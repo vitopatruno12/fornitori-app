@@ -2,16 +2,15 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
 
-# Carica sempre backend/.env (anche se uvicorn parte da un'altra cartella)
+# Carica backend/.env anche se la working directory non è la cartella backend.
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 _ENV_FILE = _BACKEND_ROOT / ".env"
-load_dotenv(_ENV_FILE, override=True)
+# override=False: su Render (e simili) le variabili del dashboard non vengono
+# sovrascritte da un .env di sviluppo con localhost.
+load_dotenv(_ENV_FILE, override=False)
 
-
-class Settings(BaseModel):
-    database_url: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/fornitori_db")
-
-
-settings = Settings()
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/fornitori_db",
+)

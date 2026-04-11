@@ -1,0 +1,29 @@
+# Render Blueprint (opzionale): New → Blueprint → collega il repo.
+# In alternativa crea a mano Postgres + Web Service e imposta le variabili come sotto.
+#
+# Web Service (manuale):
+#   Root Directory: backend
+#   Build:  pip install -r requirements.txt
+#   Start:  uvicorn app.main:app --host 0.0.0.0 --port $PORT
+#   Environment → DATABASE_URL = Internal Database URL del Postgres Render (Connect → copia URL interno)
+
+databases:
+  - name: fornitori-postgres
+    plan: free
+
+services:
+  - type: web
+    name: fornitori-api
+    plan: free
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fornitori-postgres
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
+    healthCheckPath: /health
