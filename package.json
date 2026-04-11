@@ -1,0 +1,13 @@
+{
+  "name": "fornitori-app-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && .\\\\.venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+# Netlify: collega questo repository e lascia le impostazioni predefinite,
+# oppure in "Site settings" imposta Base directory = frontend se non usi questo file dalla root.
+#
+# Variabile obbligatoria in Netlify → Site settings → Environment variables:
+#   VITE_API_BASE_URL = URL pubblico del backend Railway (es. https://xxx.up.railway.app)
+# senza slash finale. Poi "Trigger deploy" → "Clear cache and deploy site".
+
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+# App a pagina singola (React senza path URL); utile se in futuro userai il router sul path.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,0 +1,13 @@
+ALTER TABLE invoices
+ADD COLUMN IF NOT EXISTS ignored BOOLEAN;
+
+UPDATE invoices
+SET ignored = FALSE
+WHERE ignored IS NULL;
+
+ALTER TABLE invoices
+ALTER COLUMN ignored SET DEFAULT FALSE;
+
+ALTER TABLE invoices
+ALTER COLUMN ignored SET NOT NULL;
+

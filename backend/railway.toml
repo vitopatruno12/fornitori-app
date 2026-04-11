@@ -1,0 +1,13 @@
+# Railway: crea un servizio da questa cartella (Root Directory = backend) oppure
+# dal monorepo imposta Root Directory su "backend" nelle impostazioni del servizio.
+#
+# Variabili da impostare nel dashboard Railway (Variables):
+#   DATABASE_URL  → generata automaticamente se aggiungi il plugin PostgreSQL
+#   CORS_ORIGINS  → URL del sito Netlify, es. https://tuo-sito.netlify.app
+#                  (dopo il primo deploy Netlify; se usi dominio custom, includilo anche lì)
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
