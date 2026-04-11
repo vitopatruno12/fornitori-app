@@ -3,6 +3,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
+import { API_BASE_URL } from '../services/api'
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
@@ -410,8 +411,6 @@ export default function InvoicesPage() {
     window.dispatchEvent(new Event('open-prima-nota'))
   }
 
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
   return (
     <div>
       <h1 className="page-header">Fatture fornitori</h1>
@@ -623,7 +622,7 @@ export default function InvoicesPage() {
                     <td onClick={e => e.stopPropagation()}>
                       {inv.file_path ? (
                         <a
-                          href={`${apiBase}/${inv.file_path}`}
+                          href={`${API_BASE_URL}/${inv.file_path}`}
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-primary"

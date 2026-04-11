@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+/** Base URL API: in produzione deve arrivare da Netlify (VITE_API_BASE_URL in build). Fallback solo per sviluppo locale. */
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 /** Estrae messaggio leggibile da risposte FastAPI (detail string o elenco errori validazione). */
 function formatApiError(status, text) {
@@ -42,5 +44,3 @@ export async function apiFetch(path, options = {}) {
 
   return response.text()
 }
-
-export { API_BASE_URL }
