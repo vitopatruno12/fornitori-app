@@ -1,6 +1,17 @@
-/** Base URL API: in produzione deve arrivare da Netlify (VITE_API_BASE_URL in build). Fallback solo per sviluppo locale. */
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+function normalizeApiBase(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return 'http://localhost:8000'
+  return s.replace(/\/+$/, '')
+}
+
+/** Base URL API: nessuno slash finale (evita //path e 404 su alcuni proxy). */
+export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
+
+export function apiUrl(path) {
+  const p = String(path || '')
+  const q = p.startsWith('/') ? p : `/${p}`
+  return `${API_BASE_URL}${q}`
+}
 
 /** Estrae messaggio leggibile da risposte FastAPI (detail string o elenco errori validazione). */
 function formatApiError(status, text) {
@@ -24,7 +35,7 @@ function formatApiError(status, text) {
 }
 
 export async function apiFetch(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),

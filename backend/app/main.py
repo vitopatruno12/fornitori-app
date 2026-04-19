@@ -6,12 +6,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from . import models  # noqa: F401
 from .database import Base, engine
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians
 
 logger = logging.getLogger("app.startup")
 
@@ -20,6 +20,7 @@ logger = logging.getLogger("app.startup")
 async def lifespan(app: FastAPI):
     try:
         Base.metadata.create_all(bind=engine)
+        _ensure_support_technicians_columns()
     except OperationalError as e:
         logger.error(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -77,6 +78,30 @@ app.include_router(attachments.router)
 app.include_router(ai.router)
 app.include_router(supplier_orders.router)
 app.include_router(staff.router)
+app.include_router(support_technicians.router)
+
+
+def _ensure_support_technicians_columns() -> None:
+    """
+    Backward-compatibilità: aggiunge colonne orarie se il DB è stato creato
+    prima della feature report assistenza tecnici.
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE technician_activities
+                    ADD COLUMN IF NOT EXISTS time_start VARCHAR(5),
+                    ADD COLUMN IF NOT EXISTS time_end VARCHAR(5)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare colonne orarie technician_activities: %s",
+            e,
+        )
 
 
 def _check_critical_schema_columns() -> None:

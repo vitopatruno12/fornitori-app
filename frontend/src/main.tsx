@@ -9,9 +9,19 @@ import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import InvoicesPage from './pages/InvoicesPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
+import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 
-type PageKey = 'home' | 'suppliers' | 'new-order' | 'new-delivery' | 'history' | 'invoices' | 'prima-nota' | 'staff'
+type PageKey =
+  | 'home'
+  | 'suppliers'
+  | 'new-order'
+  | 'new-delivery'
+  | 'history'
+  | 'invoices'
+  | 'prima-nota'
+  | 'staff'
+  | 'support-tech'
 type AiHistoryItem = {
   id: string
   page: PageKey
@@ -114,6 +124,7 @@ function App() {
     invoices: 'fatture',
     'prima-nota': 'prima-nota',
     staff: 'personale',
+    'support-tech': 'assistenza-tecnici',
   }
 
   async function runAi(promptOverride?: string) {
@@ -256,6 +267,10 @@ function App() {
         'Compila movimento da comando testuale',
       ],
       staff: ['Come organizzo i turni su più settimane?', 'Che differenza c’è tra permesso e assenza in pianificazione?'],
+      'support-tech': [
+        'Come registro un intervento completato assistenza?',
+        'Differenza tra voce pianificata e lavoro svolto?',
+      ],
     }
     return map[page] || []
   }, [page])
@@ -437,6 +452,7 @@ function App() {
             <a href="#" className={page === 'invoices' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('invoices'); }}>Fatture fornitori</a>
             <a href="#" className={page === 'prima-nota' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('prima-nota'); }}>Prima Nota Cassa</a>
             <a href="#" className={page === 'staff' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('staff'); }}>Personale</a>
+            <a href="#" className={page === 'support-tech' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('support-tech'); }}>Assistenza tecnici</a>
           </div>
         </div>
         {navOpen && (
@@ -457,6 +473,7 @@ function App() {
         {page === 'invoices' && <InvoicesPage />}
         {page === 'prima-nota' && <PrimaNotaPage />}
         {page === 'staff' && <StaffPage />}
+        {page === 'support-tech' && <SupportTechniciansPage />}
       </main>
 
       <button type="button" className="ai-global-fab" onClick={() => setAiOpen(true)} title="Apri assistente operativo AI">

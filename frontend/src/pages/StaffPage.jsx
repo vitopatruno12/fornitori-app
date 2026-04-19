@@ -66,6 +66,12 @@ function todayDate() {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate())
 }
 
+function scrollToShiftForm() {
+  const el = document.getElementById('staff-shift-form-card')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /** Giorni inclusivi tra due date (ordine qualsiasi). */
 function daysInclusiveCount(a, b) {
   const fa = toYMD(a)
@@ -432,6 +438,18 @@ export default function StaffPage() {
     const times =
       s.time_start && s.time_end ? ` ${fmtTime(s.time_start)}–${fmtTime(s.time_end)}` : ''
     return `${name} — ${kindIt}${times}${extra}`
+  }
+
+  function openDayAndInsertShift(d) {
+    const picked = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    setPlanView('day')
+    setDayFocus(picked)
+    setEditingShiftId(null)
+    setFormDate(toYMD(picked))
+    setFormKind('shift')
+    setFormStart('08:00')
+    setFormEnd('16:00')
+    window.setTimeout(scrollToShiftForm, 80)
   }
 
   async function openWhatsAppPlanning() {
@@ -856,18 +874,24 @@ export default function StaffPage() {
 
   return (
     <div className="staff-page">
-      <h1 className="page-header">Personale</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.25rem', maxWidth: 820 }}>
-        Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
-        <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>, oppure{' '}
-        <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa <strong>«Carica piano»</strong> per
-        scaricare i turni dal server in base alle date selezionate (il caricamento non parte da solo quando cambi data).
-      </p>
+      <header className="staff-page-hero">
+        <div className="staff-page-hero-inner">
+          <h1 className="page-header staff-page-title">Personale</h1>
+          <p className="staff-page-lead">
+            Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
+            <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
+            oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
+            <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
+            parte da solo quando cambi data).
+          </p>
+        </div>
+      </header>
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-info">{success}</div>}
 
-      <section className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <section className="card" style={{ order: 1, marginBottom: 0 }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           Dipendenti
         </h2>
@@ -1020,7 +1044,7 @@ export default function StaffPage() {
         </div>
       </section>
 
-      <section className="card" style={{ marginBottom: '1rem' }}>
+      <section className="card" style={{ order: 3, marginBottom: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem' }}>
           <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
             Pianificazione turni
@@ -1329,8 +1353,33 @@ export default function StaffPage() {
               const list = shiftsByDate.get(ymd) || []
               return (
                 <div key={ymd} className="staff-day-card card" style={{ padding: '0.85rem', margin: 0 }}>
-                  <div className="staff-day-title" style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '0.6rem', borderBottom: '1px solid var(--border, #e5e7eb)', paddingBottom: '0.35rem' }}>
-                    {label} {dayNum}
+                  <div
+                    className="staff-day-title"
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '0.95rem',
+                      marginBottom: '0.6rem',
+                      borderBottom: '1px solid var(--border, #e5e7eb)',
+                      paddingBottom: '0.35rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <span>
+                      {label} {dayNum}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-vino btn-sm"
+                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+                      onClick={() => openDayAndInsertShift(d)}
+                      disabled={shiftBusy}
+                      title="Apri questo giorno e vai al modulo per inserire un turno"
+                    >
+                      Apri giorno
+                    </button>
                   </div>
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
                     {list.map((s) => (
@@ -1358,7 +1407,7 @@ export default function StaffPage() {
         )}
       </section>
 
-      <section className="card">
+      <section id="staff-shift-form-card" className="card" style={{ order: 2 }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           {editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}
         </h2>
@@ -1460,6 +1509,7 @@ export default function StaffPage() {
           </div>
         </form>
       </section>
+      </div>
 
       <WeeklyStaffReportModal
         open={reportModalOpen}

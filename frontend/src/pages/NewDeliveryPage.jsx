@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { createDeliveryBatch } from '../services/deliveriesService'
 import { fetchPriceList, addPriceListBatch, deletePriceListItem } from '../services/priceListService'
+import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
 
 const emptyItem = () => ({
   product_description: '',
@@ -35,6 +36,41 @@ function diffVsList(priceList, description, unitPriceStr) {
   return (up - lp).toFixed(2)
 }
 
+/** Righe ordine fornitore → righe consegna (prezzo da prezzario se la descrizione coincide). */
+function mapOrderItemsToDeliveryItems(orderItems, priceList) {
+  const list = Array.isArray(priceList) ? priceList : []
+  return (orderItems || []).map((it) => {
+    const desc = (it.product_description || '').trim()
+    const listRow = list.find((x) => (x.product_description || '').trim() === desc)
+    return {
+      product_description: it.product_description || '',
+      weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
+      pieces: it.pieces != null && it.pieces !== '' ? String(it.pieces) : '',
+      unit_price: listRow != null ? String(listRow.unit_price) : '',
+      anomaly_note: it.note || '',
+    }
+  })
+}
+
+function deliveryItemsHaveUserInput(rows) {
+  return (rows || []).some((it) => {
+    const d = (it.product_description || '').trim()
+    const w = Number(it.weight_kg) || 0
+    const p = Number(it.pieces) || 0
+    const u = Number(it.unit_price) || 0
+    const n = (it.anomaly_note || '').trim()
+    return Boolean(d || w || p || u || n)
+  })
+}
+
+function formatOrderOptionLabel(o) {
+  const d = o.order_date ? String(o.order_date).slice(0, 10) : ''
+  const raw = (o.merchandise_summary || '').trim()
+  const sum = raw.length > 56 ? `${raw.slice(0, 56)}…` : raw
+  const bits = [`#${o.id}`, d, sum].filter(Boolean)
+  return bits.join(' · ')
+}
+
 export default function NewDeliveryPage() {
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
@@ -52,6 +88,10 @@ export default function NewDeliveryPage() {
   const [priceListLoading, setPriceListLoading] = useState(false)
   const [priceRows, setPriceRows] = useState([emptyPriceRow()])
   const [savingPrice, setSavingPrice] = useState(false)
+  const [orderImportLoading, setOrderImportLoading] = useState(false)
+  const [ordersForImport, setOrdersForImport] = useState([])
+  const [ordersForImportLoading, setOrdersForImportLoading] = useState(false)
+  const [selectedOrderId, setSelectedOrderId] = useState('')
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -95,6 +135,43 @@ export default function NewDeliveryPage() {
       loadPriceList()
     } else {
       setPriceList([])
+    }
+  }, [supplierId])
+
+  useEffect(() => {
+    if (!supplierId) {
+      setOrdersForImport([])
+      setSelectedOrderId('')
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      setOrdersForImport([])
+      setSelectedOrderId('')
+      setOrdersForImportLoading(true)
+      try {
+        const data = await fetchSupplierOrders({ supplierId: Number(supplierId), limit: 80 })
+        const list = Array.isArray(data) ? data : []
+        if (cancelled) return
+        setOrdersForImport(list)
+        if (list.length === 0) {
+          setSelectedOrderId('')
+        } else {
+          setSelectedOrderId((prev) =>
+            list.some((o) => String(o.id) === String(prev)) ? String(prev) : String(list[0].id),
+          )
+        }
+      } catch {
+        if (!cancelled) {
+          setOrdersForImport([])
+          setSelectedOrderId('')
+        }
+      } finally {
+        if (!cancelled) setOrdersForImportLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
   }, [supplierId])
 
@@ -207,6 +284,55 @@ export default function NewDeliveryPage() {
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
+  async function loadFromPurchasedOrder() {
+    if (!supplierId) {
+      setError('Seleziona prima un fornitore')
+      return
+    }
+    const oid = selectedOrderId ? Number(selectedOrderId) : NaN
+    if (!oid || Number.isNaN(oid)) {
+      setError('Seleziona un ordine dall’elenco.')
+      return
+    }
+    if (deliveryItemsHaveUserInput(items)) {
+      if (
+        !window.confirm(
+          'Sostituire le righe già inserite con quelle dell’ordine merce selezionato?',
+        )
+      ) {
+        return
+      }
+    }
+    setError('')
+    setSuccess('')
+    setOrderImportLoading(true)
+    try {
+      const plist = await fetchPriceList(supplierId)
+      setPriceList(plist)
+      const o = await fetchSupplierOrder(oid)
+      if (!o || Number(o.supplier_id) !== Number(supplierId)) {
+        setError('Ordine non valido per il fornitore selezionato.')
+        return
+      }
+      const lines = o.items || []
+      if (!lines.length) {
+        setError('Questo ordine non contiene righe merce.')
+        return
+      }
+      const mapped = mapOrderItemsToDeliveryItems(lines, plist)
+      setItems(mapped.length ? mapped : [emptyItem()])
+      if (o.vat_percent != null && o.vat_percent !== '') {
+        setVatPercent(String(o.vat_percent))
+      }
+      const d = o.order_date ? new Date(`${String(o.order_date).slice(0, 10)}T12:00:00`).toLocaleDateString('it-IT') : ''
+      setSuccess(`Righe caricate dall’ordine #${o.id}${d ? ` del ${d}` : ''}. Controlla prezzi e completamento dati prima di salvare.`)
+    } catch {
+      setError('Impossibile caricare l’ordine. Verifica la connessione e riprova.')
+    } finally {
+      setOrderImportLoading(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -314,9 +440,74 @@ export default function NewDeliveryPage() {
             </div>
           </div>
 
-          <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
-            Prodotti consegnati
-          </h3>
+          <div
+            style={{
+              marginTop: '1rem',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+            }}
+          >
+            <h3 className="page-subheader" style={{ margin: 0, alignSelf: 'center' }}>
+              Prodotti consegnati
+            </h3>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                gap: '0.5rem',
+                flex: '1 1 280px',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <div className="form-group" style={{ marginBottom: 0, flex: '1 1 220px', minWidth: 200 }}>
+                <label htmlFor="delivery-import-order" style={{ fontSize: '0.85rem' }}>
+                  Ordine fornitore
+                </label>
+                <select
+                  id="delivery-import-order"
+                  className="form-control"
+                  value={selectedOrderId}
+                  onChange={(e) => setSelectedOrderId(e.target.value)}
+                  disabled={!supplierId || ordersForImportLoading || !ordersForImport.length}
+                >
+                  {!supplierId ? (
+                    <option value="">Seleziona un fornitore…</option>
+                  ) : ordersForImportLoading ? (
+                    <option value="">Caricamento ordini…</option>
+                  ) : ordersForImport.length === 0 ? (
+                    <option value="">Nessun ordine salvato</option>
+                  ) : (
+                    ordersForImport.map((o) => (
+                      <option key={o.id} value={String(o.id)}>
+                        {formatOrderOptionLabel(o)}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn btn-vino"
+                style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem', flex: '0 0 auto' }}
+                disabled={
+                  !supplierId ||
+                  !selectedOrderId ||
+                  orderImportLoading ||
+                  ordersForImportLoading ||
+                  loadingSuppliers ||
+                  !ordersForImport.length
+                }
+                onClick={loadFromPurchasedOrder}
+                title="Compila le righe dall’ordine scelto (stesso testo merce; prezzo da prezzario se la descrizione coincide)"
+              >
+                {orderImportLoading ? 'Caricamento…' : 'Carica da ordine'}
+              </button>
+            </div>
+          </div>
           <div className="table-wrap" style={{ marginBottom: '1rem' }}>
             <table className="app-table">
               <thead>
