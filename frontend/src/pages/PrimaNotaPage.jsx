@@ -757,257 +757,6 @@ export default function PrimaNotaPage() {
         )}
       </div>
 
-      <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Giorno <strong>{formatDate(selectedDate)}</strong>. I totali entrate/uscite si aggiornano dai movimenti. Puoi modificare la <strong>cassa iniziale</strong> per adattare lo schema; per correggere i totali modifica o elimina i movimenti nella tabella sotto.
-        </p>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Saldo attuale cassa/rimanente</label>
-            <input
-              type="number"
-              step="0.01"
-              className="form-control"
-              value={openingCashInput}
-              onChange={e => setOpeningCashInput(e.target.value)}
-              placeholder="auto"
-              style={{ maxWidth: 180 }}
-            />
-          </div>
-        </div>
-        <div className="btn-group" style={{ marginBottom: '0.75rem' }}>
-          <button type="button" className="btn btn-secondary" onClick={handleAzzeraCassaIniziale}>
-            Azzera cassa iniziale
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger"
-            onClick={handleEliminaGiornata}
-            disabled={deletingDay || entries.length === 0}
-            title="Elimina tutti i movimenti della data selezionata nel calendario. Aggiorna saldo giornaliero e saldo cumulativo (senza i movimenti di quel giorno)."
-          >
-            {deletingDay ? 'Eliminazione...' : 'Elimina tutti i movimenti del giorno'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger"
-            onClick={handleAzzeraSaldoCumulativo}
-            disabled={resettingCumulative || !summary}
-            title="Registra un movimento di assestamento per portare il saldo cumulativo di fine giornata a zero."
-          >
-            {resettingCumulative ? 'Azzeramento...' : 'Azzera saldo cumulativo di fine giornata'}
-          </button>
-        </div>
-        <div className="form-row" style={{ alignItems: 'end', marginBottom: '0.75rem' }}>
-          <div className="form-group">
-            <label>Reset movimenti intervallo - data inizio</label>
-            <input
-              type="date"
-              className="form-control"
-              value={resetRangeFrom}
-              onChange={e => setResetRangeFrom(e.target.value)}
-              style={{ maxWidth: 180 }}
-            />
-          </div>
-          <div className="form-group">
-            <label>Data fine</label>
-            <input
-              type="date"
-              className="form-control"
-              value={resetRangeTo}
-              onChange={e => setResetRangeTo(e.target.value)}
-              style={{ maxWidth: 180 }}
-            />
-          </div>
-          <div className="form-group">
-            <button
-              type="button"
-              className="btn btn-outline-danger"
-              onClick={handleEliminaIntervallo}
-              disabled={deletingRange}
-              title="Elimina riepilogo giornaliero periodo"
-            >
-              {deletingRange ? 'Eliminazione intervallo...' : 'Elimina riepilogo giornaliero periodo'}
-            </button>
-          </div>
-        </div>
-
-        {summary && (
-          <div className="table-wrap" style={{ marginTop: '1rem' }}>
-            <table className="app-table">
-              <tbody>
-                <tr>
-                  <td><strong>Totale entrate</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(summary.totale_entrate)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale uscite</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(summary.totale_uscite)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale non fiscale (giorno)</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(nonFiscaleGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Saldo giornaliero</strong></td>
-                  <td className="text-end amount">€ {formatAmount(summary.saldo_giornaliero)}</td>
-                </tr>
-                <tr>
-                  <td>
-                    <strong>Saldo cumulativo a fine giornata</strong>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 400, marginTop: '0.3rem', maxWidth: 360 }}>
-                      È la cassa calcolata su <strong>tutti</strong> i movimenti fino a questa data (anche dei giorni precedenti). Usa i pulsanti sopra per eliminare solo i movimenti della <strong>data selezionata</strong>: se gran parte del saldo viene dai giorni passati, questo totale non si azzera finché non modifichi o elimini anche quelle registrazioni.
-                    </div>
-                  </td>
-                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(summary.saldo_cumulativo)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Saldo attuale cassa</strong></td>
-                  <td className="text-end amount">€ {formatAmount(rowsWithLedger.cassaIniziale)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Cassa finale (schema)</strong></td>
-                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(cassaFinaleRiepilogo)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>Movimenti del {formatDate(selectedDate)}</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
-          Clicca una riga per il dettaglio. I filtri sono nella barra in alto.
-        </p>
-        {focusEntryMessage && (
-          <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
-        )}
-        {loading && <p className="loading">Caricamento...</p>}
-        {!loading && !error && (
-          <div className="table-wrap pn-table-wrap">
-            <table className="app-table app-table--compact">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>N.</th>
-                  <th>Operazioni</th>
-                  <th className="text-end">Cassa entrata</th>
-                  <th className="text-end">Cassa uscita</th>
-                  <th className="text-end">Non fiscale</th>
-                  <th className="text-end">Totale</th>
-                  <th className="text-end">Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMovementRows.map((entry, idx) => (
-                  <tr
-                    key={entry.id}
-                    id={`cash-entry-row-${entry.id}`}
-                    className="pn-row-click"
-                    onClick={() => setDrawerEntry(entry)}
-                    style={
-                      highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-                        ? { background: 'rgba(250, 204, 21, 0.22)', boxShadow: 'inset 0 0 0 2px #d97706' }
-                        : undefined
-                    }
-                  >
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(entry.entry_date)}</td>
-                    <td>{idx + 1}</td>
-                    <td style={{ maxWidth: 260 }}>
-                      {entry.description || '–'}
-                      {entry.riferimento_documento ? <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{entry.riferimento_documento}</div> : null}
-                    </td>
-                    <td className="text-end amount">{entry.entrata > 0 ? `€ ${formatAmount(entry.entrata)}` : '—'}</td>
-                    <td className="text-end amount">{entry.uscita > 0 ? `€ ${formatAmount(entry.uscita)}` : '—'}</td>
-                    <td className="text-end amount">{entry.nonFiscale !== 0 ? `€ ${formatAmount(entry.nonFiscale)}` : '—'}</td>
-                    <td
-                      className="text-end pn-amount-cell"
-                      style={{
-                        color: isNonFiscale(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
-                      }}
-                    >
-                      € {formatAmount(entry.incasso)}
-                    </td>
-                    <td className="text-end" style={{ whiteSpace: 'nowrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={(e) => { e.stopPropagation(); handleEdit(entry) }}
-                      >
-                        Modifica
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={(e) => { e.stopPropagation(); handleDelete(entry) }}
-                      >
-                        Elimina
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredMovementRows.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="empty-state">
-                      {rowsWithLedger.rows.length === 0 ? 'Nessun movimento in questa data.' : 'Nessun movimento corrisponde ai filtri.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {!loading && !error && rowsWithLedger.rows.length > 0 && (
-          <details style={{ marginTop: '1rem' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--text-heading)' }}>Vista foglio (stile Excel)</summary>
-            <div className="table-wrap excel-wrap" style={{ marginTop: '0.75rem' }}>
-              <table className="app-table excel-table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Descrizione</th>
-                    <th>Entrata</th>
-                    <th>Uscita</th>
-                    <th>Totale</th>
-                    <th>Non fiscale</th>
-                    <th>Saldo attuale cassa</th>
-                    <th>Cassa finale</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowsWithLedger.rows.map((entry) => (
-                    <tr
-                      key={`excel-${entry.id}`}
-                      id={`cash-entry-excel-row-${entry.id}`}
-                      style={
-                        highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-                          ? { background: 'rgba(250, 204, 21, 0.22)' }
-                          : undefined
-                      }
-                    >
-                      <td><input className="excel-cell" value={`${formatDate(entry.entry_date)} ${formatTime(entry.entry_date)}`} readOnly /></td>
-                      <td><input className="excel-cell" value={`${entry.description || ''}${isNonFiscale(entry) ? ' [Non fiscale]' : ''}`} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.nonFiscale)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaSera)} readOnly /></td>
-                      <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        )}
-      </section>
-
       <section className="card" ref={formAnchorRef} id="prima-nota-form">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>{editingId ? 'Modifica movimento' : 'Nuovo movimento'}</h2>
         <form onSubmit={handleSubmit}>
@@ -1039,10 +788,23 @@ export default function PrimaNotaPage() {
                 >
                   Cassa uscita
                 </button>
+              </div>
+            </div>
+            <div className="form-group" style={{ flex: '1 1 220px', minWidth: 200 }}>
+              <label>Voce fiscale</label>
+              <div className="btn-group" style={{ marginTop: 0 }}>
+                <button
+                  type="button"
+                  className={!formNonFiscale ? 'btn btn-primary' : 'btn btn-secondary'}
+                  onClick={() => setFormNonFiscale(false)}
+                  title="Movimento fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero."
+                >
+                  Fiscale
+                </button>
                 <button
                   type="button"
                   className={formNonFiscale ? 'btn btn-outline-danger' : 'btn btn-secondary'}
-                  onClick={() => setFormNonFiscale(v => !v)}
+                  onClick={() => setFormNonFiscale(true)}
                   title="Movimento NON fiscale: viene salvato ma non entra nei conteggi di cassa/riepilogo."
                 >
                   Non fiscale
@@ -1179,6 +941,257 @@ export default function PrimaNotaPage() {
             )}
           </div>
         </form>
+      </section>
+
+      <section className="card">
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>Movimenti del {formatDate(selectedDate)}</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
+          Clicca una riga per il dettaglio. I filtri sono nella barra in alto.
+        </p>
+        {focusEntryMessage && (
+          <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
+        )}
+        {loading && <p className="loading">Caricamento...</p>}
+        {!loading && !error && (
+          <div className="table-wrap pn-table-wrap">
+            <table className="app-table app-table--compact">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>N.</th>
+                  <th>Operazioni</th>
+                  <th className="text-end">Cassa entrata</th>
+                  <th className="text-end">Cassa uscita</th>
+                  <th className="text-end">Non fiscale</th>
+                  <th className="text-end">Totale</th>
+                  <th className="text-end">Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMovementRows.map((entry, idx) => (
+                  <tr
+                    key={entry.id}
+                    id={`cash-entry-row-${entry.id}`}
+                    className="pn-row-click"
+                    onClick={() => setDrawerEntry(entry)}
+                    style={
+                      highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+                        ? { background: 'rgba(250, 204, 21, 0.22)', boxShadow: 'inset 0 0 0 2px #d97706' }
+                        : undefined
+                    }
+                  >
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(entry.entry_date)}</td>
+                    <td>{idx + 1}</td>
+                    <td style={{ maxWidth: 260 }}>
+                      {entry.description || '–'}
+                      {entry.riferimento_documento ? <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{entry.riferimento_documento}</div> : null}
+                    </td>
+                    <td className="text-end amount">{entry.entrata > 0 ? `€ ${formatAmount(entry.entrata)}` : '—'}</td>
+                    <td className="text-end amount">{entry.uscita > 0 ? `€ ${formatAmount(entry.uscita)}` : '—'}</td>
+                    <td className="text-end amount">{entry.nonFiscale !== 0 ? `€ ${formatAmount(entry.nonFiscale)}` : '—'}</td>
+                    <td
+                      className="text-end pn-amount-cell"
+                      style={{
+                        color: isNonFiscale(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
+                      }}
+                    >
+                      € {formatAmount(entry.incasso)}
+                    </td>
+                    <td className="text-end" style={{ whiteSpace: 'nowrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                        onClick={(e) => { e.stopPropagation(); handleEdit(entry) }}
+                      >
+                        Modifica
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger"
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(entry) }}
+                      >
+                        Elimina
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {filteredMovementRows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="empty-state">
+                      {rowsWithLedger.rows.length === 0 ? 'Nessun movimento in questa data.' : 'Nessun movimento corrisponde ai filtri.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!loading && !error && rowsWithLedger.rows.length > 0 && (
+          <details style={{ marginTop: '1rem' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--text-heading)' }}>Vista foglio (stile Excel)</summary>
+            <div className="table-wrap excel-wrap" style={{ marginTop: '0.75rem' }}>
+              <table className="app-table excel-table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Descrizione</th>
+                    <th>Entrata</th>
+                    <th>Uscita</th>
+                    <th>Totale</th>
+                    <th>Non fiscale</th>
+                    <th>Saldo attuale cassa</th>
+                    <th>Cassa finale</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsWithLedger.rows.map((entry) => (
+                    <tr
+                      key={`excel-${entry.id}`}
+                      id={`cash-entry-excel-row-${entry.id}`}
+                      style={
+                        highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+                          ? { background: 'rgba(250, 204, 21, 0.22)' }
+                          : undefined
+                      }
+                    >
+                      <td><input className="excel-cell" value={`${formatDate(entry.entry_date)} ${formatTime(entry.entry_date)}`} readOnly /></td>
+                      <td><input className="excel-cell" value={`${entry.description || ''}${isNonFiscale(entry) ? ' [Non fiscale]' : ''}`} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.nonFiscale)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaSera)} readOnly /></td>
+                      <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        )}
+      </section>
+
+      <section className="card">
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+          Giorno <strong>{formatDate(selectedDate)}</strong>. I totali entrate/uscite si aggiornano dai movimenti. Puoi modificare la <strong>cassa iniziale</strong> per adattare lo schema; per correggere i totali modifica o elimina i movimenti nella tabella sotto.
+        </p>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Saldo attuale cassa/rimanente</label>
+            <input
+              type="number"
+              step="0.01"
+              className="form-control"
+              value={openingCashInput}
+              onChange={e => setOpeningCashInput(e.target.value)}
+              placeholder="auto"
+              style={{ maxWidth: 180 }}
+            />
+          </div>
+        </div>
+        <div className="btn-group" style={{ marginBottom: '0.75rem' }}>
+          <button type="button" className="btn btn-secondary" onClick={handleAzzeraCassaIniziale}>
+            Azzera cassa iniziale
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            onClick={handleEliminaGiornata}
+            disabled={deletingDay || entries.length === 0}
+            title="Elimina tutti i movimenti della data selezionata nel calendario. Aggiorna saldo giornaliero e saldo cumulativo (senza i movimenti di quel giorno)."
+          >
+            {deletingDay ? 'Eliminazione...' : 'Elimina tutti i movimenti del giorno'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            onClick={handleAzzeraSaldoCumulativo}
+            disabled={resettingCumulative || !summary}
+            title="Registra un movimento di assestamento per portare il saldo cumulativo di fine giornata a zero."
+          >
+            {resettingCumulative ? 'Azzeramento...' : 'Azzera saldo cumulativo di fine giornata'}
+          </button>
+        </div>
+        <div className="form-row" style={{ alignItems: 'end', marginBottom: '0.75rem' }}>
+          <div className="form-group">
+            <label>Reset movimenti intervallo - data inizio</label>
+            <input
+              type="date"
+              className="form-control"
+              value={resetRangeFrom}
+              onChange={e => setResetRangeFrom(e.target.value)}
+              style={{ maxWidth: 180 }}
+            />
+          </div>
+          <div className="form-group">
+            <label>Data fine</label>
+            <input
+              type="date"
+              className="form-control"
+              value={resetRangeTo}
+              onChange={e => setResetRangeTo(e.target.value)}
+              style={{ maxWidth: 180 }}
+            />
+          </div>
+          <div className="form-group">
+            <button
+              type="button"
+              className="btn btn-outline-danger"
+              onClick={handleEliminaIntervallo}
+              disabled={deletingRange}
+              title="Elimina riepilogo giornaliero periodo"
+            >
+              {deletingRange ? 'Eliminazione intervallo...' : 'Elimina riepilogo giornaliero periodo'}
+            </button>
+          </div>
+        </div>
+
+        {summary && (
+          <div className="table-wrap" style={{ marginTop: '1rem' }}>
+            <table className="app-table">
+              <tbody>
+                <tr>
+                  <td><strong>Totale entrate</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(summary.totale_entrate)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Totale uscite</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(summary.totale_uscite)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Totale non fiscale (giorno)</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(nonFiscaleGiorno)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Saldo giornaliero</strong></td>
+                  <td className="text-end amount">€ {formatAmount(summary.saldo_giornaliero)}</td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>Saldo cumulativo a fine giornata</strong>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 400, marginTop: '0.3rem', maxWidth: 360 }}>
+                      È la cassa calcolata su <strong>tutti</strong> i movimenti fino a questa data (anche dei giorni precedenti). Usa i pulsanti sopra per eliminare solo i movimenti della <strong>data selezionata</strong>: se gran parte del saldo viene dai giorni passati, questo totale non si azzera finché non modifichi o elimini anche quelle registrazioni.
+                    </div>
+                  </td>
+                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(summary.saldo_cumulativo)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Saldo attuale cassa</strong></td>
+                  <td className="text-end amount">€ {formatAmount(rowsWithLedger.cassaIniziale)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Cassa finale (schema)</strong></td>
+                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(cassaFinaleRiepilogo)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="card">

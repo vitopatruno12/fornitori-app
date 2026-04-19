@@ -23,11 +23,12 @@ const KIND_LABELS = {
   sick: 'Malattia',
 }
 
-/** Domenica come primo giorno della settimana (indice getDay: dom=0). */
-function startOfWeekSunday(d) {
+/** Lunedi come primo giorno della settimana (indice getDay: dom=0 ... sab=6). */
+function startOfWeekMonday(d) {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const dow = x.getDay()
-  x.setDate(x.getDate() - dow)
+  const delta = dow === 0 ? -6 : 1 - dow
+  x.setDate(x.getDate() + delta)
   return x
 }
 
@@ -248,15 +249,15 @@ export default function StaffPage() {
   const [shifts, setShifts] = useState([])
   /** True dopo «Carica piano» (o demo) finché non cambi date/vista. */
   const [planningLoaded, setPlanningLoaded] = useState(false)
-  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeekSunday(new Date()))
+  const [weekAnchor, setWeekAnchor] = useState(() => startOfWeekMonday(new Date()))
   /** Vista: settimana | singolo giorno | intervallo date libero (dal / al). */
   const [planView, setPlanView] = useState('week')
   const [dayFocus, setDayFocus] = useState(todayDate)
   const [periodFrom, setPeriodFrom] = useState(() => {
-    const w = startOfWeekSunday(new Date())
+    const w = startOfWeekMonday(new Date())
     return new Date(w.getFullYear(), w.getMonth(), w.getDate())
   })
-  const [periodTo, setPeriodTo] = useState(() => addDays(startOfWeekSunday(new Date()), 6))
+  const [periodTo, setPeriodTo] = useState(() => addDays(startOfWeekMonday(new Date()), 6))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -320,7 +321,7 @@ export default function StaffPage() {
     return enumerateDayCells(periodFrom, periodTo)
   }, [planView, dayCells, dayFocus, periodFrom, periodTo])
 
-  /** Intervallo date per il report PDF in base alla vista: settimana dom–sab, singolo giorno, o Dal–Al. */
+  /** Intervallo date per il report PDF in base alla vista: settimana lun–dom, singolo giorno, o Dal–Al. */
   const reportPdfRange = useMemo(() => {
     if (planView === 'week') {
       const fromD = weekAnchor
@@ -519,9 +520,9 @@ export default function StaffPage() {
         modalTitle = 'Report giorno (PDF)'
         filename = `report-personale-giorno-${fromStr}.pdf`
       } else if (rr.kind === 'week') {
-        pdfMainHeading = 'Report personale — settimana (dom–sab)'
+        pdfMainHeading = 'Report personale — settimana (lun–dom)'
         periodTitle = `Settimana dal ${rr.from.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} al ${rr.to.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`
-        periodSub = `Intervallo dati: ${fromStr} → ${toStr} (7 giorni, domenica–sabato)`
+        periodSub = `Intervallo dati: ${fromStr} → ${toStr} (7 giorni, lunedi–domenica)`
         modalTitle = 'Report settimana (PDF)'
         filename = `report-personale-settimana-${fromStr}.pdf`
       } else {
@@ -532,7 +533,15 @@ export default function StaffPage() {
         filename = `report-personale-periodo-${fromStr}_${toStr}.pdf`
       }
 
-      const blob = generateWeeklyStaffReportPdf({ pdfMainHeading, periodTitle, periodSub, rows })
+      const blob = generateWeeklyStaffReportPdf({
+        pdfMainHeading,
+        periodTitle,
+        periodSub,
+        rows,
+        shifts: sh || [],
+        dateFromYmd: fromStr,
+        dateToYmd: toStr,
+      })
       const wa = buildWeeklyReportWhatsAppText(`${fromStr} → ${toStr}`, rows)
       setReportPdfBlob(blob)
       setReportFilename(filename)
@@ -857,11 +866,11 @@ export default function StaffPage() {
           entry_kind: r.entry_kind,
         })
       }
-      const anchor = startOfWeekSunday(parseYMD('2026-03-29'))
+      const anchor = startOfWeekMonday(parseYMD('2026-03-30'))
       setPlanView('week')
       setWeekAnchor(anchor)
       setSuccess(
-        'Esempio caricato (8 giorni). La prima settimana mostra fino a sabato 4; per domenica 5 apr usa «Settimana succ.».',
+        'Esempio caricato (8 giorni). La settimana parte da lunedi e termina domenica.',
       )
       await loadForRange(anchor, addDays(anchor, 6))
       setPlanningLoaded(true)
@@ -1057,7 +1066,7 @@ export default function StaffPage() {
                 onClick={() => {
                   markPlanningStale()
                   if (planView === 'day') {
-                    setWeekAnchor(startOfWeekSunday(dayFocus))
+                    setWeekAnchor(startOfWeekMonday(dayFocus))
                   }
                   setPlanView('week')
                 }}
@@ -1136,7 +1145,7 @@ export default function StaffPage() {
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
                     markPlanningStale()
-                    setWeekAnchor(startOfWeekSunday(new Date()))
+                    setWeekAnchor(startOfWeekMonday(new Date()))
                   }}
                 >
                   Settimana corrente
@@ -1151,7 +1160,7 @@ export default function StaffPage() {
                       const v = e.target.value
                       if (!v) return
                       markPlanningStale()
-                      setWeekAnchor(startOfWeekSunday(parseYMD(v)))
+                      setWeekAnchor(startOfWeekMonday(parseYMD(v)))
                     }}
                   />
                 </label>
@@ -1265,7 +1274,7 @@ export default function StaffPage() {
                 !reportPdfRange.ok
                   ? `Periodo troppo lungo (${reportPdfRange.days} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`
                   : planView === 'week'
-                    ? 'Report PDF della settimana (dom–sab): ore turno, permessi, assenze e malattia per dipendente.'
+                    ? 'Report PDF della settimana (lun–dom): ore turno, permessi, assenze e malattia per dipendente.'
                     : planView === 'day'
                       ? 'Report PDF del giorno selezionato: stesso riepilogo per quel solo giorno.'
                       : 'Report PDF dell’intervallo Dal–Al (fino a 93 giorni): stesso riepilogo sul periodo.'
@@ -1275,21 +1284,12 @@ export default function StaffPage() {
             </button>
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={demoLoading || loading}
-              onClick={loadDemoExample}
-              title="Solo dimostrazione: crea dipendenti e turni di esempio (mar–apr 2026)"
-            >
-              {demoLoading ? 'Carico…' : 'Solo demo: carica esempio'}
-            </button>
-            <button
-              type="button"
               className="btn btn-outline-secondary btn-sm"
               disabled={shiftBusy || loading || demoLoading}
               onClick={() => void reloadPlanning()}
               title={
                 planView === 'week'
-                  ? 'Ricarica dal server tutti i turni della settimana (dom–sab) selezionata'
+                  ? 'Ricarica dal server tutti i turni della settimana (lun–dom) selezionata'
                   : planView === 'day'
                     ? 'Ricarica dal server le voci del giorno selezionato'
                     : 'Ricarica dal server tutte le voci dell’intervallo Dal–Al (anche dopo «Mese»)'
