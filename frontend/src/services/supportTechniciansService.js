@@ -1,4 +1,24 @@
-import { apiFetch } from './api'
+import { apiFetch, apiUrl } from './api'
+
+/** POST multipart (senza Content-Type JSON). */
+export async function uploadSupportTechnicianInvoice(formData) {
+  const response = await fetch(apiUrl('/support-technicians/invoice-files'), {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    let msg = text || `Errore ${response.status}`
+    try {
+      const j = JSON.parse(text)
+      if (typeof j.detail === 'string') msg = j.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  return response.json()
+}
 
 export function fetchSupportTechnicians() {
   return apiFetch('/support-technicians')

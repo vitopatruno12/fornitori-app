@@ -1,7 +1,8 @@
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -61,6 +62,38 @@ def list_activities(
     if date_to < date_from:
         raise HTTPException(status_code=400, detail="Intervallo date non valido")
     return svc.list_activities(db, date_from, date_to, technician_id)
+
+
+@router.post(
+    "/invoice-files",
+    response_model=sch.TechnicianInvoiceFileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_technician_invoice_file(
+    file: UploadFile = File(...),
+    date_from: date = Form(...),
+    date_to: date = Form(...),
+    technician_id: Optional[int] = Form(None),
+    invoice_number: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Salva un PDF fattura tecnico sotto /uploads/support_tech_invoices/ (solo PDF, max 15 MB)."""
+    upload_root = Path(__file__).resolve().parent.parent / "uploads"
+    raw = await file.read()
+    try:
+        row = svc.save_technician_invoice_file(
+            db,
+            upload_root,
+            file,
+            date_from,
+            date_to,
+            technician_id,
+            invoice_number,
+            raw,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return row
 
 
 @router.post("/activities", response_model=sch.TechnicianActivityRead, status_code=status.HTTP_201_CREATED)

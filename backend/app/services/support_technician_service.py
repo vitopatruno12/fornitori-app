@@ -1,10 +1,13 @@
 import re
+import uuid
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
+from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from ..models.support_technician import SupportTechnician, TechnicianActivity
+from ..models.support_technician import SupportTechnician, TechnicianActivity, TechnicianInvoiceFile
 from ..schemas import support_technicians as sch
 
 
@@ -202,3 +205,49 @@ def delete_activity(db: Session, aid: int) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+MAX_INVOICE_UPLOAD_BYTES = 15 * 1024 * 1024
+INVOICE_UPLOAD_SUBDIR = "support_tech_invoices"
+
+
+def save_technician_invoice_file(
+    db: Session,
+    upload_root: Path,
+    file: UploadFile,
+    period_from: date,
+    period_to: date,
+    technician_id: Optional[int],
+    invoice_number: Optional[str],
+    raw_bytes: bytes,
+) -> TechnicianInvoiceFile:
+    if period_to < period_from:
+        raise ValueError("Intervallo date non valido")
+    if technician_id is not None and not get_technician(db, technician_id):
+        raise ValueError("Tecnico non trovato")
+    if len(raw_bytes) > MAX_INVOICE_UPLOAD_BYTES:
+        raise ValueError("File troppo grande (massimo 15 MB)")
+    mime = (file.content_type or "").lower()
+    fname_lower = (file.filename or "").lower()
+    if mime != "application/pdf" and not fname_lower.endswith(".pdf"):
+        raise ValueError("Formato non supportato: carica un file PDF")
+    dest_dir = upload_root / INVOICE_UPLOAD_SUBDIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stored = f"{uuid.uuid4().hex}.pdf"
+    dest_path = dest_dir / stored
+    dest_path.write_bytes(raw_bytes)
+    rel_path = f"{INVOICE_UPLOAD_SUBDIR}/{stored}"
+    inv_num = (invoice_number or "").strip() or None
+    row = TechnicianInvoiceFile(
+        technician_id=technician_id,
+        period_from=period_from,
+        period_to=period_to,
+        invoice_number=inv_num,
+        storage_path=rel_path,
+        original_name=(file.filename or None)[:255] if file.filename else None,
+        mime_type=mime or "application/pdf",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

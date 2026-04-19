@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -71,3 +71,17 @@ class SeedDefaultsResult(BaseModel):
 
 class SupportTechniciansBulkDeleteResult(BaseModel):
     deleted: int
+
+
+class TechnicianInvoiceFileRead(BaseModel):
+    id: int
+    technician_id: Optional[int] = None
+    period_from: date
+    period_to: date
+    invoice_number: Optional[str] = None
+    storage_path: str
+    original_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

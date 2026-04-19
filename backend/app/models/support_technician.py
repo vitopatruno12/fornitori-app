@@ -35,3 +35,19 @@ class TechnicianActivity(Base):
     kind = Column(String(32), nullable=False, server_default="planned")  # planned | completed
 
     technician = relationship("SupportTechnician", back_populates="activities")
+
+
+class TechnicianInvoiceFile(Base):
+    """PDF fattura tecnico caricato dall'utente (archivio sotto /uploads)."""
+
+    __tablename__ = "technician_invoice_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    technician_id = Column(Integer, ForeignKey("support_technicians.id", ondelete="SET NULL"), nullable=True, index=True)
+    period_from = Column(Date, nullable=False)
+    period_to = Column(Date, nullable=False)
+    invoice_number = Column(String(64), nullable=True)
+    storage_path = Column(String(500), nullable=False)
+    original_name = Column(String(255), nullable=True)
+    mime_type = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

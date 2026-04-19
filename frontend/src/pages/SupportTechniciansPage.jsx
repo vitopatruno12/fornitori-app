@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createSupportActivity,
   createSupportTechnician,
@@ -11,12 +11,10 @@ import {
   supportWhatsappUrl,
   updateSupportActivity,
   updateSupportTechnician,
+  uploadSupportTechnicianInvoice,
 } from '../services/supportTechniciansService'
-import {
-  durationHours,
-  generateSupportTechnicianInvoicePdf,
-  generateSupportTechnicianPdf,
-} from '../utils/supportTechnicianReport'
+import { apiUrl } from '../services/api'
+import { durationHours, generateSupportTechnicianPdf } from '../utils/supportTechnicianReport'
 
 function toYmd(d) {
   const x = new Date(d)
@@ -53,7 +51,11 @@ export default function SupportTechniciansPage() {
   const [filterTechId, setFilterTechId] = useState('')
   const [pdfHourlyRate, setPdfHourlyRate] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
-  const [invoiceDate, setInvoiceDate] = useState(() => toYmd(new Date()))
+  const [invoiceUploadBusy, setInvoiceUploadBusy] = useState(false)
+  const [uploadNotice, setUploadNotice] = useState('')
+  /** Anteprima ultimo PDF caricato sul server (`/uploads/...`). */
+  const [uploadedInvoicePreview, setUploadedInvoicePreview] = useState(null)
+  const invoiceFileInputRef = useRef(null)
 
   const [techModal, setTechModal] = useState(null)
   const [techForm, setTechForm] = useState({ full_name: '', phone: '', specialty: '' })
@@ -321,34 +323,49 @@ export default function SupportTechniciansPage() {
     window.open(wa, '_blank', 'noopener,noreferrer')
   }
 
-  function exportTechnicianInvoicePdf() {
-    const selected = technicians.find((t) => String(t.id) === String(filterTechId))
-    if (!selected) {
-      setError('Per la fattura seleziona prima un tecnico specifico (non "Tutti").')
+  function triggerInvoiceUpload() {
+    setError('')
+    setUploadNotice('')
+    invoiceFileInputRef.current?.click()
+  }
+
+  async function handleInvoiceFileSelected(e) {
+    const input = e.target
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Per il caricamento è accettato solo un file PDF.')
       return
     }
-    const rate = Number(pdfHourlyRate || 0)
-    if (!rate || Number.isNaN(rate)) {
-      setError('Inserisci una tariffa €/h valida per generare la fattura tecnico.')
-      return
+    setInvoiceUploadBusy(true)
+    setError('')
+    setUploadNotice('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('date_from', range.from)
+      fd.append('date_to', range.to)
+      if (filterTechId) fd.append('technician_id', filterTechId)
+      if (invoiceNumber.trim()) fd.append('invoice_number', invoiceNumber.trim())
+      const data = await uploadSupportTechnicianInvoice(fd)
+      const rel = String(data.storage_path || '').replace(/^\/+/, '')
+      if (rel) {
+        setUploadedInvoicePreview({
+          url: apiUrl(`/uploads/${rel}`),
+          title: data.original_name || file.name,
+          id: data.id,
+        })
+      } else {
+        setUploadedInvoicePreview(null)
+      }
+      setUploadNotice(`Fattura salvata sul server: ${file.name}`)
+      window.setTimeout(() => setUploadNotice(''), 8000)
+    } catch (err) {
+      setError(err?.message || 'Caricamento fattura fallito')
+    } finally {
+      setInvoiceUploadBusy(false)
     }
-    const completedRows = activities.filter((a) => a.kind === 'completed' && a.technician_id === selected.id)
-    if (!completedRows.length) {
-      setError('Nessuna attività completata del tecnico selezionato nel periodo.')
-      return
-    }
-    const blob = generateSupportTechnicianInvoicePdf({
-      rows: completedRows,
-      technicianName: selected.full_name,
-      hourlyRate: rate,
-      invoiceNumber: invoiceNumber.trim(),
-      invoiceDate,
-    })
-    const safeTech = selected.full_name
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9\-]/g, '')
-    downloadBlob(blob, `fattura-tecnico-${safeTech}-${invoiceDate || range.to}.pdf`)
   }
 
   const rangeLabel =
@@ -376,6 +393,7 @@ export default function SupportTechniciansPage() {
       </header>
 
       {error && <div className="alert alert-danger">{error}</div>}
+      {uploadNotice && <div className="alert alert-success">{uploadNotice}</div>}
 
       <section className="card support-section">
         <h2 className="page-subheader">Tecnici</h2>
@@ -444,6 +462,7 @@ export default function SupportTechniciansPage() {
           per periodo e tecnico.
         </p>
 
+        <div className="support-invoice-work-row">
         <div className="support-toolbar">
           <div className="support-toolbar-mode">
             <button
@@ -510,22 +529,25 @@ export default function SupportTechniciansPage() {
               placeholder="es. 12/2026"
             />
           </div>
-          <div className="form-group support-toolbar-filter">
-            <label htmlFor="support-invoice-date">Data fattura</label>
-            <input
-              id="support-invoice-date"
-              type="date"
-              className="form-control"
-              style={{ maxWidth: 160 }}
-              value={invoiceDate}
-              onChange={(e) => setInvoiceDate(e.target.value)}
-            />
-          </div>
           <button type="button" className="btn btn-secondary btn-sm" onClick={exportSupportPdf}>
             Scarica PDF assistenza
           </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={exportTechnicianInvoicePdf}>
-            Scarica fattura tecnico
+          <input
+            ref={invoiceFileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            style={{ display: 'none' }}
+            aria-hidden
+            onChange={(ev) => void handleInvoiceFileSelected(ev)}
+          />
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={triggerInvoiceUpload}
+            disabled={invoiceUploadBusy}
+            title="Carica un PDF fattura del tecnico (max 15 MB). Usa periodo e filtro tecnico correnti; opzionale N. fattura."
+          >
+            {invoiceUploadBusy ? 'Caricamento…' : 'Carica fattura'}
           </button>
           <button type="button" className="btn btn-whatsapp btn-sm" onClick={sendWhatsAppSummary}>
             WhatsApp riepilogo
@@ -533,6 +555,41 @@ export default function SupportTechniciansPage() {
           <button type="button" className="btn btn-primary btn-sm" onClick={openNewActivity} disabled={!technicians.length}>
             Aggiungi voce
           </button>
+        </div>
+
+        {uploadedInvoicePreview ? (
+          <aside className="support-uploaded-pdf-aside" aria-label="Anteprima fattura caricata">
+            <div className="support-uploaded-pdf-aside-head">
+              <strong className="support-uploaded-pdf-aside-title">Fattura caricata</strong>
+              <div className="support-uploaded-pdf-aside-actions">
+                <a
+                  className="btn btn-secondary btn-sm"
+                  href={uploadedInvoicePreview.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Apri PDF
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => setUploadedInvoicePreview(null)}
+                >
+                  Chiudi anteprima
+                </button>
+              </div>
+            </div>
+            <p className="support-uploaded-pdf-filename" title={uploadedInvoicePreview.title}>
+              {uploadedInvoicePreview.title}
+            </p>
+            <iframe
+              key={uploadedInvoicePreview.id}
+              title={`Anteprima PDF: ${uploadedInvoicePreview.title}`}
+              src={uploadedInvoicePreview.url}
+              className="support-uploaded-pdf-frame"
+            />
+          </aside>
+        ) : null}
         </div>
 
         {actLoading ? (

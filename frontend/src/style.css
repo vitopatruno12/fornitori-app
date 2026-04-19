@@ -1414,6 +1414,74 @@ select.form-control {
   gap: 0.45rem;
 }
 
+.support-invoice-work-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.support-invoice-work-row .support-toolbar {
+  flex: 2 1 22rem;
+  margin-bottom: 0;
+}
+
+.support-uploaded-pdf-aside {
+  flex: 1 1 18rem;
+  min-width: min(100%, 17rem);
+  max-width: 32rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.support-uploaded-pdf-aside-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.support-uploaded-pdf-aside-title {
+  font-size: 0.88rem;
+  color: var(--text-heading);
+}
+
+.support-uploaded-pdf-aside-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.support-uploaded-pdf-filename {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0 0 0.45rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-uploaded-pdf-frame {
+  width: 100%;
+  height: min(52vh, 420px);
+  min-height: 220px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: #525659;
+}
+
+@media (max-width: 960px) {
+  .support-uploaded-pdf-aside {
+    max-width: none;
+    width: 100%;
+  }
+}
+
 .support-toolbar {
   display: flex;
   flex-wrap: wrap;
