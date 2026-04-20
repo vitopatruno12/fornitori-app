@@ -5,6 +5,9 @@ import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services
 import { fetchCustomers } from '../services/customersService'
 import { checkAiAnomalies, suggestPrimaNota } from '../services/aiService'
 
+const CONTO_NON_FISCALE = 'NON_FISCALE'
+const CONTO_POS = 'POS'
+
 export default function PrimaNotaPage() {
   const formatLocalIsoDate = (d) => {
     const y = d.getFullYear()
@@ -37,7 +40,7 @@ export default function PrimaNotaPage() {
   const [formDescription, setFormDescription] = useState('')
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
-  const [formNonFiscale, setFormNonFiscale] = useState(false)
+  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
   const [formInvoiceId, setFormInvoiceId] = useState('')
@@ -444,7 +447,12 @@ export default function PrimaNotaPage() {
         amount: Number(formAmount),
         description: formDescription.trim() || null,
         note: formNote.trim() || null,
-        conto: formNonFiscale ? 'NON_FISCALE' : (formConto.trim() || null),
+        conto:
+          formFlowTag === 'non_fiscale'
+            ? CONTO_NON_FISCALE
+            : formFlowTag === 'pos'
+              ? CONTO_POS
+              : (formConto.trim() || null),
         riferimento_documento: formRifDocumento.trim() || null,
         supplier_id: formSupplierId ? Number(formSupplierId) : null,
         invoice_id: formInvoiceId ? Number(formInvoiceId) : null,
@@ -467,7 +475,7 @@ export default function PrimaNotaPage() {
       setFormDescription('')
       setFormNote('')
       setFormConto('')
-      setFormNonFiscale(false)
+      setFormFlowTag('fiscale')
       setFormRifDocumento('')
       setFormSupplierId('')
       setFormInvoiceId('')
@@ -496,7 +504,7 @@ export default function PrimaNotaPage() {
     setFormDescription(entry.description || '')
     setFormNote(entry.note || '')
     setFormConto(entry.conto || '')
-    setFormNonFiscale(entry.conto === 'NON_FISCALE')
+    setFormFlowTag(entry.conto === CONTO_NON_FISCALE ? 'non_fiscale' : entry.conto === CONTO_POS ? 'pos' : 'fiscale')
     setFormRifDocumento(entry.riferimento_documento || '')
     setFormSupplierId(entry.supplier_id ? String(entry.supplier_id) : '')
     setFormInvoiceId(entry.invoice_id ? String(entry.invoice_id) : '')
@@ -517,7 +525,7 @@ export default function PrimaNotaPage() {
     setFormDescription('')
     setFormNote('')
     setFormConto('')
-    setFormNonFiscale(false)
+    setFormFlowTag('fiscale')
     setFormRifDocumento('')
     setFormSupplierId('')
     setFormInvoiceId('')
@@ -570,13 +578,21 @@ export default function PrimaNotaPage() {
   }
 
   function isNonFiscale(entry) {
-    return entry?.conto === 'NON_FISCALE'
+    return entry?.conto === CONTO_NON_FISCALE
+  }
+
+  function isPos(entry) {
+    return entry?.conto === CONTO_POS
+  }
+
+  function isExtraCassa(entry) {
+    return isNonFiscale(entry) || isPos(entry)
   }
 
   const rowsWithLedger = React.useMemo(() => {
     if (!entries || entries.length === 0) return { rows: [], cassaIniziale: 0, cassaFinale: 0 }
 
-    const firstFiscale = entries.find(e => e.conto !== 'NON_FISCALE')
+    const firstFiscale = entries.find(e => !isExtraCassa(e))
     const defaultOpening = firstFiscale
       ? Number(firstFiscale.saldo_progressivo) - (firstFiscale.type === 'entrata' ? Number(firstFiscale.amount) : -Number(firstFiscale.amount))
       : Number(entries[0].saldo_progressivo || 0)
@@ -584,19 +600,22 @@ export default function PrimaNotaPage() {
 
     let running = cassaIniziale
     const rows = entries.map((entry) => {
-      const isNonFiscal = entry.conto === 'NON_FISCALE'
-      const entrata = !isNonFiscal && entry.type === 'entrata' ? Number(entry.amount) : 0
-      const uscita = !isNonFiscal && entry.type === 'uscita' ? Number(entry.amount) : 0
-      const nonFiscale = isNonFiscal ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
+      const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
+      const posTag = entry.conto === CONTO_POS
+      const entrata = !nonFiscaleTag && !posTag && entry.type === 'entrata' ? Number(entry.amount) : 0
+      const uscita = !nonFiscaleTag && !posTag && entry.type === 'uscita' ? Number(entry.amount) : 0
+      const nonFiscale = nonFiscaleTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
+      const pos = posTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
       const totaleMovimento = entrata - uscita
-      const incasso = totaleMovimento + nonFiscale
-      const affectsSaldo = !isNonFiscal
+      const incasso = totaleMovimento + nonFiscale + pos
+      const affectsSaldo = !nonFiscaleTag && !posTag
       if (affectsSaldo) running += totaleMovimento
       return {
         ...entry,
         entrata,
         uscita,
         nonFiscale,
+        pos,
         totaleMovimento,
         affectsSaldo,
         incasso,
@@ -611,9 +630,9 @@ export default function PrimaNotaPage() {
   const filteredMovementRows = useMemo(() => {
     const q = movementSearch.trim().toLowerCase()
     return rowsWithLedger.rows.filter((entry) => {
-      if (movementKind === 'entrata' && (entry.conto === 'NON_FISCALE' || entry.type !== 'entrata')) return false
-      if (movementKind === 'uscita' && (entry.conto === 'NON_FISCALE' || entry.type !== 'uscita')) return false
-      if (movementKind === 'nf' && entry.conto !== 'NON_FISCALE') return false
+      if (movementKind === 'entrata' && (isExtraCassa(entry) || entry.type !== 'entrata')) return false
+      if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
+      if (movementKind === 'nf' && !isExtraCassa(entry)) return false
       if (!q) return true
       const blob = [entry.description, entry.note, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
@@ -680,13 +699,22 @@ export default function PrimaNotaPage() {
 
   const nonFiscaleGiorno = React.useMemo(() => {
     return entries.reduce((acc, e) => {
-      if (e.conto !== 'NON_FISCALE') return acc
+      if (e.conto !== CONTO_NON_FISCALE) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
   }, [entries])
 
-  const cassaFinaleRiepilogo = Number(nonFiscaleGiorno || 0) + Number(summary?.saldo_giornaliero || 0)
+  const posGiorno = React.useMemo(() => {
+    return entries.reduce((acc, e) => {
+      if (e.conto !== CONTO_POS) return acc
+      const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
+      return acc + delta
+    }, 0)
+  }, [entries])
+
+  const totaleVenditaGiorno = Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
+  const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0) + Number(summary?.saldo_giornaliero || 0)
 
   return (
     <div>
@@ -791,23 +819,31 @@ export default function PrimaNotaPage() {
               </div>
             </div>
             <div className="form-group" style={{ flex: '1 1 220px', minWidth: 200 }}>
-              <label>Voce fiscale</label>
+              <label>Tipologia voce</label>
               <div className="btn-group" style={{ marginTop: 0 }}>
                 <button
                   type="button"
-                  className={!formNonFiscale ? 'btn btn-primary' : 'btn btn-secondary'}
-                  onClick={() => setFormNonFiscale(false)}
+                  className={formFlowTag === 'fiscale' ? 'btn btn-primary' : 'btn btn-secondary'}
+                  onClick={() => setFormFlowTag('fiscale')}
                   title="Movimento fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero."
                 >
                   Fiscale
                 </button>
                 <button
                   type="button"
-                  className={formNonFiscale ? 'btn btn-outline-danger' : 'btn btn-secondary'}
-                  onClick={() => setFormNonFiscale(true)}
+                  className={formFlowTag === 'non_fiscale' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
+                  onClick={() => setFormFlowTag('non_fiscale')}
                   title="Movimento NON fiscale: viene salvato ma non entra nei conteggi di cassa/riepilogo."
                 >
                   Non fiscale
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'pos' ? 'btn btn-vino' : 'btn btn-secondary'}
+                  onClick={() => setFormFlowTag('pos')}
+                  title="Flusso POS/Bancomat: registrato nelle vendite ma escluso dalla cassa fisica."
+                >
+                  POS
                 </button>
               </div>
             </div>
@@ -849,7 +885,13 @@ export default function PrimaNotaPage() {
             </div>
             <div className="form-group" style={{ flex: '1 1 200px' }}>
               <label>Conto testuale (opzionale)</label>
-              <input className="form-control" value={formConto} onChange={e => setFormConto(e.target.value)} placeholder="Es. Cassa, Banca… (alternativa al conto anagrafico sotto)" disabled={formNonFiscale} />
+              <input
+                className="form-control"
+                value={formConto}
+                onChange={e => setFormConto(e.target.value)}
+                placeholder="Es. Cassa, Banca… (alternativa al conto anagrafico sotto)"
+                disabled={formFlowTag !== 'fiscale'}
+              />
             </div>
           </div>
 
@@ -963,6 +1005,7 @@ export default function PrimaNotaPage() {
                   <th className="text-end">Cassa entrata</th>
                   <th className="text-end">Cassa uscita</th>
                   <th className="text-end">Non fiscale</th>
+                  <th className="text-end">POS</th>
                   <th className="text-end">Totale</th>
                   <th className="text-end">Azioni</th>
                 </tr>
@@ -989,10 +1032,11 @@ export default function PrimaNotaPage() {
                     <td className="text-end amount">{entry.entrata > 0 ? `€ ${formatAmount(entry.entrata)}` : '—'}</td>
                     <td className="text-end amount">{entry.uscita > 0 ? `€ ${formatAmount(entry.uscita)}` : '—'}</td>
                     <td className="text-end amount">{entry.nonFiscale !== 0 ? `€ ${formatAmount(entry.nonFiscale)}` : '—'}</td>
+                    <td className="text-end amount">{entry.pos !== 0 ? `€ ${formatAmount(entry.pos)}` : '—'}</td>
                     <td
                       className="text-end pn-amount-cell"
                       style={{
-                        color: isNonFiscale(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
+                        color: isExtraCassa(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
                       }}
                     >
                       € {formatAmount(entry.incasso)}
@@ -1019,7 +1063,7 @@ export default function PrimaNotaPage() {
                 ))}
                 {filteredMovementRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="empty-state">
+                    <td colSpan={9} className="empty-state">
                       {rowsWithLedger.rows.length === 0 ? 'Nessun movimento in questa data.' : 'Nessun movimento corrisponde ai filtri.'}
                     </td>
                   </tr>
@@ -1041,6 +1085,7 @@ export default function PrimaNotaPage() {
                     <th>Uscita</th>
                     <th>Totale</th>
                     <th>Non fiscale</th>
+                    <th>POS</th>
                     <th>Saldo attuale cassa</th>
                     <th>Cassa finale</th>
                     <th>Note</th>
@@ -1058,11 +1103,12 @@ export default function PrimaNotaPage() {
                       }
                     >
                       <td><input className="excel-cell" value={`${formatDate(entry.entry_date)} ${formatTime(entry.entry_date)}`} readOnly /></td>
-                      <td><input className="excel-cell" value={`${entry.description || ''}${isNonFiscale(entry) ? ' [Non fiscale]' : ''}`} readOnly /></td>
+                      <td><input className="excel-cell" value={`${entry.description || ''}${isNonFiscale(entry) ? ' [Non fiscale]' : isPos(entry) ? ' [POS]' : ''}`} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.nonFiscale)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.pos)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaSera)} readOnly /></td>
                       <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
@@ -1168,6 +1214,14 @@ export default function PrimaNotaPage() {
                   <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(nonFiscaleGiorno)}</td>
                 </tr>
                 <tr>
+                  <td><strong>Totale POS (giorno)</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(posGiorno)}</td>
+                </tr>
+                <tr>
+                  <td><strong>Totale vendita (Non fiscale + POS)</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--text-heading)', fontWeight: 700 }}>€ {formatAmount(totaleVenditaGiorno)}</td>
+                </tr>
+                <tr>
                   <td><strong>Saldo giornaliero</strong></td>
                   <td className="text-end amount">€ {formatAmount(summary.saldo_giornaliero)}</td>
                 </tr>
@@ -1235,13 +1289,15 @@ export default function PrimaNotaPage() {
               <p style={{ marginTop: 0 }}>
                 {isNonFiscale(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">Non fiscale</span>
+                ) : isPos(drawerEntry) ? (
+                  <span className="badge-pn badge-pn--nf">POS</span>
                 ) : drawerEntry.type === 'entrata' ? (
                   <span className="badge-pn badge-pn--in">Entrata</span>
                 ) : (
                   <span className="badge-pn badge-pn--out">Uscita</span>
                 )}
               </p>
-              <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isNonFiscale(drawerEntry) ? 'var(--text-muted)' : drawerEntry.type === 'entrata' ? 'var(--success)' : 'var(--danger)' }}>
+              <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isExtraCassa(drawerEntry) ? 'var(--text-muted)' : drawerEntry.type === 'entrata' ? 'var(--success)' : 'var(--danger)' }}>
                 € {formatAmount(drawerEntry.amount)}
               </p>
               <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 0.75rem', fontSize: '0.9rem' }}>

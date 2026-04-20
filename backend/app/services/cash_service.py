@@ -12,9 +12,17 @@ from ..models.supplier import Supplier
 from ..schemas.cash import CashEntryCreate
 
 NON_FISCALE_CONTO = "NON_FISCALE"
+POS_CONTO = "POS"
 
 def _is_fiscale_filter():
-    return or_(CashEntry.conto.is_(None), CashEntry.conto != NON_FISCALE_CONTO)
+    return or_(
+        CashEntry.conto.is_(None),
+        CashEntry.conto.notin_([NON_FISCALE_CONTO, POS_CONTO]),
+    )
+
+
+def _is_extra_cassa(conto: Optional[str]) -> bool:
+    return conto in {NON_FISCALE_CONTO, POS_CONTO}
 
 
 def list_entries(
@@ -61,7 +69,7 @@ def list_entries_with_balance(
     result = []
     saldo = opening
     for e in entries:
-        if e.conto != NON_FISCALE_CONTO:
+        if not _is_extra_cassa(e.conto):
             delta = Decimal(str(e.amount)) if e.type == "entrata" else -Decimal(str(e.amount))
             saldo = (saldo + delta).quantize(Decimal("0.01"))
         result.append({
@@ -310,7 +318,7 @@ def get_entries_for_export(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
 ) -> List[dict]:
-    entries = [e for e in list_entries(db, date_from, date_to) if e.conto != NON_FISCALE_CONTO]
+    entries = [e for e in list_entries(db, date_from, date_to) if not _is_extra_cassa(e.conto)]
     return [
         {
             "id": e.id,
