@@ -232,21 +232,24 @@ def _extract_text(pattern: str, html: str) -> Optional[str]:
 
 def _parse_cassette(html: str) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
-    # Riga tipica: cassetta 1 | Si | 5.00 | 30 | 150.00
-    rx = re.compile(
-        r"cassetta\s+(\d+).*?<td class=\"tab\">\s*(Si|No)\s*</td>.*?"
-        r"<td class=\"tab\">\s*([0-9.,]+)\s*</td>.*?<td class=\"tab\">\s*([0-9]+)\s*</td>.*?"
-        r"<td class=\"tab\">\s*([0-9.,]+)\s*</td>",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    for m in rx.finditer(html):
+    # Parse robusto: cerca righe tabellari con 5 colonne class="tab"
+    row_rx = re.compile(r"<tr>(.*?)</tr>", flags=re.IGNORECASE | re.DOTALL)
+    td_rx = re.compile(r'<td\s+class=["\']tab["\']>\s*(.*?)\s*</td>', flags=re.IGNORECASE | re.DOTALL)
+    for row in row_rx.finditer(html):
+        cols = td_rx.findall(row.group(1))
+        if len(cols) < 5:
+            continue
+        first = _strip_html_block(cols[0]).lower()
+        if "cassetta" not in first:
+            continue
+        num = re.search(r"cassetta\s+(\d+)", first, flags=re.IGNORECASE)
         out.append(
             {
-                "cassetta": m.group(1),
-                "presente": m.group(2),
-                "taglio_eur": m.group(3),
-                "banconote": m.group(4),
-                "totale_eur": m.group(5),
+                "cassetta": (num.group(1) if num else "").strip(),
+                "presente": _strip_html_block(cols[1]),
+                "taglio_eur": _strip_html_block(cols[2]),
+                "banconote": _strip_html_block(cols[3]),
+                "totale_eur": _strip_html_block(cols[4]),
             }
         )
     return out
@@ -254,11 +257,21 @@ def _parse_cassette(html: str) -> List[Dict[str, str]]:
 
 def _parse_hopper(html: str) -> Dict[str, str]:
     amt = _extract_text(r"Smart\s+Hopper\s+1:\s*([0-9.,]+)\s*&euro;", html)
+    if not amt:
+        amt = _extract_text(r"Smart\s+Hopper\s+1:\s*([0-9.,]+)\s*€", html)
     fw = _extract_text(r"Firmware version:\s*([^<]+)</td>", html)
     return {
         "smart_hopper_1_eur": amt or "",
         "firmware": fw or "",
     }
+
+
+def _extract_first_number(html_text: str, patterns: List[str]) -> Optional[float]:
+    for p in patterns:
+        v = _extract_number(p, html_text)
+        if v is not None:
+            return v
+    return None
 
 
 def _build_opener() -> tuple[urllib.request.OpenerDirector, CookieJar]:
@@ -399,11 +412,42 @@ def get_model_status(model_id: str):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     html = _fetch_model_status(model)
     title = _extract_text(r"<h2 class=\"title\">([^<]+)</h2>", html) or "Stato"
-    banconote = _extract_number(r"Banconote:\s*([0-9.,]+)\s*&euro;", html)
-    monete = _extract_number(r"Monete:\s*([0-9.,]+)\s*&euro;", html)
-    totale = _extract_number(r"Totale:\s*([0-9.,]+)\s*&euro;", html)
-    stacker = _extract_number(r"Contenuto stacker:\s*([0-9.,]+)\s*&euro;", html)
-    totale_cassa = _extract_number(r"Totale cassa:\s*([0-9.,]+)\s*&euro;", html)
+    banconote = _extract_first_number(
+        html,
+        [
+            r"Banconote:\s*([0-9.,]+)\s*&euro;",
+            r"Banconote:\s*([0-9.,]+)\s*€",
+        ],
+    )
+    monete = _extract_first_number(
+        html,
+        [
+            r"Monete:\s*([0-9.,]+)\s*&euro;",
+            r"Monete:\s*([0-9.,]+)\s*€",
+        ],
+    )
+    totale = _extract_first_number(
+        html,
+        [
+            r"Totale:\s*([0-9.,]+)\s*&euro;",
+            r"Totale:\s*([0-9.,]+)\s*€",
+            r"Totale\s+IN\s*:\s*([0-9.,]+)\s*&euro;",
+        ],
+    )
+    stacker = _extract_first_number(
+        html,
+        [
+            r"Contenuto stacker:\s*([0-9.,]+)\s*&euro;",
+            r"Contenuto stacker:\s*([0-9.,]+)\s*€",
+        ],
+    )
+    totale_cassa = _extract_first_number(
+        html,
+        [
+            r"Totale cassa:\s*([0-9.,]+)\s*&euro;",
+            r"Totale cassa:\s*([0-9.,]+)\s*€",
+        ],
+    )
     updated = _extract_text(r"Sistema di controllo remoto<br/>\s*([^<]+)\s*</td>", html)
     excerpt = re.sub(r"\s+", " ", html)
     return VneStatusOut(
