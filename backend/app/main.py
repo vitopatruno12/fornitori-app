@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from . import models  # noqa: F401
 from .database import Base, engine
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians, vne
 
 logger = logging.getLogger("app.startup")
 
@@ -79,6 +79,7 @@ app.include_router(ai.router)
 app.include_router(supplier_orders.router)
 app.include_router(staff.router)
 app.include_router(support_technicians.router)
+app.include_router(vne.router)
 
 
 def _ensure_support_technicians_columns() -> None:

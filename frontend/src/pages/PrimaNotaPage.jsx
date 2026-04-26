@@ -577,6 +577,12 @@ export default function PrimaNotaPage() {
     return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
+  function formatAmountClean(value) {
+    const n = Number(value || 0)
+    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return ''
+    return formatAmount(n)
+  }
+
   function isNonFiscale(entry) {
     return entry?.conto === CONTO_NON_FISCALE
   }
@@ -713,8 +719,16 @@ export default function PrimaNotaPage() {
     }, 0)
   }, [entries])
 
-  const totaleVenditaGiorno = Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
-  const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0) + Number(summary?.saldo_giornaliero || 0)
+  const fiscaleGiorno = React.useMemo(() => {
+    return entries.reduce((acc, e) => {
+      if (e.conto === CONTO_NON_FISCALE || e.conto === CONTO_POS) return acc
+      const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
+      return acc + delta
+    }, 0)
+  }, [entries])
+
+  const totaleVenditaGiorno = Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
+  const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
 
   return (
     <div>
@@ -1004,6 +1018,7 @@ export default function PrimaNotaPage() {
                   <th>Operazioni</th>
                   <th className="text-end">Cassa entrata</th>
                   <th className="text-end">Cassa uscita</th>
+                  <th className="text-end">Fiscale</th>
                   <th className="text-end">Non fiscale</th>
                   <th className="text-end">POS</th>
                   <th className="text-end">Totale</th>
@@ -1031,6 +1046,7 @@ export default function PrimaNotaPage() {
                     </td>
                     <td className="text-end amount">{entry.entrata > 0 ? `€ ${formatAmount(entry.entrata)}` : '—'}</td>
                     <td className="text-end amount">{entry.uscita > 0 ? `€ ${formatAmount(entry.uscita)}` : '—'}</td>
+                    <td className="text-end amount">{entry.affectsSaldo ? `€ ${formatAmount(entry.totaleMovimento)}` : '—'}</td>
                     <td className="text-end amount">{entry.nonFiscale !== 0 ? `€ ${formatAmount(entry.nonFiscale)}` : '—'}</td>
                     <td className="text-end amount">{entry.pos !== 0 ? `€ ${formatAmount(entry.pos)}` : '—'}</td>
                     <td
@@ -1063,7 +1079,7 @@ export default function PrimaNotaPage() {
                 ))}
                 {filteredMovementRows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="empty-state">
+                    <td colSpan={10} className="empty-state">
                       {rowsWithLedger.rows.length === 0 ? 'Nessun movimento in questa data.' : 'Nessun movimento corrisponde ai filtri.'}
                     </td>
                   </tr>
@@ -1085,6 +1101,7 @@ export default function PrimaNotaPage() {
                     <th>Uscita</th>
                     <th>Totale</th>
                     <th>Non fiscale</th>
+                    <th>Fiscale</th>
                     <th>POS</th>
                     <th>Saldo attuale cassa</th>
                     <th>Cassa finale</th>
@@ -1107,8 +1124,9 @@ export default function PrimaNotaPage() {
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.nonFiscale)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.pos)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.nonFiscale)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.affectsSaldo ? entry.totaleMovimento : 0)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.pos)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaSera)} readOnly /></td>
                       <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
@@ -1210,6 +1228,10 @@ export default function PrimaNotaPage() {
                   <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(summary.totale_uscite)}</td>
                 </tr>
                 <tr>
+                  <td><strong>Totale fiscale (giorno)</strong></td>
+                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(fiscaleGiorno)}</td>
+                </tr>
+                <tr>
                   <td><strong>Totale non fiscale (giorno)</strong></td>
                   <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(nonFiscaleGiorno)}</td>
                 </tr>
@@ -1218,7 +1240,7 @@ export default function PrimaNotaPage() {
                   <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(posGiorno)}</td>
                 </tr>
                 <tr>
-                  <td><strong>Totale vendita (Non fiscale + POS)</strong></td>
+                  <td><strong>Totale vendita (Fiscale + Non fiscale + POS)</strong></td>
                   <td className="text-end amount" style={{ color: 'var(--text-heading)', fontWeight: 700 }}>€ {formatAmount(totaleVenditaGiorno)}</td>
                 </tr>
                 <tr>

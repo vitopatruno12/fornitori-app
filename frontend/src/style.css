@@ -77,10 +77,28 @@ a:hover {
   color: #fff;
 }
 
+.app-nav-title--atlas {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.atlas-nav-logo {
+  display: block;
+  height: 42px;
+  width: auto;
+  max-width: min(48vw, 255px);
+  filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.32));
+}
+
 .app-nav-links {
   display: flex;
   gap: 0.25rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .app-nav-links a {
@@ -101,6 +119,22 @@ a:hover {
 .app-nav-links a.active {
   background: rgba(255, 255, 255, 0.2);
   color: #fff;
+}
+
+.app-nav-logout {
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(15, 23, 42, 0.28);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-nav-logout:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(254, 202, 202, 0.7);
 }
 
 .app-nav-brand {
@@ -193,6 +227,16 @@ a:hover {
     text-overflow: ellipsis;
   }
 
+  .app-nav-title--atlas {
+    white-space: normal;
+    overflow: visible;
+  }
+
+  .atlas-nav-logo {
+    height: 34px;
+    max-width: min(56vw, 220px);
+  }
+
   .app-nav-toggle {
     display: inline-flex;
   }
@@ -232,6 +276,12 @@ a:hover {
     box-sizing: border-box;
   }
 
+  .app-nav-logout {
+    width: 100%;
+    text-align: left;
+    margin-top: 0.35rem;
+  }
+
   .app-nav-backdrop {
     display: block;
     position: fixed;
@@ -267,6 +317,106 @@ a:hover {
   margin: 0 auto;
   padding: 1.5rem;
   text-align: left;
+}
+
+.atlas-login-page {
+  min-height: 100vh;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 1.2rem;
+  background:
+    radial-gradient(60% 80% at 20% 20%, rgba(30, 64, 175, 0.25), transparent 70%),
+    radial-gradient(60% 80% at 80% 80%, rgba(56, 189, 248, 0.2), transparent 70%),
+    #020617;
+}
+
+.atlas-login-page.is-entering .atlas-login-shell {
+  animation: atlasLoginEnter 0.26s ease forwards;
+}
+
+.atlas-login-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.44), rgba(2, 6, 23, 0.66));
+}
+
+.atlas-login-shell {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 860px);
+}
+
+.atlas-login-hero {
+  width: 100%;
+  display: block;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.6);
+}
+
+.atlas-login-form {
+  width: min(420px, 88%);
+  margin: -112px auto 0;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  backdrop-filter: blur(7px);
+}
+
+.atlas-password-wrap {
+  position: relative;
+}
+
+.atlas-password-input {
+  padding-right: 5.6rem;
+}
+
+.atlas-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(15, 23, 42, 0.74);
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.atlas-password-toggle:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.atlas-login-input {
+  max-width: 100%;
+  margin-bottom: 0.6rem;
+}
+
+.atlas-login-submit {
+  width: 100%;
+  margin-top: 0.2rem;
+}
+
+.atlas-login-error {
+  margin: 0.2rem 0 0.5rem;
+  font-size: 0.84rem;
+  color: #fecaca;
+}
+
+@keyframes atlasLoginEnter {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
 }
 
 /* === Page header === */
@@ -875,6 +1025,385 @@ select.form-control {
 .app-table--compact td {
   padding: 0.45rem 0.5rem;
   font-size: 0.88rem;
+}
+
+/* VNE chiusure: look classico stile portale remoto */
+.vne-chiusure-style {
+  border: 1px solid #9da6af;
+  background: #f7f7f7;
+}
+
+.vne-chiusure-style .page-subheader {
+  color: #1f2937;
+}
+
+.vne-chiusure-hint {
+  font-family: "Trebuchet MS", Tahoma, sans-serif;
+}
+
+.vne-chiusure-table-wrap {
+  border: 1px solid #8d99a8;
+  background: #ffffff;
+}
+
+.vne-chiusure-table {
+  border-collapse: collapse;
+}
+
+.vne-chiusure-table thead th {
+  background: #e6eaee;
+  color: #1f2937;
+  border-bottom: 1px solid #8d99a8;
+  border-right: 1px solid #bcc5ce;
+  font-weight: 700;
+}
+
+.vne-chiusure-table td {
+  border-top: 1px solid #d4dbe2;
+  border-right: 1px solid #e2e8f0;
+}
+
+.vne-chiusure-table tr:nth-child(odd) td {
+  background: #fafbfd;
+}
+
+/* ===== VNE legacy skin (scoped: only VNE section) ===== */
+.vne-legacy-skin {
+  background-color: #ffffff;
+}
+
+.vne-legacy-skin .card {
+  background: #ffffff;
+}
+
+.vne-legacy-skin .page-subheader {
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  font-weight: bold;
+  border-bottom: 1px dotted #000;
+  color: #1f2937;
+  padding-bottom: 0.25rem;
+}
+
+.vne-legacy-skin .vne-chiusure-style {
+  border: 0;
+  padding-top: 0.2rem;
+  max-width: 840px;
+  margin: 0 auto 1rem;
+}
+
+.vne-legacy-skin .vne-operations-style {
+  max-width: 840px;
+}
+
+.vne-legacy-skin .vne-status-style {
+  max-width: 840px;
+}
+
+.vne-legacy-skin .vne-chiusure-hint {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+}
+
+.vne-legacy-skin .vne-chiusure-style > div:first-child .page-subheader {
+  color: #dc143c; /* crimson come header VNE */
+  border-bottom: 0;
+  font-size: 17px;
+}
+
+.vne-legacy-skin .vne-operations-style > div:first-child .page-subheader {
+  color: #dc143c;
+  border-bottom: 0;
+  font-size: 17px;
+}
+
+.vne-legacy-skin .vne-status-style > div:first-child .page-subheader {
+  color: #dc143c;
+  border-bottom: 0;
+  font-size: 17px;
+}
+
+.vne-legacy-skin .form-group label {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.vne-legacy-skin .vne-chiusure-table-wrap {
+  border: 0;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-chiusure-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.vne-legacy-skin .vne-chiusure-table thead th {
+  text-align: left;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  font-weight: bold;
+  border-bottom: 1px dotted #000;
+  background: #ffffff;
+  color: #000;
+}
+
+.vne-legacy-skin .vne-chiusure-table td {
+  text-align: left;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  background: #fff;
+  border-top: 0;
+  border-right: 0;
+  vertical-align: top;
+}
+
+.vne-legacy-skin .vne-chiusure-dettaglio {
+  white-space: pre-line;
+  line-height: 1.35;
+  min-width: 320px;
+}
+
+.vne-legacy-skin .vne-chiusure-table tr:nth-child(odd) td {
+  background: #ffffff;
+}
+
+.vne-legacy-skin .vne-chiusure-style .form-row {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-operations-style .form-row {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-chiusure-style .form-control {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  border: 1px solid #909090;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.vne-legacy-skin .vne-operations-style .form-control {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  border: 1px solid #909090;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.vne-legacy-skin .vne-chiusure-style .btn.btn-secondary.btn-sm,
+.vne-legacy-skin .vne-chiusure-style .btn.btn-primary.btn-sm {
+  border-radius: 0;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+}
+
+.vne-legacy-skin .vne-operations-style .btn.btn-secondary.btn-sm,
+.vne-legacy-skin .vne-operations-style .btn.btn-primary.btn-sm {
+  border-radius: 0;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+}
+
+.vne-legacy-skin .vne-status-style .btn.btn-secondary.btn-sm,
+.vne-legacy-skin .vne-status-style .btn.btn-primary.btn-sm {
+  border-radius: 0;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+}
+
+.vne-legacy-skin .vne-status-table {
+  width: 800px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .support-tech-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .support-tech-card {
+  position: relative;
+  overflow: hidden;
+  width: min(300px, 100%);
+  border-left: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.28));
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.vne-legacy-skin .support-tech-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.vne-legacy-skin .support-tech-card::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -16px;
+  height: 34px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse at center, rgba(125, 211, 252, 0.42) 0%, rgba(56, 189, 248, 0.18) 45%, rgba(56, 189, 248, 0) 80%);
+  pointer-events: none;
+  filter: blur(8px);
+}
+
+.vne-legacy-skin .vne-operations-legacy-list {
+  width: 800px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-operations-legacy-item {
+  text-align: left;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  padding-left: 250px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dotted #000;
+  color: #000;
+  line-height: 1.45;
+}
+
+.vne-legacy-skin .vne-operations-legacy-item strong {
+  font-weight: bold;
+}
+
+.vne-legacy-skin .vne-legacy-header {
+  position: relative;
+  min-height: 60px;
+  margin-bottom: 0.3rem;
+}
+
+.vne-legacy-skin .vne-legacy-logo {
+  position: absolute;
+  left: 25%;
+  top: 4px;
+  width: 104px;
+  height: 51px;
+  border: 1px dashed #d1d5db;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.vne-legacy-skin .vne-legacy-shell {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-legacy-menu-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.vne-legacy-skin .vne-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  padding: 0.35rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.vne-legacy-skin .vne-nav-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.32rem 0.8rem;
+  line-height: 1.1;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.vne-legacy-skin .vne-nav-btn:hover {
+  color: #0f172a;
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.vne-legacy-skin .vne-nav-btn.is-active {
+  color: #ffffff;
+  background: linear-gradient(180deg, #dc143c 0%, #b10f2f 100%);
+  border-color: #9f1239;
+  box-shadow: 0 3px 10px rgba(220, 20, 60, 0.28);
+}
+
+.vne-legacy-skin .vne-nav-btn:focus-visible {
+  outline: 2px solid #dc143c;
+  outline-offset: 2px;
+}
+
+.vne-legacy-skin .vne-contabilita-shell {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-contabilita-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vne-legacy-skin .vne-contabilita-title {
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  font-weight: bold;
+  border-bottom: 1px dotted #000;
+  padding: 0.35rem 0.4rem 0.25rem;
+  color: #000;
+}
+
+.vne-legacy-skin .vne-contabilita-col {
+  width: 50%;
+  text-align: left;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  padding-left: 100px;
+  padding-top: 8px;
+  padding-bottom: 2px;
+  vertical-align: top;
+  color: #000;
+}
+
+.vne-legacy-skin .vne-contabilita-amount {
+  padding-left: 110px;
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.vne-legacy-skin .vne-contabilita-footer {
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  color: #bbb;
+  padding-top: 8px;
+  border-top: 1px dotted #000;
 }
 
 .text-pos {

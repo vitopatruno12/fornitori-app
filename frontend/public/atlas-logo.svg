@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 130" role="img" aria-label="ATLAS">
+  <defs>
+    <linearGradient id="atlasBlue" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="atlasSilver" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(8,8)">
+    <path d="M74 0 18 98h24l11-19h43l11 19h24L74 0zm0 28 18 32H56l18-32z" fill="url(#atlasSilver)"/>
+    <path d="M31 86c24-16 55-22 86-8-6 2-13 8-18 20H45c-3-4-8-8-14-12z" fill="url(#atlasBlue)"/>
+    <ellipse cx="74" cy="94" rx="33" ry="12" fill="none" stroke="#2563eb" stroke-width="2"/>
+    <path d="M43 94h62M52 87c8 6 8 14 0 20M96 87c-8 6-8 14 0 20M74 82v24" fill="none" stroke="#1d4ed8" stroke-width="1.8" opacity=".9"/>
+  </g>
+
+  <text x="160" y="74" font-family="Segoe UI, Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="9" fill="#f8fafc">ATLAS</text>
+  <text x="160" y="102" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="500" letter-spacing="3.2" fill="#93c5fd">CONTROLLO. CONNESSIONI. CRESCITA.</text>
+</svg>

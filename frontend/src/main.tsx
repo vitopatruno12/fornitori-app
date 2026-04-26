@@ -10,6 +10,7 @@ import InvoicesPage from './pages/InvoicesPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
+import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 
 type PageKey =
@@ -22,6 +23,7 @@ type PageKey =
   | 'prima-nota'
   | 'staff'
   | 'support-tech'
+  | 'vne'
 type AiHistoryItem = {
   id: string
   page: PageKey
@@ -33,6 +35,18 @@ type AiHistoryItem = {
 }
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
+    try {
+      return sessionStorage.getItem('atlasAuth') === '1'
+    } catch {
+      return false
+    }
+  })
+  const [loginUsername, setLoginUsername] = React.useState('')
+  const [loginPassword, setLoginPassword] = React.useState('')
+  const [loginError, setLoginError] = React.useState('')
+  const [showPassword, setShowPassword] = React.useState(false)
+  const [isLoggingIn, setIsLoggingIn] = React.useState(false)
   const [page, setPage] = React.useState<PageKey>('home')
   const [navOpen, setNavOpen] = React.useState(false)
   const [aiOpen, setAiOpen] = React.useState(false)
@@ -50,6 +64,14 @@ function App() {
     setPage(p)
     setNavOpen(false)
   }, [])
+
+  React.useEffect(() => {
+    try {
+      sessionStorage.setItem('atlasAuth', isAuthenticated ? '1' : '0')
+    } catch {
+      // ignore storage errors
+    }
+  }, [isAuthenticated])
 
   React.useEffect(() => {
     try {
@@ -125,6 +147,7 @@ function App() {
     'prima-nota': 'prima-nota',
     staff: 'personale',
     'support-tech': 'assistenza-tecnici',
+    vne: 'vne',
   }
 
   async function runAi(promptOverride?: string) {
@@ -271,6 +294,10 @@ function App() {
         'Come registro un intervento completato assistenza?',
         'Differenza tra voce pianificata e lavoro svolto?',
       ],
+      vne: [
+        'Mostra stato cassa automatica in tempo reale',
+        'Filtra operazioni VNE per data e utente',
+      ],
     }
     return map[page] || []
   }, [page])
@@ -410,6 +437,32 @@ function App() {
     setAiOpen(false)
   }
 
+  function handleLoginSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (isLoggingIn) return
+    const u = loginUsername.trim()
+    const p = loginPassword.trim()
+    if (!u || !p) {
+      setLoginError('Inserisci username e password')
+      return
+    }
+    setLoginError('')
+    setIsLoggingIn(true)
+    window.setTimeout(() => {
+      setIsAuthenticated(true)
+      setLoginPassword('')
+      setIsLoggingIn(false)
+    }, 260)
+  }
+
+  function handleLogout() {
+    setAiOpen(false)
+    setNavOpen(false)
+    setIsAuthenticated(false)
+    setLoginPassword('')
+    setPage('home')
+  }
+
   React.useEffect(() => {
     if (!aiToast) return
     setAiToastClosing(false)
@@ -423,6 +476,49 @@ function App() {
       window.clearTimeout(closeEnd)
     }
   }, [aiToast])
+
+  if (!isAuthenticated) {
+    return (
+      <div className={`atlas-login-page${isLoggingIn ? ' is-entering' : ''}`}>
+        <div className="atlas-login-overlay" />
+        <div className="atlas-login-shell">
+          <img src="/atlas-login-bg.png" alt="ATLAS" className="atlas-login-hero" />
+          <form className="atlas-login-form" onSubmit={handleLoginSubmit}>
+            <input
+              type="text"
+              className="form-control atlas-login-input"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              placeholder="Username"
+              autoComplete="username"
+            />
+            <div className="atlas-password-wrap">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="form-control atlas-login-input atlas-password-input"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="Password"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="atlas-password-toggle"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
+              >
+                {showPassword ? 'Nascondi' : 'Mostra'}
+              </button>
+            </div>
+            {loginError ? <p className="atlas-login-error">{loginError}</p> : null}
+            <button type="submit" className="btn btn-primary atlas-login-submit" disabled={isLoggingIn}>
+              {isLoggingIn ? 'Accesso...' : 'Accedi'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app-wrap">
@@ -441,7 +537,9 @@ function App() {
               <span className="app-nav-toggle-bar" aria-hidden />
               <span className="app-nav-toggle-bar" aria-hidden />
             </button>
-            <h1 className="app-nav-title">Fornitori App</h1>
+            <h1 className="app-nav-title app-nav-title--atlas" title="ATLAS">
+              <img src="/atlas-logo.svg" alt="ATLAS Software Gestionale" className="atlas-nav-logo" />
+            </h1>
           </div>
           <div id="app-nav-menu" className={`app-nav-links${navOpen ? ' is-open' : ''}`}>
             <a href="#" className={page === 'home' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('home'); }}>Home</a>
@@ -453,6 +551,8 @@ function App() {
             <a href="#" className={page === 'prima-nota' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('prima-nota'); }}>Prima Nota Cassa</a>
             <a href="#" className={page === 'staff' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('staff'); }}>Personale</a>
             <a href="#" className={page === 'support-tech' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('support-tech'); }}>Assistenza tecnici</a>
+            <a href="#" className={page === 'vne' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('vne'); }}>VNE</a>
+            <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
           </div>
         </div>
         {navOpen && (
@@ -474,6 +574,7 @@ function App() {
         {page === 'prima-nota' && <PrimaNotaPage />}
         {page === 'staff' && <StaffPage />}
         {page === 'support-tech' && <SupportTechniciansPage />}
+        {page === 'vne' && <VnePage />}
       </main>
 
       <button type="button" className="ai-global-fab" onClick={() => setAiOpen(true)} title="Apri assistente operativo AI">
