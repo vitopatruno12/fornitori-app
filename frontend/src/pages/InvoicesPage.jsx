@@ -413,11 +413,13 @@ export default function InvoicesPage() {
 
   return (
     <div>
-      <h1 className="page-header">Fatture fornitori</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1rem', maxWidth: 800 }}>
+      <section className="staff-page-hero">
+      <h1 className="page-header staff-page-title">Fatture fornitori</h1>
+      <p className="staff-page-lead">
         Registra documenti con scadenza e importi pagati (totale, parziale o da saldare). Usa i filtri per le fatture scadute o in scadenza.
         Collega un movimento di cassa oppure apri la Prima Nota sulla data del documento.
       </p>
+      </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}

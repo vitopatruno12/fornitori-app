@@ -383,11 +383,13 @@ export default function NewDeliveryPage() {
 
   return (
     <div>
-      <h1 className="page-header">Nuova consegna (scarico merce)</h1>
-      <p style={{ color: 'var(--text-muted)', marginTop: '-0.5rem', marginBottom: '1rem', maxWidth: '52rem' }}>
+      <section className="staff-page-hero">
+      <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
+      <p className="staff-page-lead">
         Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
         fornitore (stessa descrizione prodotto). Utile per bar, ristoranti e negozi.
       </p>
+      </section>
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}

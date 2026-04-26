@@ -537,7 +537,19 @@ function App() {
               <span className="app-nav-toggle-bar" aria-hidden />
               <span className="app-nav-toggle-bar" aria-hidden />
             </button>
-            <h1 className="app-nav-title app-nav-title--atlas" title="ATLAS">
+            <h1
+              className="app-nav-title app-nav-title--atlas"
+              title="ATLAS"
+              onClick={() => navigateTo('home')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  navigateTo('home')
+                }
+              }}
+            >
               <img src="/atlas-logo.svg" alt="ATLAS Software Gestionale" className="atlas-nav-logo" />
             </h1>
           </div>

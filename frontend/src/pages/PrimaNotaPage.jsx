@@ -732,7 +732,10 @@ export default function PrimaNotaPage() {
 
   return (
     <div>
-      <h1 className="page-header">Prima Nota di Cassa</h1>
+      <section className="staff-page-hero">
+        <h1 className="page-header staff-page-title">Prima Nota di Cassa</h1>
+        <p className="staff-page-lead">Controllo giornaliero movimenti, cassa e riepiloghi fiscali/non fiscali/POS.</p>
+      </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}

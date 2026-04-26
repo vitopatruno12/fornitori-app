@@ -219,11 +219,13 @@ export default function DeliveriesHistoryPage() {
 
   return (
     <div>
-      <h1 className="page-header">Storico consegne</h1>
-      <p style={{ color: 'var(--text-muted)', marginTop: '-0.5rem', marginBottom: '1rem', maxWidth: '52rem' }}>
+      <section className="staff-page-hero">
+      <h1 className="page-header staff-page-title">Storico consegne</h1>
+      <p className="staff-page-lead">
         Cerca per fornitore, prodotto (testo libero) e periodo. Confronta prezzi nel tempo nella sezione analisi: ultimo
         prezzo, media, min/max e grafico.
       </p>
+      </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}

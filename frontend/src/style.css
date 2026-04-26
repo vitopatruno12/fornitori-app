@@ -82,6 +82,13 @@ a:hover {
   align-items: center;
   line-height: 1;
   letter-spacing: 0;
+  cursor: pointer;
+}
+
+.app-nav-title--atlas:focus-visible {
+  outline: 2px solid rgba(191, 219, 254, 0.95);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .atlas-nav-logo {
@@ -149,6 +156,10 @@ a:hover {
   min-width: 0;
   margin-right: 0.2rem;
   margin-left: -0.15rem;
+}
+
+.app-nav-brand .app-nav-title--atlas {
+  margin-left: -0.4rem;
 }
 
 .app-nav-toggle {

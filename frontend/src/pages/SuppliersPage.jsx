@@ -515,12 +515,14 @@ export default function SuppliersPage() {
 
   return (
     <div>
-      <h1 className="page-header">Fornitori</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.25rem', maxWidth: 720 }}>
+      <section className="staff-page-hero">
+      <h1 className="page-header staff-page-title">Fornitori</h1>
+      <p className="staff-page-lead">
         Anagrafica completa con dati commerciali, pagamenti e collegamenti. <strong>Apri IBAN</strong> mostra solo gli IBAN da copiare;
         accanto puoi scegliere un fornitore dall’elenco filtrato e aprire la modifica. Per ogni riga vedi totali fatture, saldi aperti,
         ultime consegne/fatture e listino.
       </p>
+      </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
 

@@ -832,12 +832,14 @@ export default function NewOrderPage({ onNavigate }) {
 
   return (
     <div>
-      <h1 className="page-header">Nuovo ordine</h1>
-      <p style={{ color: 'var(--text-muted)', marginTop: '-0.5rem', marginBottom: '1rem', maxWidth: '52rem' }}>
+      <section className="staff-page-hero">
+      <h1 className="page-header staff-page-title">Nuovo ordine</h1>
+      <p className="staff-page-lead">
         Ordine verso un fornitore con più righe merce, note al fornitore e note interne, consegna prevista e controlli
         rapidi. Dopo il salvataggio puoi scaricare il PDF, inviare email o passare a Nuova consegna con righe
         precompilate.
       </p>
+      </section>
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}

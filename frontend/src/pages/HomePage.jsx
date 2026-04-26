@@ -194,11 +194,11 @@ export default function HomePage({ onNavigate }) {
 
   return (
     <div className="dashboard-page">
-      <header className="dashboard-header">
-        <h1 className="page-header" style={{ marginBottom: '0.25rem' }}>
+      <header className="dashboard-header staff-page-hero">
+        <h1 className="page-header staff-page-title" style={{ marginBottom: '0.25rem' }}>
           Panoramica
         </h1>
-        <p className="dashboard-subtitle">
+        <p className="dashboard-subtitle staff-page-lead">
           Situazione al volo: cassa, banca, flussi del mese, fatture e attività recenti.
         </p>
       </header>
