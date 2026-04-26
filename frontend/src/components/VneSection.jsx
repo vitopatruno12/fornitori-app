@@ -99,6 +99,12 @@ export default function VneSection({ embedded = false }) {
     setError('')
     try {
       const data = await fetchVneModelStatus(mid)
+      const excerpt = String(data?.raw_excerpt || '').toLowerCase()
+      if (excerpt.includes('impossibile accedere alla macchina')) {
+        setStatus(null)
+        setError(`VNE: impossibile accedere alla macchina per ${selected?.label || mid}. Verifica disponibilità macchina/connessione sul portale remoto.`)
+        return
+      }
       setStatus(data)
     } catch (e) {
       setStatus(null)
