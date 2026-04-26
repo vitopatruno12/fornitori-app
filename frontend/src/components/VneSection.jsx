@@ -43,7 +43,7 @@ export default function VneSection({ embedded = false }) {
   const SECTION_CHIUSURE = 'chiusure'
   const [models, setModels] = useState([])
   const [selectedId, setSelectedId] = useState('model-1')
-  const [activeSection, setActiveSection] = useState(SECTION_HOME)
+  const [activeSection, setActiveSection] = useState(SECTION_STATO)
   const [status, setStatus] = useState(null)
   const [loadingModels, setLoadingModels] = useState(true)
   const [loadingStatus, setLoadingStatus] = useState(false)
@@ -193,7 +193,7 @@ export default function VneSection({ embedded = false }) {
     setClosingRows([])
     setOpsAutoRefreshEnabled(false)
     setClosingsAutoRefreshEnabled(false)
-    setActiveSection(SECTION_HOME)
+    setActiveSection(SECTION_STATO)
   }, [selectedId])
 
   useEffect(() => {
