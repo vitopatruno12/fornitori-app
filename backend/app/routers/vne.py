@@ -285,33 +285,53 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
     Login best-effort su VNE Remote.
     Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
     """
-    login_url = _env("VNE_LOGIN_URL", "http://www.vneremote.com/vne/")
+    login_page_url = _env("VNE_LOGIN_URL", "http://www.vneremote.com/accounts/login/?next=/vne/")
+    login_post_url = _env("VNE_LOGIN_POST_URL", "http://www.vneremote.com/login/")
+    landing_url = _env("VNE_LANDING_URL", "http://www.vneremote.com/vne/")
     username = _env("VNE_USERNAME")
     password = _env("VNE_PASSWORD")
     if not username or not password:
         return
 
-    try:
-        req = urllib.request.Request(login_url, headers={"User-Agent": "Mozilla/5.0"})
-        resp = opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC)
-        html = resp.read().decode("utf-8", errors="ignore")
-        csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", html) or ""
-        post_data = {
-            "username": username,
-            "password": password,
-        }
-        if csrf:
-            post_data["csrfmiddlewaretoken"] = csrf
-        body = urllib.parse.urlencode(post_data).encode("utf-8")
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": login_url,
-        }
-        opener.open(urllib.request.Request(login_url, data=body, headers=headers), timeout=VNE_HTTP_TIMEOUT_SEC).read()
-    except Exception:
-        # Non bloccare l'API: verrà tentata comunque la lettura stato.
-        return
+    # Alcune installazioni VNE rispondono su host diversi (www vs non-www) con cookie dominio diverso.
+    # Proviamo entrambe le varianti per stabilizzare la sessione backend.
+    page_candidates = [login_page_url]
+    if "://www.vneremote.com/" in login_page_url:
+        page_candidates.append(login_page_url.replace("://www.vneremote.com/", "://vneremote.com/"))
+    elif "://vneremote.com/" in login_page_url:
+        page_candidates.append(login_page_url.replace("://vneremote.com/", "://www.vneremote.com/"))
+
+    for page_url in page_candidates:
+        try:
+            req = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
+            resp = opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC)
+            html = resp.read().decode("utf-8", errors="ignore")
+            csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", html) or ""
+            post_data = {
+                "username": username,
+                "password": password,
+            }
+            if csrf:
+                post_data["csrfmiddlewaretoken"] = csrf
+            body = urllib.parse.urlencode(post_data).encode("utf-8")
+            parsed_page = urllib.parse.urlparse(page_url)
+            base_origin = f"{parsed_page.scheme}://{parsed_page.netloc}"
+            post_url = urllib.parse.urljoin(base_origin + "/", login_post_url)
+            landing = urllib.parse.urljoin(base_origin + "/", landing_url)
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": page_url,
+                "Origin": base_origin,
+            }
+            opener.open(urllib.request.Request(post_url, data=body, headers=headers), timeout=VNE_HTTP_TIMEOUT_SEC).read()
+            # Stabilizza la sessione richiedendo la landing /vne/.
+            _fetch_html(opener, landing, referer=page_url)
+            return
+        except Exception:
+            continue
+    # Non bloccare l'API: verrà tentata comunque la lettura stato.
+    return
 
 
 def _fetch_model_status(model: VneModelConfig) -> str:
