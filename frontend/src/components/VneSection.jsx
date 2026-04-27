@@ -67,6 +67,7 @@ export default function VneSection({ embedded = false }) {
   const [autoRefreshMs, setAutoRefreshMs] = useState(60000)
   const [opsAutoRefreshEnabled, setOpsAutoRefreshEnabled] = useState(false)
   const [closingsAutoRefreshEnabled, setClosingsAutoRefreshEnabled] = useState(false)
+  const [modelConnectivity, setModelConnectivity] = useState({})
 
   const selected = useMemo(() => models.find((m) => m.id === selectedId) || null, [models, selectedId])
 
@@ -120,6 +121,30 @@ export default function VneSection({ embedded = false }) {
       setError(e?.message || 'Errore lettura stato VNE')
     } finally {
       setLoadingStatus(false)
+    }
+  }
+
+  function hasUsableStatusData(data) {
+    return Boolean(
+      data?.totale_eur != null ||
+      data?.banconote_eur != null ||
+      data?.monete_eur != null ||
+      data?.contenuto_stacker_eur != null ||
+      data?.totale_cassa_eur != null ||
+      (Array.isArray(data?.cassette) && data.cassette.length > 0) ||
+      data?.hopper?.smart_hopper_1_eur ||
+      data?.hopper?.firmware,
+    )
+  }
+
+  async function checkModelConnectivity(mid) {
+    try {
+      const data = await fetchVneModelStatus(mid)
+      const excerpt = String(data?.raw_excerpt || '').toLowerCase()
+      const blocked = excerpt.includes('impossibile accedere alla macchina') && !hasUsableStatusData(data)
+      setModelConnectivity((prev) => ({ ...prev, [mid]: blocked ? 'offline' : 'online' }))
+    } catch {
+      setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
     }
   }
 
@@ -215,6 +240,7 @@ export default function VneSection({ embedded = false }) {
     if (!selectedId || !autoRefreshEnabled) return undefined
     const tick = () => {
       loadStatus(selectedId)
+      checkModelConnectivity(selectedId)
       if (opsAutoRefreshEnabled) runOperationsQuery(selectedId)
       if (closingsAutoRefreshEnabled) runCashClosingQuery(selectedId)
       loadContabilita(selectedId)
@@ -222,6 +248,15 @@ export default function VneSection({ embedded = false }) {
     const timer = window.setInterval(tick, autoRefreshMs)
     return () => window.clearInterval(timer)
   }, [selectedId, autoRefreshEnabled, autoRefreshMs, opsAutoRefreshEnabled, closingsAutoRefreshEnabled])
+
+  useEffect(() => {
+    if (!Array.isArray(models) || models.length === 0) return
+    models.forEach((m) => {
+      if (!m?.id || !m?.configured) return
+      setModelConnectivity((prev) => ({ ...prev, [m.id]: prev[m.id] || 'checking' }))
+      checkModelConnectivity(m.id)
+    })
+  }, [models])
 
   return (
     <div className="vne-legacy-skin">
@@ -275,6 +310,43 @@ export default function VneSection({ embedded = false }) {
                 <div className="support-tech-card-head">
                   <h3 className="support-tech-name">{m.label}</h3>
                   <span className="support-tech-role">{m.configured ? 'Configurato' : 'Da configurare'}</span>
+                </div>
+                <div style={{ marginBottom: '0.4rem' }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: 999,
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                      background:
+                        modelConnectivity[m.id] === 'online'
+                          ? 'rgba(22, 163, 74, 0.16)'
+                          : modelConnectivity[m.id] === 'offline'
+                            ? 'rgba(220, 38, 38, 0.16)'
+                            : 'rgba(100, 116, 139, 0.18)',
+                      color:
+                        modelConnectivity[m.id] === 'online'
+                          ? '#166534'
+                          : modelConnectivity[m.id] === 'offline'
+                            ? '#991b1b'
+                            : '#334155',
+                      border:
+                        modelConnectivity[m.id] === 'online'
+                          ? '1px solid rgba(22, 163, 74, 0.35)'
+                          : modelConnectivity[m.id] === 'offline'
+                            ? '1px solid rgba(220, 38, 38, 0.35)'
+                            : '1px solid rgba(100, 116, 139, 0.35)',
+                    }}
+                    title="Stato connessione stimato dal controllo endpoint stato"
+                  >
+                    {modelConnectivity[m.id] === 'online'
+                      ? 'Online'
+                      : modelConnectivity[m.id] === 'offline'
+                        ? 'Offline'
+                        : 'Verifica...'}
+                  </span>
                 </div>
                 <div className="support-tech-phone" style={{ wordBreak: 'break-all' }}>
                   {m.status_url || 'Nessun URL impostato'}
