@@ -280,6 +280,24 @@ def _build_opener() -> tuple[urllib.request.OpenerDirector, CookieJar]:
     return opener, cj
 
 
+def _host_variants(url: Optional[str]) -> List[str]:
+    if not url:
+        return []
+    out = [url]
+    if "://www.vneremote.com/" in url:
+        out.append(url.replace("://www.vneremote.com/", "://vneremote.com/"))
+    elif "://vneremote.com/" in url:
+        out.append(url.replace("://vneremote.com/", "://www.vneremote.com/"))
+    # dedup mantenendo ordine
+    seen: set[str] = set()
+    uniq: List[str] = []
+    for u in out:
+        if u and u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
+
+
 def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
     """
     Login best-effort su VNE Remote.
@@ -350,30 +368,50 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     # Alcune macchine richiedono un "passaggio" sulla pagina base del modello
     # per agganciare correttamente la sessione prima della lettura stato.
     if "impossibile accedere alla macchina" in html_text.lower():
-        retry_targets: List[str] = []
-        if model.referer_url:
-            retry_targets.append(model.referer_url)
-            if "://www.vneremote.com/" in model.referer_url:
-                retry_targets.append(model.referer_url.replace("://www.vneremote.com/", "://vneremote.com/"))
-            elif "://vneremote.com/" in model.referer_url:
-                retry_targets.append(model.referer_url.replace("://vneremote.com/", "://www.vneremote.com/"))
+        # Costruisci candidate URL stato: host varianti + trailing slash on/off.
+        status_candidates: List[str] = []
+        for su in _host_variants(model.status_url):
+            status_candidates.append(su)
+            status_candidates.append(su.rstrip("/"))
+            status_candidates.append(su.rstrip("/") + "/")
+
+        # Costruisci referer candidati: referer configurato + base directory dello stato.
+        referer_candidates: List[str] = []
+        for ru in _host_variants(model.referer_url):
+            referer_candidates.append(ru)
+        for su in status_candidates:
+            base_dir = su.rsplit("/", 1)[0] + "/"
+            referer_candidates.append(base_dir)
+            referer_candidates.append(base_dir + "?param=NO")
+
         # dedup mantenendo ordine
-        seen: set[str] = set()
-        dedup_targets: List[str] = []
-        for u in retry_targets:
-            if not u or u in seen:
-                continue
-            seen.add(u)
-            dedup_targets.append(u)
-        for ref in dedup_targets:
+        seen_status: set[str] = set()
+        uniq_status: List[str] = []
+        for u in status_candidates:
+            if u and u not in seen_status:
+                seen_status.add(u)
+                uniq_status.append(u)
+
+        seen_ref: set[str] = set()
+        uniq_ref: List[str] = []
+        for u in referer_candidates:
+            if u and u not in seen_ref:
+                seen_ref.add(u)
+                uniq_ref.append(u)
+
+        for ref in uniq_ref:
             try:
                 _fetch_html(opener, ref, referer=ref)
-                with opener.open(_build_req(model.status_url, ref), timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
-                    retry_html = resp.read().decode("utf-8", errors="ignore")
-                if "impossibile accedere alla macchina" not in retry_html.lower():
-                    return retry_html
             except Exception:
-                continue
+                pass
+            for su in uniq_status:
+                try:
+                    with opener.open(_build_req(su, ref), timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
+                        retry_html = resp.read().decode("utf-8", errors="ignore")
+                    if "impossibile accedere alla macchina" not in retry_html.lower():
+                        return retry_html
+                except Exception:
+                    continue
 
     return html_text
 
