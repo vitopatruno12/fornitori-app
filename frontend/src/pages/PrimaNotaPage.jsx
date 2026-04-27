@@ -103,7 +103,7 @@ export default function PrimaNotaPage() {
   useEffect(() => {
     const onAiFilter = (ev) => {
       const d = ev?.detail || {}
-      if (d?.movementKind && ['all', 'entrata', 'uscita', 'nf'].includes(String(d.movementKind))) {
+      if (d?.movementKind && ['all', 'entrata', 'uscita', 'fiscale', 'nf', 'pos'].includes(String(d.movementKind))) {
         setMovementKind(String(d.movementKind))
         setSuccess('Filtro AI applicato')
       }
@@ -189,7 +189,7 @@ export default function PrimaNotaPage() {
         setSelectedDate(`${data.monthKey}-01`)
         applied = true
       }
-      if (data?.movementKind && ['all', 'entrata', 'uscita', 'nf'].includes(String(data.movementKind))) {
+      if (data?.movementKind && ['all', 'entrata', 'uscita', 'fiscale', 'nf', 'pos'].includes(String(data.movementKind))) {
         setMovementKind(String(data.movementKind))
         applied = true
       }
@@ -638,7 +638,10 @@ export default function PrimaNotaPage() {
     return rowsWithLedger.rows.filter((entry) => {
       if (movementKind === 'entrata' && (isExtraCassa(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
+      if (movementKind === 'fiscale' && isExtraCassa(entry)) return false
       if (movementKind === 'nf' && !isExtraCassa(entry)) return false
+      if (movementKind === 'nf' && !isNonFiscale(entry)) return false
+      if (movementKind === 'pos' && !isPos(entry)) return false
       if (!q) return true
       const blob = [entry.description, entry.note, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
@@ -766,9 +769,11 @@ export default function PrimaNotaPage() {
           <label>Tipo</label>
           <select className="form-control" value={movementKind} onChange={e => setMovementKind(e.target.value)} style={{ minWidth: 130 }}>
             <option value="all">Tutti</option>
+            <option value="fiscale">Fiscale</option>
             <option value="entrata">Solo entrate</option>
             <option value="uscita">Solo uscite</option>
-            <option value="nf">Non fiscali</option>
+            <option value="nf">Non fiscale</option>
+            <option value="pos">POS</option>
           </select>
         </div>
         <div className="form-group">

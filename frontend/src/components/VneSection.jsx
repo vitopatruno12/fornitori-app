@@ -100,7 +100,16 @@ export default function VneSection({ embedded = false }) {
     try {
       const data = await fetchVneModelStatus(mid)
       const excerpt = String(data?.raw_excerpt || '').toLowerCase()
-      if (excerpt.includes('impossibile accedere alla macchina')) {
+      const hasStatusData =
+        data?.totale_eur != null ||
+        data?.banconote_eur != null ||
+        data?.monete_eur != null ||
+        data?.contenuto_stacker_eur != null ||
+        data?.totale_cassa_eur != null ||
+        (Array.isArray(data?.cassette) && data.cassette.length > 0) ||
+        Boolean(data?.hopper?.smart_hopper_1_eur) ||
+        Boolean(data?.hopper?.firmware)
+      if (excerpt.includes('impossibile accedere alla macchina') && !hasStatusData) {
         setStatus(null)
         setError(`VNE: impossibile accedere alla macchina per ${selected?.label || mid}. Verifica disponibilità macchina/connessione sul portale remoto.`)
         return

@@ -101,6 +101,7 @@ function enumerateDayCells(start, end) {
 const MAX_PLANNING_PERIOD_DAYS = 93
 /** Limite prudente per `https://wa.me/?text=…` (query troppo lunghe = link rotto o bloccato dal browser). */
 const WA_ME_URL_MAX_LEN = 7200
+const STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY = 'staffMembersByLocale'
 
 async function copyTextToClipboard(text) {
   try {
@@ -277,6 +278,8 @@ export default function StaffPage() {
   const [reportPeriodLabel, setReportPeriodLabel] = useState('')
   const [reportModalTitle, setReportModalTitle] = useState('Report personale (PDF)')
   const [reportLoading, setReportLoading] = useState(false)
+  const [localeStaffName, setLocaleStaffName] = useState('')
+  const [savedLocaleNames, setSavedLocaleNames] = useState([])
 
   const [formMemberId, setFormMemberId] = useState('')
   const [formDate, setFormDate] = useState(() => toYMD(new Date()))
@@ -672,6 +675,118 @@ export default function StaffPage() {
     }
   }
 
+  function normalizeLocaleName(value) {
+    return String(value || '').trim()
+  }
+
+  function readStaffLocaleStore() {
+    try {
+      const raw = window.localStorage.getItem(STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY)
+      if (!raw) return {}
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+      return parsed
+    } catch {
+      return {}
+    }
+  }
+
+  function writeStaffLocaleStore(store) {
+    window.localStorage.setItem(STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY, JSON.stringify(store))
+  }
+
+  const refreshSavedLocaleNames = useCallback(() => {
+    const store = readStaffLocaleStore()
+    const names = Object.keys(store).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+    setSavedLocaleNames(names)
+  }, [])
+
+  useEffect(() => {
+    refreshSavedLocaleNames()
+  }, [refreshSavedLocaleNames])
+
+  async function handleSaveMembersByLocale() {
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Inserisci il nome del locale prima di salvare i dipendenti')
+      return
+    }
+    try {
+      setError('')
+      const snapshot = members.map((m) => ({
+        name: m.name || '',
+        first_name: m.first_name || null,
+        last_name: m.last_name || null,
+        email: m.email || null,
+        phone: m.phone || null,
+        city: m.city || null,
+        birth_date: m.birth_date || null,
+        sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
+        is_active: Boolean(m.is_active),
+      }))
+      const store = readStaffLocaleStore()
+      store[localeName] = {
+        saved_at: new Date().toISOString(),
+        members: snapshot,
+      }
+      writeStaffLocaleStore(store)
+      refreshSavedLocaleNames()
+      setSuccess(`Lista dipendenti salvata per locale "${localeName}" (${snapshot.length} elementi)`)
+    } catch {
+      setError('Errore nel salvataggio locale dei dipendenti')
+    }
+  }
+
+  async function handleLoadMembersByLocale() {
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Inserisci il nome del locale prima di caricare i dipendenti')
+      return
+    }
+    const store = readStaffLocaleStore()
+    const pack = store[localeName]
+    if (!pack || !Array.isArray(pack.members)) {
+      setError(`Nessuna lista salvata trovata per il locale "${localeName}"`)
+      return
+    }
+    if (!window.confirm(`Caricare i dipendenti salvati per "${localeName}"?\n\nL'elenco attuale verrà sostituito.`)) return
+
+    try {
+      setError('')
+      setShiftBusy(true)
+      await deleteAllStaffMembers()
+      for (const m of pack.members) {
+        await createStaffMember({
+          name: String(m.name || '').trim() || 'Dipendente',
+          first_name: m.first_name || null,
+          last_name: m.last_name || null,
+          email: m.email || null,
+          phone: m.phone || null,
+          city: m.city || null,
+          birth_date: m.birth_date || null,
+          sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
+          is_active: m.is_active !== false,
+        })
+      }
+      markPlanningStale()
+      setMemberInfoId(null)
+      setEditingShiftId(null)
+      setFormMemberId('')
+      setFormDate(toYMD(new Date()))
+      setFormStart('08:00')
+      setFormEnd('16:00')
+      setFormKind('shift')
+      setFormNotes('')
+      await refreshMembers()
+      setSuccess(`Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi)`)
+    } catch (err) {
+      setError(err?.message || 'Errore nel caricamento dipendenti per locale')
+      await refreshMembers()
+    } finally {
+      setShiftBusy(false)
+    }
+  }
+
   function startEditShift(s) {
     setError('')
     setEditingShiftId(s.id)
@@ -947,6 +1062,64 @@ export default function StaffPage() {
             Elimina elenco dipendenti
           </button>
         </form>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.65rem',
+            alignItems: 'flex-end',
+            marginBottom: '1rem',
+            padding: '0.7rem',
+            border: '1px dashed var(--border)',
+            borderRadius: 'var(--radius)',
+            background: 'color-mix(in oklab, var(--bg-card) 92%, #0ea5e9 8%)',
+          }}
+        >
+          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 250px' }}>
+            <label>Nome locale</label>
+            <input
+              className="form-control"
+              value={localeStaffName}
+              onChange={(e) => setLocaleStaffName(e.target.value)}
+              placeholder="Es. La Risacca"
+              disabled={shiftBusy || loading || demoLoading || reportLoading}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 240px', minWidth: 220 }}>
+            <label>Locali salvati</label>
+            <select
+              className="form-control"
+              value={savedLocaleNames.includes(localeStaffName.trim()) ? localeStaffName.trim() : ''}
+              onChange={(e) => setLocaleStaffName(e.target.value)}
+              disabled={shiftBusy || loading || demoLoading || reportLoading || savedLocaleNames.length === 0}
+            >
+              <option value="">{savedLocaleNames.length === 0 ? 'Nessun locale salvato' : 'Seleziona locale salvato'}</option>
+              {savedLocaleNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void handleSaveMembersByLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Salva la lista dipendenti corrente associandola al nome locale"
+          >
+            Salva dipendenti
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void handleLoadMembersByLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Carica la lista dipendenti salvata per questo locale e sostituisce l'elenco attuale"
+          >
+            Carica dipendenti
+          </button>
+        </div>
         <div className="table-wrap">
           <table className="app-table app-table--compact">
             <thead>
