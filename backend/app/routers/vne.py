@@ -171,7 +171,7 @@ def _models() -> List[VneModelConfig]:
         ),
         VneModelConfig(
             id="model-2",
-            label="La Mediazione Zanardelli",
+            label="Mani in Pasta",
             status_url=m2 or None,
             sel_operazioni_url=m2_sel_ops or None,
             operazioni_url=m2_ops or None,
@@ -182,7 +182,7 @@ def _models() -> List[VneModelConfig]:
         ),
         VneModelConfig(
             id="model-3",
-            label="ABBA La Mediazione",
+            label="Le Mucche Volanti",
             status_url=m3 or None,
             sel_operazioni_url=m3_sel_ops or None,
             operazioni_url=m3_ops or None,
