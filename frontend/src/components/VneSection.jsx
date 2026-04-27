@@ -101,23 +101,22 @@ export default function VneSection({ embedded = false }) {
     try {
       const data = await fetchVneModelStatus(mid)
       const excerpt = String(data?.raw_excerpt || '').toLowerCase()
-      const hasStatusData =
-        data?.totale_eur != null ||
-        data?.banconote_eur != null ||
-        data?.monete_eur != null ||
-        data?.contenuto_stacker_eur != null ||
-        data?.totale_cassa_eur != null ||
-        (Array.isArray(data?.cassette) && data.cassette.length > 0) ||
-        Boolean(data?.hopper?.smart_hopper_1_eur) ||
-        Boolean(data?.hopper?.firmware)
-      if (excerpt.includes('impossibile accedere alla macchina') && !hasStatusData) {
+      const hasStatusData = hasUsableStatusData(data)
+      const blockedByPortal =
+        excerpt.includes('impossibile accedere alla macchina') ||
+        excerpt.includes('imposible acceder a la maquina')
+
+      if (blockedByPortal && !hasStatusData) {
         setStatus(null)
+        setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
         setError(`VNE: impossibile accedere alla macchina per ${selected?.label || mid}. Verifica disponibilità macchina/connessione sul portale remoto.`)
         return
       }
       setStatus(data)
+      setModelConnectivity((prev) => ({ ...prev, [mid]: hasStatusData ? 'online' : 'offline' }))
     } catch (e) {
       setStatus(null)
+      setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
       setError(e?.message || 'Errore lettura stato VNE')
     } finally {
       setLoadingStatus(false)
@@ -135,19 +134,6 @@ export default function VneSection({ embedded = false }) {
       data?.hopper?.smart_hopper_1_eur ||
       data?.hopper?.firmware,
     )
-  }
-
-  async function checkModelConnectivity(mid) {
-    try {
-      const data = await fetchVneModelStatus(mid)
-      const excerpt = String(data?.raw_excerpt || '').toLowerCase()
-      const blocked = excerpt.includes('impossibile accedere alla macchina') && !hasUsableStatusData(data)
-      setModelConnectivity((prev) => ({ ...prev, [mid]: blocked ? 'offline' : 'online' }))
-    } catch {
-      // In caso di errore rete/backend non forzare "offline":
-      // evitiamo falsi negativi quando il portale è online ma la verifica fallisce.
-      setModelConnectivity((prev) => ({ ...prev, [mid]: 'unknown' }))
-    }
   }
 
   async function loadOperationFilters(mid) {
@@ -257,7 +243,6 @@ export default function VneSection({ embedded = false }) {
     if (!selectedId || !autoRefreshEnabled) return undefined
     const tick = () => {
       loadStatus(selectedId)
-      checkModelConnectivity(selectedId)
       if (opsAutoRefreshEnabled) runOperationsQuery(selectedId)
       if (closingsAutoRefreshEnabled) runCashClosingQuery(selectedId)
       loadContabilita(selectedId)
@@ -274,16 +259,11 @@ export default function VneSection({ embedded = false }) {
       const next = { ...prev }
       for (const m of models) {
         if (!m?.id || !m?.configured) continue
-        if (!next[m.id]) next[m.id] = 'unknown'
+        if (!next[m.id]) next[m.id] = 'offline'
       }
       return next
     })
   }, [models])
-
-  useEffect(() => {
-    if (!selectedId) return
-    checkModelConnectivity(selectedId)
-  }, [selectedId])
 
   return (
     <div className="vne-legacy-skin">
@@ -352,24 +332,18 @@ export default function VneSection({ embedded = false }) {
                           ? 'rgba(22, 163, 74, 0.16)'
                           : modelConnectivity[m.id] === 'offline'
                             ? 'rgba(220, 38, 38, 0.16)'
-                            : modelConnectivity[m.id] === 'unknown'
-                              ? 'rgba(59, 130, 246, 0.14)'
                             : 'rgba(100, 116, 139, 0.18)',
                       color:
                         modelConnectivity[m.id] === 'online'
                           ? '#166534'
                           : modelConnectivity[m.id] === 'offline'
                             ? '#991b1b'
-                            : modelConnectivity[m.id] === 'unknown'
-                              ? '#1d4ed8'
                             : '#334155',
                       border:
                         modelConnectivity[m.id] === 'online'
                           ? '1px solid rgba(22, 163, 74, 0.35)'
                           : modelConnectivity[m.id] === 'offline'
                             ? '1px solid rgba(220, 38, 38, 0.35)'
-                            : modelConnectivity[m.id] === 'unknown'
-                              ? '1px solid rgba(59, 130, 246, 0.32)'
                             : '1px solid rgba(100, 116, 139, 0.35)',
                     }}
                     title="Stato connessione stimato dal controllo endpoint stato"
@@ -378,8 +352,6 @@ export default function VneSection({ embedded = false }) {
                       ? 'Online'
                       : modelConnectivity[m.id] === 'offline'
                         ? 'Offline'
-                        : modelConnectivity[m.id] === 'unknown'
-                          ? 'Non verificato'
                         : 'Verifica...'}
                   </span>
                 </div>
