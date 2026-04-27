@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "build": "cd frontend && npm run build",
+    "preview": "cd frontend && npm run preview",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && .\\\\.venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload"
   },
