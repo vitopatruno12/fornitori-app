@@ -343,9 +343,39 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     req = _build_req(model.status_url, model.referer_url)
     try:
         with opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
+            html_text = resp.read().decode("utf-8", errors="ignore")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE: {e}")
+
+    # Alcune macchine richiedono un "passaggio" sulla pagina base del modello
+    # per agganciare correttamente la sessione prima della lettura stato.
+    if "impossibile accedere alla macchina" in html_text.lower():
+        retry_targets: List[str] = []
+        if model.referer_url:
+            retry_targets.append(model.referer_url)
+            if "://www.vneremote.com/" in model.referer_url:
+                retry_targets.append(model.referer_url.replace("://www.vneremote.com/", "://vneremote.com/"))
+            elif "://vneremote.com/" in model.referer_url:
+                retry_targets.append(model.referer_url.replace("://vneremote.com/", "://www.vneremote.com/"))
+        # dedup mantenendo ordine
+        seen: set[str] = set()
+        dedup_targets: List[str] = []
+        for u in retry_targets:
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            dedup_targets.append(u)
+        for ref in dedup_targets:
+            try:
+                _fetch_html(opener, ref, referer=ref)
+                with opener.open(_build_req(model.status_url, ref), timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
+                    retry_html = resp.read().decode("utf-8", errors="ignore")
+                if "impossibile accedere alla macchina" not in retry_html.lower():
+                    return retry_html
+            except Exception:
+                continue
+
+    return html_text
 
 
 def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = None) -> urllib.request.Request:
