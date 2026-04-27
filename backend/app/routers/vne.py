@@ -15,6 +15,7 @@ router = APIRouter(prefix="/vne", tags=["vne"])
 VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "12"))
 VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
 VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
+VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "18"))
 
 
 @dataclass
@@ -359,6 +360,7 @@ def _fetch_model_status(model: VneModelConfig) -> str:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
 
     opener, _ = _build_opener()
+    started = time.monotonic()
     _maybe_login_vne(opener)
     req = _build_req(model.status_url, model.referer_url)
     try:
@@ -401,11 +403,15 @@ def _fetch_model_status(model: VneModelConfig) -> str:
                 uniq_ref.append(u)
 
         for ref in uniq_ref:
+            if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
+                break
             try:
                 _fetch_html(opener, ref, referer=ref)
             except Exception:
                 pass
             for su in uniq_status:
+                if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
+                    break
                 try:
                     retry_html = _open_bytes_with_retries(opener, _build_req(su, ref)).decode("utf-8", errors="ignore")
                     if "impossibile accedere alla macchina" not in retry_html.lower():
