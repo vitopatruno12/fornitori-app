@@ -3,6 +3,7 @@ import re
 import urllib.parse
 import urllib.request
 import html
+import time
 from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from typing import Dict, List, Optional
@@ -11,7 +12,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/vne", tags=["vne"])
-VNE_HTTP_TIMEOUT_SEC = 6
+VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "12"))
+VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
+VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
 
 
 @dataclass
@@ -322,8 +325,7 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
     for page_url in page_candidates:
         try:
             req = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
-            resp = opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC)
-            html = resp.read().decode("utf-8", errors="ignore")
+            html = _open_bytes_with_retries(opener, req).decode("utf-8", errors="ignore")
             csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", html) or ""
             post_data = {
                 "username": username,
@@ -342,7 +344,7 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
                 "Referer": page_url,
                 "Origin": base_origin,
             }
-            opener.open(urllib.request.Request(post_url, data=body, headers=headers), timeout=VNE_HTTP_TIMEOUT_SEC).read()
+            _open_bytes_with_retries(opener, urllib.request.Request(post_url, data=body, headers=headers))
             # Stabilizza la sessione richiedendo la landing /vne/.
             _fetch_html(opener, landing, referer=page_url)
             return
@@ -360,8 +362,7 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     _maybe_login_vne(opener)
     req = _build_req(model.status_url, model.referer_url)
     try:
-        with opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
-            html_text = resp.read().decode("utf-8", errors="ignore")
+        html_text = _open_bytes_with_retries(opener, req).decode("utf-8", errors="ignore")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE: {e}")
 
@@ -406,8 +407,7 @@ def _fetch_model_status(model: VneModelConfig) -> str:
                 pass
             for su in uniq_status:
                 try:
-                    with opener.open(_build_req(su, ref), timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
-                        retry_html = resp.read().decode("utf-8", errors="ignore")
+                    retry_html = _open_bytes_with_retries(opener, _build_req(su, ref)).decode("utf-8", errors="ignore")
                     if "impossibile accedere alla macchina" not in retry_html.lower():
                         return retry_html
                 except Exception:
@@ -428,10 +428,27 @@ def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = 
     return urllib.request.Request(url, data=data, headers=headers)
 
 
+def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.request.Request) -> bytes:
+    last_exc: Optional[Exception] = None
+    attempts = max(1, VNE_HTTP_RETRIES + 1)
+    for idx in range(attempts):
+        try:
+            with opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
+                return resp.read()
+        except Exception as e:
+            last_exc = e
+            if idx >= attempts - 1:
+                break
+            time.sleep(VNE_HTTP_RETRY_DELAY_SEC * (idx + 1))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Errore HTTP VNE sconosciuto")
+
+
 def _fetch_html(opener: urllib.request.OpenerDirector, url: str, referer: Optional[str] = None, data: Optional[bytes] = None) -> str:
     req = _build_req(url, referer=referer, data=data)
-    with opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
-        return resp.read().decode("utf-8", errors="ignore")
+    raw = _open_bytes_with_retries(opener, req)
+    return raw.decode("utf-8", errors="ignore")
 
 
 def _extract_values_by_name(html: str, name: str) -> List[str]:
