@@ -228,15 +228,30 @@ export default function VneSection({ embedded = false }) {
   useEffect(() => {
     if (!selectedId) return
     loadStatus(selectedId)
-    loadOperationFilters(selectedId)
-    loadCashClosingFilters(selectedId)
-    loadContabilita(selectedId)
     setOpsRows([])
     setClosingRows([])
+    setOpsFilters({ operations: [], users: [] })
+    setClosingFilters({ operators: [] })
+    setContabilita(null)
     setOpsAutoRefreshEnabled(false)
     setClosingsAutoRefreshEnabled(false)
     setActiveSection(SECTION_STATO)
   }, [selectedId])
+
+  useEffect(() => {
+    if (!selectedId || !selected) return
+    if (activeSection === SECTION_CONTABILITA && selected.contabilita_url) {
+      loadContabilita(selectedId)
+      return
+    }
+    if (activeSection === SECTION_OPERAZIONI && selected.sel_operazioni_url) {
+      loadOperationFilters(selectedId)
+      return
+    }
+    if (activeSection === SECTION_CHIUSURE && selected.sel_chiusure_url) {
+      loadCashClosingFilters(selectedId)
+    }
+  }, [activeSection, selectedId, selected])
 
   useEffect(() => {
     if (!selectedId || !autoRefreshEnabled) return undefined
@@ -428,11 +443,14 @@ export default function VneSection({ embedded = false }) {
               {loadingContabilita ? 'Aggiornamento…' : 'Aggiorna'}
             </button>
           </div>
+          {!selected?.contabilita_url && (
+            <p className="empty-state">Contabilita non configurata per questo modello.</p>
+          )}
           {loadingContabilita && <p className="loading">Caricamento contabilita…</p>}
-          {!loadingContabilita && !contabilita && (
+          {!selected?.contabilita_url ? null : !loadingContabilita && !contabilita && (
             <p className="empty-state">Nessun dato contabilita disponibile.</p>
           )}
-          {!loadingContabilita && contabilita && (
+          {!selected?.contabilita_url ? null : !loadingContabilita && contabilita && (
             <table className="vne-contabilita-table">
               <tbody>
                 {Object.entries(contabilita.sections || {}).map(([sectionKey, items]) => {
@@ -591,6 +609,9 @@ export default function VneSection({ embedded = false }) {
           <p className="vne-chiusure-hint" style={{ marginTop: '0.35rem' }}>
             Modello: <strong>{selected?.label || selectedId}</strong> — formato data <strong>dd-mm-yyyy hh:mm</strong>.
           </p>
+          {!selected?.sel_operazioni_url && (
+            <p className="empty-state">Operazioni non configurate per questo modello.</p>
+          )}
           <div className="form-row">
             <div className="form-group">
               <label>Data inizio</label>
@@ -635,6 +656,7 @@ export default function VneSection({ embedded = false }) {
           )}
           {loadingOps && <p className="loading">Caricamento operazioni…</p>}
           {!loadingOps && opsRows.length === 0 && (
+            !selected?.sel_operazioni_url ? null :
             <p className="empty-state">Nessuna operazione caricata. Imposta i filtri e premi «Cerca operazioni».</p>
           )}
           {!loadingOps && opsRows.length > 0 && (
@@ -681,6 +703,9 @@ export default function VneSection({ embedded = false }) {
           <p className="vne-chiusure-hint" style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginTop: '0.35rem' }}>
             Modello: <strong>{selected?.label || selectedId}</strong> — formato data <strong>dd-mm-yyyy hh:mm</strong>.
           </p>
+          {!selected?.sel_chiusure_url && (
+            <p className="empty-state">Chiusure non configurate per questo modello.</p>
+          )}
           <div className="form-row">
           <div className="form-group">
             <label>Data inizio</label>
@@ -707,6 +732,7 @@ export default function VneSection({ embedded = false }) {
           </div>
           {loadingClosings && <p className="loading">Caricamento chiusure…</p>}
           {!loadingClosings && closingRows.length === 0 && (
+            !selected?.sel_chiusure_url ? null :
             <p className="empty-state">Nessuna chiusura caricata. Imposta i filtri e premi «Cerca chiusure».</p>
           )}
           {!loadingClosings && closingRows.length > 0 && (
