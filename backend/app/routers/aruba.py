@@ -55,6 +55,8 @@ def _get_env_config() -> Dict[str, Any]:
         "username": username,
         "password": password,
         "owner_username": owner_username,
+        "portal_base": _env("ARUBA_PORTAL_BASE", "https://fatturazioneelettronica.aruba.it"),
+        "portal_sid": _env("ARUBA_PORTAL_SID"),
         "receiver_country": _env("ARUBA_RECEIVER_COUNTRY", "IT"),
         "receiver_vat": _env("ARUBA_RECEIVER_VATCODE"),
         "receiver_fiscal": _env("ARUBA_RECEIVER_FISCALCODE"),
@@ -70,12 +72,15 @@ def _open_json(
     token: Optional[str] = None,
     data: Optional[bytes] = None,
     content_type: Optional[str] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
 ) -> Any:
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     if content_type:
         headers["Content-Type"] = content_type
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=18) as res:
@@ -249,6 +254,66 @@ def _fetch_received_rows(
     return all_rows
 
 
+def _build_fiscal_years(days: int) -> List[int]:
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    years = list(range(start.year, now.year + 1))
+    years.sort(reverse=True)
+    return years
+
+
+def _fetch_received_rows_advanced_search(cfg: Dict[str, Any], days: int) -> List[Dict[str, Any]]:
+    sid = (cfg.get("portal_sid") or "").strip()
+    if not sid:
+        return []
+
+    base = (cfg.get("portal_base") or "").rstrip("/")
+    username = cfg["owner_username"]
+    url = f"{base}/services/FatturaRicevutaFrontEnd/advancedSearch"
+    headers = {
+        "Accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest",
+        "aru-delegator": username,
+        "aru-sub": username,
+        "Origin": base,
+        "Cookie": f"SID={sid}",
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for fiscal_year in _build_fiscal_years(days):
+        payload = json.dumps({"PageNumber": 1, "PageSize": None, "AnnoFiscale": fiscal_year}).encode("utf-8")
+        try:
+            data = _open_json(
+                url,
+                method="POST",
+                data=payload,
+                content_type="application/json",
+                extra_headers=headers,
+            )
+        except HTTPException:
+            continue
+
+        items = data.get("Items") if isinstance(data, dict) else None
+        if isinstance(items, list):
+            rows.extend(item for item in items if isinstance(item, dict))
+    return rows
+
+
+def _normalize_advanced_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    filename = str(item.get("FileName") or item.get("SdiFileName") or "")
+    sender_name = str(item.get("Mittente") or "")
+    numero = str(item.get("Numero") or "")
+    invoice_date = item.get("Data")
+    row_id = str(item.get("Id") or "")
+    return {
+        "id": row_id,
+        "filename": filename,
+        "sender": {"description": sender_name},
+        "invoices": [{"number": numero, "invoiceDate": invoice_date}],
+        "creationDate": invoice_date,
+    }
+
+
 def _read_manual_assignments() -> Dict[str, str]:
     if not _ASSIGNMENTS_PATH.exists():
         return {}
@@ -277,24 +342,35 @@ def list_aruba_received_invoices(
     size: int = Query(default=40, ge=1, le=100),
 ):
     cfg = _get_env_config()
-    token = _get_token(cfg)
-    rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=True, max_pages=4)
+    rows = _fetch_received_rows_advanced_search(cfg, days=days)
+    portal_advanced_used = bool(rows)
     fallback_used = False
+
+    token: Optional[str] = None
     if not rows:
-        # Fallback: alcuni account non popolano correttamente i campi receiver* via API
-        rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=False, max_pages=4)
-        fallback_used = True
+        token = _get_token(cfg)
+        rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=True, max_pages=4)
+        if not rows:
+            # Fallback: alcuni account non popolano correttamente i campi receiver* via API
+            rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=False, max_pages=4)
+            fallback_used = True
 
     manual = _read_manual_assignments()
     invoices: List[Dict[str, Any]] = []
     receiver_code_filter = (cfg.get("receiver_code") or "").strip().upper()
     filtered_out_by_receiver_code = 0
     for item in rows:
-        filename = str(item.get("filename") or "")
+        source_item = item
+        if "filename" not in source_item and ("FileName" in source_item or "Mittente" in source_item):
+            source_item = _normalize_advanced_row(source_item)
+
+        filename = str(source_item.get("filename") or "")
         if not filename:
             continue
-        detail = _get_invoice_detail(token, cfg, filename)
-        xml_text = _find_xml_text(detail) or ""
+        xml_text = ""
+        if token:
+            detail = _get_invoice_detail(token, cfg, filename)
+            xml_text = _find_xml_text(detail) or ""
         xml_receiver_code = _extract_receiver_code(xml_text) if xml_text else ""
         if receiver_code_filter and xml_receiver_code and xml_receiver_code.upper() != receiver_code_filter:
             filtered_out_by_receiver_code += 1
@@ -302,15 +378,17 @@ def list_aruba_received_invoices(
         destination = _extract_destination(xml_text) if xml_text else ""
         auto_section = _pick_section(destination, cfg)
         section = manual.get(filename, auto_section)
-        item_invoices = item.get("invoices") or []
+        item_invoices = source_item.get("invoices") or []
         first_meta = item_invoices[0] if item_invoices and isinstance(item_invoices[0], dict) else {}
         invoices.append(
             {
-                "id": item.get("id"),
+                "id": source_item.get("id"),
                 "filename": filename,
                 "invoice_number": first_meta.get("number") or "",
-                "invoice_date": first_meta.get("invoiceDate") or item.get("creationDate"),
-                "supplier_name": (item.get("sender") or {}).get("description") if isinstance(item.get("sender"), dict) else "",
+                "invoice_date": first_meta.get("invoiceDate") or source_item.get("creationDate"),
+                "supplier_name": (source_item.get("sender") or {}).get("description")
+                if isinstance(source_item.get("sender"), dict)
+                else "",
                 "destination": destination,
                 "section": section,
                 "auto_section": auto_section,
@@ -325,6 +403,7 @@ def list_aruba_received_invoices(
         "non_classificata": [x for x in invoices if x["section"] == "non_classificata"],
         "debug": {
             "rows_found": len(rows),
+            "source_advanced_search": portal_advanced_used,
             "fallback_without_receiver_filters": fallback_used,
             "receiver_code_filter": receiver_code_filter or None,
             "filtered_out_by_receiver_code": filtered_out_by_receiver_code,
