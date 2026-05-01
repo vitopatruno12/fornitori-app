@@ -58,6 +58,7 @@ def _get_env_config() -> Dict[str, Any]:
         "receiver_country": _env("ARUBA_RECEIVER_COUNTRY", "IT"),
         "receiver_vat": _env("ARUBA_RECEIVER_VATCODE"),
         "receiver_fiscal": _env("ARUBA_RECEIVER_FISCALCODE"),
+        "receiver_code": _env("ARUBA_RECEIVER_CODE"),
         "abba_keywords": [k.strip().lower() for k in _env("ARUBA_DEST_ABBA_KEYWORDS", "abba,via abba").split(",") if k.strip()],
         "zan_keywords": [k.strip().lower() for k in _env("ARUBA_DEST_ZANARDELLI_KEYWORDS", "zanardelli,via zanardelli").split(",") if k.strip()],
     }
@@ -183,6 +184,14 @@ def _extract_destination(xml_text: str) -> str:
     return ", ".join(parts)
 
 
+def _extract_receiver_code(xml_text: str) -> str:
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return ""
+    return (root.findtext(".//{*}DatiTrasmissione/{*}CodiceDestinatario") or "").strip()
+
+
 def _pick_section(destination: str, cfg: Dict[str, Any]) -> str:
     low = destination.lower()
     if any(k in low for k in cfg["abba_keywords"]):
@@ -278,12 +287,18 @@ def list_aruba_received_invoices(
 
     manual = _read_manual_assignments()
     invoices: List[Dict[str, Any]] = []
+    receiver_code_filter = (cfg.get("receiver_code") or "").strip().upper()
+    filtered_out_by_receiver_code = 0
     for item in rows:
         filename = str(item.get("filename") or "")
         if not filename:
             continue
         detail = _get_invoice_detail(token, cfg, filename)
         xml_text = _find_xml_text(detail) or ""
+        xml_receiver_code = _extract_receiver_code(xml_text) if xml_text else ""
+        if receiver_code_filter and xml_receiver_code and xml_receiver_code.upper() != receiver_code_filter:
+            filtered_out_by_receiver_code += 1
+            continue
         destination = _extract_destination(xml_text) if xml_text else ""
         auto_section = _pick_section(destination, cfg)
         section = manual.get(filename, auto_section)
@@ -300,6 +315,7 @@ def list_aruba_received_invoices(
                 "section": section,
                 "auto_section": auto_section,
                 "manual_section": manual.get(filename),
+                "receiver_code": xml_receiver_code,
             }
         )
 
@@ -310,6 +326,8 @@ def list_aruba_received_invoices(
         "debug": {
             "rows_found": len(rows),
             "fallback_without_receiver_filters": fallback_used,
+            "receiver_code_filter": receiver_code_filter or None,
+            "filtered_out_by_receiver_code": filtered_out_by_receiver_code,
         },
     }
 
