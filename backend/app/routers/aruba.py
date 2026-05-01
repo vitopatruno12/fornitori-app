@@ -198,6 +198,48 @@ def _get_invoice_detail(token: str, cfg: Dict[str, Any], filename: str) -> Dict[
     return _open_json(unsigned_url, token=token)
 
 
+def _fetch_received_rows(
+    token: str,
+    cfg: Dict[str, Any],
+    days: int,
+    size: int,
+    include_receiver_filters: bool,
+    max_pages: int = 4,
+) -> List[Dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=days)).isoformat()
+    end = now.isoformat()
+    all_rows: List[Dict[str, Any]] = []
+
+    for page in range(1, max_pages + 1):
+        params: Dict[str, str] = {
+            "username": cfg["owner_username"],
+            "page": str(page),
+            "size": str(size),
+            "startDate": start,
+            "endDate": end,
+        }
+        if include_receiver_filters:
+            if cfg["receiver_country"]:
+                params["countryReceiver"] = cfg["receiver_country"]
+            if cfg["receiver_vat"]:
+                params["vatcodeReceiver"] = cfg["receiver_vat"]
+            if cfg["receiver_fiscal"]:
+                params["fiscalcodeReceiver"] = cfg["receiver_fiscal"]
+
+        list_url = f"{cfg['api_base']}/services/invoice/in/findByUsername?{urllib.parse.urlencode(params)}"
+        listed = _open_json(list_url, token=token)
+        content = _extract_content(listed)
+        rows = content if isinstance(content, list) else []
+        if not rows:
+            break
+        all_rows.extend(rows)
+        if len(rows) < size:
+            break
+
+    return all_rows
+
+
 def _read_manual_assignments() -> Dict[str, str]:
     if not _ASSIGNMENTS_PATH.exists():
         return {}
@@ -227,27 +269,12 @@ def list_aruba_received_invoices(
 ):
     cfg = _get_env_config()
     token = _get_token(cfg)
-    now = datetime.now(timezone.utc)
-    start = (now - timedelta(days=days)).isoformat()
-    end = now.isoformat()
-    params: Dict[str, str] = {
-        "username": cfg["owner_username"],
-        "page": "1",
-        "size": str(size),
-        "startDate": start,
-        "endDate": end,
-    }
-    if cfg["receiver_country"]:
-        params["countryReceiver"] = cfg["receiver_country"]
-    if cfg["receiver_vat"]:
-        params["vatcodeReceiver"] = cfg["receiver_vat"]
-    if cfg["receiver_fiscal"]:
-        params["fiscalcodeReceiver"] = cfg["receiver_fiscal"]
-
-    list_url = f"{cfg['api_base']}/services/invoice/in/findByUsername?{urllib.parse.urlencode(params)}"
-    listed = _open_json(list_url, token=token)
-    content = _extract_content(listed)
-    rows = content if isinstance(content, list) else []
+    rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=True, max_pages=4)
+    fallback_used = False
+    if not rows:
+        # Fallback: alcuni account non popolano correttamente i campi receiver* via API
+        rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=False, max_pages=4)
+        fallback_used = True
 
     manual = _read_manual_assignments()
     invoices: List[Dict[str, Any]] = []
@@ -280,6 +307,10 @@ def list_aruba_received_invoices(
         "abba": [x for x in invoices if x["section"] == "abba"],
         "zanardelli": [x for x in invoices if x["section"] == "zanardelli"],
         "non_classificata": [x for x in invoices if x["section"] == "non_classificata"],
+        "debug": {
+            "rows_found": len(rows),
+            "fallback_without_receiver_filters": fallback_used,
+        },
     }
 
 
