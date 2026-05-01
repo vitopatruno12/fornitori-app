@@ -209,7 +209,12 @@ def _pick_section(destination: str, cfg: Dict[str, Any]) -> str:
 def _get_invoice_detail(token: str, cfg: Dict[str, Any], filename: str) -> Dict[str, Any]:
     base = cfg["api_base"]
     unsigned_url = f"{base}/services/invoice/in/getInvoiceWithUnsignedFile?{urllib.parse.urlencode({'filename': filename})}"
-    return _open_json(unsigned_url, token=token)
+    try:
+        return _open_json(unsigned_url, token=token)
+    except HTTPException:
+        # Some Aruba accounts return XML only from getByFilename.
+        by_filename_url = f"{base}/services/invoice/in/getByFilename?{urllib.parse.urlencode({'filename': filename})}"
+        return _open_json(by_filename_url, token=token)
 
 
 def _fetch_received_rows(
@@ -367,6 +372,8 @@ def list_aruba_received_invoices(
     invoices: List[Dict[str, Any]] = []
     receiver_code_filter = (cfg.get("receiver_code") or "").strip().upper()
     filtered_out_by_receiver_code = 0
+    detail_fetch_success = 0
+    detail_fetch_failed = 0
     for item in rows:
         source_item = item
         if "filename" not in source_item and ("FileName" in source_item or "Mittente" in source_item):
@@ -380,9 +387,14 @@ def list_aruba_received_invoices(
             try:
                 detail = _get_invoice_detail(token, cfg, filename)
                 xml_text = _find_xml_text(detail) or ""
+                if xml_text:
+                    detail_fetch_success += 1
+                else:
+                    detail_fetch_failed += 1
             except HTTPException:
                 # Keep the invoice visible even if detail retrieval fails.
                 xml_text = ""
+                detail_fetch_failed += 1
         xml_receiver_code = _extract_receiver_code(xml_text) if xml_text else ""
         if receiver_code_filter and xml_receiver_code and xml_receiver_code.upper() != receiver_code_filter:
             filtered_out_by_receiver_code += 1
@@ -419,6 +431,9 @@ def list_aruba_received_invoices(
             "fallback_without_receiver_filters": fallback_used,
             "receiver_code_filter": receiver_code_filter or None,
             "filtered_out_by_receiver_code": filtered_out_by_receiver_code,
+            "token_available": bool(token),
+            "detail_fetch_success": detail_fetch_success,
+            "detail_fetch_failed": detail_fetch_failed,
         },
     }
 
