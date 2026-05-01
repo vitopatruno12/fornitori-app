@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchInvoices, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
+import { fetchInvoices, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored, fetchArubaReceivedInvoices, getArubaInvoiceDownloadUrl, assignArubaInvoiceSection } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { API_BASE_URL } from '../services/api'
@@ -64,6 +64,9 @@ export default function InvoicesPage() {
   const [aiInvoiceText, setAiInvoiceText] = useState('')
   const [aiInvoiceWarnings, setAiInvoiceWarnings] = useState([])
   const [aiInvoiceAnomalies, setAiInvoiceAnomalies] = useState([])
+  const [arubaLoading, setArubaLoading] = useState(false)
+  const [arubaRows, setArubaRows] = useState({ abba: [], zanardelli: [], non_classificata: [] })
+  const [arubaDays, setArubaDays] = useState('60')
 
   const availableMonths = useMemo(() => {
     const uniq = new Set()
@@ -102,6 +105,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadSuppliers()
+    loadArubaInvoices(60)
   }, [])
 
   useEffect(() => {
@@ -220,6 +224,33 @@ export default function InvoicesPage() {
       setError('Errore nel caricamento delle fatture')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadArubaInvoices(daysOverride) {
+    try {
+      setArubaLoading(true)
+      const days = Number(daysOverride || arubaDays || 60)
+      const data = await fetchArubaReceivedInvoices({ days, size: 40 })
+      setArubaRows({
+        abba: Array.isArray(data?.abba) ? data.abba : [],
+        zanardelli: Array.isArray(data?.zanardelli) ? data.zanardelli : [],
+        non_classificata: Array.isArray(data?.non_classificata) ? data.non_classificata : [],
+      })
+    } catch {
+      setError('Errore Aruba: verifica credenziali API o configurazione ambiente')
+    } finally {
+      setArubaLoading(false)
+    }
+  }
+
+  async function handleManualAssign(item, section) {
+    try {
+      await assignArubaInvoiceSection(item.filename, section)
+      setSuccess(`Assegnazione salvata: ${item.filename} -> ${section === 'abba' ? 'Via Abba' : 'Via Zanardelli'}`)
+      await loadArubaInvoices()
+    } catch {
+      setError('Errore nel salvataggio assegnazione manuale Aruba')
     }
   }
 
@@ -439,6 +470,136 @@ export default function InvoicesPage() {
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>€ {formatAmount(kpi.scaduteEuro)}</div>
         </div>
       </div>
+
+      <section className="card">
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>Fatture da Aruba SDI</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+            Classificazione automatica dalla <strong>destinazione</strong> letta nell&apos;XML fattura.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
+              Ultimi giorni
+              <select className="form-control" value={arubaDays} onChange={(e) => setArubaDays(e.target.value)} style={{ minWidth: 100 }}>
+                <option value="30">30</option>
+                <option value="60">60</option>
+                <option value="90">90</option>
+              </select>
+            </label>
+            <button type="button" className="btn btn-secondary" onClick={() => loadArubaInvoices()} disabled={arubaLoading}>
+              {arubaLoading ? 'Sincronizzazione...' : 'Sincronizza Aruba'}
+            </button>
+          </div>
+        </div>
+        <div className="table-wrap pn-table-wrap" style={{ marginBottom: '0.75rem' }}>
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th colSpan={5}>Fatture destinazione Via Abba ({arubaRows.abba.length})</th>
+              </tr>
+              <tr>
+                <th>Numero</th>
+                <th>Data</th>
+                <th>Fornitore</th>
+                <th>Destinazione</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arubaRows.abba.map((item) => (
+                <tr key={`abba-${item.filename}`}>
+                  <td>{item.invoice_number || '—'}</td>
+                  <td>{formatDate(item.invoice_date)}</td>
+                  <td>{item.supplier_name || '—'}</td>
+                  <td>{item.destination || '—'}</td>
+                  <td>
+                    <a className="btn btn-primary" style={{ marginRight: '0.35rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'pdf')} target="_blank" rel="noreferrer">Mostra fattura</a>
+                    <a className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'xml')} target="_blank" rel="noreferrer">Scarica fattura</a>
+                  </td>
+                </tr>
+              ))}
+              {arubaRows.abba.length === 0 && (
+                <tr><td colSpan={5} className="empty-state">Nessuna fattura Aruba classificata su Via Abba.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="table-wrap pn-table-wrap">
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th colSpan={5}>Fatture destinazione Via Zanardelli ({arubaRows.zanardelli.length})</th>
+              </tr>
+              <tr>
+                <th>Numero</th>
+                <th>Data</th>
+                <th>Fornitore</th>
+                <th>Destinazione</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arubaRows.zanardelli.map((item) => (
+                <tr key={`zan-${item.filename}`}>
+                  <td>{item.invoice_number || '—'}</td>
+                  <td>{formatDate(item.invoice_date)}</td>
+                  <td>{item.supplier_name || '—'}</td>
+                  <td>{item.destination || '—'}</td>
+                  <td>
+                    <a className="btn btn-primary" style={{ marginRight: '0.35rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'pdf')} target="_blank" rel="noreferrer">Mostra fattura</a>
+                    <a className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'xml')} target="_blank" rel="noreferrer">Scarica fattura</a>
+                  </td>
+                </tr>
+              ))}
+              {arubaRows.zanardelli.length === 0 && (
+                <tr><td colSpan={5} className="empty-state">Nessuna fattura Aruba classificata su Via Zanardelli.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="table-wrap pn-table-wrap" style={{ marginTop: '0.75rem' }}>
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th colSpan={6}>Fatture non classificate ({arubaRows.non_classificata.length})</th>
+              </tr>
+              <tr>
+                <th>Numero</th>
+                <th>Data</th>
+                <th>Fornitore</th>
+                <th>Destinazione</th>
+                <th>Mostra / Scarica</th>
+                <th>Assegna manualmente</th>
+              </tr>
+            </thead>
+            <tbody>
+              {arubaRows.non_classificata.map((item) => (
+                <tr key={`nc-${item.filename}`}>
+                  <td>{item.invoice_number || '—'}</td>
+                  <td>{formatDate(item.invoice_date)}</td>
+                  <td>{item.supplier_name || '—'}</td>
+                  <td>{item.destination || '—'}</td>
+                  <td>
+                    <a className="btn btn-primary" style={{ marginRight: '0.35rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'pdf')} target="_blank" rel="noreferrer">Mostra</a>
+                    <a className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }} href={getArubaInvoiceDownloadUrl(item.filename, 'xml')} target="_blank" rel="noreferrer">Scarica</a>
+                  </td>
+                  <td>
+                    <button type="button" className="btn btn-secondary" style={{ marginRight: '0.35rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }} onClick={() => handleManualAssign(item, 'abba')}>
+                      Assegna Via Abba
+                    </button>
+                    <button type="button" className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }} onClick={() => handleManualAssign(item, 'zanardelli')}>
+                      Assegna Via Zanardelli
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {arubaRows.non_classificata.length === 0 && (
+                <tr><td colSpan={6} className="empty-state">Nessuna fattura non classificata.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>{editingId ? 'Modifica fattura' : 'Nuova fattura'}</h2>

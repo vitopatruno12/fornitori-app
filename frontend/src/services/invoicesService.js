@@ -68,3 +68,22 @@ export function getInvoicesExportUrl(supplierId) {
   return `${API_BASE_URL}/invoices/export/csv${q ? '?' + q : ''}`
 }
 
+export async function fetchArubaReceivedInvoices(params = {}) {
+  const search = new URLSearchParams()
+  if (params.days) search.append('days', String(params.days))
+  if (params.size) search.append('size', String(params.size))
+  const query = search.toString()
+  const path = query ? `/aruba/invoices/received?${query}` : '/aruba/invoices/received'
+  return apiFetch(path)
+}
+
+export function getArubaInvoiceDownloadUrl(filename, kind = 'xml') {
+  const search = new URLSearchParams({ filename: String(filename), kind: String(kind) })
+  return `${API_BASE_URL}/aruba/invoices/download?${search.toString()}`
+}
+
+export async function assignArubaInvoiceSection(filename, section) {
+  const search = new URLSearchParams({ filename: String(filename), section: String(section) })
+  return apiFetch(`/aruba/invoices/assign?${search.toString()}`, { method: 'POST' })
+}
+
