@@ -347,8 +347,16 @@ def list_aruba_received_invoices(
     fallback_used = False
 
     token: Optional[str] = None
-    if not rows:
+    # Try to get API token also when advancedSearch works, so we can still
+    # load XML details for destination/receiver-based classification.
+    try:
         token = _get_token(cfg)
+    except HTTPException:
+        token = None
+
+    if not rows:
+        if not token:
+            token = _get_token(cfg)
         rows = _fetch_received_rows(token, cfg, days=days, size=size, include_receiver_filters=True, max_pages=4)
         if not rows:
             # Fallback: alcuni account non popolano correttamente i campi receiver* via API
@@ -369,8 +377,12 @@ def list_aruba_received_invoices(
             continue
         xml_text = ""
         if token:
-            detail = _get_invoice_detail(token, cfg, filename)
-            xml_text = _find_xml_text(detail) or ""
+            try:
+                detail = _get_invoice_detail(token, cfg, filename)
+                xml_text = _find_xml_text(detail) or ""
+            except HTTPException:
+                # Keep the invoice visible even if detail retrieval fails.
+                xml_text = ""
         xml_receiver_code = _extract_receiver_code(xml_text) if xml_text else ""
         if receiver_code_filter and xml_receiver_code and xml_receiver_code.upper() != receiver_code_filter:
             filtered_out_by_receiver_code += 1
