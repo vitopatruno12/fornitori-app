@@ -259,11 +259,11 @@ export default function VneSection({ embedded = false }) {
       loadStatus(selectedId)
       if (opsAutoRefreshEnabled) runOperationsQuery(selectedId)
       if (closingsAutoRefreshEnabled) runCashClosingQuery(selectedId)
-      loadContabilita(selectedId)
+      if (activeSection === SECTION_CONTABILITA) loadContabilita(selectedId)
     }
     const timer = window.setInterval(tick, autoRefreshMs)
     return () => window.clearInterval(timer)
-  }, [selectedId, autoRefreshEnabled, autoRefreshMs, opsAutoRefreshEnabled, closingsAutoRefreshEnabled])
+  }, [selectedId, autoRefreshEnabled, autoRefreshMs, opsAutoRefreshEnabled, closingsAutoRefreshEnabled, activeSection])
 
   useEffect(() => {
     if (!Array.isArray(models) || models.length === 0) return

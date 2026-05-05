@@ -16,6 +16,7 @@ VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "12"))
 VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
 VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
 VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "18"))
+VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", "10"))
 
 
 @dataclass
@@ -229,6 +230,19 @@ def _ensure_vne_credentials() -> None:
         raise HTTPException(status_code=503, detail=_missing_credentials_detail())
 
 
+def _remaining_seconds(deadline: Optional[float]) -> Optional[float]:
+    if deadline is None:
+        return None
+    return max(0.0, deadline - time.monotonic())
+
+
+def _ensure_not_timed_out(deadline: Optional[float]) -> None:
+    if deadline is None:
+        return
+    if _remaining_seconds(deadline) <= 0:
+        raise TimeoutError("Timeout richiesta VNE")
+
+
 def _to_float_it(text: str) -> Optional[float]:
     t = (text or "").strip()
     if not t:
@@ -333,7 +347,7 @@ def _host_variants(url: Optional[str]) -> List[str]:
     return uniq
 
 
-def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
+def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[float] = None) -> None:
     """
     Login best-effort su VNE Remote.
     Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
@@ -355,9 +369,10 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
         page_candidates.append(login_page_url.replace("://vneremote.com/", "://www.vneremote.com/"))
 
     for page_url in page_candidates:
+        _ensure_not_timed_out(deadline)
         try:
             req = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
-            html = _open_bytes_with_retries(opener, req).decode("utf-8", errors="ignore")
+            html = _open_bytes_with_retries(opener, req, deadline=deadline).decode("utf-8", errors="ignore")
             csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", html) or ""
             post_data = {
                 "username": username,
@@ -376,9 +391,9 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
                 "Referer": page_url,
                 "Origin": base_origin,
             }
-            _open_bytes_with_retries(opener, urllib.request.Request(post_url, data=body, headers=headers))
+            _open_bytes_with_retries(opener, urllib.request.Request(post_url, data=body, headers=headers), deadline=deadline)
             # Stabilizza la sessione richiedendo la landing /vne/.
-            _fetch_html(opener, landing, referer=page_url)
+            _fetch_html(opener, landing, referer=page_url, deadline=deadline)
             return
         except Exception:
             continue
@@ -392,11 +407,14 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     _ensure_vne_credentials()
 
     opener, _ = _build_opener()
+    request_deadline = time.monotonic() + VNE_REQUEST_MAX_SEC
     started = time.monotonic()
-    _maybe_login_vne(opener)
+    _maybe_login_vne(opener, deadline=request_deadline)
     req = _build_req(model.status_url, model.referer_url)
     try:
-        html_text = _open_bytes_with_retries(opener, req).decode("utf-8", errors="ignore")
+        html_text = _open_bytes_with_retries(opener, req, deadline=request_deadline).decode("utf-8", errors="ignore")
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE: {e}")
 
@@ -437,15 +455,19 @@ def _fetch_model_status(model: VneModelConfig) -> str:
         for ref in uniq_ref:
             if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
                 break
+            if _remaining_seconds(request_deadline) <= 0:
+                raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
             try:
-                _fetch_html(opener, ref, referer=ref)
+                _fetch_html(opener, ref, referer=ref, deadline=request_deadline)
             except Exception:
                 pass
             for su in uniq_status:
                 if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
                     break
+                if _remaining_seconds(request_deadline) <= 0:
+                    raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
                 try:
-                    retry_html = _open_bytes_with_retries(opener, _build_req(su, ref)).decode("utf-8", errors="ignore")
+                    retry_html = _open_bytes_with_retries(opener, _build_req(su, ref), deadline=request_deadline).decode("utf-8", errors="ignore")
                     if "impossibile accedere alla macchina" not in retry_html.lower():
                         return retry_html
                 except Exception:
@@ -466,26 +488,45 @@ def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = 
     return urllib.request.Request(url, data=data, headers=headers)
 
 
-def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.request.Request) -> bytes:
+def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.request.Request, deadline: Optional[float] = None) -> bytes:
     last_exc: Optional[Exception] = None
     attempts = max(1, VNE_HTTP_RETRIES + 1)
     for idx in range(attempts):
+        _ensure_not_timed_out(deadline)
         try:
-            with opener.open(req, timeout=VNE_HTTP_TIMEOUT_SEC) as resp:
+            remaining = _remaining_seconds(deadline)
+            timeout = VNE_HTTP_TIMEOUT_SEC if remaining is None else max(0.5, min(VNE_HTTP_TIMEOUT_SEC, remaining))
+            with opener.open(req, timeout=timeout) as resp:
                 return resp.read()
+        except TimeoutError as e:
+            last_exc = e
+            break
         except Exception as e:
             last_exc = e
             if idx >= attempts - 1:
                 break
-            time.sleep(VNE_HTTP_RETRY_DELAY_SEC * (idx + 1))
+            remaining = _remaining_seconds(deadline)
+            if remaining is not None and remaining <= 0:
+                break
+            sleep_for = VNE_HTTP_RETRY_DELAY_SEC * (idx + 1)
+            if remaining is not None:
+                sleep_for = min(sleep_for, max(0.0, remaining))
+            if sleep_for > 0:
+                time.sleep(sleep_for)
     if last_exc:
         raise last_exc
     raise RuntimeError("Errore HTTP VNE sconosciuto")
 
 
-def _fetch_html(opener: urllib.request.OpenerDirector, url: str, referer: Optional[str] = None, data: Optional[bytes] = None) -> str:
+def _fetch_html(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    referer: Optional[str] = None,
+    data: Optional[bytes] = None,
+    deadline: Optional[float] = None,
+) -> str:
     req = _build_req(url, referer=referer, data=data)
-    raw = _open_bytes_with_retries(opener, req)
+    raw = _open_bytes_with_retries(opener, req, deadline=deadline)
     return raw.decode("utf-8", errors="ignore")
 
 
