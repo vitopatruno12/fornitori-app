@@ -279,7 +279,7 @@ export default function HomePage({ onNavigate }) {
                   <tbody>
                     {(data.ordini_consegna_in_ritardo || []).map((o) => (
                       <tr key={o.id}>
-                        <td>#{o.id}</td>
+                        <td>#{o.sequence_number ?? o.id}</td>
                         <td>{o.supplier_name}</td>
                         <td>{formatDateShort(o.order_date)}</td>
                         <td>{formatDateShort(o.expected_delivery_date)}</td>

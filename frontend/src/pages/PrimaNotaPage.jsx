@@ -29,6 +29,8 @@ export default function PrimaNotaPage() {
   const [success, setSuccess] = useState('')
 
   const [selectedDate, setSelectedDate] = useState(() => todayIso)
+  const [movementPeriodFrom, setMovementPeriodFrom] = useState(() => todayIso)
+  const [movementPeriodTo, setMovementPeriodTo] = useState(() => todayIso)
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
   const [resetRangeFrom, setResetRangeFrom] = useState(currentMonthFrom)
@@ -58,7 +60,6 @@ export default function PrimaNotaPage() {
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [deletingDay, setDeletingDay] = useState(false)
-  const [resettingCumulative, setResettingCumulative] = useState(false)
   const [deletingRange, setDeletingRange] = useState(false)
   const [highlightEntryId, setHighlightEntryId] = useState(null)
   const [focusEntryMessage, setFocusEntryMessage] = useState('')
@@ -154,6 +155,8 @@ export default function PrimaNotaPage() {
       if (data.date) {
         setSelectedDate(data.date)
         setFormEntryDate(data.date)
+        setMovementPeriodFrom(data.date)
+        setMovementPeriodTo(data.date)
       }
       if (data.supplierId) setFormSupplierId(String(data.supplierId))
       if (data.invoiceId) setFormInvoiceId(String(data.invoiceId))
@@ -182,11 +185,18 @@ export default function PrimaNotaPage() {
         selectedDate,
         movementKind,
         movementSearch,
+        movementPeriodFrom,
+        movementPeriodTo,
       }
       sessionStorage.removeItem('primaNotaDashboardFilter')
       let applied = false
       if (data?.monthKey && /^\d{4}-\d{2}$/.test(data.monthKey)) {
-        setSelectedDate(`${data.monthKey}-01`)
+        const firstDay = `${data.monthKey}-01`
+        const ms = new Date(`${data.monthKey}-01T12:00:00`)
+        const lastDay = formatLocalIsoDate(new Date(ms.getFullYear(), ms.getMonth() + 1, 0))
+        setSelectedDate(firstDay)
+        setMovementPeriodFrom(firstDay)
+        setMovementPeriodTo(lastDay)
         applied = true
       }
       if (data?.movementKind && ['all', 'entrata', 'uscita', 'fiscale', 'nf', 'pos'].includes(String(data.movementKind))) {
@@ -211,12 +221,36 @@ export default function PrimaNotaPage() {
       setSelectedDate(prev.selectedDate || todayIso)
       setMovementKind(prev.movementKind || 'all')
       setMovementSearch(prev.movementSearch || '')
+      if (prev.movementPeriodFrom) setMovementPeriodFrom(prev.movementPeriodFrom)
+      if (prev.movementPeriodTo) setMovementPeriodTo(prev.movementPeriodTo)
     } else {
       setMovementKind('all')
       setMovementSearch('')
     }
     setDashboardFilterActive(false)
     setSuccess('Filtri dashboard rimossi')
+  }
+
+  function applyMovementPeriodPreset(which) {
+    const now = new Date()
+    const today = formatLocalIsoDate(now)
+    if (which === 'today') {
+      setMovementPeriodFrom(today)
+      setMovementPeriodTo(today)
+    } else if (which === 'month') {
+      setMovementPeriodFrom(currentMonthFrom)
+      setMovementPeriodTo(currentMonthTo)
+    } else if (which === 'week') {
+      const d = new Date(now)
+      d.setDate(d.getDate() - 6)
+      setMovementPeriodFrom(formatLocalIsoDate(d))
+      setMovementPeriodTo(today)
+    }
+  }
+
+  function alignMovementPeriodToSelectedDay() {
+    setMovementPeriodFrom(selectedDate)
+    setMovementPeriodTo(selectedDate)
   }
 
   useEffect(() => {
@@ -238,7 +272,7 @@ export default function PrimaNotaPage() {
     }
     const found = entries.some(e => Number(e.id) === id)
     if (!found) {
-      setFocusEntryMessage(`Movimento cassa #${id} non presente nella data selezionata. Cambia la data in alto se il movimento è registrato in un altro giorno.`)
+      setFocusEntryMessage(`Movimento cassa #${id} non è nell’elenco del periodo impostato (dal ${formatDate(movementPeriodFrom)} al ${formatDate(movementPeriodTo)}). Allarga il periodo nella barra in alto o vai al giorno giusto.`)
       return
     }
     setFocusEntryMessage('')
@@ -248,12 +282,15 @@ export default function PrimaNotaPage() {
       const el = document.getElementById(`cash-entry-row-${id}`)
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 200)
-  }, [loading, entries, highlightEntryId])
+  }, [loading, entries, highlightEntryId, movementPeriodFrom, movementPeriodTo])
+
+  useEffect(() => {
+    loadSummary()
+  }, [selectedDate])
 
   useEffect(() => {
     loadEntries()
-    loadSummary()
-  }, [selectedDate])
+  }, [movementPeriodFrom, movementPeriodTo])
 
   async function loadSuppliers() {
     try {
@@ -268,9 +305,16 @@ export default function PrimaNotaPage() {
     try {
       setLoading(true)
       setError('')
+      let from = movementPeriodFrom
+      let to = movementPeriodTo
+      if (from && to && from > to) {
+        const swap = from
+        from = to
+        to = swap
+      }
       const data = await fetchEntries({
-        date_from: selectedDate,
-        date_to: selectedDate,
+        date_from: from || undefined,
+        date_to: to || undefined,
       })
       setEntries(data)
     } catch (e) {
@@ -359,49 +403,6 @@ export default function PrimaNotaPage() {
     }
   }
 
-  async function handleAzzeraSaldoCumulativo() {
-    if (!summary) return
-    const saldo = Number(summary.saldo_cumulativo || 0)
-    if (!Number.isFinite(saldo) || Math.abs(saldo) < 0.005) {
-      setSuccess('Saldo cumulativo gia a zero')
-      return
-    }
-    const isPositive = saldo > 0
-    const amount = Math.abs(saldo)
-    const actionLabel = isPositive ? 'uscita' : 'entrata'
-    if (!window.confirm(
-      `Vuoi azzerare il saldo cumulativo del ${formatDate(selectedDate)}?\nVerrà registrata una ${actionLabel} di € ${formatAmount(amount)}.`
-    )) return
-
-    try {
-      setResettingCumulative(true)
-      setError('')
-      await createEntry({
-        entry_date: `${selectedDate}T23:59:00`,
-        type: isPositive ? 'uscita' : 'entrata',
-        amount,
-        description: 'Azzera saldo cumulativo fine giornata',
-        note: 'Movimento automatico di assestamento',
-        conto: null,
-        riferimento_documento: null,
-        supplier_id: null,
-        invoice_id: null,
-        delivery_id: null,
-        customer_id: null,
-        account_id: null,
-        payment_method_id: null,
-        category_id: null,
-      })
-      await loadEntries()
-      await loadSummary()
-      setSuccess('Saldo cumulativo azzerato')
-    } catch {
-      setError('Errore nell\'azzeramento del saldo cumulativo')
-    } finally {
-      setResettingCumulative(false)
-    }
-  }
-
   async function handleEliminaIntervallo() {
     if (!resetRangeFrom || !resetRangeTo) {
       setError('Seleziona data inizio e data fine dell\'intervallo')
@@ -438,6 +439,13 @@ export default function PrimaNotaPage() {
       return
     }
 
+    const descTrimmed = formDescription.trim()
+    if (!descTrimmed) {
+      setError('La descrizione operazione è obbligatoria')
+      document.getElementById('prima-nota-description')?.focus()
+      return
+    }
+
     try {
       setSaving(true)
       const entryDate = formEntryDate || selectedDate
@@ -445,7 +453,7 @@ export default function PrimaNotaPage() {
         entry_date: entryDate.includes('T') ? entryDate : `${entryDate}T12:00:00`,
         type: formType,
         amount: Number(formAmount),
-        description: formDescription.trim() || null,
+        description: descTrimmed,
         note: formNote.trim() || null,
         conto:
           formFlowTag === 'non_fiscale'
@@ -565,6 +573,19 @@ export default function PrimaNotaPage() {
     return d.toLocaleDateString('it-IT')
   }
 
+  const movementsSectionHeading = useMemo(() => {
+    let from = movementPeriodFrom
+    let to = movementPeriodTo
+    if (from && to && from > to) {
+      const s = from
+      from = to
+      to = s
+    }
+    if (!from && !to) return `Movimenti del ${formatDate(selectedDate)}`
+    if (from === to) return `Movimenti del ${formatDate(from)}`
+    return `Movimenti dal ${formatDate(from)} al ${formatDate(to)}`
+  }, [movementPeriodFrom, movementPeriodTo, selectedDate])
+
   function formatTime(value) {
     if (!value) return ''
     const d = new Date(value)
@@ -632,6 +653,52 @@ export default function PrimaNotaPage() {
 
     return { rows, cassaIniziale, cassaFinale: running }
   }, [entries, openingCashInput])
+
+  const entriesForSelectedDay = useMemo(() => {
+    if (!entries?.length) return []
+    const day = selectedDate
+    return entries.filter((e) => (e.entry_date ? String(e.entry_date).slice(0, 10) : '') === day)
+  }, [entries, selectedDate])
+
+  const rowsWithLedgerSelectedDay = React.useMemo(() => {
+    if (!entriesForSelectedDay || entriesForSelectedDay.length === 0) {
+      return { rows: [], cassaIniziale: 0, cassaFinale: 0 }
+    }
+
+    const firstFiscale = entriesForSelectedDay.find((e) => !isExtraCassa(e))
+    const defaultOpening = firstFiscale
+      ? Number(firstFiscale.saldo_progressivo) - (firstFiscale.type === 'entrata' ? Number(firstFiscale.amount) : -Number(firstFiscale.amount))
+      : Number(entriesForSelectedDay[0].saldo_progressivo || 0)
+    const cassaIniziale = openingCashInput === '' ? defaultOpening : Number(openingCashInput || 0)
+
+    let running = cassaIniziale
+    const rows = entriesForSelectedDay.map((entry) => {
+      const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
+      const posTag = entry.conto === CONTO_POS
+      const entrata = !nonFiscaleTag && !posTag && entry.type === 'entrata' ? Number(entry.amount) : 0
+      const uscita = !nonFiscaleTag && !posTag && entry.type === 'uscita' ? Number(entry.amount) : 0
+      const nonFiscale = nonFiscaleTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
+      const pos = posTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
+      const totaleMovimento = entrata - uscita
+      const incasso = totaleMovimento + nonFiscale + pos
+      const affectsSaldo = !nonFiscaleTag && !posTag
+      if (affectsSaldo) running += totaleMovimento
+      return {
+        ...entry,
+        entrata,
+        uscita,
+        nonFiscale,
+        pos,
+        totaleMovimento,
+        affectsSaldo,
+        incasso,
+        cassaMattina: cassaIniziale,
+        cassaSera: running,
+      }
+    })
+
+    return { rows, cassaIniziale, cassaFinale: running }
+  }, [entriesForSelectedDay, openingCashInput])
 
   const filteredMovementRows = useMemo(() => {
     const q = movementSearch.trim().toLowerCase()
@@ -707,28 +774,28 @@ export default function PrimaNotaPage() {
   }
 
   const nonFiscaleGiorno = React.useMemo(() => {
-    return entries.reduce((acc, e) => {
+    return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto !== CONTO_NON_FISCALE) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entries])
+  }, [entriesForSelectedDay])
 
   const posGiorno = React.useMemo(() => {
-    return entries.reduce((acc, e) => {
+    return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto !== CONTO_POS) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entries])
+  }, [entriesForSelectedDay])
 
   const fiscaleGiorno = React.useMemo(() => {
-    return entries.reduce((acc, e) => {
+    return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto === CONTO_NON_FISCALE || e.conto === CONTO_POS) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entries])
+  }, [entriesForSelectedDay])
 
   const totaleVenditaGiorno = Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
@@ -737,7 +804,7 @@ export default function PrimaNotaPage() {
     <div>
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Prima Nota di Cassa</h1>
-        <p className="staff-page-lead">Controllo giornaliero movimenti, cassa e riepiloghi fiscali/non fiscali/POS.</p>
+        <p className="staff-page-lead">Riepilogo sulla giornata selezionata; l’elenco movimenti può essere filtrato per intervallo di date insieme alla ricerca testuale.</p>
       </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -754,6 +821,40 @@ export default function PrimaNotaPage() {
             style={{ maxWidth: 160 }}
           />
         </div>
+        <div className="form-group" style={{ minWidth: 220 }}>
+          <label>Periodo elenco movimenti</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+            <input
+              type="date"
+              className="form-control"
+              value={movementPeriodFrom}
+              onChange={e => setMovementPeriodFrom(e.target.value)}
+              aria-label="Data inizio periodo movimenti"
+              style={{ maxWidth: 150 }}
+            />
+            <span style={{ color: 'var(--text-muted)' }}>–</span>
+            <input
+              type="date"
+              className="form-control"
+              value={movementPeriodTo}
+              onChange={e => setMovementPeriodTo(e.target.value)}
+              aria-label="Data fine periodo movimenti"
+              style={{ maxWidth: 150 }}
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyMovementPeriodPreset('today')} title="Solo oggi">
+              Oggi
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyMovementPeriodPreset('week')} title="Ultimi 7 giorni">
+              7 gg
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyMovementPeriodPreset('month')} title="Mese corrente">
+              Mese
+            </button>
+            <button type="button" className="btn btn-outline-secondary btn-sm" onClick={alignMovementPeriodToSelectedDay} title="Imposta periodo = giornata riepilogo">
+              = giornata
+            </button>
+          </div>
+        </div>
         <div className="form-group" style={{ flex: '1 1 200px', minWidth: 160 }}>
           <label>Cerca movimento</label>
           <input
@@ -761,7 +862,7 @@ export default function PrimaNotaPage() {
             className="form-control"
             value={movementSearch}
             onChange={e => setMovementSearch(e.target.value)}
-            placeholder="Descrizione, note, riferimento…"
+            placeholder="Descrizione, note, riferimento (nell’elenco del periodo)"
             aria-label="Filtra movimenti"
           />
         </div>
@@ -885,8 +986,17 @@ export default function PrimaNotaPage() {
           </div>
           <div className="form-row">
             <div className="form-group" style={{ flex: '1 1 300px' }}>
-              <label>Descrizione operazione</label>
-              <input className="form-control" value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="Perché hai pagato o ricevuto questa somma" />
+              <label htmlFor="prima-nota-description">Descrizione operazione (obbligatorio)</label>
+              <input
+                id="prima-nota-description"
+                className="form-control"
+                value={formDescription}
+                onChange={e => setFormDescription(e.target.value)}
+                placeholder="Perché hai pagato o ricevuto questa somma"
+                required
+                aria-required="true"
+                autoComplete="off"
+              />
             </div>
           </div>
           <div className="form-row">
@@ -1008,9 +1118,9 @@ export default function PrimaNotaPage() {
       </section>
 
       <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>Movimenti del {formatDate(selectedDate)}</h2>
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>{movementsSectionHeading}</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
-          Clicca una riga per il dettaglio. I filtri sono nella barra in alto.
+          Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
         </p>
         {focusEntryMessage && (
           <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
@@ -1088,7 +1198,7 @@ export default function PrimaNotaPage() {
                 {filteredMovementRows.length === 0 && (
                   <tr>
                     <td colSpan={10} className="empty-state">
-                      {rowsWithLedger.rows.length === 0 ? 'Nessun movimento in questa data.' : 'Nessun movimento corrisponde ai filtri.'}
+                      {rowsWithLedger.rows.length === 0 ? 'Nessun movimento nel periodo selezionato.' : 'Nessun movimento corrisponde ai filtri.'}
                     </td>
                   </tr>
                 )}
@@ -1150,7 +1260,7 @@ export default function PrimaNotaPage() {
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Giorno <strong>{formatDate(selectedDate)}</strong>. I totali entrate/uscite si aggiornano dai movimenti. Puoi modificare la <strong>cassa iniziale</strong> per adattare lo schema; per correggere i totali modifica o elimina i movimenti nella tabella sotto.
+          Riferito al giorno <strong>{formatDate(selectedDate)}</strong> (il blocco sottostante non dipende dal periodo dell’elenco movimenti). I totali con etichetta “(giorno)” usano solo i movimenti di quel giorno tra quelli già caricati. Puoi modificare la <strong>cassa iniziale</strong> per adattare lo schema; per correggere i totali modifica o elimina i movimenti nella tabella sopra.
         </p>
         <div className="form-row">
           <div className="form-group">
@@ -1174,19 +1284,10 @@ export default function PrimaNotaPage() {
             type="button"
             className="btn btn-outline-danger"
             onClick={handleEliminaGiornata}
-            disabled={deletingDay || entries.length === 0}
-            title="Elimina tutti i movimenti della data selezionata nel calendario. Aggiorna saldo giornaliero e saldo cumulativo (senza i movimenti di quel giorno)."
+            disabled={deletingDay}
+            title="Elimina tutti i movimenti della data selezionata nel calendario. Aggiorna il saldo giornaliero."
           >
             {deletingDay ? 'Eliminazione...' : 'Elimina tutti i movimenti del giorno'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger"
-            onClick={handleAzzeraSaldoCumulativo}
-            disabled={resettingCumulative || !summary}
-            title="Registra un movimento di assestamento per portare il saldo cumulativo di fine giornata a zero."
-          >
-            {resettingCumulative ? 'Azzeramento...' : 'Azzera saldo cumulativo di fine giornata'}
           </button>
         </div>
         <div className="form-row" style={{ alignItems: 'end', marginBottom: '0.75rem' }}>
@@ -1256,17 +1357,8 @@ export default function PrimaNotaPage() {
                   <td className="text-end amount">€ {formatAmount(summary.saldo_giornaliero)}</td>
                 </tr>
                 <tr>
-                  <td>
-                    <strong>Saldo cumulativo a fine giornata</strong>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 400, marginTop: '0.3rem', maxWidth: 360 }}>
-                      È la cassa calcolata su <strong>tutti</strong> i movimenti fino a questa data (anche dei giorni precedenti). Usa i pulsanti sopra per eliminare solo i movimenti della <strong>data selezionata</strong>: se gran parte del saldo viene dai giorni passati, questo totale non si azzera finché non modifichi o elimini anche quelle registrazioni.
-                    </div>
-                  </td>
-                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(summary.saldo_cumulativo)}</td>
-                </tr>
-                <tr>
                   <td><strong>Saldo attuale cassa</strong></td>
-                  <td className="text-end amount">€ {formatAmount(rowsWithLedger.cassaIniziale)}</td>
+                  <td className="text-end amount">€ {formatAmount(rowsWithLedgerSelectedDay.cassaIniziale)}</td>
                 </tr>
                 <tr>
                   <td><strong>Cassa finale (schema)</strong></td>

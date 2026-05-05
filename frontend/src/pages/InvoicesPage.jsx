@@ -32,6 +32,38 @@ function PaymentBadge({ status, ignored }) {
 }
 
 export default function InvoicesPage() {
+  const invoicesMaintenanceMode = true
+  if (invoicesMaintenanceMode) {
+    return (
+      <div>
+        <section className="staff-page-hero">
+          <h1 className="page-header staff-page-title">Fatture fornitori</h1>
+          <p className="staff-page-lead">
+            Sezione temporaneamente chiusa per manutenzione straordinaria.
+          </p>
+        </section>
+        <section
+          className="card"
+          style={{
+            border: '2px dashed #b45309',
+            background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+            boxShadow: '0 10px 25px rgba(180, 83, 9, 0.16)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '0.55rem' }}>
+            <span style={{ fontSize: '1.6rem', lineHeight: 1 }} aria-hidden>🚧</span>
+            <h2 className="page-subheader" style={{ margin: 0, color: '#9a3412' }}>
+              Pagina in manutenzione
+            </h2>
+          </div>
+          <p style={{ margin: 0, color: '#7c2d12', fontWeight: 600 }}>
+            Lavorazione fatturazione in corso. Modulo non usabile temporaneamente.
+          </p>
+        </section>
+      </div>
+    )
+  }
+
   const [suppliers, setSuppliers] = useState([])
   const [invoices, setInvoices] = useState([])
   const [supplierId, setSupplierId] = useState('')

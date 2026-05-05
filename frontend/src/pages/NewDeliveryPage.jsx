@@ -63,11 +63,18 @@ function deliveryItemsHaveUserInput(rows) {
   })
 }
 
+function orderImportDisplayNum(o) {
+  if (!o || typeof o !== 'object') return ''
+  const n = o.sequence_number
+  if (n != null && n !== '' && Number.isFinite(Number(n))) return String(n)
+  return String(o.id ?? '')
+}
+
 function formatOrderOptionLabel(o) {
   const d = o.order_date ? String(o.order_date).slice(0, 10) : ''
   const raw = (o.merchandise_summary || '').trim()
   const sum = raw.length > 56 ? `${raw.slice(0, 56)}…` : raw
-  const bits = [`#${o.id}`, d, sum].filter(Boolean)
+  const bits = [`n. ${orderImportDisplayNum(o)}`, d, sum].filter(Boolean)
   return bits.join(' · ')
 }
 
@@ -77,6 +84,9 @@ export default function NewDeliveryPage() {
   const [date, setDate] = useState('')
   const [ddtNumber, setDdtNumber] = useState('')
   const [vatPercent, setVatPercent] = useState('23')
+  const [deliveryLocation, setDeliveryLocation] = useState('')
+  const [orderSignedBy, setOrderSignedBy] = useState('')
+  const [unloadingSignedBy, setUnloadingSignedBy] = useState('')
   const [note, setNote] = useState('')
   const [items, setItems] = useState([emptyItem()])
   const [loadingSuppliers, setLoadingSuppliers] = useState(true)
@@ -121,6 +131,8 @@ export default function NewDeliveryPage() {
         )
       }
       if (data.note_hint) setNote(String(data.note_hint))
+      if (data.order_signed_by) setOrderSignedBy(String(data.order_signed_by))
+      if (data.unloading_signed_by) setUnloadingSignedBy(String(data.unloading_signed_by))
     } catch {
       try {
         sessionStorage.removeItem('deliveryPrefillFromOrder')
@@ -325,7 +337,7 @@ export default function NewDeliveryPage() {
         setVatPercent(String(o.vat_percent))
       }
       const d = o.order_date ? new Date(`${String(o.order_date).slice(0, 10)}T12:00:00`).toLocaleDateString('it-IT') : ''
-      setSuccess(`Righe caricate dall’ordine #${o.id}${d ? ` del ${d}` : ''}. Controlla prezzi e completamento dati prima di salvare.`)
+      setSuccess(`Righe caricate dall’ordine n. ${orderImportDisplayNum(o)}${d ? ` del ${d}` : ''}. Controlla prezzi e completamento dati prima di salvare.`)
     } catch {
       setError('Impossibile caricare l’ordine. Verifica la connessione e riprova.')
     } finally {
@@ -340,6 +352,10 @@ export default function NewDeliveryPage() {
 
     if (!supplierId) {
       setError('Seleziona un fornitore')
+      return
+    }
+    if (!unloadingSignedBy.trim()) {
+      setError("Inserisci la firma: chi fa lo scarico")
       return
     }
 
@@ -358,14 +374,22 @@ export default function NewDeliveryPage() {
       return
     }
 
+    const dest = deliveryLocation.trim()
+    const noteParts = []
+    if (dest) noteParts.push(`Destinazione scarico: ${dest}`)
+    if (note?.trim()) noteParts.push(note.trim())
+    const mergedNote = noteParts.length ? noteParts.join('\n\n') : null
+
     try {
       setSaving(true)
       await createDeliveryBatch({
         supplier_id: Number(supplierId),
         delivery_date: date || null,
         ddt_number: ddtNumber?.trim() || null,
+        order_signed_by: orderSignedBy.trim() || null,
+        unloading_signed_by: unloadingSignedBy.trim() || null,
         vat_percent: Number(vatPercent) || 23,
-        note: note?.trim() || null,
+        note: mergedNote,
         items: validItems,
       })
       setSuccess(`Consegna registrata${supplierLabel ? ` — ${supplierLabel}` : ''}`)
@@ -373,6 +397,9 @@ export default function NewDeliveryPage() {
       setDate('')
       setDdtNumber('')
       setVatPercent('23')
+      setDeliveryLocation('')
+      setOrderSignedBy('')
+      setUnloadingSignedBy('')
       setNote('')
     } catch (e) {
       setError('Errore nel salvataggio della consegna')
@@ -387,7 +414,8 @@ export default function NewDeliveryPage() {
       <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
       <p className="staff-page-lead">
         Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
-        fornitore (stessa descrizione prodotto). Utile per bar, ristoranti e negozi.
+        fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
+        spedizione</strong>, che viene registrata nelle note della consegna.
       </p>
       </section>
 
@@ -438,6 +466,16 @@ export default function NewDeliveryPage() {
                 value={vatPercent}
                 onChange={(e) => setVatPercent(e.target.value)}
                 style={{ maxWidth: 120 }}
+              />
+            </div>
+            <div className="form-group" style={{ minWidth: 220, maxWidth: 320 }}>
+              <label>Destinazione scarico / spedizione</label>
+              <input
+                className="form-control"
+                value={deliveryLocation}
+                onChange={(e) => setDeliveryLocation(e.target.value)}
+                placeholder="Inserisci indirizzo o punto di scarico"
+                title="Dove scaricare o far consegnare la merce; riportato nelle note della consegna"
               />
             </div>
           </div>
@@ -612,6 +650,17 @@ export default function NewDeliveryPage() {
           <div className="form-group">
             <label>Note documento</label>
             <textarea className="form-control" value={note} onChange={(e) => setNote(e.target.value)} rows={2} />
+          </div>
+          <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '0.75rem' }}>
+            <div className="form-group" style={{ minWidth: 260, marginBottom: 0 }}>
+              <label>Firma (chi fa lo scarico) *</label>
+              <input
+                className="form-control"
+                value={unloadingSignedBy}
+                onChange={(e) => setUnloadingSignedBy(e.target.value)}
+                placeholder="Nome e cognome"
+              />
+            </div>
           </div>
           <div className="btn-group">
             <button type="submit" className="btn btn-primary" disabled={saving}>

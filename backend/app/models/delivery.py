@@ -24,6 +24,8 @@ class Delivery(Base):
   invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True, index=True)
   delivery_document_id = Column(Integer, ForeignKey("delivery_documents.id"), nullable=True, index=True)
   ddt_number = Column(String(64), nullable=True, index=True)
+  order_signed_by = Column(String(128), nullable=True)
+  unloading_signed_by = Column(String(128), nullable=True)
   list_unit_price = Column(Numeric(10, 2), nullable=True)
   price_diff_vs_list = Column(Numeric(10, 2), nullable=True)
   anomaly_note = Column(Text, nullable=True)

@@ -19,6 +19,9 @@ class SupplierOrderCreate(BaseModel):
   note: Optional[str] = None
   note_internal: Optional[str] = None
   expected_delivery_date: Optional[date] = None
+  delivery_location: Optional[str] = Field(default=None, max_length=128)
+  order_signed_by: Optional[str] = Field(default=None, max_length=128)
+  unloading_signed_by: Optional[str] = Field(default=None, max_length=128)
   status: Literal["pending", "sent"] = "pending"
   items: List[SupplierOrderItemCreate] = Field(..., min_length=1)
 
@@ -30,6 +33,9 @@ class SupplierOrderUpdate(BaseModel):
   note: Optional[str] = None
   note_internal: Optional[str] = None
   expected_delivery_date: Optional[date] = None
+  delivery_location: Optional[str] = Field(default=None, max_length=128)
+  order_signed_by: Optional[str] = Field(default=None, max_length=128)
+  unloading_signed_by: Optional[str] = Field(default=None, max_length=128)
   status: Literal["pending", "sent"] = "pending"
   items: List[SupplierOrderItemCreate] = Field(..., min_length=1)
 
@@ -48,12 +54,16 @@ class SupplierOrderItemRead(BaseModel):
 class SupplierOrderRead(BaseModel):
   id: int
   supplier_id: int
+  sequence_number: int
   supplier_name: Optional[str] = None
   order_date: date
   vat_percent: Decimal
   note: Optional[str] = None
   note_internal: Optional[str] = None
   expected_delivery_date: Optional[date] = None
+  delivery_location: Optional[str] = None
+  order_signed_by: Optional[str] = None
+  unloading_signed_by: Optional[str] = None
   status: str = "pending"
   merchandise_summary: Optional[str] = None
   created_at: Optional[datetime] = None

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -7,14 +7,21 @@ from ..database import Base
 
 class SupplierOrder(Base):
   __tablename__ = "supplier_orders"
+  __table_args__ = (
+      UniqueConstraint("supplier_id", "sequence_number", name="uq_supplier_orders_supplier_sequence"),
+  )
 
   id = Column(Integer, primary_key=True, index=True)
   supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False, index=True)
+  sequence_number = Column(Integer, nullable=False)
   order_date = Column(Date, nullable=False)
   vat_percent = Column(Numeric(5, 2), nullable=False, server_default="23")
   note = Column(Text, nullable=True)
   note_internal = Column(Text, nullable=True)
   expected_delivery_date = Column(Date, nullable=True)
+  delivery_location = Column(String(128), nullable=True)
+  order_signed_by = Column(String(128), nullable=True)
+  unloading_signed_by = Column(String(128), nullable=True)
   status = Column(String(20), nullable=False, server_default="pending")
   supplier_name_snapshot = Column(String(255), nullable=True)
   merchandise_summary = Column(Text, nullable=True)

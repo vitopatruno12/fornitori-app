@@ -26,6 +26,8 @@ class DeliveryBase(BaseModel):
   note: Optional[str] = None
   invoice_id: Optional[int] = None
   ddt_number: Optional[str] = None
+  order_signed_by: Optional[str] = None
+  unloading_signed_by: Optional[str] = None
   anomaly_note: Optional[str] = None
 
 
@@ -39,6 +41,8 @@ class DeliveryBatchCreate(BaseModel):
   vat_percent: Decimal = Decimal("23.0")
   note: Optional[str] = None
   ddt_number: Optional[str] = None
+  order_signed_by: Optional[str] = None
+  unloading_signed_by: Optional[str] = None
   items: List[DeliveryItemCreate]
 
 

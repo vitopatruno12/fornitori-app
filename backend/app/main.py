@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from . import models  # noqa: F401
 from .database import Base, engine
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians, vne, aruba
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians, vne, aruba, sdi
 
 logger = logging.getLogger("app.startup")
 
@@ -21,6 +21,8 @@ async def lifespan(app: FastAPI):
     try:
         Base.metadata.create_all(bind=engine)
         _ensure_support_technicians_columns()
+        _ensure_supplier_orders_delivery_location_column()
+        _ensure_order_delivery_signature_columns()
     except OperationalError as e:
         logger.error(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -81,6 +83,7 @@ app.include_router(staff.router)
 app.include_router(support_technicians.router)
 app.include_router(vne.router)
 app.include_router(aruba.router)
+app.include_router(sdi.router)
 
 
 def _ensure_support_technicians_columns() -> None:
@@ -106,6 +109,51 @@ def _ensure_support_technicians_columns() -> None:
         )
 
 
+def _ensure_supplier_orders_delivery_location_column() -> None:
+    """Backward-compat: colonna destinazione scarico/spedizione (migr. 20260505)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS delivery_location VARCHAR(128)"
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare supplier_orders.delivery_location: %s",
+            e,
+        )
+
+
+def _ensure_order_delivery_signature_columns() -> None:
+    """Backward-compat: firme ordine/scarico su ordini e consegne (migr. 20260507)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE supplier_orders
+                    ADD COLUMN IF NOT EXISTS order_signed_by VARCHAR(128),
+                    ADD COLUMN IF NOT EXISTS unloading_signed_by VARCHAR(128)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE deliveries
+                    ADD COLUMN IF NOT EXISTS order_signed_by VARCHAR(128),
+                    ADD COLUMN IF NOT EXISTS unloading_signed_by VARCHAR(128)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare colonne firma ordine/scarico: %s",
+            e,
+        )
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     required = [
@@ -116,6 +164,12 @@ def _check_critical_schema_columns() -> None:
         ("supplier_orders", "order_date", "20260408_supplier_orders.sql"),
         ("supplier_orders", "status", "20260409_supplier_orders_status_summary.sql"),
         ("supplier_orders", "expected_delivery_date", "20260410_supplier_orders_delivery_internal_note.sql"),
+        ("supplier_orders", "delivery_location", "20260505_supplier_orders_delivery_location.sql"),
+        ("supplier_orders", "sequence_number", "20260506_supplier_orders_sequence_number.sql"),
+        ("supplier_orders", "order_signed_by", "20260507_order_delivery_signatures.sql"),
+        ("supplier_orders", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
+        ("deliveries", "order_signed_by", "20260507_order_delivery_signatures.sql"),
+        ("deliveries", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
         ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
     ]
     insp = inspect(engine)

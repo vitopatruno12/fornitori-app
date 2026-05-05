@@ -22,12 +22,18 @@ def build_order_pdf_bytes(order: SupplierOrderRead) -> bytes:
   pdf.cell(0, 10, "Ordine fornitore", ln=True)
   pdf.set_font("helvetica", size=11)
   lines: List[str] = [
-    f"N. ordine: #{order.id}",
+    f"N. ordine: #{order.sequence_number}",
     f"Fornitore: {order.supplier_name or '-'}",
     f"Data ordine: {order.order_date}",
   ]
   if order.expected_delivery_date:
     lines.append(f"Consegna prevista: {order.expected_delivery_date}")
+  if order.delivery_location:
+    lines.append(f"Destinazione scarico / spedizione: {order.delivery_location}")
+  if order.order_signed_by:
+    lines.append(f"Firma ordine (chi fa l'ordine): {order.order_signed_by}")
+  if order.unloading_signed_by:
+    lines.append(f"Firma scarico (chi fa lo scarico): {order.unloading_signed_by}")
   lines.append(f"IVA %: {order.vat_percent}")
   lines.append(f"Stato: {order.status}")
   lines.append("")

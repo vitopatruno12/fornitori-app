@@ -51,6 +51,14 @@ function truncate(str, n) {
   return t.length <= n ? t : `${t.slice(0, n)}…`
 }
 
+/** Numero ordine mostrato al fornitore (per fornitore; diverso dall'id interno). */
+function orderDisplayNum(o) {
+  if (!o || typeof o !== 'object') return ''
+  const n = o.sequence_number
+  if (n != null && n !== '' && Number.isFinite(Number(n))) return String(n)
+  return String(o.id ?? '')
+}
+
 function monthRangeFromYm(ym) {
   if (!ym || String(ym).length < 7) return { from: undefined, to: undefined }
   const [ys, ms] = String(ym).split('-')
@@ -107,7 +115,7 @@ function buildWhatsAppTextFromOrder(order) {
   const lines = [
     'Buongiorno,',
     '',
-    `Ordine merce — ${supplierName || 'Fornitore'} (riferimento n. #${order.id}):`,
+    `Ordine merce — ${supplierName || 'Fornitore'} (riferimento n. #${orderDisplayNum(order)}):`,
     `Data ordine: ${formatDateIt(order.order_date)}`,
     `IVA indicativa: ${order.vat_percent ?? '—'}%`,
     `Stato: ${statusLabel(order.status)}`,
@@ -136,6 +144,8 @@ export default function NewOrderPage({ onNavigate }) {
   const [orderDate, setOrderDate] = useState(todayIso)
   const [vatPercent, setVatPercent] = useState('23')
   const [orderStatus, setOrderStatus] = useState('pending')
+  const [orderSignedBy, setOrderSignedBy] = useState('')
+  const [unloadingSignedBy, setUnloadingSignedBy] = useState('')
   const [orderNote, setOrderNote] = useState('')
   const [orderNoteInternal, setOrderNoteInternal] = useState('')
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('')
@@ -147,6 +157,7 @@ export default function NewOrderPage({ onNavigate }) {
   const [successDetail, setSuccessDetail] = useState(null)
   const [recentOrders, setRecentOrders] = useState([])
   const [editingOrderId, setEditingOrderId] = useState(null)
+  const [editingOrderSeq, setEditingOrderSeq] = useState(null)
   const [historyMonth, setHistoryMonth] = useState('')
   const [historyStatus, setHistoryStatus] = useState('')
   const [priceList, setPriceList] = useState([])
@@ -154,6 +165,7 @@ export default function NewOrderPage({ onNavigate }) {
   const [aiOrderText, setAiOrderText] = useState('')
   const [aiOrderLoading, setAiOrderLoading] = useState(false)
   const [anomalyReport, setAnomalyReport] = useState(null)
+  const [copyFromOrderId, setCopyFromOrderId] = useState('')
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -300,6 +312,10 @@ export default function NewOrderPage({ onNavigate }) {
     refreshRecentOrders()
   }, [supplierId, historyMonth, historyStatus])
 
+  useEffect(() => {
+    setCopyFromOrderId('')
+  }, [supplierId])
+
   async function runAnomalyCheck(payload) {
     try {
       const r = await checkAiAnomalies('supplier-order', {
@@ -346,9 +362,12 @@ export default function NewOrderPage({ onNavigate }) {
 
   function resetFormNew() {
     setEditingOrderId(null)
+    setEditingOrderSeq(null)
     setOrderDate(todayIso())
     setVatPercent('23')
     setOrderStatus('pending')
+    setOrderSignedBy('')
+    setUnloadingSignedBy('')
     setOrderNote('')
     setOrderNoteInternal('')
     setExpectedDeliveryDate('')
@@ -390,6 +409,8 @@ export default function NewOrderPage({ onNavigate }) {
       vat_percent: Number(vatPercent) || 23,
       note: orderNote.trim() || null,
       note_internal: orderNoteInternal.trim() || null,
+      order_signed_by: orderSignedBy.trim() || null,
+      unloading_signed_by: unloadingSignedBy.trim() || null,
       expected_delivery_date: expectedDeliveryDate || null,
       status: orderStatus,
       items,
@@ -464,20 +485,26 @@ export default function NewOrderPage({ onNavigate }) {
     }
   }
 
-  async function duplicateLastOrder() {
-    if (!recentOrders.length) {
-      setError('Nessun ordine nello storico filtrato da duplicare')
+  /**
+   * Copia un ordine salvato nel modulo come nuovo ordine (bozza): data odierna, stato in sospeso, non sovrascrive l’ordine originale.
+   */
+  async function handleLoadOrderAsNew(orderId) {
+    if (!orderId) {
+      setError('Seleziona un ordine dallo storico')
       return
     }
-    const first = recentOrders[0]
     setError('')
+    setSuccess('')
+    setSuccessDetail(null)
     try {
-      const o = await fetchSupplierOrder(first.id)
+      const o = await fetchSupplierOrder(orderId)
       setEditingOrderId(null)
       setSupplierId(String(o.supplier_id))
       setOrderDate(todayIso())
       setVatPercent(String(o.vat_percent ?? '23'))
       setOrderStatus('pending')
+      setOrderSignedBy(o.order_signed_by || '')
+      setUnloadingSignedBy(o.unloading_signed_by || '')
       setOrderNote(o.note || '')
       setOrderNoteInternal(o.note_internal || '')
       setExpectedDeliveryDate(o.expected_delivery_date ? String(o.expected_delivery_date).slice(0, 10) : '')
@@ -490,11 +517,30 @@ export default function NewOrderPage({ onNavigate }) {
           }))
         : [emptyRow()]
       setRows(list)
-      setSuccess('Ordine duplicato come nuovo (data odierna, stato in sospeso)')
+      setAnomalyReport(null)
+      setSuccess(
+        `Ordine n. ${orderDisplayNum(o)} ripreso come nuovo (data ${formatDateIt(todayIso())}, in sospeso). Modifica le righe e salva per creare un ordine distinto.`,
+      )
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch {
-      setError('Impossibile duplicare l’ordine')
+      setError('Impossibile caricare l’ordine')
     }
+  }
+
+  async function duplicateLastOrder() {
+    if (!recentOrders.length) {
+      setError('Nessun ordine nello storico filtrato da duplicare')
+      return
+    }
+    await handleLoadOrderAsNew(recentOrders[0].id)
+  }
+
+  function handleLoadSelectedOrderAsNew() {
+    if (!copyFromOrderId) {
+      setError('Scegli un ordine dal menu a tendina')
+      return
+    }
+    handleLoadOrderAsNew(Number(copyFromOrderId))
   }
 
   async function handleAiSuggest() {
@@ -534,6 +580,10 @@ export default function NewOrderPage({ onNavigate }) {
       setError('Seleziona un fornitore')
       return
     }
+    if (!orderSignedBy.trim()) {
+      setError("Inserisci la firma: chi fa l'ordine")
+      return
+    }
     const payload = buildPayload()
     if (payload.items.length === 0) {
       setError('Aggiungi almeno un prodotto con descrizione')
@@ -551,22 +601,28 @@ export default function NewOrderPage({ onNavigate }) {
       let saved
       if (editingOrderId != null) {
         saved = await updateSupplierOrder(editingOrderId, payload)
-        setSuccess(`Ordine #${editingOrderId} aggiornato`)
+        const dn = orderDisplayNum(saved)
+        setSuccess(`Ordine n. ${dn} aggiornato`)
       } else {
         saved = await createSupplierOrder(payload)
-        setSuccess('Ordine salvato')
+        const dn = orderDisplayNum(saved)
+        setSuccess(`Ordine salvato (n. ${dn})`)
       }
       setSuccessDetail({
         id: saved?.id,
+        sequence_number: saved?.sequence_number ?? saved?.id,
         date: saved?.order_date,
         supplier: saved?.supplier_name || supplierLabel,
         merchandise: saved?.merchandise_summary,
         status: saved?.status || orderStatus,
       })
       setEditingOrderId(null)
+      setEditingOrderSeq(null)
       setOrderDate(todayIso())
       setVatPercent('23')
       setOrderStatus('pending')
+      setOrderSignedBy('')
+      setUnloadingSignedBy('')
       setOrderNote('')
       setOrderNoteInternal('')
       setExpectedDeliveryDate('')
@@ -676,7 +732,7 @@ export default function NewOrderPage({ onNavigate }) {
         return `<tr>
           <td>${escapeHtml(formatDateIt(o.order_date))}</td>
           <td>${escapeHtml(o.expected_delivery_date ? formatDateIt(o.expected_delivery_date) : '—')}</td>
-          <td>#${o.id}</td>
+          <td>#${orderDisplayNum(o)}</td>
           <td>${escapeHtml(truncate(o.merchandise_summary, 80))}</td>
           <td>${escapeHtml(statusLabel(o.status))}</td>
           <td><a href="${escapeHtml(pdfHref)}">PDF ordine</a></td>
@@ -776,6 +832,8 @@ export default function NewOrderPage({ onNavigate }) {
             anomaly_note: it.note || '',
           })),
           note_hint: orderNote.trim() || null,
+          order_signed_by: orderSignedBy.trim() || null,
+          unloading_signed_by: unloadingSignedBy.trim() || null,
         }),
       )
     } catch {
@@ -793,10 +851,13 @@ export default function NewOrderPage({ onNavigate }) {
     try {
       const o = await fetchSupplierOrder(order.id)
       setEditingOrderId(o.id)
+      setEditingOrderSeq(orderDisplayNum(o))
       setSupplierId(String(o.supplier_id))
       setOrderDate(String(o.order_date).slice(0, 10))
       setVatPercent(String(o.vat_percent ?? '23'))
       setOrderStatus(o.status === 'sent' ? 'sent' : 'pending')
+      setOrderSignedBy(o.order_signed_by || '')
+      setUnloadingSignedBy(o.unloading_signed_by || '')
       setOrderNote(o.note || '')
       setOrderNoteInternal(o.note_internal || '')
       setExpectedDeliveryDate(o.expected_delivery_date ? String(o.expected_delivery_date).slice(0, 10) : '')
@@ -836,8 +897,10 @@ export default function NewOrderPage({ onNavigate }) {
       <h1 className="page-header staff-page-title">Nuovo ordine</h1>
       <p className="staff-page-lead">
         Ordine verso un fornitore con più righe merce, note al fornitore e note interne, consegna prevista e controlli
-        rapidi. Dopo il salvataggio puoi scaricare il PDF, inviare email o passare a Nuova consegna con righe
-        precompilate.
+        rapidi. Puoi <strong>caricare un ordine già fatto</strong> (menu &quot;Carica ordine vecchio&quot; o pulsante nello
+        storico) per riprenderlo come <strong>bozza nuova</strong>, modificarlo e salvare; da storico,{' '}
+        <strong>Modifica</strong> aggiorna invece quell’ordine. Dopo il salvataggio: PDF, email, WhatsApp o Nuova consegna
+        precompilata. La <strong>destinazione scarico / spedizione</strong> si indica in <strong>Nuova consegna</strong>.
       </p>
       </section>
 
@@ -862,7 +925,7 @@ export default function NewOrderPage({ onNavigate }) {
               </li>
               {successDetail.id != null && (
                 <li>
-                  <strong>N. ordine:</strong> #{successDetail.id}{' '}
+                  <strong>N. ordine:</strong> #{successDetail.sequence_number ?? successDetail.id}{' '}
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -934,7 +997,7 @@ export default function NewOrderPage({ onNavigate }) {
       <section className="card">
         {editingOrderId != null && (
           <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-            Stai modificando l’ordine <strong>#{editingOrderId}</strong>.
+            Stai modificando l’ordine <strong>n. {editingOrderSeq ?? editingOrderId}</strong>.
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -1155,6 +1218,49 @@ export default function NewOrderPage({ onNavigate }) {
             />
           </div>
 
+          {supplierId && recentOrders.length > 0 && (
+            <div
+              className="form-row"
+              style={{
+                alignItems: 'flex-end',
+                marginBottom: '1rem',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                padding: '0.75rem',
+                background: 'var(--surface-2, rgba(0,0,0,0.04))',
+                borderRadius: 8,
+                border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))',
+              }}
+            >
+              <div className="form-group" style={{ minWidth: 260, flex: '1 1 260px', marginBottom: 0 }}>
+                <label>Carica ordine vecchio (come nuovo)</label>
+                <select
+                  className="form-control"
+                  value={copyFromOrderId}
+                  onChange={(e) => setCopyFromOrderId(e.target.value)}
+                  aria-label="Seleziona ordine da riprendere come nuovo"
+                >
+                  <option value="">Scegli data e ordine…</option>
+                  {recentOrders.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {formatDateIt(o.order_date)} — n. {orderDisplayNum(o)} — {truncate(o.merchandise_summary, 42)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleLoadSelectedOrderAsNew}
+                  title="Copia righe e note nell’ordine in compilazione (data odierna). Non modifica l’ordine archiviato."
+                >
+                  Carica in nuovo ordine
+                </button>
+              </div>
+            </div>
+          )}
+
           <details className="card" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
             <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Anteprima messaggio WhatsApp / email</summary>
             <pre
@@ -1173,6 +1279,17 @@ export default function NewOrderPage({ onNavigate }) {
             </pre>
           </details>
 
+          <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '0.75rem' }}>
+            <div className="form-group" style={{ minWidth: 260, marginBottom: 0 }}>
+              <label>Firma (chi fa l'ordine) *</label>
+              <input
+                className="form-control"
+                value={orderSignedBy}
+                onChange={(e) => setOrderSignedBy(e.target.value)}
+                placeholder="Nome e cognome"
+              />
+            </div>
+          </div>
           <div className="btn-group" style={{ flexWrap: 'wrap' }}>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Salvataggio...' : editingOrderId != null ? 'Aggiorna ordine' : 'Salva ordine'}
@@ -1192,8 +1309,14 @@ export default function NewOrderPage({ onNavigate }) {
             <button type="button" className="btn btn-secondary" onClick={loadTemplate}>
               Carica modello righe
             </button>
-            <button type="button" className="btn btn-secondary" onClick={duplicateLastOrder} disabled={!supplierId || !recentOrders.length}>
-              Duplica ultimo ordine (lista)
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={duplicateLastOrder}
+              disabled={!supplierId || !recentOrders.length}
+              title="Riprende il primo ordine dell’elenco filtrato sotto (come «Carica ordine vecchio»)"
+            >
+              Duplica ultimo in elenco
             </button>
           </div>
           {!selectedSupplier?.phone && supplierId && (
@@ -1211,7 +1334,9 @@ export default function NewOrderPage({ onNavigate }) {
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
             Dal nome fornitore puoi aprire una <strong>chat WhatsApp</strong>; da Azioni invii il <strong>testo dell’ordine</strong> salvato o apri il{' '}
-            <strong>PDF</strong>. Usa &quot;Stampa elenco&quot; per un riepilogo stampabile / salvabile come PDF dello storico filtrato.
+            <strong>PDF</strong>. <strong>Nuovo da questo</strong> copia l’ordine nel modulo come bozza nuova;{' '}
+            <strong>Modifica</strong> cambia l’ordine salvato. Destinazione di scarico / spedizione: vedi <strong>Nuova consegna</strong>.{' '}
+            &quot;Stampa elenco&quot; per PDF dello storico filtrato.
           </p>
           <div className="form-row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>
             <div className="form-group">
@@ -1251,7 +1376,9 @@ export default function NewOrderPage({ onNavigate }) {
                 <thead>
                   <tr>
                     <th>Data</th>
+                    <th className="text-end" style={{ whiteSpace: 'nowrap' }}>N.</th>
                     <th>Consegna prev.</th>
+                    <th>Firma ordine</th>
                     <th>Fornitore / WhatsApp</th>
                     <th>Descrizione merce</th>
                     <th>Stato</th>
@@ -1264,7 +1391,9 @@ export default function NewOrderPage({ onNavigate }) {
                     return (
                       <tr key={o.id}>
                         <td>{formatDateIt(o.order_date)}</td>
+                        <td className="text-end" style={{ fontWeight: 600 }}>{orderDisplayNum(o)}</td>
                         <td>{o.expected_delivery_date ? formatDateIt(o.expected_delivery_date) : '—'}</td>
+                        <td>{o.order_signed_by || '—'}</td>
                         <td>
                           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem' }}>
                             <span>{o.supplier_name || supplierLabel || '—'}</span>
@@ -1305,6 +1434,15 @@ export default function NewOrderPage({ onNavigate }) {
                             onClick={() => handleOpenPdf(o.id)}
                           >
                             PDF
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', marginRight: '0.35rem' }}
+                            onClick={() => handleLoadOrderAsNew(o.id)}
+                            title="Copia questo ordine nel modulo sopra come nuovo (data odierna); la numerazione interna resta in archivio finché non salvi un nuovo ordine"
+                          >
+                            Nuovo da questo
                           </button>
                           <button
                             type="button"

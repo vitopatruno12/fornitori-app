@@ -292,6 +292,7 @@ export default function DeliveriesHistoryPage() {
                   <th>DDT</th>
                   <th>Fornitore</th>
                   <th>Prodotto</th>
+                  <th>Firma scarico</th>
                   <th>Quantità</th>
                   <th className="text-end">Prezzo unit.</th>
                   <th className="text-end">Listino</th>
@@ -310,6 +311,7 @@ export default function DeliveriesHistoryPage() {
                     <td>{d.ddt_number || '–'}</td>
                     <td>{d.supplier_name || d.supplier_id}</td>
                     <td>{d.product_description || '–'}</td>
+                    <td>{d.unloading_signed_by || '–'}</td>
                     <td>{qtyCell(d)}</td>
                     <td className="text-end amount">{formatAmount(d.unit_price)}</td>
                     <td className="text-end amount">{d.list_unit_price != null ? formatAmount(d.list_unit_price) : '–'}</td>
@@ -337,7 +339,7 @@ export default function DeliveriesHistoryPage() {
                 ))}
                 {deliveries.length === 0 && (
                   <tr>
-                    <td colSpan={13} className="empty-state">
+                    <td colSpan={14} className="empty-state">
                       Nessuna consegna registrata.
                     </td>
                   </tr>

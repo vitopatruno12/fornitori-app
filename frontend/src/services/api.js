@@ -48,10 +48,19 @@ export async function apiFetch(path, options = {}) {
     throw new Error(formatApiError(response.status, text))
   }
 
+  const text = await response.text().catch(() => '')
   const contentType = response.headers.get('content-type') || ''
   if (contentType.includes('application/json')) {
-    return response.json()
+    const trimmed = text.trim()
+    if (!trimmed) {
+      return null
+    }
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      return text
+    }
   }
 
-  return response.text()
+  return text
 }

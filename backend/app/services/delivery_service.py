@@ -26,6 +26,13 @@ def _norm_ddt(value) -> Optional[str]:
     return s if s else None
 
 
+def _norm_signature(value) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s[:128] if s else None
+
+
 def _resolve_listino(
     db: Session, supplier_id: int, product_description: Optional[str], unit_price: Decimal
 ) -> tuple[Optional[Decimal], Optional[Decimal]]:
@@ -163,6 +170,8 @@ def create_delivery(db: Session, data: DeliveryCreate) -> Delivery:
         note=payload.get("note"),
         invoice_id=payload.get("invoice_id"),
         ddt_number=_norm_ddt(payload.get("ddt_number")),
+        order_signed_by=_norm_signature(payload.get("order_signed_by")),
+        unloading_signed_by=_norm_signature(payload.get("unloading_signed_by")),
         list_unit_price=list_u,
         price_diff_vs_list=diff,
         anomaly_note=payload.get("anomaly_note"),
@@ -180,6 +189,8 @@ def create_delivery_batch(db: Session, data: DeliveryBatchCreate) -> List[Delive
     delivery_date = payload.get("delivery_date") or datetime.utcnow()
     note = payload.get("note")
     ddt_number = _norm_ddt(payload.get("ddt_number"))
+    order_signed_by = _norm_signature(payload.get("order_signed_by"))
+    unloading_signed_by = _norm_signature(payload.get("unloading_signed_by"))
     items = payload["items"]
     vat_percent = Decimal(str(payload.get("vat_percent") or "23.0"))
 
@@ -218,6 +229,8 @@ def create_delivery_batch(db: Session, data: DeliveryBatchCreate) -> List[Delive
             note=note,
             invoice_id=None,
             ddt_number=ddt_number,
+            order_signed_by=order_signed_by,
+            unloading_signed_by=unloading_signed_by,
             list_unit_price=list_u,
             price_diff_vs_list=diff,
             anomaly_note=anomaly_note,

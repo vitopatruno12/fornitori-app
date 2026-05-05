@@ -564,7 +564,9 @@ function App() {
             <a href="#" className={page === 'staff' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('staff'); }}>Personale</a>
             <a href="#" className={page === 'support-tech' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('support-tech'); }}>Assistenza tecnici</a>
             <a href="#" className={page === 'vne' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('vne'); }}>VNE</a>
-            <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
+            <div className="app-nav-right">
+              <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
+            </div>
           </div>
         </div>
         {navOpen && (
@@ -575,6 +577,7 @@ function App() {
           />
         )}
       </nav>
+      <div className="app-version-strip" aria-label="Versione software">Versione 1.0</div>
 
       <main className="app-main">
         {page === 'home' && <HomePage onNavigate={navigateTo} />}

@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CashEntryBase(BaseModel):
@@ -23,7 +23,9 @@ class CashEntryBase(BaseModel):
 
 
 class CashEntryCreate(CashEntryBase):
-    pass
+    """Creazione/aggiornamento movimento: descrizione obbligatoria."""
+
+    description: str = Field(..., min_length=1, max_length=2000)
 
 
 class CashEntryRead(CashEntryBase):
