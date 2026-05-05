@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
         _ensure_support_technicians_columns()
         _ensure_supplier_orders_delivery_location_column()
+        _ensure_supplier_orders_sequence_number_column()
         _ensure_order_delivery_signature_columns()
     except OperationalError as e:
         logger.error(
@@ -121,6 +122,44 @@ def _ensure_supplier_orders_delivery_location_column() -> None:
     except Exception as e:
         logger.warning(
             "Impossibile verificare/aggiornare supplier_orders.delivery_location: %s",
+            e,
+        )
+
+
+def _ensure_supplier_orders_sequence_number_column() -> None:
+    """Backward-compat: sequence_number ordini per fornitore (migr. 20260506)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS sequence_number INTEGER"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE supplier_orders o
+                    SET sequence_number = sub.rn
+                    FROM (
+                      SELECT id, ROW_NUMBER() OVER (PARTITION BY supplier_id ORDER BY id ASC) AS rn
+                      FROM supplier_orders
+                    ) sub
+                    WHERE o.id = sub.id
+                      AND o.sequence_number IS NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_supplier_orders_supplier_sequence
+                    ON supplier_orders (supplier_id, sequence_number)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare supplier_orders.sequence_number: %s",
             e,
         )
 
