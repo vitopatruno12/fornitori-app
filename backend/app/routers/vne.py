@@ -134,6 +134,21 @@ class VneContabilitaOut(BaseModel):
     raw_excerpt: str
 
 
+class VneHealthModelOut(BaseModel):
+    model_id: str
+    model_label: str
+    configured: bool
+    reachable: bool
+    detail: str
+
+
+class VneHealthOut(BaseModel):
+    ok: bool
+    credentials_configured: bool
+    credentials_message: str
+    models: List[VneHealthModelOut]
+
+
 def _env(name: str, default: str = "") -> str:
     return (os.getenv(name, default) or "").strip()
 
@@ -196,6 +211,22 @@ def _models() -> List[VneModelConfig]:
             referer_url=m3_ref or None,
         ),
     ]
+
+
+def _credentials_configured() -> bool:
+    return bool(_env("VNE_USERNAME") and _env("VNE_PASSWORD"))
+
+
+def _missing_credentials_detail() -> str:
+    return (
+        "Credenziali VNE mancanti: configura VNE_USERNAME e VNE_PASSWORD "
+        "nel backend (.env / Render Environment)."
+    )
+
+
+def _ensure_vne_credentials() -> None:
+    if not _credentials_configured():
+        raise HTTPException(status_code=503, detail=_missing_credentials_detail())
 
 
 def _to_float_it(text: str) -> Optional[float]:
@@ -358,6 +389,7 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector) -> None:
 def _fetch_model_status(model: VneModelConfig) -> str:
     if not model.status_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
+    _ensure_vne_credentials()
 
     opener, _ = _build_opener()
     started = time.monotonic()
@@ -516,6 +548,74 @@ def list_models():
     ]
 
 
+@router.get("/health", response_model=VneHealthOut)
+def get_vne_health():
+    credentials_ok = _credentials_configured()
+    models_out: List[VneHealthModelOut] = []
+    for model in _models():
+        is_configured = bool(model.status_url)
+        if not is_configured:
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=False,
+                    reachable=False,
+                    detail="URL stato non configurato",
+                )
+            )
+            continue
+        if not credentials_ok:
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=True,
+                    reachable=False,
+                    detail=_missing_credentials_detail(),
+                )
+            )
+            continue
+        try:
+            html = _fetch_model_status(model)
+            blocked = "impossibile accedere alla macchina" in html.lower()
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=True,
+                    reachable=not blocked,
+                    detail="OK" if not blocked else "Portale VNE raggiungibile ma macchina non accessibile",
+                )
+            )
+        except HTTPException as exc:
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=True,
+                    reachable=False,
+                    detail=str(exc.detail),
+                )
+            )
+        except Exception as exc:
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=True,
+                    reachable=False,
+                    detail=f"Errore healthcheck: {exc}",
+                )
+            )
+    return VneHealthOut(
+        ok=credentials_ok and all((not m.configured) or m.reachable for m in models_out),
+        credentials_configured=credentials_ok,
+        credentials_message="OK" if credentials_ok else _missing_credentials_detail(),
+        models=models_out,
+    )
+
+
 @router.get("/models/{model_id}/status", response_model=VneStatusOut)
 def get_model_status(model_id: str):
     model = next((m for m in _models() if m.id == model_id), None)
@@ -585,6 +685,7 @@ def get_model_operation_filters(model_id: str):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.sel_operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_operazioni URL")
+    _ensure_vne_credentials()
     opener, _ = _build_opener()
     _maybe_login_vne(opener)
     try:
@@ -611,6 +712,7 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.sel_operazioni_url or not model.operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL operazioni")
+    _ensure_vne_credentials()
 
     opener, _ = _build_opener()
     _maybe_login_vne(opener)
@@ -665,6 +767,7 @@ def get_model_cash_closing_filters(model_id: str):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.sel_chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_chiusure URL")
+    _ensure_vne_credentials()
     opener, _ = _build_opener()
     _maybe_login_vne(opener)
     try:
@@ -734,6 +837,7 @@ def get_model_contabilita(model_id: str):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.contabilita_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca contabilita URL")
+    _ensure_vne_credentials()
 
     opener, _ = _build_opener()
     _maybe_login_vne(opener)
@@ -772,6 +876,7 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.sel_chiusure_url or not model.chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL chiusure")
+    _ensure_vne_credentials()
     opener, _ = _build_opener()
     _maybe_login_vne(opener)
     try:

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   fetchVneModels,
+  fetchVneHealth,
   fetchVneModelStatus,
   fetchVneOperationFilters,
   queryVneOperations,
@@ -68,6 +69,7 @@ export default function VneSection({ embedded = false }) {
   const [opsAutoRefreshEnabled, setOpsAutoRefreshEnabled] = useState(false)
   const [closingsAutoRefreshEnabled, setClosingsAutoRefreshEnabled] = useState(false)
   const [modelConnectivity, setModelConnectivity] = useState({})
+  const [healthWarning, setHealthWarning] = useState('')
 
   const selected = useMemo(() => models.find((m) => m.id === selectedId) || null, [models, selectedId])
 
@@ -82,6 +84,18 @@ export default function VneSection({ embedded = false }) {
         setModels(Array.isArray(data) ? data : [])
         if (Array.isArray(data) && data.length > 0 && !data.some((m) => m.id === selectedId)) {
           setSelectedId(data[0].id)
+        }
+        try {
+          const health = await fetchVneHealth()
+          if (!mounted) return
+          if (!health?.credentials_configured) {
+            setHealthWarning(health?.credentials_message || 'Credenziali VNE mancanti')
+          } else {
+            setHealthWarning('')
+          }
+        } catch {
+          if (!mounted) return
+          setHealthWarning('')
         }
       } catch (e) {
         if (!mounted) return
@@ -277,6 +291,7 @@ export default function VneSection({ embedded = false }) {
       )}
 
       {error && <div className="alert alert-danger">{error}</div>}
+      {healthWarning && <div className="alert alert-warning">{healthWarning}</div>}
 
       <section className="card vne-chiusure-style">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.65rem' }}>

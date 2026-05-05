@@ -4,6 +4,10 @@ export function fetchVneModels() {
   return apiFetch('/vne/models')
 }
 
+export function fetchVneHealth() {
+  return apiFetch('/vne/health')
+}
+
 export function fetchVneModelStatus(modelId) {
   return apiFetch(`/vne/models/${encodeURIComponent(modelId)}/status`)
 }
