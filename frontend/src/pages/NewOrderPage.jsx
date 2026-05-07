@@ -123,6 +123,8 @@ function buildWhatsAppTextFromOrder(order) {
   if (order.expected_delivery_date) {
     lines.push(`Consegna richiesta entro: ${formatDateIt(order.expected_delivery_date)}`)
   }
+  const ordDest = (order.delivery_location || '').trim()
+  if (ordDest) lines.push(`Destinazione scarico / spedizione: ${ordDest}`)
   lines.push('')
   const items = order.items || []
   items.forEach((it) => {
@@ -149,6 +151,7 @@ export default function NewOrderPage({ onNavigate }) {
   const [orderNote, setOrderNote] = useState('')
   const [orderNoteInternal, setOrderNoteInternal] = useState('')
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('')
+  const [deliveryLocation, setDeliveryLocation] = useState('')
   const [rows, setRows] = useState([emptyRow()])
   const [loadingSuppliers, setLoadingSuppliers] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -371,6 +374,7 @@ export default function NewOrderPage({ onNavigate }) {
     setOrderNote('')
     setOrderNoteInternal('')
     setExpectedDeliveryDate('')
+    setDeliveryLocation('')
     setRows([emptyRow()])
     setSuccessDetail(null)
     setAnomalyReport(null)
@@ -430,6 +434,8 @@ export default function NewOrderPage({ onNavigate }) {
     if (expectedDeliveryDate) {
       lines.push(`Consegna richiesta entro: ${formatDateIt(expectedDeliveryDate)}`)
     }
+    const dlMsg = deliveryLocation.trim()
+    if (dlMsg) lines.push(`Destinazione scarico / spedizione: ${dlMsg}`)
     lines.push('')
     payload.items.forEach((it) => {
       const bits = [it.product_description]
@@ -508,6 +514,7 @@ export default function NewOrderPage({ onNavigate }) {
       setOrderNote(o.note || '')
       setOrderNoteInternal(o.note_internal || '')
       setExpectedDeliveryDate(o.expected_delivery_date ? String(o.expected_delivery_date).slice(0, 10) : '')
+      setDeliveryLocation(o.delivery_location ? String(o.delivery_location) : '')
       const list = (o.items || []).length
         ? o.items.map((it) => ({
             product_description: it.product_description || '',
@@ -571,13 +578,17 @@ export default function NewOrderPage({ onNavigate }) {
     }
   }
 
-  async function handleSave(e) {
-    e.preventDefault()
+  async function handleSave(e, opts = {}) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault()
     setError('')
     setSuccess('')
     setSuccessDetail(null)
     if (!supplierId) {
       setError('Seleziona un fornitore')
+      return
+    }
+    if (opts.requireDelivery && !deliveryLocation.trim()) {
+      setError('Inserisci la destinazione scarico / spedizione per salvare con destinazione')
       return
     }
     if (!orderSignedBy.trim()) {
@@ -824,6 +835,7 @@ export default function NewOrderPage({ onNavigate }) {
         'deliveryPrefillFromOrder',
         JSON.stringify({
           supplier_id: Number(supplierId),
+          delivery_location: deliveryLocation.trim() || null,
           items: payload.items.map((it) => ({
             product_description: it.product_description,
             weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
@@ -861,6 +873,7 @@ export default function NewOrderPage({ onNavigate }) {
       setOrderNote(o.note || '')
       setOrderNoteInternal(o.note_internal || '')
       setExpectedDeliveryDate(o.expected_delivery_date ? String(o.expected_delivery_date).slice(0, 10) : '')
+      setDeliveryLocation(o.delivery_location ? String(o.delivery_location) : '')
       const list = (o.items || []).length
         ? o.items.map((it) => ({
             product_description: it.product_description || '',
@@ -900,7 +913,8 @@ export default function NewOrderPage({ onNavigate }) {
         rapidi. Puoi <strong>caricare un ordine già fatto</strong> (menu &quot;Carica ordine vecchio&quot; o pulsante nello
         storico) per riprenderlo come <strong>bozza nuova</strong>, modificarlo e salvare; da storico,{' '}
         <strong>Modifica</strong> aggiorna invece quell’ordine. Dopo il salvataggio: PDF, email, WhatsApp o Nuova consegna
-        precompilata. La <strong>destinazione scarico / spedizione</strong> si indica in <strong>Nuova consegna</strong>.
+        precompilata. Puoi indicare la <strong>destinazione scarico / spedizione</strong> anche nell&apos;ordine; lo stesso testo viene proposto in{' '}
+        <strong>Nuova consegna</strong> quando usi &quot;Registra consegna (precompila)&quot;.
       </p>
       </section>
 
@@ -1279,6 +1293,23 @@ export default function NewOrderPage({ onNavigate }) {
             </pre>
           </details>
 
+          <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+            <label>Destinazione scarico / spedizione</label>
+            <input
+              type="text"
+              className="form-control"
+              value={deliveryLocation}
+              onChange={(e) => setDeliveryLocation(e.target.value)}
+              placeholder="es. sede, magazzino, indirizzo di scarico"
+              maxLength={128}
+              autoComplete="off"
+            />
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.35rem', marginBottom: 0 }}>
+              Opzionale con <strong>Salva ordine</strong>; obbligatoria con <strong>Salva ordine con destinazione</strong>.
+              Compare nel PDF ordine e nel messaggio WhatsApp / email.
+            </p>
+          </div>
+
           <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '0.75rem' }}>
             <div className="form-group" style={{ minWidth: 260, marginBottom: 0 }}>
               <label>Firma (chi fa l'ordine) *</label>
@@ -1293,6 +1324,15 @@ export default function NewOrderPage({ onNavigate }) {
           <div className="btn-group" style={{ flexWrap: 'wrap' }}>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Salvataggio...' : editingOrderId != null ? 'Aggiorna ordine' : 'Salva ordine'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={saving}
+              onClick={() => handleSave(null, { requireDelivery: true })}
+              title="Richiede il campo destinazione compilato sopra"
+            >
+              {saving ? 'Salvataggio...' : editingOrderId != null ? 'Aggiorna con destinazione' : 'Salva ordine con destinazione'}
             </button>
             <button type="button" className="btn btn-whatsapp" onClick={handleWhatsApp} disabled={!supplierId}>
               Invia ordine via WhatsApp
@@ -1335,7 +1375,8 @@ export default function NewOrderPage({ onNavigate }) {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
             Dal nome fornitore puoi aprire una <strong>chat WhatsApp</strong>; da Azioni invii il <strong>testo dell’ordine</strong> salvato o apri il{' '}
             <strong>PDF</strong>. <strong>Nuovo da questo</strong> copia l’ordine nel modulo come bozza nuova;{' '}
-            <strong>Modifica</strong> cambia l’ordine salvato. Destinazione di scarico / spedizione: vedi <strong>Nuova consegna</strong>.{' '}
+            <strong>Modifica</strong> cambia l’ordine salvato. Destinazione: campo nell&apos;ordine sopra o in{' '}
+            <strong>Nuova consegna</strong>.{' '}
             &quot;Stampa elenco&quot; per PDF dello storico filtrato.
           </p>
           <div className="form-row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>

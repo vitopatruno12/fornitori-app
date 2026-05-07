@@ -133,6 +133,7 @@ export default function NewDeliveryPage() {
       if (data.note_hint) setNote(String(data.note_hint))
       if (data.order_signed_by) setOrderSignedBy(String(data.order_signed_by))
       if (data.unloading_signed_by) setUnloadingSignedBy(String(data.unloading_signed_by))
+      if (data.delivery_location) setDeliveryLocation(String(data.delivery_location))
     } catch {
       try {
         sessionStorage.removeItem('deliveryPrefillFromOrder')
