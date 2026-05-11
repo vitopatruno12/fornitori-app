@@ -4,8 +4,9 @@ import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -114,6 +115,47 @@ else:
 _uploads_dir = Path(__file__).resolve().parent / "uploads"
 _uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+
+# Mostra dettagli errore al client quando richiesto (DEBUG_ERRORS=true). Utile in
+# staging/Render per debuggare 500. In produzione meglio false.
+EXPOSE_ERROR_DETAILS = os.getenv("DEBUG_ERRORS", "false").strip().lower() in ("1", "true", "yes")
+
+
+@app.exception_handler(OperationalError)
+async def _operational_error_handler(request: Request, exc: OperationalError):
+    """DB irraggiungibile/credenziali errate: 503 con messaggio chiaro.
+
+    Importante: tornare una Response qui invece di propagare l'eccezione fa sì
+    che la risposta passi dal CORSMiddleware e includa Access-Control-Allow-Origin.
+    """
+    logger.error("OperationalError su %s: %s", request.url.path, exc)
+    payload = {
+        "detail": "Database non raggiungibile. Verifica DATABASE_URL e che il Postgres sia attivo.",
+        "error": "operational_error",
+    }
+    if EXPOSE_ERROR_DETAILS:
+        payload["debug"] = str(exc)
+    return JSONResponse(status_code=503, content=payload)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
+    logger.error("SQLAlchemyError su %s (%s): %s", request.url.path, type(exc).__name__, exc)
+    payload = {"detail": "Errore database.", "error": "sqlalchemy_error"}
+    if EXPOSE_ERROR_DETAILS:
+        payload["debug"] = f"{type(exc).__name__}: {exc}"
+    return JSONResponse(status_code=500, content=payload)
+
+
+@app.exception_handler(Exception)
+async def _generic_error_handler(request: Request, exc: Exception):
+    """Catchall: assicura JSON + header CORS anche su eccezioni non previste."""
+    logger.exception("Errore non gestito su %s", request.url.path)
+    payload = {"detail": "Errore interno.", "error": "internal_error"}
+    if EXPOSE_ERROR_DETAILS:
+        payload["debug"] = f"{type(exc).__name__}: {exc}"
+    return JSONResponse(status_code=500, content=payload)
+
 
 app.include_router(suppliers.router)
 app.include_router(deliveries.router)
