@@ -1,5 +1,6 @@
 import logging
 import os
+import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,7 +14,23 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians, vne, aruba, sdi
 
+# Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
+# del nostro logger arrivino sempre nel log del servizio.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger("app.startup")
+
+# Modalità tollerante in deploy: se True, le inizializzazioni DB falliscono
+# senza killare il processo (il servizio resta su e /health risponde, così
+# si possono ispezionare i log su Render).
+ALLOW_STARTUP_DB_FAILURE = os.getenv("ALLOW_STARTUP_DB_FAILURE", "true").strip().lower() in ("1", "true", "yes")
+
+
+def _log_startup_exception(prefix: str, exc: Exception) -> None:
+    logger.error("%s (%s): %s", prefix, type(exc).__name__, exc)
+    logger.error("Traceback:\n%s", traceback.format_exc())
 
 
 @asynccontextmanager
@@ -25,25 +42,31 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_orders_sequence_number_column()
         _ensure_order_delivery_signature_columns()
     except OperationalError as e:
-        logger.error(
+        _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
-            "Controlla che il servizio sia avviato e che la password in backend/.env (DATABASE_URL) "
-            "coincida con l'utente sul server. "
-            "Per allineare l'utente locale vedi backend/scripts/dev_postgres_fornitori.sql — Dettaglio: %s",
+            "Controlla DATABASE_URL su Render (Internal URL del DB) e che il servizio Postgres sia attivo. "
+            "Se serve SSL imposta DATABASE_SSL_REQUIRE=true.",
             e,
         )
-        raise
+        if not ALLOW_STARTUP_DB_FAILURE:
+            raise
     except SQLAlchemyError as e:
-        logger.error(
-            "Inizializzazione database fallita (%s): %s. "
-            "Se accedi a Postgres gestito, prova DATABASE_SSL_REQUIRE=true nel dashboard. "
+        _log_startup_exception(
+            "Inizializzazione database fallita. "
             "ProgrammingError (sqlalche.me/e/20/e3q8): verifica DATABASE_URL, "
-            "password con caratteri speciali (codifica nella URL) e che sia Postgres.",
-            type(e).__name__,
+            "password URL-encoded e che il target sia Postgres.",
             e,
         )
-        raise
-    _check_critical_schema_columns()
+        if not ALLOW_STARTUP_DB_FAILURE:
+            raise
+    except Exception as e:  # pylint: disable=broad-except
+        _log_startup_exception("Errore generico durante init DB", e)
+        if not ALLOW_STARTUP_DB_FAILURE:
+            raise
+    try:
+        _check_critical_schema_columns()
+    except Exception as e:  # pylint: disable=broad-except
+        _log_startup_exception("Schema check fallito (non bloccante)", e)
     yield
 
 
