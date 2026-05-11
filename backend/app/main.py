@@ -75,20 +75,36 @@ app = FastAPI(lifespan=lifespan)
 # CORS subito dopo la creazione dell'app (prima di mount/router): così tutte le risposte
 # (anche errori) passano dal middleware. Con allow_credentials=True + origini fisse il
 # browser a volte non riceve l'header; per API senza cookie usiamo * in dev.
-_cors = os.getenv("CORS_ORIGINS", "*").strip()
+#
+# Configurazione:
+#   CORS_ORIGINS       = "*"  oppure CSV di origin esatti (https://app.vercel.app, ...)
+#   CORS_ORIGIN_REGEX  = regex Python per matchare origin dinamici (es. preview Vercel)
+# Default (env vuota o assente): "*". I deploy su Vercel hanno URL preview variabili
+# (<proj>-<hash>-<team>.vercel.app), quindi per evitare 500 da CORS abilitiamo anche
+# un regex di default che copre *.vercel.app.
+_cors = (os.getenv("CORS_ORIGINS", "*").strip() or "*")
+_cors_regex = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"https://([a-z0-9-]+\.)*vercel\.app",
+).strip() or None
+
 if _cors == "*":
+    logger.info("CORS: allow_origins=* (credentials disabled), regex=%s", _cors_regex)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
+        allow_origin_regex=_cors_regex,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 else:
-    _origins = [o.strip() for o in _cors.split(",") if o.strip()]
+    _origins = [o.strip() for o in _cors.split(",") if o.strip()] or ["http://localhost:5173"]
+    logger.info("CORS: allow_origins=%s (credentials enabled), regex=%s", _origins, _cors_regex)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_origins or ["http://localhost:5173"],
+        allow_origins=_origins,
+        allow_origin_regex=_cors_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
