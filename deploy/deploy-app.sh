@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+#
+# deploy-app.sh
+# Clona/aggiorna il codice e installa le dipendenze Python.
+# Da eseguire DOPO install-server.sh.
+#
+# Idempotente: puoi lanciarlo ogni volta che fai un release.
+#
+# Uso (come root o con sudo):
+#   sudo bash deploy-app.sh [REPO_URL] [BRANCH]
+# Default: repo public GitHub, branch main
+
+set -euo pipefail
+
+REPO_URL="${1:-https://github.com/vitopatruno12/fornitori-app.git}"
+BRANCH="${2:-main}"
+APP_USER="${APP_USER:-fornitori}"
+APP_DIR="${APP_DIR:-/opt/fornitori-app}"
+VENV_DIR="$APP_DIR/backend/.venv"
+
+log() { printf "\n\033[1;32m==> %s\033[0m\n" "$*"; }
+
+if [[ $EUID -ne 0 ]]; then
+   echo "Devi essere root (usa: sudo bash $0)"
+   exit 1
+fi
+
+if [[ ! -d "$APP_DIR/.git" ]]; then
+    log "Primo clone del repo in $APP_DIR"
+    rm -rf "$APP_DIR/_tmp_clone"
+    git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR/_tmp_clone"
+    shopt -s dotglob
+    mv "$APP_DIR/_tmp_clone"/* "$APP_DIR"/
+    rm -rf "$APP_DIR/_tmp_clone"
+    shopt -u dotglob
+else
+    log "Aggiornamento repo (git pull)"
+    git -C "$APP_DIR" fetch origin
+    git -C "$APP_DIR" checkout "$BRANCH"
+    git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+fi
+
+chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+log "Creazione/aggiornamento virtualenv Python 3.12"
+if [[ ! -d "$VENV_DIR" ]]; then
+    sudo -u "$APP_USER" python3.12 -m venv "$VENV_DIR"
+fi
+sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip wheel
+sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+
+log "Verifica file .env produzione"
+ENV_FILE="$APP_DIR/backend/.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+    log "Creo .env da template (DEVI EDITARLO PRIMA DI AVVIARE)"
+    cp "$APP_DIR/deploy/env.production.example" "$ENV_FILE"
+    chown "$APP_USER:$APP_USER" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    echo
+    echo "================================================================"
+    echo "  ATTENZIONE: configura $ENV_FILE prima del primo avvio."
+    echo "  Suggerimento: prendi DATABASE_URL da /root/fornitori_db_credentials.txt"
+    echo "    cat /root/fornitori_db_credentials.txt"
+    echo "    nano $ENV_FILE"
+    echo "================================================================"
+fi
+
+log "Installazione systemd unit fornitori-api"
+install -m 644 "$APP_DIR/deploy/fornitori-api.service" /etc/systemd/system/fornitori-api.service
+systemctl daemon-reload
+systemctl enable fornitori-api
+
+if systemctl is-active --quiet fornitori-api; then
+    log "Restart fornitori-api"
+    systemctl restart fornitori-api
+else
+    log "Avvio fornitori-api (potrebbe fallire se .env non configurato)"
+    systemctl start fornitori-api || true
+fi
+
+sleep 2
+log "Stato del servizio"
+systemctl --no-pager --full status fornitori-api | head -20 || true
+
+echo
+echo "================================================================"
+echo "  Log live:   journalctl -u fornitori-api -f"
+echo "  Health:     curl http://127.0.0.1:8000/health"
+echo "  Restart:    systemctl restart fornitori-api"
+echo "================================================================"

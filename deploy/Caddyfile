@@ -1,0 +1,58 @@
+# /etc/caddy/Caddyfile
+#
+# Reverse proxy + HTTPS automatico (Let's Encrypt) per il backend fornitori-api.
+# DA EDITARE: sostituisci api.tuosito.it con il tuo dominio reale prima del primo
+# `systemctl reload caddy`.
+#
+# Caddy:
+#  - Ottiene il certificato TLS automaticamente al primo avvio
+#  - Lo rinnova da solo prima della scadenza (ogni 60 giorni circa)
+#  - Redirect 80 -> 443 in automatico
+
+api.tuosito.it {
+	# Inoltra tutto a uvicorn in ascolto su 127.0.0.1:8000
+	reverse_proxy 127.0.0.1:8000 {
+		# Forward dei veri header per CORS, IP client, ecc.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Limite upload (fatture PDF, allegati): default 10MB, qui 25MB
+	request_body {
+		max_size 25MB
+	}
+
+	# Compressione automatica delle risposte
+	encode zstd gzip
+
+	# Header di sicurezza minimi (non aggressivi)
+	header {
+		# Forza HTTPS futuri sul dominio per 1 anno
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Anti-clickjacking per UI servita da Vercel
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Rimuove l'header Server di Caddy per non rivelare versione
+		-Server
+	}
+
+	# File statici delle fatture/allegati: vengono serviti direttamente dal
+	# disco SENZA passare per uvicorn (più veloce). FastAPI mount /uploads,
+	# qui invece il path /uploads/* lo possiamo passare comunque al backend
+	# perché monta StaticFiles. Lasciamo cosi'.
+
+	# Log strutturato (stdout -> journalctl -u caddy)
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Esempio: se in futuro vuoi servire anche il frontend dal server:
+#
+# fornitori.tuosito.it {
+# 	root * /opt/fornitori-app/frontend/dist
+# 	encode zstd gzip
+# 	try_files {path} /index.html
+# 	file_server
+# }

@@ -1,0 +1,27 @@
+# Forza line endings LF per i file che vanno eseguiti su Linux,
+# anche se vengono modificati su Windows.
+* text=auto eol=lf
+
+# Shell script: SEMPRE LF, eseguibili
+*.sh           text eol=lf
+deploy/*.sh    text eol=lf
+
+# Config systemd e reverse proxy: SEMPRE LF
+*.service      text eol=lf
+deploy/Caddyfile text eol=lf
+
+# File Windows-specific (script PowerShell): CRLF
+*.ps1          text eol=crlf
+*.bat          text eol=crlf
+*.cmd          text eol=crlf
+
+# File binari: nessuna conversione
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.sql.gz binary

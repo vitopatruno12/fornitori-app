@@ -1,0 +1,4 @@
+# Niente segreti committati per sbaglio in questa cartella.
+*.local
+*.secret
+credentials*.txt

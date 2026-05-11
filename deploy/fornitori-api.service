@@ -1,0 +1,34 @@
+[Unit]
+Description=Fornitori API (FastAPI + Uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=fornitori
+Group=fornitori
+WorkingDirectory=/opt/fornitori-app/backend
+EnvironmentFile=/opt/fornitori-app/backend/.env
+ExecStart=/opt/fornitori-app/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/opt/fornitori-app/backend/app/uploads /opt/fornitori-app/backups
+
+[Install]
+WantedBy=multi-user.target

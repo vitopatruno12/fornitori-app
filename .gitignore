@@ -1,3 +1,39 @@
 __pycache__/
 *.py[cod]
 backend/app/uploads/
+
+# Virtualenv e cache locali
+backend/.venv/
+backend/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# File ambiente (mai committarli: contengono segreti)
+backend/.env
+backend/.env.local
+backend/.env.production
+backend/.env.staging
+frontend/.env.local
+frontend/.env.production.local
+
+# Backup DB / dump
+*.sql.gz
+*.dump
+backups/
+
+# Credenziali / artefatti di deploy
+deploy/credentials*.txt
+deploy/*.local
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build frontend
+frontend/dist/
+frontend/node_modules/
+
+# File temporanei git
+.git/COMMIT_MSG_TMP.txt

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fornitori_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fornitori_user
+      POSTGRES_PASSWORD: fornitori_pass
+      POSTGRES_DB: fornitori_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - fornitori_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fornitori_user -d fornitori_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  fornitori_pgdata:
