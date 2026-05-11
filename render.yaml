@@ -6,6 +6,8 @@
 #   Build:  pip install -r requirements.txt
 #   Start:  uvicorn app.main:app --host 0.0.0.0 --port $PORT
 #   Environment → DATABASE_URL = Internal Database URL del Postgres Render (Connect → copia URL interno)
+#   Opzionale se il log mostra errori SSL: DATABASE_SSL_REQUIRE=true
+#   Opzionale se la connessione interna non accetta SSL: DATABASE_SSL_DISABLE=true
 
 databases:
   - name: fornitori-postgres

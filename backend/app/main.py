@@ -34,7 +34,14 @@ async def lifespan(app: FastAPI):
         )
         raise
     except SQLAlchemyError as e:
-        logger.error("Inizializzazione database fallita: %s", e)
+        logger.error(
+            "Inizializzazione database fallita (%s): %s. "
+            "Se accedi a Postgres gestito, prova DATABASE_SSL_REQUIRE=true nel dashboard. "
+            "ProgrammingError (sqlalche.me/e/20/e3q8): verifica DATABASE_URL, "
+            "password con caratteri speciali (codifica nella URL) e che sia Postgres.",
+            type(e).__name__,
+            e,
+        )
         raise
     _check_critical_schema_columns()
     yield
@@ -152,8 +159,20 @@ def _ensure_supplier_orders_sequence_number_column() -> None:
             conn.execute(
                 text(
                     """
-                    CREATE UNIQUE INDEX IF NOT EXISTS uq_supplier_orders_supplier_sequence
-                    ON supplier_orders (supplier_id, sequence_number)
+                    DO $uniq$
+                    BEGIN
+                      IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'uq_supplier_orders_supplier_sequence'
+                      ) AND NOT EXISTS (
+                        SELECT 1 FROM pg_indexes
+                        WHERE indexname = 'uq_supplier_orders_supplier_sequence'
+                      ) THEN
+                        CREATE UNIQUE INDEX uq_supplier_orders_supplier_sequence
+                        ON supplier_orders (supplier_id, sequence_number);
+                      END IF;
+                    END
+                    $uniq$;
                     """
                 )
             )
@@ -195,43 +214,49 @@ def _ensure_order_delivery_signature_columns() -> None:
 
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
-    required = [
-        ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
-        ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),
-        ("cash_entries", "delivery_id", "20260208_core_entities_prima_nota_links.sql"),
-        ("cash_entries", "customer_id", "20260208_core_entities_prima_nota_links.sql"),
-        ("supplier_orders", "order_date", "20260408_supplier_orders.sql"),
-        ("supplier_orders", "status", "20260409_supplier_orders_status_summary.sql"),
-        ("supplier_orders", "expected_delivery_date", "20260410_supplier_orders_delivery_internal_note.sql"),
-        ("supplier_orders", "delivery_location", "20260505_supplier_orders_delivery_location.sql"),
-        ("supplier_orders", "sequence_number", "20260506_supplier_orders_sequence_number.sql"),
-        ("supplier_orders", "order_signed_by", "20260507_order_delivery_signatures.sql"),
-        ("supplier_orders", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
-        ("deliveries", "order_signed_by", "20260507_order_delivery_signatures.sql"),
-        ("deliveries", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
-        ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
-    ]
-    insp = inspect(engine)
-    missing = []
-    for table, column, migration in required:
-        try:
-            cols = {c["name"] for c in insp.get_columns(table)}
-        except Exception:
-            missing.append((table, column, migration))
-            continue
-        if column not in cols:
-            missing.append((table, column, migration))
+    try:
+        required = [
+            ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
+            ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),
+            ("cash_entries", "delivery_id", "20260208_core_entities_prima_nota_links.sql"),
+            ("cash_entries", "customer_id", "20260208_core_entities_prima_nota_links.sql"),
+            ("supplier_orders", "order_date", "20260408_supplier_orders.sql"),
+            ("supplier_orders", "status", "20260409_supplier_orders_status_summary.sql"),
+            ("supplier_orders", "expected_delivery_date", "20260410_supplier_orders_delivery_internal_note.sql"),
+            ("supplier_orders", "delivery_location", "20260505_supplier_orders_delivery_location.sql"),
+            ("supplier_orders", "sequence_number", "20260506_supplier_orders_sequence_number.sql"),
+            ("supplier_orders", "order_signed_by", "20260507_order_delivery_signatures.sql"),
+            ("supplier_orders", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
+            ("deliveries", "order_signed_by", "20260507_order_delivery_signatures.sql"),
+            ("deliveries", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
+            ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
+        ]
+        insp = inspect(engine)
+        missing = []
+        for table, column, migration in required:
+            try:
+                cols = {c["name"] for c in insp.get_columns(table)}
+            except Exception:
+                missing.append((table, column, migration))
+                continue
+            if column not in cols:
+                missing.append((table, column, migration))
 
-    if not missing:
-        logger.info("Schema check OK: critical migration columns found")
-        return
+        if not missing:
+            logger.info("Schema check OK: critical migration columns found")
+            return
 
-    msg = ", ".join(f"{t}.{c} (migrazione: {m})" for t, c, m in missing)
-    logger.warning(
-        "Schema check: colonne mancanti rilevate -> %s. "
-        "Applicare le migrazioni indicate in backend/migrations o gli script in backend/scripts.",
-        msg,
-    )
+        msg = ", ".join(f"{t}.{c} (migrazione: {m})" for t, c, m in missing)
+        logger.warning(
+            "Schema check: colonne mancanti rilevate -> %s. "
+            "Applicare le migrazioni indicate in backend/migrations o gli script in backend/scripts.",
+            msg,
+        )
+    except Exception as e:
+        logger.warning(
+            "Schema check saltato (non bloccante): %s",
+            e,
+        )
 
 
 @app.get("/health")

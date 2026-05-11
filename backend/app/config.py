@@ -10,7 +10,16 @@ _ENV_FILE = _BACKEND_ROOT / ".env"
 # sovrascritte da un .env di sviluppo con localhost.
 load_dotenv(_ENV_FILE, override=False)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/fornitori_db",
+def _normalize_database_url(url: str) -> str:
+    """Heroku/Render spesso usano postgres:// — SQLAlchemy 2 richiede postgresql://."""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
+DATABASE_URL = _normalize_database_url(
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql://postgres:postgres@localhost:5432/fornitori_db",
+    )
 )
