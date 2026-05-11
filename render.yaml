@@ -12,11 +12,13 @@
 databases:
   - name: fornitori-postgres
     plan: free
+    region: frankfurt
 
 services:
   - type: web
-    name: fornitori-api
+    name: fornitori-app
     plan: free
+    region: frankfurt
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
@@ -27,7 +29,7 @@ services:
           name: fornitori-postgres
           property: connectionString
       - key: CORS_ORIGINS
-        sync: false
+        value: "*"
       - key: PYTHON_VERSION
         value: 3.12.7
       - key: ALLOW_STARTUP_DB_FAILURE
