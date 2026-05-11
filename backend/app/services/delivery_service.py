@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import func, or_
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ..models.delivery import Delivery
@@ -10,6 +11,7 @@ from ..models.supplier import Supplier
 from ..schemas.delivery import (
     DeliveryCreate,
     DeliveryBatchCreate,
+    DeliveryNotesUpdate,
     DeliveryPriceAnalytics,
     DeliveryPricePoint,
     DeliveryRead,
@@ -31,6 +33,34 @@ def _norm_signature(value) -> Optional[str]:
         return None
     s = str(value).strip()
     return s[:128] if s else None
+
+
+def _merge_delivery_note(destination_note: Optional[str], document_note: Optional[str]) -> Optional[str]:
+    dest = (destination_note or "").strip()
+    doc = (document_note or "").strip()
+    parts = []
+    if dest:
+        parts.append(f"Destinazione scarico: {dest}")
+    if doc:
+        parts.append(doc)
+    return "\n\n".join(parts) if parts else None
+
+
+def _ensure_supplier_ddt_unique(db: Session, supplier_id: int, ddt_number: Optional[str]) -> None:
+    ddt = _norm_ddt(ddt_number)
+    if not ddt:
+        return
+    exists = (
+        db.query(Delivery.id)
+        .filter(Delivery.supplier_id == supplier_id)
+        .filter(func.lower(Delivery.ddt_number) == ddt.lower())
+        .first()
+    )
+    if exists is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DDT '{ddt}' già presente per questo fornitore. Usa un numero DDT univoco.",
+        )
 
 
 def _resolve_listino(
@@ -138,6 +168,7 @@ def price_analytics(
 
 def create_delivery(db: Session, data: DeliveryCreate) -> Delivery:
     payload = data.model_dump()
+    _ensure_supplier_ddt_unique(db, payload["supplier_id"], payload.get("ddt_number"))
 
     weight_kg = Decimal(str(payload.get("weight_kg") or 0))
     pieces = payload.get("pieces") or 0
@@ -189,6 +220,7 @@ def create_delivery_batch(db: Session, data: DeliveryBatchCreate) -> List[Delive
     delivery_date = payload.get("delivery_date") or datetime.utcnow()
     note = payload.get("note")
     ddt_number = _norm_ddt(payload.get("ddt_number"))
+    _ensure_supplier_ddt_unique(db, supplier_id, ddt_number)
     order_signed_by = _norm_signature(payload.get("order_signed_by"))
     unloading_signed_by = _norm_signature(payload.get("unloading_signed_by"))
     items = payload["items"]
@@ -248,3 +280,31 @@ def delete_all_deliveries(db: Session) -> int:
     n = db.query(Delivery).delete(synchronize_session=False)
     db.commit()
     return int(n)
+
+
+def delete_delivery(db: Session, delivery_id: int) -> None:
+    delivery = db.query(Delivery).filter(Delivery.id == delivery_id).first()
+    if not delivery:
+        raise HTTPException(status_code=404, detail="Consegna non trovata")
+    db.delete(delivery)
+    db.commit()
+
+
+def update_delivery_notes(db: Session, delivery_id: int, data: DeliveryNotesUpdate) -> Delivery:
+    delivery = db.query(Delivery).filter(Delivery.id == delivery_id).first()
+    if not delivery:
+        raise HTTPException(status_code=404, detail="Consegna non trovata")
+
+    payload = data.model_dump()
+    destination_note = (payload.get("destination_note") or "").strip()
+    document_note = (payload.get("note") or "").strip()
+    anomaly_note = payload.get("anomaly_note")
+    anomaly_note = anomaly_note.strip() if isinstance(anomaly_note, str) else anomaly_note
+
+    delivery.note = _merge_delivery_note(destination_note, document_note)
+    delivery.anomaly_note = anomaly_note or None
+
+    db.add(delivery)
+    db.commit()
+    db.refresh(delivery)
+    return delivery

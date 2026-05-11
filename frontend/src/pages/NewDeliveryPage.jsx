@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { createDeliveryBatch } from '../services/deliveriesService'
+import { createDeliveryBatch, fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList, addPriceListBatch, deletePriceListItem } from '../services/priceListService'
 import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
 
@@ -9,6 +9,7 @@ const emptyItem = () => ({
   weight_kg: '',
   pieces: '',
   unit_price: '',
+  note: '',
   anomaly_note: '',
 })
 const emptyPriceRow = () => ({ product_description: '', unit_price: '' })
@@ -47,7 +48,8 @@ function mapOrderItemsToDeliveryItems(orderItems, priceList) {
       weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
       pieces: it.pieces != null && it.pieces !== '' ? String(it.pieces) : '',
       unit_price: listRow != null ? String(listRow.unit_price) : '',
-      anomaly_note: it.note || '',
+      note: it.note || '',
+      anomaly_note: '',
     }
   })
 }
@@ -59,7 +61,8 @@ function deliveryItemsHaveUserInput(rows) {
     const p = Number(it.pieces) || 0
     const u = Number(it.unit_price) || 0
     const n = (it.anomaly_note || '').trim()
-    return Boolean(d || w || p || u || n)
+    const rowNote = (it.note || '').trim()
+    return Boolean(d || w || p || u || rowNote || n)
   })
 }
 
@@ -76,6 +79,10 @@ function formatOrderOptionLabel(o) {
   const sum = raw.length > 56 ? `${raw.slice(0, 56)}…` : raw
   const bits = [`n. ${orderImportDisplayNum(o)}`, d, sum].filter(Boolean)
   return bits.join(' · ')
+}
+
+function normalizeDdt(value) {
+  return String(value || '').trim().toLowerCase()
 }
 
 export default function NewDeliveryPage() {
@@ -126,6 +133,7 @@ export default function NewDeliveryPage() {
             weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
             pieces: it.pieces != null && it.pieces !== '' ? String(it.pieces) : '',
             unit_price: it.unit_price != null && it.unit_price !== '' ? String(it.unit_price) : '',
+            note: it.note || '',
             anomaly_note: it.anomaly_note || '',
           })),
         )
@@ -279,6 +287,7 @@ export default function NewDeliveryPage() {
         weight_kg: '',
         pieces: '',
         unit_price: String(priceItem.unit_price),
+        note: '',
         anomaly_note: '',
       },
     ])
@@ -337,8 +346,13 @@ export default function NewDeliveryPage() {
       if (o.vat_percent != null && o.vat_percent !== '') {
         setVatPercent(String(o.vat_percent))
       }
+      const orderDest = (o.delivery_location || '').trim()
+      if (orderDest) {
+        setDeliveryLocation(orderDest)
+      }
       const d = o.order_date ? new Date(`${String(o.order_date).slice(0, 10)}T12:00:00`).toLocaleDateString('it-IT') : ''
-      setSuccess(`Righe caricate dall’ordine n. ${orderImportDisplayNum(o)}${d ? ` del ${d}` : ''}. Controlla prezzi e completamento dati prima di salvare.`)
+      const destSuffix = orderDest ? ` Destinazione: ${orderDest}.` : ''
+      setSuccess(`Righe caricate dall’ordine n. ${orderImportDisplayNum(o)}${d ? ` del ${d}` : ''}.${destSuffix} Controlla prezzi e completamento dati prima di salvare.`)
     } catch {
       setError('Impossibile caricare l’ordine. Verifica la connessione e riprova.')
     } finally {
@@ -359,6 +373,7 @@ export default function NewDeliveryPage() {
       setError("Inserisci la firma: chi fa lo scarico")
       return
     }
+    if (await ensureDdtUniqueForSupplier(true)) return
 
     const validItems = items
       .map((it) => ({
@@ -366,7 +381,12 @@ export default function NewDeliveryPage() {
         weight_kg: it.weight_kg ? Number(it.weight_kg) : null,
         pieces: it.pieces ? Number(it.pieces) : null,
         unit_price: Number(it.unit_price) || 0,
-        anomaly_note: it.anomaly_note?.trim() || null,
+        anomaly_note: (() => {
+          const rowNote = it.note?.trim() || ''
+          const anomaly = it.anomaly_note?.trim() || ''
+          if (rowNote && anomaly) return `Nota: ${rowNote}\nAnomalia: ${anomaly}`
+          return rowNote || anomaly || null
+        })(),
       }))
       .filter((it) => (it.weight_kg > 0 || it.pieces > 0) && it.unit_price > 0)
 
@@ -403,9 +423,32 @@ export default function NewDeliveryPage() {
       setUnloadingSignedBy('')
       setNote('')
     } catch (e) {
-      setError('Errore nel salvataggio della consegna')
+      const msg = e?.message || ''
+      if (msg.includes('DDT') && msg.toLowerCase().includes('gia presente')) {
+        window.alert('Numero DDT già presente per questo fornitore. Inserisci un numero univoco.')
+        setError('Numero DDT già presente per questo fornitore')
+      } else {
+        setError('Errore nel salvataggio della consegna')
+      }
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function ensureDdtUniqueForSupplier(showPopup = false) {
+    const ddt = normalizeDdt(ddtNumber)
+    if (!supplierId || !ddt) return false
+    try {
+      const rows = await fetchDeliveries({ supplier_id: Number(supplierId) })
+      const duplicate = (Array.isArray(rows) ? rows : []).some((r) => normalizeDdt(r?.ddt_number) === ddt)
+      if (duplicate) {
+        if (showPopup) window.alert('Numero DDT già presente per questo fornitore.')
+        setError('Numero DDT già presente per questo fornitore')
+        return true
+      }
+      return false
+    } catch {
+      return false
     }
   }
 
@@ -453,6 +496,7 @@ export default function NewDeliveryPage() {
                 className="form-control"
                 value={ddtNumber}
                 onChange={(e) => setDdtNumber(e.target.value)}
+                onBlur={() => ensureDdtUniqueForSupplier(true)}
                 placeholder="es. 123/2026"
                 style={{ maxWidth: 200 }}
               />
@@ -470,7 +514,7 @@ export default function NewDeliveryPage() {
               />
             </div>
             <div className="form-group" style={{ minWidth: 220, maxWidth: 320 }}>
-              <label>Destinazione scarico / spedizione</label>
+              <label>Destinazione diversa (scarico / spedizione)</label>
               <input
                 className="form-control"
                 value={deliveryLocation}
@@ -560,6 +604,8 @@ export default function NewDeliveryPage() {
                   <th style={{ minWidth: 100 }}>Tot. riga (imp.)</th>
                   <th style={{ minWidth: 100 }}>Listino €</th>
                   <th style={{ minWidth: 100 }}>Diff. listino</th>
+                  <th style={{ minWidth: 160 }}>Note</th>
+                  <th style={{ minWidth: 160 }}>Destinazione</th>
                   <th style={{ minWidth: 160 }}>Note anomalie</th>
                   <th />
                 </tr>
@@ -618,6 +664,17 @@ export default function NewDeliveryPage() {
                         }}
                       >
                         {diff != null ? `${Number(diff) > 0 ? '+' : ''}${diff}` : '—'}
+                      </td>
+                      <td>
+                        <input
+                          className="form-control"
+                          value={item.note}
+                          onChange={(e) => updateItem(index, 'note', e.target.value)}
+                          placeholder="opzionale"
+                        />
+                      </td>
+                      <td style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                        {deliveryLocation.trim() || '—'}
                       </td>
                       <td>
                         <input

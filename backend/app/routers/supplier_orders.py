@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -62,6 +62,14 @@ def get_supplier_order(order_id: int, db: Session = Depends(get_db)):
 @router.put("/{order_id}", response_model=SupplierOrderRead)
 def update_supplier_order(order_id: int, payload: SupplierOrderUpdate, db: Session = Depends(get_db)):
     return supplier_order_service.update_order(db, order_id, payload)
+
+
+@router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
+def delete_all_supplier_orders(
+    supplier_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    supplier_order_service.delete_all_orders(db, supplier_id=supplier_id)
 
 
 @router.delete("/{order_id}", status_code=204)

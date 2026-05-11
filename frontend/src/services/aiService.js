@@ -37,6 +37,13 @@ export async function suggestOrderLines(text) {
   })
 }
 
+export async function suggestOrderFull(text, supplierNames = []) {
+  return apiFetch('/ai/orders/suggest-full', {
+    method: 'POST',
+    body: JSON.stringify({ text, supplier_names: supplierNames }),
+  })
+}
+
 export async function checkAiAnomalies(entityType, payload, history = {}) {
   return apiFetch('/ai/anomalies/check', {
     method: 'POST',

@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from ..database import get_db
 from ..schemas.ai import (
     AnomalyCheckIn,
     AnomalyCheckOut,
@@ -7,6 +9,9 @@ from ..schemas.ai import (
     AskAiOut,
     InvoiceSuggestIn,
     InvoiceSuggestOut,
+    ManagerInsightsOut,
+    OrderFullSuggestIn,
+    OrderFullSuggestOut,
     OrderSuggestIn,
     OrderSuggestOut,
     PrimaNotaSuggestIn,
@@ -14,7 +19,7 @@ from ..schemas.ai import (
     SupplierSuggestIn,
     SupplierSuggestOut,
 )
-from ..services import ai_service
+from ..services import ai_manager_service, ai_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -39,6 +44,11 @@ def suggest_order(dto: OrderSuggestIn):
     return ai_service.suggest_order_lines(dto.text)
 
 
+@router.post("/orders/suggest-full", response_model=OrderFullSuggestOut)
+def suggest_order_full(dto: OrderFullSuggestIn):
+    return ai_service.suggest_order_full(dto.text, dto.supplier_names)
+
+
 @router.post("/anomalies/check", response_model=AnomalyCheckOut)
 def check_anomalies(dto: AnomalyCheckIn):
     return ai_service.check_anomalies(dto.entity_type, dto.payload)
@@ -47,4 +57,9 @@ def check_anomalies(dto: AnomalyCheckIn):
 @router.post("/ask", response_model=AskAiOut)
 def ask_ai(dto: AskAiIn):
     return ai_service.ask_ai(dto.question, dto.module, dto.context)
+
+
+@router.get("/manager/insights", response_model=ManagerInsightsOut)
+def manager_insights(db: Session = Depends(get_db)):
+    return ai_manager_service.gather_insights(db)
 

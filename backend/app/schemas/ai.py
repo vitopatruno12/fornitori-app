@@ -78,3 +78,33 @@ class OrderSuggestOut(BaseModel):
     warnings: List[str]
     confidence: float
 
+
+class OrderFullSuggestIn(BaseModel):
+    text: str
+    supplier_names: Optional[List[str]] = None
+
+
+class OrderFullSuggestOut(BaseModel):
+    suggested_fields: Dict[str, Any]
+    suggested_lines: List[OrderLineSuggest]
+    warnings: List[str]
+    confidence: float
+
+
+class ManagerInsight(BaseModel):
+    id: str
+    severity: str
+    category: str
+    title: str
+    message: str
+    target_page: Optional[str] = None
+    count: Optional[int] = None
+    payload: Optional[Dict[str, Any]] = None
+    created_at: str
+
+
+class ManagerInsightsOut(BaseModel):
+    insights: List[ManagerInsight]
+    summary: Dict[str, Any]
+    generated_at: str
+

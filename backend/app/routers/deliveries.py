@@ -8,6 +8,7 @@ from ..database import get_db
 from ..schemas.delivery import (
     DeliveryCreate,
     DeliveryBatchCreate,
+    DeliveryNotesUpdate,
     DeliveryRead,
     DeliveryReadEnriched,
     DeliveryPriceAnalytics,
@@ -57,3 +58,13 @@ def create_delivery_batch(payload: DeliveryBatchCreate, db: Session = Depends(ge
 @router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
 def delete_all_deliveries(db: Session = Depends(get_db)):
     delivery_service.delete_all_deliveries(db)
+
+
+@router.delete("/{delivery_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_delivery(delivery_id: int, db: Session = Depends(get_db)):
+    delivery_service.delete_delivery(db, delivery_id)
+
+
+@router.patch("/{delivery_id}/notes", response_model=DeliveryRead)
+def patch_delivery_notes(delivery_id: int, payload: DeliveryNotesUpdate, db: Session = Depends(get_db)):
+    return delivery_service.update_delivery_notes(db, delivery_id, payload)

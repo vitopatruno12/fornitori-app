@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchStaffMembers,
   fetchStaffShifts,
@@ -15,6 +15,132 @@ import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
+
+const SpeechRecognition =
+  typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+
+const VOICE_ITALIAN_MONTHS = {
+  gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6,
+  luglio: 7, agosto: 8, settembre: 9, ottobre: 10, novembre: 11, dicembre: 12,
+}
+const VOICE_ITALIAN_DAYS = {
+  lunedi: 1, lunedì: 1, martedi: 2, martedì: 2, mercoledi: 3, mercoledì: 3,
+  giovedi: 4, giovedì: 4, venerdi: 5, venerdì: 5, sabato: 6, domenica: 0,
+}
+
+function voiceParseDateIso(text) {
+  const t = (text || '').toLowerCase().trim()
+  if (!t) return ''
+  const today = new Date()
+  if (t === 'oggi' || /^stesso giorno/.test(t)) {
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  }
+  if (t === 'domani') {
+    const d = new Date(today.getTime() + 86400000)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  if (t === 'dopodomani') {
+    const d = new Date(today.getTime() + 2 * 86400000)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  for (const [name, dow] of Object.entries(VOICE_ITALIAN_DAYS)) {
+    if (t.includes(name)) {
+      const cur = today.getDay()
+      let delta = (dow - cur + 7) % 7
+      if (delta === 0) delta = 7
+      const d = new Date(today.getTime() + delta * 86400000)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+  }
+  let m = t.match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)(?:\s+(\d{2,4}))?/)
+  if (m) {
+    const dd = Number(m[1])
+    const mm = VOICE_ITALIAN_MONTHS[m[2]]
+    let yy = m[3] ? Number(m[3]) : today.getFullYear()
+    if (yy < 100) yy += 2000
+    if (dd >= 1 && dd <= 31 && mm) {
+      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
+    }
+  }
+  m = t.match(/(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/)
+  if (m) {
+    const dd = Number(m[1])
+    const mm = Number(m[2])
+    let yy = m[3] ? Number(m[3]) : today.getFullYear()
+    if (yy < 100) yy += 2000
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
+      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
+    }
+  }
+  return ''
+}
+
+function voiceParseShiftTimes(text) {
+  const t = (text || '').toLowerCase()
+  let m = t.match(/(?:dalle?|da)\s*(?:ore\s*)?(\d{1,2})(?:[:.,]\s*(\d{2}))?\s*(?:alle?|fino\s*alle?|sino\s*alle?|a)\s*(\d{1,2})(?:[:.,]\s*(\d{2}))?/i)
+  if (m) {
+    return {
+      start: `${m[1].padStart(2, '0')}:${(m[2] || '00').padStart(2, '0')}`,
+      end: `${m[3].padStart(2, '0')}:${(m[4] || '00').padStart(2, '0')}`,
+    }
+  }
+  m = t.match(/(\d{1,2})[:.,]\s*(\d{2})\s*[-–]\s*(\d{1,2})[:.,]\s*(\d{2})/)
+  if (m) {
+    return {
+      start: `${m[1].padStart(2, '0')}:${m[2]}`,
+      end: `${m[3].padStart(2, '0')}:${m[4]}`,
+    }
+  }
+  m = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/)
+  if (m) {
+    return {
+      start: `${m[1].padStart(2, '0')}:00`,
+      end: `${m[2].padStart(2, '0')}:00`,
+    }
+  }
+  return null
+}
+
+function voiceParseEntryKind(text) {
+  const lo = (text || '').toLowerCase()
+  if (/\b(malatti[ae]|malat[oa])\b/.test(lo)) return 'sick'
+  if (/\b(permess[oi])\b/.test(lo)) return 'permission'
+  if (/\b(assenz[ae]|assente|assenti)\b/.test(lo)) return 'absence'
+  if (/\b(turno|turni)\b/.test(lo)) return 'shift'
+  return null
+}
+
+function voiceMatchMember(text, members) {
+  if (!text || !members || !members.length) return null
+  const norm = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim()
+  const ttext = norm(text)
+  if (!ttext) return null
+  let found = members.find((m) => norm(m.name) === ttext)
+  if (found) return found
+  found = members.find((m) => ttext && norm(m.name).includes(ttext))
+  if (found) return found
+  found = members.find((m) => norm(m.name) && ttext.includes(norm(m.name)))
+  return found || null
+}
+
+function voiceParseShift(text, members) {
+  const out = {}
+  if (!text) return out
+  const member = voiceMatchMember(text, members)
+  if (member) out.staff_member_id = String(member.id)
+  const iso = voiceParseDateIso(text)
+  if (iso) out.work_date = iso
+  const kind = voiceParseEntryKind(text)
+  if (kind) out.entry_kind = kind
+  const times = voiceParseShiftTimes(text)
+  if (times) {
+    out.time_start = times.start
+    out.time_end = times.end
+  }
+  const noteM = text.match(/\b(?:note?|nota)\s*[:\s]*(.{2,200})/i)
+  if (noteM) out.notes = noteM[1].trim()
+  return out
+}
 
 const KIND_LABELS = {
   shift: 'Turno',
@@ -290,6 +416,19 @@ export default function StaffPage() {
   const [editingShiftId, setEditingShiftId] = useState(null)
   /** Evita richieste duplicate (doppio clic / Invio mentre parte un’altra azione). */
   const [shiftBusy, setShiftBusy] = useState(false)
+
+  const [voiceListening, setVoiceListening] = useState(false)
+  const [voiceError, setVoiceError] = useState('')
+  const [voiceGuideActive, setVoiceGuideActive] = useState(false)
+  const [voiceGuideStep, setVoiceGuideStep] = useState(0)
+  const [voiceGuidePrompt, setVoiceGuidePrompt] = useState('')
+  const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
+  const [assistantActive, setAssistantActive] = useState(false)
+  const [assistantTranscript, setAssistantTranscript] = useState('')
+  const assistantRecognitionRef = useRef(null)
+  const assistantCancelledRef = useRef(false)
+  const assistantConfirmRef = useRef(null)
+  const voiceSubmitBtnRef = useRef(null)
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -996,6 +1135,416 @@ export default function StaffPage() {
     }
   }
 
+  function applyVoiceShiftFields(parsed, options = {}) {
+    if (!parsed) return []
+    const applied = []
+    if (parsed.staff_member_id) {
+      setFormMemberId(String(parsed.staff_member_id))
+      const member = members.find((mm) => String(mm.id) === String(parsed.staff_member_id))
+      applied.push(`Dipendente: ${member ? member.name : parsed.staff_member_id}`)
+    }
+    if (parsed.work_date) {
+      setFormDate(parsed.work_date)
+      applied.push(`Data: ${parsed.work_date}`)
+    }
+    if (parsed.entry_kind) {
+      setFormKind(parsed.entry_kind)
+      applied.push(`Tipo: ${KIND_LABELS[parsed.entry_kind] || parsed.entry_kind}`)
+    }
+    if (parsed.time_start) {
+      setFormStart(parsed.time_start)
+      applied.push(`Inizio: ${parsed.time_start}`)
+    }
+    if (parsed.time_end) {
+      setFormEnd(parsed.time_end)
+      applied.push(`Fine: ${parsed.time_end}`)
+    }
+    if (parsed.notes && !options.skipNotes) {
+      setFormNotes(parsed.notes)
+      applied.push('Note aggiornate')
+    }
+    return applied
+  }
+
+  function resetVoiceShiftFields() {
+    if (voiceGuideActive) stopVoiceShiftGuide()
+    if (assistantActive) {
+      assistantCancelledRef.current = true
+      setAssistantActive(false)
+      try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
+    }
+    try { assistantConfirmRef.current?.stop() } catch { /* noop */ }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel() } catch { /* noop */ }
+    }
+    setAssistantTranscript('')
+    resetForm()
+    setVoiceGuideHeard('')
+    setVoiceGuidePrompt('')
+    setVoiceError('')
+    setVoiceListening(false)
+    setSuccess('Campi turno azzerati. Pronto a ricominciare.')
+  }
+
+  function startVoiceShiftAssistant() {
+    if (!SpeechRecognition) {
+      setVoiceError("L'assistente vocale non è supportato (usa Chrome o Edge)")
+      return
+    }
+    if (assistantActive || voiceGuideActive) return
+    setVoiceError('')
+    setVoiceGuideHeard('')
+    setVoiceGuidePrompt('Assistente attivo: dimmi liberamente dipendente, data, ora di inizio e fine. Premi "Ferma" quando hai finito.')
+    setAssistantTranscript('')
+    assistantCancelledRef.current = false
+    setAssistantActive(true)
+    startVoiceShiftLoop()
+  }
+
+  function startVoiceShiftLoop() {
+    if (assistantCancelledRef.current) return
+    if (!SpeechRecognition) return
+    let rec
+    try {
+      rec = new SpeechRecognition()
+    } catch {
+      setVoiceError('Riconoscimento vocale non disponibile')
+      return
+    }
+    rec.lang = 'it-IT'
+    rec.continuous = true
+    rec.interimResults = false
+    rec.onstart = () => setVoiceListening(true)
+    rec.onend = () => {
+      setVoiceListening(false)
+      if (assistantCancelledRef.current) return
+      window.setTimeout(() => {
+        if (!assistantCancelledRef.current) startVoiceShiftLoop()
+      }, 200)
+    }
+    rec.onerror = (e) => {
+      if (e?.error === 'not-allowed') {
+        setVoiceError('Microfono non autorizzato')
+        assistantCancelledRef.current = true
+        setAssistantActive(false)
+      }
+    }
+    rec.onresult = (e) => {
+      const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
+      const additions = []
+      for (let i = startIdx; i < e.results.length; i++) {
+        const r = e.results[i]
+        if (!r || !r.isFinal) continue
+        const phrase = String(r[0]?.transcript || '').trim()
+        if (phrase) additions.push(phrase)
+      }
+      if (!additions.length) return
+      const added = additions.join(' ')
+      setVoiceGuideHeard(added)
+      setAssistantTranscript((prev) => {
+        const merged = prev ? `${prev}. ${added}`.trim() : added
+        const parsed = voiceParseShift(merged, members)
+        applyVoiceShiftFields(parsed)
+        return merged
+      })
+    }
+    assistantRecognitionRef.current = rec
+    try { rec.start() } catch { setVoiceListening(false) }
+  }
+
+  function stopVoiceShiftAssistant() {
+    if (!assistantActive) return
+    assistantCancelledRef.current = true
+    setAssistantActive(false)
+    setVoiceListening(false)
+    try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
+    askVoiceShiftSaveOrReset()
+  }
+
+  function askVoiceShiftSaveOrReset() {
+    setVoiceGuidePrompt('Vuoi salvare il turno? Rispondi sì o no.')
+    if (!SpeechRecognition || typeof window === 'undefined') {
+      const ok = window.confirm('Vuoi salvare il turno appena dettato?\nOK = salva  •  Annulla = resetta')
+      if (ok) {
+        if (!formMemberId) setVoiceError('Manca il dipendente: completa e salva manualmente.')
+        else window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 150)
+      } else {
+        resetVoiceShiftFields()
+      }
+      return
+    }
+    const speakAndListen = () => {
+      try {
+        const utter = new SpeechSynthesisUtterance('Vuoi salvare il turno? Rispondi sì o no.')
+        utter.lang = 'it-IT'
+        utter.rate = 1
+        utter.onend = () => window.setTimeout(listenForVoiceShiftAnswer, 150)
+        window.speechSynthesis.cancel()
+        window.speechSynthesis.speak(utter)
+      } catch {
+        listenForVoiceShiftAnswer()
+      }
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      speakAndListen()
+    } else {
+      listenForVoiceShiftAnswer()
+    }
+  }
+
+  function listenForVoiceShiftAnswer() {
+    if (!SpeechRecognition) return
+    let rec
+    try { rec = new SpeechRecognition() } catch { return }
+    rec.lang = 'it-IT'
+    rec.continuous = false
+    rec.interimResults = false
+    rec.onstart = () => setVoiceListening(true)
+    rec.onend = () => setVoiceListening(false)
+    rec.onerror = () => setVoiceListening(false)
+    rec.onresult = (e) => {
+      const transcript = Array.from(e.results).map((r) => r[0].transcript).join(' ').trim()
+      setVoiceGuideHeard(transcript)
+      const yes = /\b(si|sì|salva|ok|conferma|procedi|va bene|aggiungi|certo)\b/i.test(transcript)
+      const no = /\b(no|annulla|cancella|resetta|reset|non salvare)\b/i.test(transcript)
+      if (yes && !no) {
+        if (!formMemberId) {
+          setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
+        } else {
+          window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 200)
+          setVoiceGuidePrompt('Salvataggio in corso...')
+        }
+      } else if (no && !yes) {
+        resetVoiceShiftFields()
+        setVoiceGuidePrompt('Campi azzerati. Pronto per ricominciare.')
+      } else {
+        setVoiceError(`Non ho capito "${transcript}". Premi Aggiungi o 🔁 Reset manualmente.`)
+      }
+      window.setTimeout(() => setVoiceGuidePrompt(''), 4000)
+    }
+    assistantConfirmRef.current = rec
+    try { rec.start() } catch { /* noop */ }
+  }
+
+  function stopVoiceShiftGuide() {
+    setVoiceGuideActive(false)
+    setVoiceGuidePrompt('')
+    setVoiceGuideStep(0)
+    setVoiceGuideHeard('')
+    setVoiceListening(false)
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel() } catch { /* noop */ }
+    }
+  }
+
+  function startVoiceShiftGuide() {
+    if (!SpeechRecognition) {
+      setVoiceError("L'assistente vocale non è supportato (usa Chrome o Edge)")
+      return
+    }
+    if (assistantActive) return
+    setVoiceError('')
+    setVoiceGuideHeard('')
+    setVoiceGuideActive(true)
+    setVoiceGuideStep(0)
+  }
+
+  useEffect(() => {
+    if (!voiceGuideActive) return
+    const memberPrompt = formMemberId
+      ? `Dipendente attuale: ${(members.find((m) => String(m.id) === String(formMemberId)) || {}).name || ''}. Per cambiarlo dimmi un altro nome.`
+      : 'Per chi è il turno? Dimmi il nome del dipendente.'
+    const steps = [
+      { key: 'member', prompt: memberPrompt },
+      { key: 'kind', prompt: 'Che tipo? Dimmi turno, permesso, assenza o malattia.' },
+      { key: 'work_date', prompt: 'Per quale giorno? Puoi dire oggi, domani, lunedì oppure una data come 12 marzo.' },
+      { key: 'time_start', prompt: "A che ora inizia? (es. otto, otto e mezza, 8:30). Di' \"passa\" se non serve." },
+      { key: 'time_end', prompt: "A che ora finisce? (es. sedici). Di' \"passa\" se non serve." },
+      { key: 'notes', prompt: 'Vuoi aggiungere note? Dimmi le note oppure passa.' },
+      { key: '__confirm__', prompt: 'Aggiungo questo turno? Rispondi sì o no.' },
+    ]
+    if (voiceGuideStep >= steps.length) {
+      setVoiceGuidePrompt('Compilazione vocale completata.')
+      setVoiceGuideActive(false)
+      setVoiceListening(false)
+      return undefined
+    }
+    const step = steps[voiceGuideStep]
+    setVoiceGuidePrompt(step.prompt)
+
+    const TERMINATOR_RX = /\b(andiamo\s+avanti|vai\s+avanti|prossim[oa]|continu[ai]|sono\s+pronto|pronto\s+ad?\s+andare|avanti)\b/i
+    const SKIP_RX = /^(passa|salta|skip|nessuno|vuoto|nulla)\b/i
+    const REPEAT_RX = /^(ripeti|ripet[iy]|di nuovo|repeat)\b/i
+    const YES_RX = /\b(si|sì|ok|confermo|salva|procedi|va bene|aggiungi)\b/i
+
+    let cancelled = false
+    let recognition = null
+    let buffer = ''
+    let inactivityTimer = null
+    let advancing = false
+
+    const speak = (text, cb) => {
+      if (cancelled) return
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const u = new SpeechSynthesisUtterance(text)
+          u.lang = 'it-IT'
+          u.rate = 1
+          if (cb) u.onend = () => window.setTimeout(cb, 200)
+          window.speechSynthesis.cancel()
+          window.speechSynthesis.speak(u)
+          return
+        } catch { /* fallthrough */ }
+      }
+      if (cb) window.setTimeout(cb, 200)
+    }
+    const armInactivityTimer = () => {
+      if (inactivityTimer) window.clearTimeout(inactivityTimer)
+      inactivityTimer = window.setTimeout(() => {
+        if (cancelled || advancing) return
+        speak('Sei pronto ad andare avanti?')
+        armInactivityTimer()
+      }, 30000)
+    }
+    const advance = () => {
+      if (advancing || cancelled) return
+      advancing = true
+      cancelled = true
+      if (inactivityTimer) window.clearTimeout(inactivityTimer)
+      try { recognition && recognition.stop() } catch { /* noop */ }
+      window.setTimeout(() => setVoiceGuideStep((s) => s + 1), 50)
+    }
+    const applyAndAdvance = (rawText) => {
+      const text = (rawText || '').trim()
+      const isSkip = SKIP_RX.test(text)
+      const valueText = isSkip ? '' : text
+      if (step.key === 'member') {
+        if (valueText) {
+          const m = voiceMatchMember(valueText, members)
+          if (m) setFormMemberId(String(m.id))
+          else if (!formMemberId) setVoiceError(`Dipendente "${valueText}" non trovato. Selezionalo manualmente.`)
+        }
+      } else if (step.key === 'kind') {
+        const k = voiceParseEntryKind(text) || 'shift'
+        setFormKind(k)
+      } else if (step.key === 'work_date') {
+        const iso = voiceParseDateIso(valueText || text)
+        if (iso) setFormDate(iso)
+      } else if (step.key === 'time_start') {
+        if (valueText) {
+          const t = voiceParseShiftTimes(valueText) || voiceParseShiftTimes(`dalle ${valueText} alle 0`)
+          if (t?.start) setFormStart(t.start)
+          else {
+            const numM = valueText.match(/(\d{1,2})(?:[:.,]\s*(\d{2}))?/)
+            if (numM) {
+              setFormStart(`${numM[1].padStart(2, '0')}:${(numM[2] || '00').padStart(2, '0')}`)
+            }
+          }
+        }
+      } else if (step.key === 'time_end') {
+        if (valueText) {
+          const t = voiceParseShiftTimes(`dalle 0 alle ${valueText}`) || voiceParseShiftTimes(valueText)
+          if (t?.end) setFormEnd(t.end)
+          else {
+            const numM = valueText.match(/(\d{1,2})(?:[:.,]\s*(\d{2}))?/)
+            if (numM) {
+              setFormEnd(`${numM[1].padStart(2, '0')}:${(numM[2] || '00').padStart(2, '0')}`)
+            }
+          }
+        }
+      } else if (step.key === 'notes') {
+        if (valueText) setFormNotes(valueText)
+      } else if (step.key === '__confirm__') {
+        const yes = YES_RX.test(text)
+        if (yes) {
+          if (!formMemberId) {
+            setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
+          } else {
+            window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 200)
+          }
+        }
+      }
+      advance()
+    }
+
+    const startRecognition = () => {
+      if (cancelled) return
+      if (!SpeechRecognition) {
+        setVoiceError('Riconoscimento vocale non disponibile')
+        advance()
+        return
+      }
+      try {
+        recognition = new SpeechRecognition()
+        recognition.lang = 'it-IT'
+        recognition.continuous = true
+        recognition.interimResults = false
+      } catch {
+        setVoiceError('Riconoscimento vocale non disponibile')
+        advance()
+        return
+      }
+      recognition.onstart = () => {
+        setVoiceListening(true)
+        armInactivityTimer()
+      }
+      recognition.onend = () => {
+        setVoiceListening(false)
+        if (cancelled) return
+        window.setTimeout(() => {
+          if (!cancelled) startRecognition()
+        }, 250)
+      }
+      recognition.onerror = () => { /* onend riavvia */ }
+      recognition.onresult = (e) => {
+        armInactivityTimer()
+        const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
+        for (let i = startIdx; i < e.results.length; i++) {
+          const r = e.results[i]
+          if (!r || !r.isFinal) continue
+          const phrase = String(r[0]?.transcript || '').trim()
+          if (!phrase) continue
+          setVoiceGuideHeard(phrase)
+
+          if (REPEAT_RX.test(phrase)) {
+            speak(step.prompt)
+            continue
+          }
+          if (step.key === '__confirm__') {
+            applyAndAdvance(phrase)
+            return
+          }
+          if (TERMINATOR_RX.test(phrase)) {
+            const cleaned = phrase.replace(TERMINATOR_RX, '').trim()
+            if (cleaned) buffer = (buffer + ' ' + cleaned).trim()
+            applyAndAdvance(buffer)
+            return
+          }
+          if (SKIP_RX.test(phrase)) {
+            applyAndAdvance('')
+            return
+          }
+          buffer = (buffer + ' ' + phrase).trim()
+        }
+      }
+      try { recognition.start() } catch { setVoiceListening(false) }
+    }
+
+    speak(step.prompt, startRecognition)
+
+    return () => {
+      cancelled = true
+      advancing = true
+      if (inactivityTimer) window.clearTimeout(inactivityTimer)
+      try { recognition && recognition.stop() } catch { /* noop */ }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel() } catch { /* noop */ }
+      }
+      setVoiceListening(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceGuideActive, voiceGuideStep])
+
   return (
     <div className="staff-page">
       <header className="staff-page-hero">
@@ -1581,9 +2130,68 @@ export default function StaffPage() {
       </section>
 
       <section id="staff-shift-form-card" className="card" style={{ order: 2 }}>
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>
-          {editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}
+        <h2 className="page-subheader" style={{ marginTop: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <span>{editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}</span>
+          {SpeechRecognition && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={startVoiceShiftAssistant}
+                disabled={assistantActive || voiceGuideActive}
+                style={{ marginLeft: '0.5rem', padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
+                title="Assistente vocale: parla liberamente, l'AI compila i campi finché non premi Ferma"
+              >
+                {assistantActive ? '🎤 In ascolto...' : '🎤 Assistente vocale'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-warning"
+                onClick={stopVoiceShiftAssistant}
+                disabled={!assistantActive}
+                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
+                title="Ferma l'assistente: poi ti chiede se salvare o resettare"
+              >
+                ⏹️ Ferma
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={voiceGuideActive ? stopVoiceShiftGuide : startVoiceShiftGuide}
+                disabled={assistantActive || (voiceListening && !voiceGuideActive)}
+                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
+                title="Guida vocale passo-passo: ti fa una domanda alla volta"
+              >
+                {voiceGuideActive ? '⏹️ Ferma guida' : '🗣️ Guida vocale passo-passo'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-danger"
+                onClick={resetVoiceShiftFields}
+                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
+                title="Cancella i campi del turno per ricominciare"
+              >
+                🔁 Reset campi
+              </button>
+            </>
+          )}
         </h2>
+        {SpeechRecognition && (
+          <div className="alert alert-info" style={{ fontSize: '0.88rem', marginBottom: '0.75rem' }}>
+            <strong>🎤 Assistente vocale (libera):</strong> premi <strong>Assistente vocale</strong>, dimmi liberamente <em>chi, quando, da che ora a che ora, tipo</em> (es. <em>&quot;Mario, domani, turno dalle 8 alle 16, note: prima cassa&quot;</em>) e quando hai finito premi <strong>⏹️ Ferma</strong>. L&apos;assistente chiederà &quot;vuoi salvare? sì o no&quot;: <strong>sì</strong> aggiunge, <strong>no</strong> resetta.
+            <br />
+            <strong>🗣️ Guida vocale passo-passo:</strong> ti fa una domanda alla volta. Per ogni campo parla, poi di&apos; <strong>&quot;andiamo avanti&quot;</strong>; <em>passa</em> per saltare, <em>ripeti</em> per riascoltare. Dopo 30s di silenzio chiede &quot;sei pronto ad andare avanti?&quot;.
+            {voiceError ? <div style={{ marginTop: '0.5rem', color: 'var(--danger, #c0392b)' }}>{voiceError}</div> : null}
+          </div>
+        )}
+        {voiceGuidePrompt && (
+          <div className="alert alert-info" style={{ marginBottom: '0.5rem' }}>
+            <strong>Guida vocale:</strong> {voiceGuidePrompt}
+            {voiceGuideHeard ? (
+              <div style={{ marginTop: '0.35rem', color: 'var(--text-muted)' }}>Hai detto: &quot;{voiceGuideHeard}&quot;</div>
+            ) : null}
+          </div>
+        )}
         <form
           onSubmit={handleSubmitShift}
           className="form-row"
@@ -1657,6 +2265,16 @@ export default function StaffPage() {
           <div className="btn-group" style={{ marginBottom: '0.35rem' }}>
             <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
               {shiftBusy ? 'Attendere…' : editingShiftId ? 'Salva modifiche' : 'Aggiungi'}
+            </button>
+            <button
+              ref={voiceSubmitBtnRef}
+              type="submit"
+              className="btn btn-primary"
+              style={{ display: 'none' }}
+              aria-hidden
+              tabIndex={-1}
+            >
+              Salva (vocale)
             </button>
             {editingShiftId && (
               <button

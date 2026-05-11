@@ -20,6 +20,16 @@ export async function deleteSupplierOrder(id) {
   })
 }
 
+export async function deleteAllSupplierOrders({ supplierId } = {}) {
+  const q = new URLSearchParams()
+  if (supplierId) q.set('supplier_id', String(supplierId))
+  const qs = q.toString()
+  const res = await fetch(`${API_BASE_URL}/supplier-orders/all${qs ? `?${qs}` : ''}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw new Error("Errore nell'eliminazione dello storico ordini")
+  }
+}
+
 export async function fetchSupplierOrders({ supplierId, dateFrom, dateTo, status, limit } = {}) {
   const q = new URLSearchParams()
   if (supplierId) q.set('supplier_id', String(supplierId))

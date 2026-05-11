@@ -194,6 +194,23 @@ def delete_order(db: Session, order_id: int) -> None:
   db.commit()
 
 
+def delete_all_orders(db: Session, supplier_id: Optional[int] = None) -> int:
+  if supplier_id is not None:
+    order_ids = [
+        oid for (oid,) in db.query(SupplierOrder.id).filter(SupplierOrder.supplier_id == supplier_id).all()
+    ]
+    if not order_ids:
+      return 0
+    db.query(SupplierOrderItem).filter(SupplierOrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+    n = db.query(SupplierOrder).filter(SupplierOrder.id.in_(order_ids)).delete(synchronize_session=False)
+    db.commit()
+    return int(n)
+  db.query(SupplierOrderItem).delete(synchronize_session=False)
+  n = db.query(SupplierOrder).delete(synchronize_session=False)
+  db.commit()
+  return int(n)
+
+
 def get_order(db: Session, order_id: int) -> Optional[SupplierOrder]:
   return (
       db.query(SupplierOrder)

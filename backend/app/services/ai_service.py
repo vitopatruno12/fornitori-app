@@ -1,40 +1,198 @@
 import re
+import unicodedata
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+
+
+_KEYWORD_TOKENS = (
+    "partita iva", "p.iva", "p iva", "piva", "iva",
+    "codice fiscale", "cod. fisc", "cf",
+    "email", "e-mail", "e mail", "pec",
+    "telefono", "cell", "cellulare", "tel",
+    "citta", "città", "city",
+    "indirizzo", "via", "piazza", "viale", "corso", "strada",
+    "iban",
+    "referente", "responsabile", "contatto", "persona",
+    "pagamento", "pagamenti", "bonifico", "rid", "ricevuta",
+    "categoria", "merce", "merceologica", "settore",
+    "note", "nota",
+)
+
+
+def _strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+def _normalize_for_match(s: str) -> str:
+    return re.sub(r"\s+", " ", _strip_accents((s or "").lower())).strip()
+
+
+def _split_sentences(t: str) -> List[str]:
+    parts = re.split(r"[\n;]+|(?:,\s+(?=(?:partita|p\.?\s?iva|piva|email|e-?mail|tel|cell|telefono|citta|città|indirizzo|iban|pec|referente|note|categoria|pagamento|bonifico)))", t, flags=re.I)
+    return [p.strip(" ,;.\t") for p in parts if p and p.strip(" ,;.\t")]
+
+
+def _find_first_keyword_index(t: str) -> int:
+    lo = _normalize_for_match(t)
+    indices: List[int] = []
+    for k in _KEYWORD_TOKENS:
+        i = lo.find(k)
+        if i >= 0:
+            indices.append(i)
+    return min(indices) if indices else -1
+
+
+def _extract_name(t: str) -> str:
+    if not t:
+        return ""
+    cut = _find_first_keyword_index(t)
+    candidate = t if cut < 0 else t[:cut]
+    candidate = candidate.split(",")[0].split("\n")[0].strip(" ,;.-")
+    if 2 <= len(candidate) <= 80:
+        return candidate
+    return ""
+
+
+_DAY_WORDS = {
+    "lunedi": 0, "martedi": 1, "mercoledi": 2, "giovedi": 3, "venerdi": 4, "sabato": 5, "domenica": 6,
+}
+
+
+def _parse_date_token(tok: str, today: Optional[datetime] = None) -> Optional[str]:
+    """Parse natural date token (oggi, domani, lunedi, 15/03, 15/03/2026...)"""
+    if not tok:
+        return None
+    t = _normalize_for_match(tok)
+    today = today or datetime.now()
+    if t in ("oggi", "stesso giorno"):
+        return today.date().isoformat()
+    if t == "domani":
+        return (today + timedelta(days=1)).date().isoformat()
+    if t == "dopodomani":
+        return (today + timedelta(days=2)).date().isoformat()
+    for word, dow in _DAY_WORDS.items():
+        if word in t:
+            delta = (dow - today.weekday()) % 7
+            if delta == 0:
+                delta = 7
+            return (today + timedelta(days=delta)).date().isoformat()
+    m = re.search(r"\b([0-3]?\d)\s*[/\-\.]\s*([0-1]?\d)(?:\s*[/\-\.]\s*(\d{2,4}))?\b", t)
+    if m:
+        dd, mm = int(m.group(1)), int(m.group(2))
+        yy = m.group(3)
+        year = today.year
+        if yy:
+            yy = int(yy)
+            year = yy + 2000 if yy < 100 else yy
+        try:
+            return datetime(year, mm, dd).date().isoformat()
+        except Exception:
+            return None
+    return None
+
+
+def _detect_payment_terms(lo: str) -> Optional[str]:
+    m = re.search(r"(?:pagament[oi]|condizioni)\s*[:\s]*([^,;\n]{2,80})", lo, re.I)
+    if m:
+        return m.group(1).strip()
+    if "bonifico" in lo and "30" in lo and ("giorni" in lo or "gg" in lo):
+        return "Bonifico 30 giorni"
+    if "bonifico" in lo and "60" in lo and ("giorni" in lo or "gg" in lo):
+        return "Bonifico 60 giorni"
+    if "bonifico" in lo:
+        return "Bonifico"
+    if "rid" in lo:
+        return "RID"
+    if "ricevuta bancaria" in lo or "ri.ba" in lo:
+        return "Ricevuta bancaria"
+    if "contanti" in lo or "contante" in lo:
+        return "Contanti"
+    return None
 
 
 def suggest_supplier_fields(text: str, existing_data: Dict[str, Any] | None = None) -> Dict[str, Any]:
     t = (text or "").strip()
+    if not t:
+        current = existing_data or {}
+        return {"suggested_fields": {}, "missing_fields": ["name"], "warnings": [], "confidence": 0.0}
     lo = t.lower()
+    lo_norm = _normalize_for_match(t)
     out: Dict[str, Any] = {}
 
-    first = t.split(",")[0].strip() if t else ""
-    if first:
-        out["name"] = first
+    name = _extract_name(t)
+    if name:
+        out["name"] = name
 
-    m_vat = re.search(r"(?:partita\s*iva|p\.?\s*iva|piva)\s*[:\s]*(?:it\s*)?([0-9\s]{9,13})", lo, re.I)
+    m_vat = re.search(r"(?:partita\s*iva|p\.?\s*iva|piva)\s*[:\s]*(?:it\s*)?([0-9][0-9\s]{8,13})", lo, re.I)
     if m_vat:
         out["vat_number"] = re.sub(r"\s+", "", m_vat.group(1))[-11:]
+    elif "iva" not in lo_norm:
+        m_just = re.search(r"\b(\d{11})\b", t)
+        if m_just:
+            out["vat_number"] = m_just.group(1)
+
+    m_cf = re.search(r"(?:codice\s*fiscale|cod\.?\s*fisc\.?|c\.?f\.?)\s*[:\s]*([A-Z0-9]{11,16})", t, re.I)
+    if m_cf:
+        out["fiscal_code"] = m_cf.group(1).upper()
+    else:
+        m_cf2 = re.search(r"\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b", t.upper())
+        if m_cf2:
+            out["fiscal_code"] = m_cf2.group(1)
 
     m_email = re.search(r"([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})", lo, re.I)
     if m_email:
         out["email"] = m_email.group(1)
 
-    m_phone = re.search(r"(?:telefono|tel|cellulare|cell)\s*[:\s]*([0-9+\s\-/.]{6,20})", t, re.I)
+    m_phone = re.search(r"(?:telefono|tel\.?|cellulare|cell\.?)\s*[:\s]*([0-9+][0-9+\s\-/.]{6,20})", t, re.I)
     if m_phone:
         out["phone"] = re.sub(r"[^\d+]", "", m_phone.group(1))[:15]
+    else:
+        m_phone2 = re.search(r"\b((?:\+?39\s?)?[03][0-9](?:[\s\-.]?\d){7,10})\b", t)
+        if m_phone2:
+            out["phone"] = re.sub(r"[^\d+]", "", m_phone2.group(1))[:15]
 
-    m_city = re.search(r"(?:città|citta|city)\s*[:\s]*([a-zA-ZàèéìòùÀÈÉÌÒÙ'\s]{2,50})", t, re.I)
+    m_city = re.search(r"(?:citt[aà]|city)\s*[:\s]*([a-zA-ZàèéìòùÀÈÉÌÒÙ'\s]{2,50})", t, re.I)
     if m_city:
-        out["city"] = m_city.group(1).strip()
+        out["city"] = re.split(r"[,;\n]", m_city.group(1))[0].strip()
 
-    if "bonifico" in lo:
-        out["payment_terms"] = out.get("payment_terms") or "Bonifico"
+    m_addr = re.search(r"(?:indirizzo)\s*[:\s]*([^,;\n]{4,120})", t, re.I)
+    if m_addr:
+        out["address"] = m_addr.group(1).strip()
+    else:
+        m_addr2 = re.search(r"\b(?:via|piazza|viale|corso|strada)\s+([A-Za-zÀ-ÿ0-9' .]{3,80}?)(?=,|;|$|\s+(?:partita|piva|email|tel|cell))", t, re.I)
+        if m_addr2:
+            out["address"] = (m_addr2.group(0)).strip().rstrip(",;.")
+
+    m_iban = re.search(r"\b(?:iban\s*[:\s]*)?([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b", t.upper())
+    if m_iban:
+        cand = m_iban.group(1)
+        if cand.startswith(("IT", "SM", "VA", "DE", "FR", "ES", "GB", "CH", "AT", "BE", "NL")):
+            out["iban"] = cand
+
+    m_ref = re.search(r"(?:referente|responsabile|contatto|persona)\s*[:\s]*([A-Za-zÀ-ÿ' .]{3,60})", t, re.I)
+    if m_ref:
+        out["contact_person"] = re.split(r"[,;\n]", m_ref.group(1))[0].strip()
+
+    pt = _detect_payment_terms(lo)
+    if pt:
+        out["payment_terms"] = pt
+
+    m_notes = re.search(r"(?:^|[,;\n])\s*note?\s*[:\s]*([^\n;]{2,500})", t, re.I)
+    if m_notes:
+        out["notes"] = m_notes.group(1).strip()
 
     category = "altro"
-    if any(k in lo for k in ["bevande", "acqua", "vino", "birra"]):
+    if any(k in lo for k in ["bevande", "acqua", "vino", "birra", "bibita"]):
         category = "bevande"
-    elif any(k in lo for k in ["luce", "gas", "acquedotto", "energia"]):
+    elif any(k in lo for k in ["ortofrutta", "frutta", "verdura", "ortaggi"]):
+        category = "ortofrutta"
+    elif any(k in lo for k in ["carne", "macelleria", "salumi", "salumeria"]):
+        category = "carne"
+    elif any(k in lo for k in ["pesce", "pescheria", "ittico"]):
+        category = "pesce"
+    elif any(k in lo for k in ["panificio", "pane", "panetteria", "pasticceria", "dolci"]):
+        category = "panificio"
+    elif any(k in lo for k in ["luce", "gas", "acquedotto", "energia", "utenze"]):
         category = "utenze"
     elif "manutenzione" in lo:
         category = "manutenzione"
@@ -43,14 +201,17 @@ def suggest_supplier_fields(text: str, existing_data: Dict[str, Any] | None = No
     current = existing_data or {}
     merged = {**current, **out}
     missing = [k for k in ["name", "vat_number", "iban", "email", "payment_terms"] if not str(merged.get(k) or "").strip()]
-    warnings = []
+    warnings: List[str] = []
     if "pec" not in lo:
         warnings.append("PEC non rilevata nel testo")
+    if not out.get("name") and not current.get("name"):
+        warnings.append("Ragione sociale non rilevata")
+    confidence = round(min(0.99, 0.55 + 0.07 * len([k for k in out if k != "merchandise_category"])), 2)
     return {
         "suggested_fields": out,
         "missing_fields": missing,
         "warnings": warnings,
-        "confidence": 0.82,
+        "confidence": confidence,
     }
 
 
@@ -130,6 +291,133 @@ def suggest_invoice_fields(text: str, existing_data: Dict[str, Any] | None = Non
         warnings.append("Data scadenza da verificare")
 
     return {"suggested_fields": out, "warnings": warnings, "confidence": 0.84}
+
+
+def _match_supplier_name(text: str, supplier_names: List[str]) -> Optional[Tuple[str, float]]:
+    if not text or not supplier_names:
+        return None
+    norm_text = _normalize_for_match(text)
+    best: Optional[Tuple[str, float]] = None
+    for name in supplier_names:
+        n_norm = _normalize_for_match(name)
+        if not n_norm:
+            continue
+        if n_norm in norm_text:
+            score = min(1.0, 0.6 + 0.05 * len(n_norm.split()))
+            if best is None or score > best[1]:
+                best = (name, score)
+            continue
+        words = [w for w in re.split(r"\s+", n_norm) if len(w) > 2]
+        if not words:
+            continue
+        hits = sum(1 for w in words if w in norm_text)
+        if hits >= max(1, len(words) - 1):
+            score = 0.45 + 0.1 * hits
+            if best is None or score > best[1]:
+                best = (name, score)
+    return best
+
+
+def _strip_known_dates(t: str) -> str:
+    """Remove date and date-keyword fragments from text (used to leave product lines untouched)."""
+    out = t
+    for pat in [
+        r"data\s+ordine\s*[:\s]*[^\n,;]*",
+        r"consegna(?:\s+prevista)?\s*[:\s]*[^\n,;]*",
+        r"data\s+consegna\s*[:\s]*[^\n,;]*",
+    ]:
+        out = re.sub(pat, " ", out, flags=re.I)
+    return out
+
+
+def suggest_order_full(text: str, supplier_names: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Comprehensive order parsing: supplier match, dates, destination, signatures, lines, notes."""
+    t = (text or "").strip()
+    warnings: List[str] = []
+    out: Dict[str, Any] = {}
+    if not t:
+        return {
+            "suggested_fields": {},
+            "suggested_lines": [],
+            "warnings": ["Testo vuoto"],
+            "confidence": 0.0,
+        }
+    lo = t.lower()
+    lo_norm = _normalize_for_match(t)
+
+    if supplier_names:
+        m = _match_supplier_name(t, supplier_names)
+        if m:
+            out["supplier_name"] = m[0]
+            out["supplier_match_confidence"] = round(m[1], 2)
+
+    m_od = re.search(r"data\s+ordine\s*[:\s]*([^\n,;]+)", t, re.I)
+    if m_od:
+        d = _parse_date_token(m_od.group(1))
+        if d:
+            out["order_date"] = d
+    elif "oggi" in lo_norm.split() or "oggi," in lo_norm or " oggi " in f" {lo_norm} ":
+        out["order_date"] = datetime.now().date().isoformat()
+
+    m_ed = re.search(r"(?:consegna(?:\s+prevista)?|data\s+consegna)\s*[:\s]*([^\n,;]+)", t, re.I)
+    if m_ed:
+        d = _parse_date_token(m_ed.group(1))
+        if d:
+            out["expected_delivery_date"] = d
+
+    m_dest = re.search(r"(?:destinazione|consegnare\s+(?:a|presso)|scarico\s+(?:a|presso)|spedizione\s+(?:a|presso))\s*[:\s]*([^\n;]{2,200})", t, re.I)
+    if m_dest:
+        dest = re.split(r"\b(?:firma|note|prodott|riga|pagament|piva|p\.iva|partita\s+iva)\b", m_dest.group(1), maxsplit=1, flags=re.I)[0]
+        out["delivery_location"] = dest.strip(" ,;:.-")[:128]
+
+    m_signed_by = re.search(r"(?:firma\s+ordine|ordinato\s+da|chi\s+ordina)\s*[:\s]*([A-Za-zÀ-ÿ' .]{2,60})", t, re.I)
+    if m_signed_by:
+        out["order_signed_by"] = re.split(r"[,;\n]", m_signed_by.group(1))[0].strip()
+
+    m_unl = re.search(r"(?:firma\s+scarico|scarica(?:to)?\s+da|chi\s+scarica)\s*[:\s]*([A-Za-zÀ-ÿ' .]{2,60})", t, re.I)
+    if m_unl:
+        out["unloading_signed_by"] = re.split(r"[,;\n]", m_unl.group(1))[0].strip()
+
+    m_vat = re.search(r"\biva\s*(?:al)?\s*([0-9]{1,2})\s*%", lo, re.I)
+    if m_vat:
+        try:
+            out["vat_percent"] = int(m_vat.group(1))
+        except (TypeError, ValueError):
+            pass
+
+    m_note = re.search(r"(?:^|[,;\n])\s*note?\s*[:\s]*([^\n;]{2,500})", t, re.I)
+    if m_note:
+        out["note"] = m_note.group(1).strip()
+
+    products_text = t
+    m_prods = re.search(r"prodott[oi]?\s*[:\s]*(.+)$", t, re.I | re.S)
+    if m_prods:
+        products_text = m_prods.group(1)
+    products_text = _strip_known_dates(products_text)
+    for pat in [
+        r"destinazione\s*[:\s]*[^\n,;]*",
+        r"firma\s+(?:ordine|scarico)\s*[:\s]*[^\n,;]*",
+        r"ordinato\s+da\s*[:\s]*[^\n,;]*",
+        r"^note?\s*[:\s]*[^\n;]*",
+        r"iva\s*(?:al)?\s*\d{1,2}\s*%",
+    ]:
+        products_text = re.sub(pat, " ", products_text, flags=re.I | re.M)
+
+    lines_result = suggest_order_lines(products_text)
+    suggested_lines = lines_result.get("suggested_lines") or []
+
+    if not suggested_lines:
+        warnings.append("Nessuna riga prodotto ricavata dal testo")
+    if supplier_names and not out.get("supplier_name"):
+        warnings.append("Fornitore non riconosciuto: selezionalo manualmente")
+
+    confidence = round(min(0.99, 0.45 + 0.07 * len(out) + 0.05 * min(8, len(suggested_lines))), 2)
+    return {
+        "suggested_fields": out,
+        "suggested_lines": suggested_lines,
+        "warnings": warnings,
+        "confidence": confidence,
+    }
 
 
 def suggest_order_lines(text: str) -> Dict[str, Any]:

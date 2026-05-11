@@ -46,6 +46,12 @@ class DeliveryBatchCreate(BaseModel):
   items: List[DeliveryItemCreate]
 
 
+class DeliveryNotesUpdate(BaseModel):
+  destination_note: Optional[str] = None
+  note: Optional[str] = None
+  anomaly_note: Optional[str] = None
+
+
 class DeliveryRead(DeliveryBase):
   id: int
   imponibile: Decimal

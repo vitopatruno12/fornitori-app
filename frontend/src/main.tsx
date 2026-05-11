@@ -12,6 +12,7 @@ import StaffPage from './pages/StaffPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
+import AiManagerPopups from './components/AiManagerPopups.jsx'
 
 type PageKey =
   | 'home'
@@ -109,6 +110,29 @@ function App() {
     const goPrimaNota = () => navigateTo('prima-nota')
     window.addEventListener('open-prima-nota', goPrimaNota)
     return () => window.removeEventListener('open-prima-nota', goPrimaNota)
+  }, [navigateTo])
+
+  React.useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      const target = detail?.page as PageKey | undefined
+      if (!target) return
+      const valid: PageKey[] = [
+        'home',
+        'suppliers',
+        'new-order',
+        'new-delivery',
+        'history',
+        'invoices',
+        'prima-nota',
+        'staff',
+        'support-tech',
+        'vne',
+      ]
+      if (valid.includes(target)) navigateTo(target)
+    }
+    window.addEventListener('navigate-app', onNavigate as EventListener)
+    return () => window.removeEventListener('navigate-app', onNavigate as EventListener)
   }, [navigateTo])
 
   React.useEffect(() => {
@@ -673,6 +697,7 @@ function App() {
         </>
       )}
       {aiToast && <div className={`ai-toast ${aiToastClosing ? 'is-closing' : 'is-open'}`}>{aiToast}</div>}
+      <AiManagerPopups enabled={isAuthenticated} />
     </div>
   )
 }

@@ -46,3 +46,16 @@ export async function deleteAllDeliveries() {
   }
 }
 
+export async function deleteDelivery(id) {
+  return apiFetch(`/deliveries/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function updateDeliveryNotes(id, payload) {
+  return apiFetch(`/deliveries/${encodeURIComponent(id)}/notes`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload || {}),
+  })
+}
+

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics } from '../services/deliveriesService'
+import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryNotes, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
 
 function formatDate(value) {
@@ -21,6 +21,25 @@ function qtyCell(d) {
   if (w) return `${Number(d.weight_kg)} kg`
   if (p) return `${d.pieces} pz`
   return '–'
+}
+
+function splitDeliveryNote(note) {
+  const text = String(note || '').trim()
+  if (!text) return { destination: '', documentNote: '' }
+  const m = text.match(/^Destinazione\s+scarico:\s*(.+)$/im)
+  const destination = m ? String(m[1] || '').trim() : ''
+  if (!destination) return { destination: '', documentNote: text }
+  const lines = text.split(/\r?\n/)
+  let skipping = true
+  const rest = []
+  for (const ln of lines) {
+    const t = ln.trim()
+    if (skipping && /^Destinazione\s+scarico:/i.test(t)) continue
+    if (skipping && t === '') continue
+    skipping = false
+    rest.push(ln)
+  }
+  return { destination, documentNote: rest.join('\n').trim() }
 }
 
 function PriceTrendChart({ series }) {
@@ -125,6 +144,12 @@ export default function DeliveriesHistoryPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [deletingAll, setDeletingAll] = useState(false)
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState('')
+  const [editingDeliveryId, setEditingDeliveryId] = useState(null)
+  const [editDestinationNote, setEditDestinationNote] = useState('')
+  const [editDocumentNote, setEditDocumentNote] = useState('')
+  const [editAnomalyNote, setEditAnomalyNote] = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
 
   const [anSupplierId, setAnSupplierId] = useState('')
   const [anProduct, setAnProduct] = useState('')
@@ -157,6 +182,10 @@ export default function DeliveriesHistoryPage() {
         product_query: productQuery?.trim() || undefined,
       })
       setDeliveries(data)
+      setSelectedDeliveryId((prev) => {
+        if (!Array.isArray(data) || data.length === 0) return ''
+        return data.some((d) => String(d.id) === String(prev)) ? String(prev) : String(data[0].id)
+      })
     } catch (e) {
       setError('Errore nel caricamento delle consegne')
     } finally {
@@ -215,6 +244,84 @@ export default function DeliveriesHistoryPage() {
     } finally {
       setAnalyticsLoading(false)
     }
+  }
+
+  function openEditNotes(row) {
+    const parsed = splitDeliveryNote(row?.note)
+    setEditingDeliveryId(row?.id ?? null)
+    setEditDestinationNote(parsed.destination || '')
+    setEditDocumentNote(parsed.documentNote || '')
+    setEditAnomalyNote(row?.anomaly_note || '')
+  }
+
+  function closeEditNotes() {
+    setEditingDeliveryId(null)
+    setEditDestinationNote('')
+    setEditDocumentNote('')
+    setEditAnomalyNote('')
+  }
+
+  async function handleSaveNotes() {
+    if (!editingDeliveryId) return
+    try {
+      setSavingNotes(true)
+      setError('')
+      setSuccess('')
+      const updated = await updateDeliveryNotes(editingDeliveryId, {
+        destination_note: editDestinationNote.trim() || null,
+        note: editDocumentNote.trim() || null,
+        anomaly_note: editAnomalyNote.trim() || null,
+      })
+      setDeliveries((prev) => prev.map((d) => (d.id === editingDeliveryId ? { ...d, ...updated } : d)))
+      setSuccess('Note consegna aggiornate')
+      closeEditNotes()
+    } catch (e) {
+      setError('Errore nel salvataggio delle note consegna')
+    } finally {
+      setSavingNotes(false)
+    }
+  }
+
+  async function handleDeleteDeliveryRow(row) {
+    if (!row?.id) return
+    const label = row?.product_description ? ` (${row.product_description})` : ''
+    if (!window.confirm(`Eliminare questa riga consegna${label}?`)) return
+    try {
+      setError('')
+      setSuccess('')
+      await deleteDelivery(row.id)
+      setDeliveries((prev) => prev.filter((d) => d.id !== row.id))
+      if (editingDeliveryId === row.id) closeEditNotes()
+      setSuccess('Riga consegna eliminata')
+    } catch {
+      setError('Errore nell’eliminazione della riga consegna')
+    }
+  }
+
+  function handleOpenSelectedNotes() {
+    if (!selectedDeliveryId) {
+      setError('Seleziona una riga consegna prima di modificare le note')
+      return
+    }
+    const row = deliveries.find((d) => String(d.id) === String(selectedDeliveryId))
+    if (!row) {
+      setError('Riga consegna non trovata')
+      return
+    }
+    openEditNotes(row)
+  }
+
+  async function handleDeleteSelectedRow() {
+    if (!selectedDeliveryId) {
+      setError('Seleziona una riga consegna prima di eliminare')
+      return
+    }
+    const row = deliveries.find((d) => String(d.id) === String(selectedDeliveryId))
+    if (!row) {
+      setError('Riga consegna non trovata')
+      return
+    }
+    await handleDeleteDeliveryRow(row)
   }
 
   return (
@@ -281,6 +388,83 @@ export default function DeliveriesHistoryPage() {
             {deletingAll ? 'Eliminazione...' : 'Elimina tutto lo storico'}
           </button>
         </form>
+        <div className="filter-bar" style={{ marginTop: '0.55rem', alignItems: 'flex-end' }}>
+          <div className="form-group">
+            <label>Riga selezionata</label>
+            <select
+              className="form-control"
+              value={selectedDeliveryId}
+              onChange={(e) => setSelectedDeliveryId(e.target.value)}
+              style={{ minWidth: 320 }}
+            >
+              {deliveries.length === 0 && <option value="">Nessuna riga disponibile</option>}
+              {deliveries.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {formatDate(d.delivery_date)} · DDT {d.ddt_number || '—'} · {d.product_description || '—'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!deliveries.length}
+            onClick={handleOpenSelectedNotes}
+          >
+            Modifica note
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            disabled={!deliveries.length}
+            onClick={handleDeleteSelectedRow}
+          >
+            Elimina riga
+          </button>
+        </div>
+
+        {editingDeliveryId != null && (
+          <div className="card" style={{ marginTop: '0.85rem', marginBottom: '0.4rem', padding: '0.85rem' }}>
+            <h3 className="page-subheader" style={{ marginTop: 0 }}>Modifica note consegna #{editingDeliveryId}</h3>
+            <div className="form-row">
+              <div className="form-group" style={{ flex: '1 1 260px' }}>
+                <label>Destinazione</label>
+                <input
+                  className="form-control"
+                  value={editDestinationNote}
+                  onChange={(e) => setEditDestinationNote(e.target.value)}
+                  placeholder="es. Via Roma 10, magazzino"
+                />
+              </div>
+              <div className="form-group" style={{ flex: '2 1 340px' }}>
+                <label>Note documento</label>
+                <textarea
+                  className="form-control"
+                  value={editDocumentNote}
+                  onChange={(e) => setEditDocumentNote(e.target.value)}
+                  rows={2}
+                />
+              </div>
+              <div className="form-group" style={{ flex: '2 1 340px' }}>
+                <label>Note anomalie</label>
+                <textarea
+                  className="form-control"
+                  value={editAnomalyNote}
+                  onChange={(e) => setEditAnomalyNote(e.target.value)}
+                  rows={2}
+                />
+              </div>
+            </div>
+            <div className="btn-group">
+              <button type="button" className="btn btn-primary" onClick={handleSaveNotes} disabled={savingNotes}>
+                {savingNotes ? 'Salvataggio...' : 'Salva note'}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={closeEditNotes} disabled={savingNotes}>
+                Annulla
+              </button>
+            </div>
+          </div>
+        )}
 
         {loading && <p className="loading">Caricamento...</p>}
         {!loading && !error && (
@@ -300,12 +484,16 @@ export default function DeliveriesHistoryPage() {
                   <th className="text-end">Imponibile</th>
                   <th className="text-end">IVA</th>
                   <th className="text-end">Totale</th>
+                  <th>Destinazione</th>
                   <th>Note doc.</th>
                   <th>Anomalie</th>
+                  <th>Azioni</th>
                 </tr>
               </thead>
               <tbody>
-                {deliveries.map((d) => (
+                {deliveries.map((d) => {
+                  const parsed = splitDeliveryNote(d.note)
+                  return (
                   <tr key={d.id}>
                     <td>{formatDate(d.delivery_date)}</td>
                     <td>{d.ddt_number || '–'}</td>
@@ -333,13 +521,15 @@ export default function DeliveriesHistoryPage() {
                     <td className="text-end amount">{formatAmount(d.imponibile)}</td>
                     <td className="text-end amount">{formatAmount(d.vat_amount)}</td>
                     <td className="text-end amount">{formatAmount(d.total)}</td>
-                    <td style={{ maxWidth: 140 }}>{d.note || '–'}</td>
+                    <td style={{ maxWidth: 150 }}>{parsed.destination || '–'}</td>
+                    <td style={{ maxWidth: 180 }}>{parsed.documentNote || '–'}</td>
                     <td style={{ maxWidth: 160 }}>{d.anomaly_note || '–'}</td>
+                    <td>{String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : '—'}</td>
                   </tr>
-                ))}
+                )})}
                 {deliveries.length === 0 && (
                   <tr>
-                    <td colSpan={14} className="empty-state">
+                    <td colSpan={16} className="empty-state">
                       Nessuna consegna registrata.
                     </td>
                   </tr>
