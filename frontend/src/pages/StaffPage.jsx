@@ -28,6 +28,127 @@ const VOICE_ITALIAN_DAYS = {
   giovedi: 4, giovedì: 4, venerdi: 5, venerdì: 5, sabato: 6, domenica: 0,
 }
 
+/** Ore in parole (riconoscimento vocale IT). Chiavi senza accenti. */
+const VOICE_ITALIAN_HOUR_WORDS = {
+  zero: 0,
+  mezzanotte: 0,
+  uno: 1, un: 1, una: 1,
+  due: 2,
+  tre: 3,
+  quattro: 4,
+  cinque: 5,
+  sei: 6,
+  sette: 7,
+  otto: 8,
+  nove: 9,
+  dieci: 10,
+  undici: 11,
+  dodici: 12,
+  mezzogiorno: 12,
+  tredici: 13,
+  quattordici: 14,
+  quindici: 15,
+  sedici: 16,
+  diciassette: 17,
+  diciotto: 18,
+  diciannove: 19,
+  venti: 20,
+  ventuno: 21,
+  ventidue: 22,
+  ventitre: 23,
+  ventitré: 23,
+  ventiquattro: 24,
+}
+
+function voiceStripAccents(s) {
+  return (s || '').normalize('NFD').replace(/\p{M}/gu, '')
+}
+
+function voiceNormalizeTimePhrase(text) {
+  return voiceStripAccents((text || '').toLowerCase())
+    .replace(/[^\p{L}\p{N}\s:.,\-–h]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function voicePadHour(h) {
+  return String(Math.min(23, Math.max(0, h))).padStart(2, '0')
+}
+
+function voicePadMinutes(m) {
+  return String(Math.min(59, Math.max(0, m))).padStart(2, '0')
+}
+
+/** Da token (parola o cifra) a ora 0–23, oppure null. */
+function voiceTokenToHour(token) {
+  const t = voiceStripAccents((token || '').trim().toLowerCase())
+  if (!t) return null
+  if (/^\d{1,2}$/.test(t)) {
+    const n = Number(t)
+    if (n >= 0 && n <= 24) return n === 24 ? 0 : n
+    return null
+  }
+  if (Object.prototype.hasOwnProperty.call(VOICE_ITALIAN_HOUR_WORDS, t)) {
+    return VOICE_ITALIAN_HOUR_WORDS[t]
+  }
+  return null
+}
+
+/**
+ * Un solo orario HH:MM da frase vocale: "otto", "otto e mezza", "8:30", "alle 16", "sedici e mezza".
+ */
+function voiceParseSingleTime(text) {
+  const t = voiceNormalizeTimePhrase(text)
+  if (!t) return null
+
+  let m = t.match(
+    /(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s*[:.,h]\s*(\d{1,2})(?:\b|$)/,
+  )
+  if (!m) {
+    m = t.match(/(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s+(\d{2})(?:\b|$)/)
+  }
+  if (m) {
+    const h = Number(m[1])
+    const min = Number(m[2])
+    if (h >= 0 && h <= 24 && min >= 0 && min <= 59) {
+      return `${voicePadHour(h === 24 ? 0 : h)}:${voicePadMinutes(min)}`
+    }
+  }
+
+  m = t.match(
+    /(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s+e\s+(mezza|un\s+quarto|trenta|(\d{1,2}))(?:\b|$)/,
+  )
+  if (m) {
+    const h = Number(m[1])
+    let min = 0
+    if (m[2] === 'mezza' || m[2] === 'trenta') min = 30
+    else if (/quarto/.test(m[2])) min = 15
+    else if (m[3]) min = Number(m[3])
+    if (h >= 0 && h <= 24) return `${voicePadHour(h === 24 ? 0 : h)}:${voicePadMinutes(min)}`
+  }
+
+  m = t.match(/(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})(?:\b|$)/)
+  if (m) {
+    const h = Number(m[1])
+    if (h >= 0 && h <= 24) return `${voicePadHour(h === 24 ? 0 : h)}:00`
+  }
+
+  const wordHourRe =
+    /\b(?:ore?\s+|alle?\s+)?(zero|mezzanotte|uno|un|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|undici|dodici|mezzogiorno|tredici|quattordici|quindici|sedici|diciassette|diciotto|diciannove|venti|ventuno|ventidue|ventitre|ventiquattro)(?:\s+e\s+(mezza|un\s+quarto|trenta|(\d{1,2})))?\b/
+  m = t.match(wordHourRe)
+  if (m) {
+    const h = voiceTokenToHour(m[1])
+    if (h == null) return null
+    let min = 0
+    if (m[2] === 'mezza' || m[2] === 'trenta') min = 30
+    else if (m[2] && /quarto/.test(m[2])) min = 15
+    else if (m[3]) min = Number(m[3])
+    return `${voicePadHour(h)}:${voicePadMinutes(min)}`
+  }
+
+  return null
+}
+
 function voiceParseDateIso(text) {
   const t = (text || '').toLowerCase().trim()
   if (!t) return ''
@@ -75,30 +196,164 @@ function voiceParseDateIso(text) {
   return ''
 }
 
-function voiceParseShiftTimes(text) {
-  const t = (text || '').toLowerCase()
-  let m = t.match(/(?:dalle?|da)\s*(?:ore\s*)?(\d{1,2})(?:[:.,]\s*(\d{2}))?\s*(?:alle?|fino\s*alle?|sino\s*alle?|a)\s*(\d{1,2})(?:[:.,]\s*(\d{2}))?/i)
+/** Estrae un orario ignorando parole come inizio, fine, turno. */
+function voiceExtractTimeFromPhrase(text) {
+  const t = voiceNormalizeTimePhrase(text)
+  if (!t) return null
+  const cleaned = t
+    .replace(
+      /\b(inizio|inizia|comincia|partenza|apertura|fine|finisce|termine|chiusura|uscita|del|della|di|il|la|lo|turno|turni|orario|lavoro|ore?|alle?|dalle?|a|da|fino|sino|e|il|un|una)\b/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+  return voiceParseSingleTime(cleaned) || voiceParseSingleTime(t)
+}
+
+const VOICE_START_KW_RX = /\b(inizio|inizia|comincia|partenza|apertura)\b/
+const VOICE_END_KW_RX = /\b(fine|finisce|termine|chiusura|uscita)\b/
+
+/** Estrae orario dopo parola-chiave inizio/fine (es. "inizio turno 9" → 09:00). */
+function voiceParseLabeledShiftTime(text, role) {
+  const t = voiceNormalizeTimePhrase(text)
+  if (!t) return null
+  if (role === 'start') {
+    if (!VOICE_START_KW_RX.test(t)) return null
+    const m = t.match(
+      /\b(?:inizio|inizia|comincia|partenza|apertura)(?:\s+(?:del|di|il|la|lo))?\s*(?:turno|orario)?\s*(.+?)(?=\s*\.?\s*\b(?:fine|finisce|termine|chiusura|uscita)\b|$)/,
+    )
+    return m ? voiceExtractTimeFromPhrase(m[1]) : voiceExtractTimeFromPhrase(t)
+  }
+  if (!VOICE_END_KW_RX.test(t)) return null
+  const m = t.match(
+    /\b(?:fine|finisce|termine|chiusura|uscita)(?:\s+(?:del|di|il|la|lo))?\s*(?:turno|orario)?\s*(.+?)$/,
+  )
+  return m ? voiceExtractTimeFromPhrase(m[1]) : voiceExtractTimeFromPhrase(t)
+}
+
+/**
+ * Orari turno con ruolo esplicito: "inizio turno 9", "fine turno 17",
+ * oppure intervallo "dalle 8 alle 16". Evita di scambiare inizio/fine.
+ */
+function voiceParseShiftTimesWithRoles(text) {
+  const raw = (text || '').trim()
+  if (!raw) return null
+  const t = voiceNormalizeTimePhrase(raw)
+  const hasStartKw = VOICE_START_KW_RX.test(t)
+  const hasEndKw = VOICE_END_KW_RX.test(t)
+
+  if (hasStartKw || hasEndKw) {
+    const start = hasStartKw ? voiceParseLabeledShiftTime(raw, 'start') : null
+    const end = hasEndKw ? voiceParseLabeledShiftTime(raw, 'end') : null
+    if (start || end) return { start, end }
+  }
+
+  const range = voiceParseShiftTimesRange(raw)
+  if (range?.start && range?.end) return range
+  if (range?.start || range?.end) return range
+
+  if (hasStartKw || hasEndKw) return null
+
+  const single = voiceExtractTimeFromPhrase(t)
+  if (single) return { start: single, end: null }
+
+  return null
+}
+
+/** Intervalli espliciti (dalle/alle, 8-16) senza spezzare frasi con inizio/fine. */
+function voiceParseShiftTimesRange(text) {
+  const raw = (text || '').trim()
+  if (!raw) return null
+  const t = voiceNormalizeTimePhrase(raw)
+  if (VOICE_START_KW_RX.test(t) && VOICE_END_KW_RX.test(t)) return null
+
+  let m = t.match(
+    /(?:dalle?|da)\s+(.+?)\s+(?:alle?|fino\s+alle?|sino\s+alle?|a)\s+(.+)/,
+  )
+  if (m) {
+    const start = voiceParseSingleTime(m[1])
+    const end = voiceParseSingleTime(m[2])
+    if (start && end) return { start, end }
+  }
+
+  m = t.match(/(\d{1,2})[:.,h]\s*(\d{1,2})\s*[-–]\s*(\d{1,2})[:.,h]\s*(\d{1,2})/)
   if (m) {
     return {
-      start: `${m[1].padStart(2, '0')}:${(m[2] || '00').padStart(2, '0')}`,
-      end: `${m[3].padStart(2, '0')}:${(m[4] || '00').padStart(2, '0')}`,
+      start: `${voicePadHour(Number(m[1]))}:${voicePadMinutes(Number(m[2]))}`,
+      end: `${voicePadHour(Number(m[3]))}:${voicePadMinutes(Number(m[4]))}`,
     }
   }
-  m = t.match(/(\d{1,2})[:.,]\s*(\d{2})\s*[-–]\s*(\d{1,2})[:.,]\s*(\d{2})/)
-  if (m) {
-    return {
-      start: `${m[1].padStart(2, '0')}:${m[2]}`,
-      end: `${m[3].padStart(2, '0')}:${m[4]}`,
-    }
-  }
+
   m = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/)
   if (m) {
     return {
-      start: `${m[1].padStart(2, '0')}:00`,
-      end: `${m[2].padStart(2, '0')}:00`,
+      start: `${voicePadHour(Number(m[1]))}:00`,
+      end: `${voicePadHour(Number(m[2]))}:00`,
     }
   }
+
+  const parts = t.split(/\s+/).filter(Boolean)
+  if (parts.length === 2) {
+    const h1 = voiceTokenToHour(parts[0])
+    const h2 = voiceTokenToHour(parts[1])
+    if (h1 != null && h2 != null) {
+      return { start: `${voicePadHour(h1)}:00`, end: `${voicePadHour(h2)}:00` }
+    }
+  }
+
   return null
+}
+
+function voiceParseShiftTimes(text) {
+  const raw = (text || '').trim()
+  if (!raw) return null
+  const withRoles = voiceParseShiftTimesWithRoles(raw)
+  if (withRoles) return withRoles
+  return voiceParseShiftTimesRange(raw)
+}
+
+/** Nel dettato libero: ogni frase aggiorna solo il campo giusto (inizio/fine). */
+function voiceMergeTimesFromPhrases(phrases) {
+  let start = null
+  let end = null
+  for (const phrase of phrases || []) {
+    const p = (phrase || '').trim()
+    if (!p) continue
+    const labeled = voiceParseShiftTimesWithRoles(p)
+    if (labeled?.start) start = labeled.start
+    if (labeled?.end) end = labeled.end
+  }
+  if (start || end) return { start, end }
+  const merged = (phrases || []).join('. ').trim()
+  return merged ? voiceParseShiftTimesWithRoles(merged) || voiceParseShiftTimesRange(merged) : null
+}
+
+/** Applica orario/i turno al form (inizio/fine). */
+function voiceApplyShiftTimesToForm(times, setters) {
+  if (!times) return false
+  let ok = false
+  if (times.start) {
+    setters.setFormStart(times.start)
+    ok = true
+  }
+  if (times.end) {
+    setters.setFormEnd(times.end)
+    ok = true
+  }
+  return ok
+}
+
+/** Risposta vocale sufficiente per passare allo step orario successivo. */
+function voiceTimeStepLooksComplete(stepKey, phrase) {
+  const p = (phrase || '').trim()
+  if (!p || /^(passa|salta|skip)\b/i.test(p)) return true
+  if (stepKey === 'time_range') {
+    const r = voiceParseShiftTimesWithRoles(p)
+    return !!(r?.start && r?.end)
+  }
+  if (stepKey === 'time_start') return !!voiceParseSingleTime(p)
+  if (stepKey === 'time_end') return !!voiceParseSingleTime(p)
+  return false
 }
 
 function voiceParseEntryKind(text) {
@@ -132,10 +387,10 @@ function voiceParseShift(text, members) {
   if (iso) out.work_date = iso
   const kind = voiceParseEntryKind(text)
   if (kind) out.entry_kind = kind
-  const times = voiceParseShiftTimes(text)
+  const times = voiceParseShiftTimesWithRoles(text) || voiceParseShiftTimesRange(text)
   if (times) {
-    out.time_start = times.start
-    out.time_end = times.end
+    if (times.start) out.time_start = times.start
+    if (times.end) out.time_end = times.end
   }
   const noteM = text.match(/\b(?:note?|nota)\s*[:\s]*(.{2,200})/i)
   if (noteM) out.notes = noteM[1].trim()
@@ -425,10 +680,35 @@ export default function StaffPage() {
   const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
   const [assistantActive, setAssistantActive] = useState(false)
   const [assistantTranscript, setAssistantTranscript] = useState('')
+  const [voiceGuideInfoOpen, setVoiceGuideInfoOpen] = useState(false)
   const assistantRecognitionRef = useRef(null)
+  const [assistantPhrases, setAssistantPhrases] = useState([])
   const assistantCancelledRef = useRef(false)
   const assistantConfirmRef = useRef(null)
   const voiceSubmitBtnRef = useRef(null)
+  const voiceShiftFormRef = useRef(null)
+
+  function stopVoiceShiftConfirmListen() {
+    try {
+      assistantConfirmRef.current?.stop()
+    } catch {
+      /* noop */
+    }
+    assistantConfirmRef.current = null
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel()
+      } catch {
+        /* noop */
+      }
+    }
+    setVoiceListening(false)
+  }
+
+  function dismissVoiceShiftSessionPrompt() {
+    stopVoiceShiftConfirmListen()
+    setVoiceGuidePrompt('')
+  }
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -553,6 +833,48 @@ export default function StaffPage() {
     }
   }, [planView, weekAnchor, dayFocus, periodFrom, periodTo, loadForRange])
 
+  /** Ricarica i turni includendo sempre `ymd` (stessa logica di reloadPlanning ma range calcolato sulla data salvata, evita closure stale dopo setState). */
+  async function reloadPlanningForWorkDate(ymd) {
+    if (!ymd || typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+      await reloadPlanning()
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      if (planView === 'week') {
+        const anchor = startOfWeekMonday(parseYMD(ymd))
+        await loadForRange(anchor, addDays(anchor, 6))
+      } else if (planView === 'day') {
+        const d = parseYMD(ymd)
+        await loadForRange(d, d)
+      } else {
+        const fa = toYMD(periodFrom)
+        const fb = toYMD(periodTo)
+        let lo = fa <= fb ? fa : fb
+        let hi = fa <= fb ? fb : fa
+        if (ymd < lo) lo = ymd
+        if (ymd > hi) hi = ymd
+        const startD = parseYMD(lo)
+        const endD = parseYMD(hi)
+        const n = daysInclusiveCount(startD, endD)
+        if (n > MAX_PLANNING_PERIOD_DAYS) {
+          setError(`Intervallo troppo lungo (${n} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni: restringi «Dal» / «Al».`)
+          setShifts([])
+          setPlanningLoaded(false)
+          return
+        }
+        await loadForRange(startD, endD)
+      }
+      setPlanningLoaded(true)
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento personale')
+      setPlanningLoaded(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!success) return
     const t = window.setTimeout(() => setSuccess(''), 2800)
@@ -570,6 +892,15 @@ export default function StaffPage() {
       setFormDate(periodLoStr)
     }
   }, [planView, periodLoStr, editingShiftId])
+
+  useEffect(() => {
+    if (!voiceGuideInfoOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setVoiceGuideInfoOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [voiceGuideInfoOpen])
 
   function shiftLine(s) {
     const name = s.staff_member_name
@@ -964,19 +1295,51 @@ export default function StaffPage() {
     }
   }, [members, formMemberId])
 
+  /** Allinea vista planning alla data del turno salvato (evita che sparisca dopo voce/AI se dayFocus o settimana erano altri giorni). */
+  function focusPlanningOnWorkDate(ymd) {
+    if (!ymd || typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return
+    const d = parseYMD(ymd)
+    if (Number.isNaN(d.getTime())) return
+
+    if (planView === 'day') {
+      setDayFocus(d)
+      return
+    }
+    if (planView === 'week') {
+      setWeekAnchor(startOfWeekMonday(d))
+      return
+    }
+    if (planView === 'period') {
+      const fa = toYMD(periodFrom)
+      const fb = toYMD(periodTo)
+      const lo = fa <= fb ? fa : fb
+      const hi = fa <= fb ? fb : fa
+      if (ymd < lo) {
+        if (fa <= fb) setPeriodFrom(d)
+        else setPeriodTo(d)
+      } else if (ymd > hi) {
+        if (fa <= fb) setPeriodTo(d)
+        else setPeriodFrom(d)
+      }
+    }
+  }
+
   async function handleSubmitShift(e) {
     e.preventDefault()
     if (shiftBusy) return
     if (!formMemberId) {
       setError('Seleziona un dipendente')
+      dismissVoiceShiftSessionPrompt()
       return
     }
     const staffId = Number(formMemberId)
     if (!Number.isFinite(staffId) || !members.some((m) => m.id === staffId)) {
       setError('Il dipendente selezionato non è più in elenco. Scegli un altro nome dal menu.')
       await refreshMembers()
+      dismissVoiceShiftSessionPrompt()
       return
     }
+    const savedWorkDate = formDate
     const payload = {
       staff_member_id: staffId,
       work_date: formDate,
@@ -988,12 +1351,14 @@ export default function StaffPage() {
     if (formKind === 'shift') {
       if (!formStart || !formEnd) {
         setError('Per il turno servono ora inizio e fine')
+        dismissVoiceShiftSessionPrompt()
         return
       }
     }
     if (formKind === 'permission') {
       if ((formStart && !formEnd) || (!formStart && formEnd)) {
         setError('Permesso: indicare sia inizio sia fine, oppure lasciare vuoto e usare le note')
+        dismissVoiceShiftSessionPrompt()
         return
       }
       if (!formStart) {
@@ -1016,8 +1381,9 @@ export default function StaffPage() {
         await createStaffShift(payload)
         setSuccess('Voce aggiunta')
       }
+      focusPlanningOnWorkDate(savedWorkDate)
       resetForm()
-      await reloadPlanning()
+      await reloadPlanningForWorkDate(savedWorkDate)
     } catch (err) {
       const msg = String(err?.message || '')
       if (msg.includes('404') || msg.includes('Voce non trovata') || msg.includes('Not Found')) {
@@ -1036,6 +1402,7 @@ export default function StaffPage() {
       }
     } finally {
       setShiftBusy(false)
+      dismissVoiceShiftSessionPrompt()
     }
   }
 
@@ -1135,6 +1502,38 @@ export default function StaffPage() {
     }
   }
 
+  function submitVoiceShiftForm(options = {}) {
+    const { showSavingPrompt = false } = options
+    // Bug pregresso: cliccare un bottone display:none non triggera il form submit
+    // in nessun browser. Qui prima provo requestSubmit() sul <form>, poi se non
+    // disponibile faccio fallback al bottone "Aggiungi" visibile cercandolo nel form.
+    const form = voiceShiftFormRef.current
+    if (form && typeof form.reportValidity === 'function' && !form.reportValidity()) {
+      setVoiceError('Controlla dipendente, data e campi obbligatori prima di salvare.')
+      dismissVoiceShiftSessionPrompt()
+      return false
+    }
+    if (showSavingPrompt) setVoiceGuidePrompt('Salvataggio in corso…')
+    if (form && typeof form.requestSubmit === 'function') {
+      try {
+        form.requestSubmit()
+        return true
+      } catch {
+        /* prosegui col fallback */
+      }
+    }
+    if (form) {
+      const submitBtn = form.querySelector('button[type="submit"]:not([style*="display: none"])')
+      if (submitBtn) {
+        submitBtn.click()
+        return true
+      }
+    }
+    // Ultima spiaggia: click sul bottone vocale dedicato (storicamente non funzionante).
+    voiceSubmitBtnRef.current?.click()
+    return true
+  }
+
   function applyVoiceShiftFields(parsed, options = {}) {
     if (!parsed) return []
     const applied = []
@@ -1173,10 +1572,11 @@ export default function StaffPage() {
       setAssistantActive(false)
       try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
     }
-    try { assistantConfirmRef.current?.stop() } catch { /* noop */ }
+    stopVoiceShiftConfirmListen()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try { window.speechSynthesis.cancel() } catch { /* noop */ }
     }
+    setAssistantPhrases([])
     setAssistantTranscript('')
     resetForm()
     setVoiceGuideHeard('')
@@ -1184,6 +1584,36 @@ export default function StaffPage() {
     setVoiceError('')
     setVoiceListening(false)
     setSuccess('Campi turno azzerati. Pronto a ricominciare.')
+  }
+
+  function reapplyAssistantDictation(phrases) {
+    resetForm()
+    const merged = (phrases || []).join('. ').trim()
+    setAssistantTranscript(merged)
+    if (merged) {
+      const parsed = voiceParseShift(merged, members)
+      const times = voiceMergeTimesFromPhrases(phrases)
+      if (times?.start) parsed.time_start = times.start
+      if (times?.end) parsed.time_end = times.end
+      applyVoiceShiftFields(parsed)
+    }
+    setVoiceGuideHeard(phrases.length ? phrases[phrases.length - 1] : '')
+  }
+
+  function clearAssistantDictation() {
+    if (!assistantActive) return
+    setAssistantPhrases([])
+    setAssistantTranscript('')
+    setVoiceGuideHeard('')
+    setVoiceError('')
+    resetForm()
+  }
+
+  function undoLastAssistantDictationPhrase() {
+    if (!assistantActive || assistantPhrases.length === 0) return
+    const next = assistantPhrases.slice(0, -1)
+    setAssistantPhrases(next)
+    reapplyAssistantDictation(next)
   }
 
   function startVoiceShiftAssistant() {
@@ -1195,6 +1625,7 @@ export default function StaffPage() {
     setVoiceError('')
     setVoiceGuideHeard('')
     setVoiceGuidePrompt('Assistente attivo: dimmi liberamente dipendente, data, ora di inizio e fine. Premi "Ferma" quando hai finito.')
+    setAssistantPhrases([])
     setAssistantTranscript('')
     assistantCancelledRef.current = false
     setAssistantActive(true)
@@ -1240,13 +1671,12 @@ export default function StaffPage() {
       }
       if (!additions.length) return
       const added = additions.join(' ')
-      setVoiceGuideHeard(added)
-      setAssistantTranscript((prev) => {
-        const merged = prev ? `${prev}. ${added}`.trim() : added
-        const parsed = voiceParseShift(merged, members)
-        applyVoiceShiftFields(parsed)
-        return merged
+      let nextPhrases = assistantPhrases
+      setAssistantPhrases((prev) => {
+        nextPhrases = [...prev, added]
+        return nextPhrases
       })
+      reapplyAssistantDictation(nextPhrases)
     }
     assistantRecognitionRef.current = rec
     try { rec.start() } catch { setVoiceListening(false) }
@@ -1262,12 +1692,13 @@ export default function StaffPage() {
   }
 
   function askVoiceShiftSaveOrReset() {
+    stopVoiceShiftConfirmListen()
     setVoiceGuidePrompt('Vuoi salvare il turno? Rispondi sì o no.')
     if (!SpeechRecognition || typeof window === 'undefined') {
       const ok = window.confirm('Vuoi salvare il turno appena dettato?\nOK = salva  •  Annulla = resetta')
       if (ok) {
         if (!formMemberId) setVoiceError('Manca il dipendente: completa e salva manualmente.')
-        else window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 150)
+        else window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 150)
       } else {
         resetVoiceShiftFields()
       }
@@ -1310,23 +1741,24 @@ export default function StaffPage() {
       if (yes && !no) {
         if (!formMemberId) {
           setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
+          window.setTimeout(() => dismissVoiceShiftSessionPrompt(), 4000)
         } else {
-          window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 200)
-          setVoiceGuidePrompt('Salvataggio in corso...')
+          window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
         }
       } else if (no && !yes) {
         resetVoiceShiftFields()
         setVoiceGuidePrompt('Campi azzerati. Pronto per ricominciare.')
       } else {
         setVoiceError(`Non ho capito "${transcript}". Premi Aggiungi o 🔁 Reset manualmente.`)
+        window.setTimeout(() => dismissVoiceShiftSessionPrompt(), 4000)
       }
-      window.setTimeout(() => setVoiceGuidePrompt(''), 4000)
     }
     assistantConfirmRef.current = rec
     try { rec.start() } catch { /* noop */ }
   }
 
   function stopVoiceShiftGuide() {
+    stopVoiceShiftConfirmListen()
     setVoiceGuideActive(false)
     setVoiceGuidePrompt('')
     setVoiceGuideStep(0)
@@ -1357,9 +1789,8 @@ export default function StaffPage() {
     const steps = [
       { key: 'member', prompt: memberPrompt },
       { key: 'kind', prompt: 'Che tipo? Dimmi turno, permesso, assenza o malattia.' },
-      { key: 'work_date', prompt: 'Per quale giorno? Puoi dire oggi, domani, lunedì oppure una data come 12 marzo.' },
-      { key: 'time_start', prompt: "A che ora inizia? (es. otto, otto e mezza, 8:30). Di' \"passa\" se non serve." },
-      { key: 'time_end', prompt: "A che ora finisce? (es. sedici). Di' \"passa\" se non serve." },
+      { key: 'work_date', prompt: 'Che giorno? Oggi, domani, lunedì o una data.' },
+      { key: 'time_range', prompt: 'Orario? Es. inizio turno 9, fine turno 17, oppure dalle 9 alle 17, 9-17.' },
       { key: 'notes', prompt: 'Vuoi aggiungere note? Dimmi le note oppure passa.' },
       { key: '__confirm__', prompt: 'Aggiungo questo turno? Rispondi sì o no.' },
     ]
@@ -1389,22 +1820,23 @@ export default function StaffPage() {
         try {
           const u = new SpeechSynthesisUtterance(text)
           u.lang = 'it-IT'
-          u.rate = 1
-          if (cb) u.onend = () => window.setTimeout(cb, 200)
+          u.rate = 1.22
+          if (cb) u.onend = () => window.setTimeout(cb, 60)
           window.speechSynthesis.cancel()
           window.speechSynthesis.speak(u)
           return
         } catch { /* fallthrough */ }
       }
-      if (cb) window.setTimeout(cb, 200)
+      if (cb) window.setTimeout(cb, 60)
     }
+    const isTimeStep = step.key === 'time_range' || step.key === 'time_start' || step.key === 'time_end'
     const armInactivityTimer = () => {
       if (inactivityTimer) window.clearTimeout(inactivityTimer)
       inactivityTimer = window.setTimeout(() => {
         if (cancelled || advancing) return
-        speak('Sei pronto ad andare avanti?')
+        speak(isTimeStep ? 'Dimmi l\'orario, oppure passa.' : 'Sei pronto ad andare avanti?')
         armInactivityTimer()
-      }, 30000)
+      }, isTimeStep ? 12000 : 30000)
     }
     const advance = () => {
       if (advancing || cancelled) return
@@ -1430,27 +1862,18 @@ export default function StaffPage() {
       } else if (step.key === 'work_date') {
         const iso = voiceParseDateIso(valueText || text)
         if (iso) setFormDate(iso)
-      } else if (step.key === 'time_start') {
+      } else if (step.key === 'time_range' || step.key === 'time_start' || step.key === 'time_end') {
         if (valueText) {
-          const t = voiceParseShiftTimes(valueText) || voiceParseShiftTimes(`dalle ${valueText} alle 0`)
-          if (t?.start) setFormStart(t.start)
-          else {
-            const numM = valueText.match(/(\d{1,2})(?:[:.,]\s*(\d{2}))?/)
-            if (numM) {
-              setFormStart(`${numM[1].padStart(2, '0')}:${(numM[2] || '00').padStart(2, '0')}`)
-            }
+          let t = voiceParseShiftTimesWithRoles(valueText)
+          if (!t?.start && step.key === 'time_start') {
+            const one = voiceExtractTimeFromPhrase(valueText)
+            if (one) t = { start: one, end: null }
           }
-        }
-      } else if (step.key === 'time_end') {
-        if (valueText) {
-          const t = voiceParseShiftTimes(`dalle 0 alle ${valueText}`) || voiceParseShiftTimes(valueText)
-          if (t?.end) setFormEnd(t.end)
-          else {
-            const numM = valueText.match(/(\d{1,2})(?:[:.,]\s*(\d{2}))?/)
-            if (numM) {
-              setFormEnd(`${numM[1].padStart(2, '0')}:${(numM[2] || '00').padStart(2, '0')}`)
-            }
+          if (!t?.end && step.key === 'time_end') {
+            const one = voiceExtractTimeFromPhrase(valueText)
+            if (one) t = { start: null, end: one }
           }
+          voiceApplyShiftTimesToForm(t, { setFormStart, setFormEnd })
         }
       } else if (step.key === 'notes') {
         if (valueText) setFormNotes(valueText)
@@ -1460,7 +1883,7 @@ export default function StaffPage() {
           if (!formMemberId) {
             setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
           } else {
-            window.setTimeout(() => voiceSubmitBtnRef.current?.click(), 200)
+            window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
           }
         }
       }
@@ -1493,7 +1916,7 @@ export default function StaffPage() {
         if (cancelled) return
         window.setTimeout(() => {
           if (!cancelled) startRecognition()
-        }, 250)
+        }, isTimeStep ? 80 : 180)
       }
       recognition.onerror = () => { /* onend riavvia */ }
       recognition.onresult = (e) => {
@@ -1525,6 +1948,16 @@ export default function StaffPage() {
             return
           }
           buffer = (buffer + ' ' + phrase).trim()
+          if (isTimeStep) {
+            const partial = voiceParseShiftTimesWithRoles(buffer)
+            if (partial?.start) setFormStart(partial.start)
+            if (partial?.end) setFormEnd(partial.end)
+            if (voiceTimeStepLooksComplete(step.key, buffer)) {
+              applyAndAdvance(buffer)
+              return
+            }
+            continue
+          }
         }
       }
       try { recognition.start() } catch { setVoiceListening(false) }
@@ -2137,32 +2570,35 @@ export default function StaffPage() {
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={startVoiceShiftAssistant}
+                onClick={startVoiceShiftGuide}
                 disabled={assistantActive || voiceGuideActive}
                 style={{ marginLeft: '0.5rem', padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Assistente vocale: parla liberamente, l'AI compila i campi finché non premi Ferma"
+                title="Assistente vocale: ti fa le domande una alla volta (dipendente, tipo, giorno, orari…). Le domande compaiono anche in un riquadro in primo piano."
               >
-                {assistantActive ? '🎤 In ascolto...' : '🎤 Assistente vocale'}
+                🎤 Assistente vocale
               </button>
               <button
                 type="button"
                 className="btn btn-warning"
-                onClick={stopVoiceShiftAssistant}
-                disabled={!assistantActive}
+                onClick={() => {
+                  if (assistantActive) stopVoiceShiftAssistant()
+                  else if (voiceGuideActive) stopVoiceShiftGuide()
+                }}
+                disabled={!assistantActive && !voiceGuideActive}
                 style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Ferma l'assistente: poi ti chiede se salvare o resettare"
+                title="Interrompe il dettato libero oppure la guida vocale"
               >
                 ⏹️ Ferma
               </button>
               <button
                 type="button"
-                className="btn btn-primary"
-                onClick={voiceGuideActive ? stopVoiceShiftGuide : startVoiceShiftGuide}
-                disabled={assistantActive || (voiceListening && !voiceGuideActive)}
+                className="btn btn-outline-secondary"
+                onClick={startVoiceShiftAssistant}
+                disabled={assistantActive || voiceGuideActive}
                 style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Guida vocale passo-passo: ti fa una domanda alla volta"
+                title="Microfono continuo: detta tutto in una volta, poi Ferma; niente domande passo-passo"
               >
-                {voiceGuideActive ? '⏹️ Ferma guida' : '🗣️ Guida vocale passo-passo'}
+                🎧 Dettato libero
               </button>
               <button
                 type="button"
@@ -2177,22 +2613,33 @@ export default function StaffPage() {
           )}
         </h2>
         {SpeechRecognition && (
-          <div className="alert alert-info" style={{ fontSize: '0.88rem', marginBottom: '0.75rem' }}>
-            <strong>🎤 Assistente vocale (libera):</strong> premi <strong>Assistente vocale</strong>, dimmi liberamente <em>chi, quando, da che ora a che ora, tipo</em> (es. <em>&quot;Mario, domani, turno dalle 8 alle 16, note: prima cassa&quot;</em>) e quando hai finito premi <strong>⏹️ Ferma</strong>. L&apos;assistente chiederà &quot;vuoi salvare? sì o no&quot;: <strong>sì</strong> aggiunge, <strong>no</strong> resetta.
-            <br />
-            <strong>🗣️ Guida vocale passo-passo:</strong> ti fa una domanda alla volta. Per ogni campo parla, poi di&apos; <strong>&quot;andiamo avanti&quot;</strong>; <em>passa</em> per saltare, <em>ripeti</em> per riascoltare. Dopo 30s di silenzio chiede &quot;sei pronto ad andare avanti?&quot;.
-            {voiceError ? <div style={{ marginTop: '0.5rem', color: 'var(--danger, #c0392b)' }}>{voiceError}</div> : null}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              marginBottom: '0.75rem',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', flex: '1 1 240px', maxWidth: '100%' }}>
+              Usa <strong>Assistente vocale</strong> per le <strong>domande passo-passo</strong> (anche in un riquadro in primo piano), <strong>Dettato libero</strong> per parlare in continuo, <strong>Ferma</strong> per interrompere, <strong>Reset campi</strong> per azzerare. Per il dettaglio apri{' '}
+              <strong>Info guida</strong>.
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              style={{ flexShrink: 0 }}
+              onClick={() => setVoiceGuideInfoOpen(true)}
+            >
+              Info guida
+            </button>
           </div>
         )}
-        {voiceGuidePrompt && (
-          <div className="alert alert-info" style={{ marginBottom: '0.5rem' }}>
-            <strong>Guida vocale:</strong> {voiceGuidePrompt}
-            {voiceGuideHeard ? (
-              <div style={{ marginTop: '0.35rem', color: 'var(--text-muted)' }}>Hai detto: &quot;{voiceGuideHeard}&quot;</div>
-            ) : null}
-          </div>
-        )}
+        {voiceError ? <div className="alert alert-warning" style={{ marginBottom: '0.5rem' }}>{voiceError}</div> : null}
         <form
+          ref={voiceShiftFormRef}
           onSubmit={handleSubmitShift}
           className="form-row"
           style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}
@@ -2301,6 +2748,180 @@ export default function StaffPage() {
         </form>
       </section>
       </div>
+
+      {(assistantActive || voiceGuideActive || (voiceGuidePrompt || '').trim() !== '') && (
+        <div className="staff-report-modal-backdrop" role="presentation">
+          <div
+            className="card staff-report-modal"
+            style={{ maxWidth: 520, width: 'min(94vw, 520px)' }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="staff-voice-session-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="staff-voice-session-title" className="page-subheader" style={{ marginTop: 0 }}>
+              {voiceGuideActive
+                ? 'Assistente vocale — domande'
+                : assistantActive
+                  ? 'Dettato libero'
+                  : /vuoi salvare/i.test(voiceGuidePrompt || '')
+                    ? 'Conferma salvataggio'
+                    : 'Assistente vocale'}
+            </h3>
+            <p style={{ fontSize: '1.05rem', lineHeight: 1.5, margin: '0 0 1rem', color: 'var(--text-heading)' }}>{voiceGuidePrompt}</p>
+            {voiceGuideHeard ? (
+              <p style={{ margin: '0 0 0.75rem', color: 'var(--text-muted)', fontSize: '0.92rem' }}>
+                Ultimo riconoscimento: &quot;{voiceGuideHeard}&quot;
+              </p>
+            ) : null}
+            {assistantActive && assistantPhrases.length > 0 ? (
+              <details open style={{ marginBottom: '0.85rem', fontSize: '0.88rem' }}>
+                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
+                  Frasi raccolte ({assistantPhrases.length})
+                </summary>
+                <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem', color: 'var(--text-muted)' }}>
+                  {assistantPhrases.map((phrase, idx) => (
+                    <li key={`${idx}-${phrase.slice(0, 24)}`} style={{ marginBottom: '0.25rem' }}>
+                      {phrase}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+            {(voiceListening && (assistantActive || voiceGuideActive)) ? (
+              <p className="loading" style={{ margin: '0 0 1rem' }}>
+                Microfono in ascolto…
+              </p>
+            ) : null}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {(assistantActive || voiceGuideActive) && (
+                  <button
+                    type="button"
+                    className="btn btn-warning"
+                    onClick={() => {
+                      if (assistantActive) stopVoiceShiftAssistant()
+                      else if (voiceGuideActive) stopVoiceShiftGuide()
+                    }}
+                  >
+                    ⏹️ Ferma
+                  </button>
+                )}
+                {assistantActive && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger"
+                      onClick={() => clearAssistantDictation()}
+                      disabled={assistantPhrases.length === 0}
+                      title="Azzera testo dettato e campi del modulo"
+                    >
+                      Cancella tutto
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={() => undoLastAssistantDictationPhrase()}
+                      disabled={assistantPhrases.length === 0}
+                      title="Rimuove l’ultima frase riconosciuta e ricalcola i campi"
+                    >
+                      Annulla ultima frase
+                    </button>
+                  </>
+                )}
+                {!assistantActive &&
+                  !voiceGuideActive &&
+                  /vuoi salvare/i.test(voiceGuidePrompt || '') &&
+                  !/salvataggio in corso/i.test(voiceGuidePrompt || '') && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          if (!formMemberId) {
+                            setVoiceError('Manca il dipendente: non posso salvare.')
+                            return
+                          }
+                          window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
+                        }}
+                      >
+                        Salva
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={() => resetVoiceShiftFields()}>
+                        Annulla
+                      </button>
+                    </>
+                  )}
+                {!assistantActive &&
+                  !voiceGuideActive &&
+                  /vuoi salvare/i.test(voiceGuidePrompt || '') &&
+                  voiceListening &&
+                  !/salvataggio in corso/i.test(voiceGuidePrompt || '') && (
+                    <button type="button" className="btn btn-outline-secondary" onClick={() => stopVoiceShiftConfirmListen()}>
+                      Interrompi ascolto
+                    </button>
+                  )}
+                {!assistantActive &&
+                  !voiceGuideActive &&
+                  /salvataggio in corso/i.test(voiceGuidePrompt || '') &&
+                  !shiftBusy && (
+                    <button type="button" className="btn btn-secondary" onClick={() => dismissVoiceShiftSessionPrompt()}>
+                      Chiudi
+                    </button>
+                  )}
+                {!assistantActive && !voiceGuideActive && /completat/i.test(voiceGuidePrompt || '') && (
+                  <button type="button" className="btn btn-primary" onClick={() => setVoiceGuidePrompt('')}>
+                    Chiudi
+                  </button>
+                )}
+              </div>
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setVoiceGuideInfoOpen(true)}>
+                Info guida
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {voiceGuideInfoOpen && (
+        <div
+          className="staff-report-modal-backdrop"
+          role="presentation"
+          onClick={() => setVoiceGuideInfoOpen(false)}
+        >
+          <div
+            className="card staff-report-modal"
+            style={{ maxWidth: 520, width: 'min(96vw, 520px)' }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="staff-voice-guide-info-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="staff-voice-guide-info-title" className="page-subheader" style={{ marginTop: 0 }}>
+              Assistente e guida vocale (Personale)
+            </h3>
+            <div style={{ fontSize: '0.92rem', lineHeight: 1.55, color: 'var(--text-body)' }}>
+              <p style={{ margin: '0 0 0.75rem' }}>
+                <strong>Assistente vocale:</strong> avvia la <strong>guida con domande</strong> (dipendente, tipo, giorno, orari…). Ogni domanda compare anche in un <strong>riquadro in primo piano</strong>. Per parlare in continuo senza domande usa <strong>Dettato libero</strong>, poi <strong>Ferma</strong>; ti chiederà se salvare.
+              </p>
+              <p style={{ margin: '0 0 0.75rem' }}>
+                <strong>Dettato libero:</strong> microfono continuo; detta tutto insieme (es. &quot;Mario, domani, turno 8–16&quot;) e premi <strong>Ferma</strong>. Poi &quot;vuoi salvare?&quot;: <strong>sì</strong> salva, <strong>no</strong> azzera.
+              </p>
+              <p style={{ margin: '0 0 0.75rem' }}>
+                <strong>Orario:</strong> puoi dire <em>inizio turno 9</em> e <em>fine turno 17</em> (anche in due frasi), oppure <em>dalle 9 alle 17</em>, <em>9-17</em>. <em>Inizio</em> va nel campo Inizio, <em>fine</em> nel campo Fine. Quando hai entrambi si passa avanti.
+              </p>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Suggerimento: usa Chrome o Edge per il riconoscimento vocale. Chiudi con <strong>Chiudi</strong>, clic fuori dalla finestra o tasto <strong>Esc</strong>. Per annullare i campi usa <strong>Reset campi</strong>.
+              </p>
+            </div>
+            <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button type="button" className="btn btn-primary" onClick={() => setVoiceGuideInfoOpen(false)}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <WeeklyStaffReportModal
         open={reportModalOpen}

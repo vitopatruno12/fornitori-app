@@ -238,7 +238,7 @@ export default function NewOrderPage({ onNavigate }) {
   const [voiceGuidePrompt, setVoiceGuidePrompt] = useState('')
   const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
   const [voiceGuideProducts, setVoiceGuideProducts] = useState([])
-  const aiTextareaRef = useRef(null)
+  const [voiceGuideInfoOpen, setVoiceGuideInfoOpen] = useState(false)
   const recognitionRef = useRef(null)
 
   const supplierLabel = useMemo(() => {
@@ -339,6 +339,15 @@ export default function NewOrderPage({ onNavigate }) {
     window.addEventListener('ai-apply-order', fn)
     return () => window.removeEventListener('ai-apply-order', fn)
   }, [])
+
+  useEffect(() => {
+    if (!voiceGuideInfoOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setVoiceGuideInfoOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [voiceGuideInfoOpen])
 
   useEffect(() => {
     if (!supplierId) {
@@ -641,34 +650,6 @@ export default function NewOrderPage({ onNavigate }) {
       return
     }
     handleLoadOrderAsNew(Number(copyFromOrderId))
-  }
-
-  async function handleAiSuggest() {
-    const t = aiOrderText.trim()
-    if (!t) return
-    try {
-      setAiOrderLoading(true)
-      setError('')
-      const r = await suggestOrderLines(t)
-      const lines = r?.suggested_lines || []
-      if (!lines.length) {
-        setError('Nessuna riga ricavata dal testo')
-        return
-      }
-      setRows(
-        lines.map((l) => ({
-          product_description: l.product_description || '',
-          pieces: l.pieces != null ? String(l.pieces) : '',
-          weight_kg: l.weight_kg != null && l.weight_kg !== '' ? String(l.weight_kg) : '',
-          note: l.note || '',
-        })),
-      )
-      setSuccess('Righe ordine generate da testo (controlla quantità e nomi)')
-    } catch {
-      setError('Servizio suggerimento ordine non disponibile')
-    } finally {
-      setAiOrderLoading(false)
-    }
   }
 
   async function handleAiSuggestFull(textOverride) {
@@ -1611,18 +1592,30 @@ export default function NewOrderPage({ onNavigate }) {
           </div>
 
           <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
-            Compila ordine con AI / voce
+            Compila ordine a voce
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: 0 }}>
-            Detta o scrivi in linguaggio naturale: l&apos;AI riconosce <strong>fornitore, date, destinazione, firma e prodotti</strong>.
-            Esempio: <em>&quot;Ordine per Acqua Pura, oggi, consegna domani, destinazione magazzino, ordinato da Mario Rossi, IVA 22%, prodotti: 10 kg arance, 5 pasta, 2 vino rosso&quot;</em>.
-          </p>
-          <div className="alert alert-info" style={{ fontSize: '0.88rem', marginBottom: '0.6rem' }}>
-            <strong>🗣️ Guida vocale — come funziona:</strong> per ogni campo l&apos;assistente ti fa una domanda e <strong>resta in ascolto</strong>.
-            Parla quanto vuoi (anche più frasi), poi di&apos; <strong>&quot;andiamo avanti&quot;</strong> per passare al campo successivo.
-            Comandi utili: <em>passa</em> per saltare il campo, <em>ripeti</em> per riascoltare, <em>fine</em> per terminare la lista prodotti.
-            Se resti in silenzio per 30 secondi, l&apos;assistente ti chiede &quot;sei pronto ad andare avanti?&quot; e continua ad aspettare.
-            Se sbagli, premi <strong>🔁 Reset campi</strong> e ricominci.
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              marginBottom: '0.75rem',
+            }}
+          >
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0, flex: '1 1 260px', maxWidth: '100%' }}>
+              Detta in linguaggio naturale o usa la guida vocale: l&apos;assistente compila in automatico{' '}
+              <strong>fornitore, date, destinazione, firma e prodotti</strong>. Per le istruzioni dettagliate della guida vocale usa il pulsante a destra.
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              style={{ flexShrink: 0 }}
+              onClick={() => setVoiceGuideInfoOpen(true)}
+            >
+              Info guida
+            </button>
           </div>
           {voiceError && <div className="alert alert-warning" style={{ marginBottom: '0.5rem' }}>{voiceError}</div>}
           {voiceGuidePrompt && (
@@ -1640,24 +1633,10 @@ export default function NewOrderPage({ onNavigate }) {
           )}
           {aiSummary && !voiceGuidePrompt && (
             <div className="alert alert-success" style={{ marginBottom: '0.5rem' }}>
-              <strong>AI ha compilato:</strong> {aiSummary}
+              <strong>Compilato:</strong> {aiSummary}
             </div>
           )}
-          <textarea
-            className="form-control"
-            rows={3}
-            value={aiOrderText}
-            onChange={(e) => setAiOrderText(e.target.value)}
-            ref={aiTextareaRef}
-            placeholder={`Es: "Ordine per Mario Rossi srl, oggi, consegna lunedì, destinazione sede, ordinato da Luca, prodotti: 10 kg arance; 5 pasta; 2 vino"\nOppure solo righe: "10 kg arance\\n5 pasta\\n2x vino"`}
-          />
           <div className="btn-group" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.4rem' }}>
-            <button type="button" className="btn btn-primary" disabled={aiOrderLoading} onClick={() => handleAiSuggestFull()}>
-              {aiOrderLoading ? 'Analisi...' : '✨ Compila con AI (tutti i campi)'}
-            </button>
-            <button type="button" className="btn btn-secondary" disabled={aiOrderLoading} onClick={handleAiSuggest}>
-              {aiOrderLoading ? 'Analisi...' : 'Solo righe prodotto'}
-            </button>
             {SpeechRecognition && (
               <>
                 <button
@@ -1665,7 +1644,7 @@ export default function NewOrderPage({ onNavigate }) {
                   className="btn btn-secondary"
                   onClick={handleVoiceCapture}
                   disabled={voiceListening || voiceGuideActive}
-                  title="Detta liberamente: l'AI estrae automaticamente i campi"
+                  title="Detta liberamente: il sistema estrae automaticamente i campi"
                 >
                   {voiceListening ? '🎤 In ascolto...' : '🎤 Detta'}
                 </button>
@@ -1684,7 +1663,7 @@ export default function NewOrderPage({ onNavigate }) {
               type="button"
               className="btn btn-outline-danger"
               onClick={resetVoiceFields}
-              title="Cancella tutti i campi compilati a voce/AI per ricominciare"
+              title="Cancella tutti i campi compilati a voce per ricominciare"
             >
               🔁 Reset campi
             </button>
@@ -2110,6 +2089,53 @@ export default function NewOrderPage({ onNavigate }) {
             </div>
           )}
         </section>
+      )}
+      {voiceGuideInfoOpen && (
+        <div
+          className="staff-report-modal-backdrop"
+          role="presentation"
+          onClick={() => setVoiceGuideInfoOpen(false)}
+        >
+          <div
+            className="card staff-report-modal"
+            style={{ maxWidth: 520, width: 'min(96vw, 520px)' }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="voice-guide-info-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="voice-guide-info-title" className="page-subheader" style={{ marginTop: 0 }}>
+              Come funziona la guida vocale
+            </h3>
+            <div style={{ fontSize: '0.92rem', lineHeight: 1.55, color: 'var(--text-body)' }}>
+              <ul style={{ margin: '0 0 1rem', paddingLeft: '1.25rem' }}>
+                <li>
+                  Per ogni campo l&apos;assistente ti fa una domanda e <strong>resta in ascolto</strong>.
+                </li>
+                <li>
+                  Parla quanto vuoi (anche più frasi), poi di&apos; <strong>&quot;andiamo avanti&quot;</strong> per passare al campo successivo.
+                </li>
+                <li>
+                  Comandi utili: <em>passa</em> per saltare il campo, <em>ripeti</em> per riascoltare, <em>fine</em> per terminare la lista prodotti.
+                </li>
+                <li>
+                  Se resti in silenzio per 30 secondi, l&apos;assistente ti chiede &quot;sei pronto ad andare avanti?&quot; e continua ad aspettare.
+                </li>
+                <li>
+                  Se sbagli, premi <strong>Reset campi</strong> nella sezione qui sopra e ricominci.
+                </li>
+              </ul>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Suggerimento: usa Chrome o Edge per il riconoscimento vocale. Chiudi questa finestra con <strong>Chiudi</strong>, clic fuori o tasto <strong>Esc</strong>.
+              </p>
+            </div>
+            <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button type="button" className="btn btn-primary" onClick={() => setVoiceGuideInfoOpen(false)}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
