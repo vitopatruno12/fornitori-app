@@ -3,6 +3,8 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { createDeliveryBatch, fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList, addPriceListBatch, deletePriceListItem } from '../services/priceListService'
 import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
+import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
+import { getOperatorDeliveryPublicUrl } from '../utils/operatorMode.ts'
 
 const emptyItem = () => ({
   product_description: '',
@@ -85,7 +87,7 @@ function normalizeDdt(value) {
   return String(value || '').trim().toLowerCase()
 }
 
-export default function NewDeliveryPage() {
+export default function NewDeliveryPage({ operatorMode = false }) {
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
   const [date, setDate] = useState('')
@@ -457,11 +459,28 @@ export default function NewDeliveryPage() {
       <section className="staff-page-hero">
       <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
       <p className="staff-page-lead">
-        Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
-        fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
-        spedizione</strong>, che viene registrata nelle note della consegna.
+        {operatorMode ? (
+          <>
+            Registra scarichi merce con DDT e righe prodotto. I dati vengono salvati nel gestionale ATLAS come nel modulo
+            completo.
+          </>
+        ) : (
+          <>
+            Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
+            fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
+            spedizione</strong>, che viene registrata nelle note della consegna.
+          </>
+        )}
       </p>
       </section>
+
+      {!operatorMode && (
+        <OperatorLinkCard
+          title="Link operatore (consegne)"
+          description="Un solo indirizzo per l’operatore: dentro trova Nuova consegna e Storico consegne (schede in alto). Stesso login e stesso database del gestionale, senza il resto del menu."
+          links={[{ label: 'Link consegne', url: getOperatorDeliveryPublicUrl() }]}
+        />
+      )}
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}

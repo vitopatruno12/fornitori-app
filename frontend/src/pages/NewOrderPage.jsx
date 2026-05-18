@@ -14,6 +14,7 @@ import {
   supplierOrderPdfUrl,
   updateSupplierOrder,
 } from '../services/supplierOrdersService'
+import { getOperatorOrderPublicUrl } from '../utils/operatorMode.ts'
 
 const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'
@@ -200,7 +201,7 @@ function buildWhatsAppTextFromOrder(order) {
   return lines.join('\n')
 }
 
-export default function NewOrderPage({ onNavigate }) {
+export default function NewOrderPage({ onNavigate, operatorMode = false }) {
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
   const [orderDate, setOrderDate] = useState(todayIso)
@@ -239,7 +240,10 @@ export default function NewOrderPage({ onNavigate }) {
   const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
   const [voiceGuideProducts, setVoiceGuideProducts] = useState([])
   const [voiceGuideInfoOpen, setVoiceGuideInfoOpen] = useState(false)
+  const [operatorLinkCopied, setOperatorLinkCopied] = useState(false)
   const recognitionRef = useRef(null)
+
+  const operatorOrderUrl = useMemo(() => getOperatorOrderPublicUrl(), [])
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -1299,6 +1303,7 @@ export default function NewOrderPage({ onNavigate }) {
   }
 
   function handleRegisterDelivery() {
+    if (operatorMode) return
     setError('')
     if (!supplierId) {
       setError('Seleziona un fornitore')
@@ -1413,19 +1418,77 @@ export default function NewOrderPage({ onNavigate }) {
 
   const waPreview = buildWhatsAppMessage()
 
+  async function copyOperatorLink() {
+    const url = operatorOrderUrl
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = url
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+    setOperatorLinkCopied(true)
+    window.setTimeout(() => setOperatorLinkCopied(false), 2500)
+  }
+
   return (
     <div>
       <section className="staff-page-hero">
       <h1 className="page-header staff-page-title">Nuovo ordine</h1>
       <p className="staff-page-lead">
-        Ordine verso un fornitore con più righe merce, note al fornitore e note interne, consegna prevista e controlli
-        rapidi. Puoi <strong>caricare un ordine già fatto</strong> (menu &quot;Carica ordine vecchio&quot; o pulsante nello
-        storico) per riprenderlo come <strong>bozza nuova</strong>, modificarlo e salvare; da storico,{' '}
-        <strong>Modifica</strong> aggiorna invece quell’ordine. Dopo il salvataggio: PDF, email, WhatsApp o Nuova consegna
-        precompilata. Puoi indicare la <strong>destinazione scarico / spedizione</strong> anche nell&apos;ordine; lo stesso testo viene proposto in{' '}
-        <strong>Nuova consegna</strong> quando usi &quot;Registra consegna (precompila)&quot;.
+        {operatorMode ? (
+          <>
+            Inserisci ordini verso i fornitori: stessi dati e salvataggio del gestionale ATLAS. Dopo il salvataggio puoi
+            inviare <strong>PDF</strong>, <strong>email</strong> o <strong>WhatsApp</strong> al fornitore.
+          </>
+        ) : (
+          <>
+            Ordine verso un fornitore con più righe merce, note al fornitore e note interne, consegna prevista e controlli
+            rapidi. Puoi <strong>caricare un ordine già fatto</strong> (menu &quot;Carica ordine vecchio&quot; o pulsante nello
+            storico) per riprenderlo come <strong>bozza nuova</strong>, modificarlo e salvare; da storico,{' '}
+            <strong>Modifica</strong> aggiorna invece quell’ordine. Dopo il salvataggio: PDF, email, WhatsApp o Nuova consegna
+            precompilata. Puoi indicare la <strong>destinazione scarico / spedizione</strong> anche nell&apos;ordine; lo stesso testo viene proposto in{' '}
+            <strong>Nuova consegna</strong> quando usi &quot;Registra consegna (precompila)&quot;.
+          </>
+        )}
       </p>
       </section>
+
+      {!operatorMode && (
+        <section className="card operator-link-card" style={{ marginBottom: '1rem' }}>
+          <h2 className="page-subheader" style={{ marginTop: 0, fontSize: '1.05rem' }}>
+            Link operatore (solo nuovo ordine)
+          </h2>
+          <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Condividi questo indirizzo con chi deve <strong>solo compilare ordini</strong>: vede la stessa pagina Nuovo ordine,
+            senza menu Home, consegne, fatture ecc. Gli ordini salvati compaiono nel gestionale completo.
+          </p>
+          <div className="operator-link-row">
+            <input
+              type="text"
+              className="form-control"
+              readOnly
+              value={operatorOrderUrl}
+              aria-label="Link pagina operatore"
+              onFocus={(e) => e.target.select()}
+            />
+            <button type="button" className="btn btn-primary" onClick={() => copyOperatorLink()}>
+              {operatorLinkCopied ? 'Copiato' : 'Copia link'}
+            </button>
+            <a
+              href={operatorOrderUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary"
+            >
+              Apri
+            </a>
+          </div>
+        </section>
+      )}
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -1908,9 +1971,11 @@ export default function NewOrderPage({ onNavigate }) {
             <button type="button" className="btn btn-secondary" onClick={handleEmail} disabled={!supplierId}>
               Email al fornitore
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => handleRegisterDelivery()} disabled={!supplierId}>
-              Registra consegna (precompila)
-            </button>
+            {!operatorMode && (
+              <button type="button" className="btn btn-secondary" onClick={() => handleRegisterDelivery()} disabled={!supplierId}>
+                Registra consegna (precompila)
+              </button>
+            )}
             <button type="button" className="btn btn-secondary" onClick={saveTemplate}>
               Salva modello righe
             </button>
@@ -1976,17 +2041,19 @@ export default function NewOrderPage({ onNavigate }) {
                 Stampa / PDF elenco
               </button>
             </div>
-            <div className="form-group">
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm"
-                disabled={deletingAllOrders || !supplierId}
-                onClick={handleDeleteAllOrders}
-                title="Elimina tutti gli ordini del fornitore selezionato"
-              >
-                {deletingAllOrders ? 'Eliminazione...' : 'Elimina tutto lo storico (fornitore)'}
-              </button>
-            </div>
+            {!operatorMode && (
+              <div className="form-group">
+                <button
+                  type="button"
+                  className="btn btn-outline-danger btn-sm"
+                  disabled={deletingAllOrders || !supplierId}
+                  onClick={handleDeleteAllOrders}
+                  title="Elimina tutti gli ordini del fornitore selezionato"
+                >
+                  {deletingAllOrders ? 'Eliminazione...' : 'Elimina tutto lo storico (fornitore)'}
+                </button>
+              </div>
+            )}
           </div>
           {recentOrders.length === 0 ? (
             <p className="empty-state">Nessun ordine con i filtri attuali.</p>

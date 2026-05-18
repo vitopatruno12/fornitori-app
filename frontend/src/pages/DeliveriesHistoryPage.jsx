@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryNotes, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
+import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
+import { getOperatorDeliveryPublicUrl } from '../utils/operatorMode.ts'
 
 function formatDate(value) {
   if (!value) return ''
@@ -133,7 +135,7 @@ function PriceTrendChart({ series }) {
   )
 }
 
-export default function DeliveriesHistoryPage() {
+export default function DeliveriesHistoryPage({ operatorMode = false }) {
   const [deliveries, setDeliveries] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
@@ -329,10 +331,27 @@ export default function DeliveriesHistoryPage() {
       <section className="staff-page-hero">
       <h1 className="page-header staff-page-title">Storico consegne</h1>
       <p className="staff-page-lead">
-        Cerca per fornitore, prodotto (testo libero) e periodo. Confronta prezzi nel tempo nella sezione analisi: ultimo
-        prezzo, media, min/max e grafico.
+        {operatorMode ? (
+          <>
+            Consulta e filtra le consegne registrate. Per inserire un nuovo scarico usa la scheda{' '}
+            <strong>Nuova consegna</strong> in alto.
+          </>
+        ) : (
+          <>
+            Cerca per fornitore, prodotto (testo libero) e periodo. Confronta prezzi nel tempo nella sezione analisi: ultimo
+            prezzo, media, min/max e grafico.
+          </>
+        )}
       </p>
       </section>
+
+      {!operatorMode && (
+        <OperatorLinkCard
+          title="Link operatore (consegne)"
+          description="Un solo indirizzo: Nuova consegna e Storico consegne nella stessa pagina (schede in alto). Stesso login e database del gestionale."
+          links={[{ label: 'Link consegne', url: getOperatorDeliveryPublicUrl() }]}
+        />
+      )}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -379,14 +398,16 @@ export default function DeliveriesHistoryPage() {
           <button type="submit" className="btn btn-primary">
             Cerca
           </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger"
-            onClick={handleDeleteAllHistory}
-            disabled={deletingAll}
-          >
-            {deletingAll ? 'Eliminazione...' : 'Elimina tutto lo storico'}
-          </button>
+          {!operatorMode && (
+            <button
+              type="button"
+              className="btn btn-outline-danger"
+              onClick={handleDeleteAllHistory}
+              disabled={deletingAll}
+            >
+              {deletingAll ? 'Eliminazione...' : 'Elimina tutto lo storico'}
+            </button>
+          )}
         </form>
         <div className="filter-bar" style={{ marginTop: '0.55rem', alignItems: 'flex-end' }}>
           <div className="form-group">

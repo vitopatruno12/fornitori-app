@@ -56,3 +56,8 @@ api.tuosito.it {
 # 	try_files {path} /index.html
 # 	file_server
 # }
+#
+# Link operatore ordini:     https://fornitori.tuosito.it/operatore-ordine
+# Link operatore consegne:   https://fornitori.tuosito.it/operatore-consegne
+# Storico consegne diretto:  https://fornitori.tuosito.it/operatore-consegne/storico
+# Richiede try_files come sopra (SPA). Stesso login e API del gestionale.

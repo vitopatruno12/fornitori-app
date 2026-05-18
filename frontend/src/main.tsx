@@ -13,6 +13,9 @@ import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
+import OperatorOrderApp from './OperatorOrderApp.tsx'
+import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
+import { isOperatorDeliveryMode, isOperatorOrderMode } from './utils/operatorMode.ts'
 
 type PageKey =
   | 'home'
@@ -702,8 +705,16 @@ function App() {
   )
 }
 
+function pickRootApp() {
+  if (isOperatorOrderMode()) return OperatorOrderApp
+  if (isOperatorDeliveryMode()) return OperatorDeliveryApp
+  return App
+}
+
+const RootApp = pickRootApp()
+
 ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <RootApp />
   </React.StrictMode>,
 )

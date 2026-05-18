@@ -2504,3 +2504,125 @@ select.form-control {
     bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px) + 56px);
   }
 }
+
+/* —— Pagina satellite operatore (solo nuovo ordine) —— */
+.operator-order-wrap {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.operator-order-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 1rem;
+  background: var(--surface-card, #fff);
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.operator-order-logo {
+  height: 36px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.operator-order-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.operator-order-header-text strong {
+  font-size: 1rem;
+  color: var(--text-heading);
+}
+
+.operator-order-logout {
+  flex-shrink: 0;
+}
+
+.operator-order-main {
+  flex: 1;
+  padding-top: 0.75rem;
+}
+
+.operator-order-login-hint {
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 0.75rem;
+}
+
+.operator-link-card {
+  border: 1px dashed var(--border-subtle, #cbd5e1);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.04), transparent);
+}
+
+.operator-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.operator-link-row .form-control {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.operator-link-row .btn {
+  flex-shrink: 0;
+}
+
+.operator-link-block {
+  margin-bottom: 0.75rem;
+}
+
+.operator-link-block:last-child {
+  margin-bottom: 0;
+}
+
+.operator-link-block-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin-bottom: 0.35rem;
+}
+
+.operator-satellite-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface-muted, #f1f5f9);
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.operator-satellite-nav-btn {
+  border: 1px solid var(--border-subtle, #cbd5e1);
+  background: #fff;
+  color: var(--text-body);
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.operator-satellite-nav-btn.is-active {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
+}
+
+.operator-satellite-nav-btn:hover:not(.is-active) {
+  background: #f8fafc;
+}
