@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_orders_delivery_location_column()
         _ensure_supplier_orders_sequence_number_column()
         _ensure_order_delivery_signature_columns()
+        _ensure_cash_entries_activity_column()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -293,11 +294,48 @@ def _ensure_order_delivery_signature_columns() -> None:
         )
 
 
+def _ensure_cash_entries_activity_column() -> None:
+    """Backward-compat: attività economica su movimenti Prima Nota (migr. 20260519)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE cash_entries
+                    ADD COLUMN IF NOT EXISTS activity VARCHAR(32)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_cash_entries_activity
+                    ON cash_entries (activity)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE cash_entries
+                    SET activity = 'via_abba'
+                    WHERE activity = 'mediazione'
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare cash_entries.activity: %s",
+            e,
+        )
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
         required = [
             ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
+            ("cash_entries", "activity", "20260519_cash_entries_activity.sql"),
             ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),
             ("cash_entries", "delivery_id", "20260208_core_entities_prima_nota_links.sql"),
             ("cash_entries", "customer_id", "20260208_core_entities_prima_nota_links.sql"),

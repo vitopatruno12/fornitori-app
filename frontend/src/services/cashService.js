@@ -1,5 +1,9 @@
 import { apiFetch, API_BASE_URL } from './api'
 
+function appendActivity(searchParams, activity) {
+  if (activity) searchParams.append('activity', activity)
+}
+
 export async function fetchCashEntry(id) {
   return apiFetch(`/cash/entries/${id}`)
 }
@@ -12,6 +16,7 @@ export async function fetchEntries(params = {}) {
   const searchParams = new URLSearchParams()
   if (params.date_from) searchParams.append('date_from', params.date_from)
   if (params.date_to) searchParams.append('date_to', params.date_to)
+  appendActivity(searchParams, params.activity)
   const query = searchParams.toString()
   const path = query ? `/cash/entries?${query}` : '/cash/entries'
   return apiFetch(path)
@@ -48,9 +53,11 @@ export async function deleteEntry(id) {
   }
 }
 
-export async function deleteEntriesForDay(dateStr) {
+export async function deleteEntriesForDay(dateStr, activity) {
+  const params = new URLSearchParams({ date_str: dateStr })
+  appendActivity(params, activity)
   const response = await fetch(
-    `${API_BASE_URL}/cash/entries/day?date_str=${encodeURIComponent(dateStr)}`,
+    `${API_BASE_URL}/cash/entries/day?${params.toString()}`,
     { method: 'DELETE' },
   )
   if (!response.ok) {
@@ -59,9 +66,11 @@ export async function deleteEntriesForDay(dateStr) {
 }
 
 
-export async function deleteEntriesForRange(dateFrom, dateTo) {
+export async function deleteEntriesForRange(dateFrom, dateTo, activity) {
+  const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
+  appendActivity(params, activity)
   const response = await fetch(
-    `${API_BASE_URL}/cash/entries/range?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`,
+    `${API_BASE_URL}/cash/entries/range?${params.toString()}`,
     { method: 'DELETE' },
   )
   if (!response.ok) {
@@ -70,14 +79,17 @@ export async function deleteEntriesForRange(dateFrom, dateTo) {
 }
 
 
-export async function fetchDailySummary(dateStr) {
-  return apiFetch(`/cash/summary?date_str=${encodeURIComponent(dateStr)}`)
+export async function fetchDailySummary(dateStr, activity) {
+  const params = new URLSearchParams({ date_str: dateStr })
+  appendActivity(params, activity)
+  return apiFetch(`/cash/summary?${params.toString()}`)
 }
 
-export function getExportUrl(dateFrom, dateTo) {
+export function getExportUrl(dateFrom, dateTo, activity) {
   const params = new URLSearchParams()
   if (dateFrom) params.append('date_from', dateFrom)
   if (dateTo) params.append('date_to', dateTo)
+  appendActivity(params, activity)
   const q = params.toString()
   return `${API_BASE_URL}/cash/export/csv${q ? '?' + q : ''}`
 }

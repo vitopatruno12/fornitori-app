@@ -5,6 +5,11 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 
+from ..constants.prima_nota import (
+    DEFAULT_PRIMA_NOTA_ACTIVITY,
+    LEGACY_ACTIVITY_ALIASES,
+    is_valid_activity_slug,
+)
 from ..models.cash_entry import CashEntry
 from ..models.delivery import Delivery
 from ..models.invoice import Invoice
@@ -13,6 +18,35 @@ from ..schemas.cash import CashEntryCreate
 
 NON_FISCALE_CONTO = "NON_FISCALE"
 POS_CONTO = "POS"
+
+
+def normalize_activity(activity: Optional[str]) -> str:
+    if not activity:
+        return DEFAULT_PRIMA_NOTA_ACTIVITY
+    if activity in LEGACY_ACTIVITY_ALIASES:
+        activity = LEGACY_ACTIVITY_ALIASES[activity]
+    if is_valid_activity_slug(activity):
+        return activity
+    return DEFAULT_PRIMA_NOTA_ACTIVITY
+
+
+def validate_activity_param(activity: Optional[str]) -> Optional[str]:
+    if activity is None:
+        return None
+    if activity in LEGACY_ACTIVITY_ALIASES:
+        return normalize_activity(activity)
+    if is_valid_activity_slug(activity):
+        return activity
+    raise ValueError("Attività non valida")
+
+
+def _activity_filter(activity: Optional[str]):
+    act = normalize_activity(activity)
+    if act == DEFAULT_PRIMA_NOTA_ACTIVITY:
+        return or_(CashEntry.activity == act, CashEntry.activity.is_(None))
+    if act == "via_abba":
+        return or_(CashEntry.activity == act, CashEntry.activity == "mediazione")
+    return CashEntry.activity == act
 
 def _is_fiscale_filter():
     return or_(
@@ -29,8 +63,9 @@ def list_entries(
     db: Session,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    activity: Optional[str] = None,
 ) -> List[CashEntry]:
-    q = db.query(CashEntry)
+    q = db.query(CashEntry).filter(_activity_filter(activity))
     if date_from:
         q = q.filter(CashEntry.entry_date >= date_from)
     if date_to:
@@ -42,9 +77,10 @@ def list_entries_with_balance(
     db: Session,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    activity: Optional[str] = None,
 ) -> List[dict]:
     """Ritorna i movimenti con saldo progressivo calcolato."""
-    entries = list_entries(db, date_from, date_to)
+    entries = list_entries(db, date_from, date_to, activity=activity)
     if not entries:
         return []
 
@@ -54,12 +90,22 @@ def list_entries_with_balance(
     if start:
         entrate_before = (
             db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-            .filter(CashEntry.entry_date < start, CashEntry.type == "entrata", _is_fiscale_filter())
+            .filter(
+                CashEntry.entry_date < start,
+                CashEntry.type == "entrata",
+                _is_fiscale_filter(),
+                _activity_filter(activity),
+            )
             .scalar()
         )
         uscite_before = (
             db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-            .filter(CashEntry.entry_date < start, CashEntry.type == "uscita", _is_fiscale_filter())
+            .filter(
+                CashEntry.entry_date < start,
+                CashEntry.type == "uscita",
+                _is_fiscale_filter(),
+                _activity_filter(activity),
+            )
             .scalar()
         )
         opening = (
@@ -88,6 +134,7 @@ def list_entries_with_balance(
             "account_id": getattr(e, "account_id", None),
             "payment_method_id": getattr(e, "payment_method_id", None),
             "category_id": getattr(e, "category_id", None),
+            "activity": getattr(e, "activity", None) or DEFAULT_PRIMA_NOTA_ACTIVITY,
             "created_at": e.created_at,
             "saldo_progressivo": saldo,
         })
@@ -111,6 +158,7 @@ def create_entry(db: Session, data: CashEntryCreate) -> CashEntry:
         account_id=payload.get("account_id"),
         payment_method_id=payload.get("payment_method_id"),
         category_id=payload.get("category_id"),
+        activity=normalize_activity(payload.get("activity")),
     )
     db.add(e)
     db.commit()
@@ -142,6 +190,8 @@ def update_entry(db: Session, entry_id: int, data: CashEntryCreate) -> Optional[
     entry.account_id = payload.get("account_id")
     entry.payment_method_id = payload.get("payment_method_id")
     entry.category_id = payload.get("category_id")
+    if payload.get("activity") is not None:
+        entry.activity = normalize_activity(payload.get("activity"))
     db.commit()
     db.refresh(entry)
     return entry
@@ -156,43 +206,66 @@ def delete_entry(db: Session, entry_id: int) -> bool:
     return True
 
 
-def delete_entries_for_day(db: Session, target_date: date) -> int:
+def delete_entries_for_day(db: Session, target_date: date, activity: Optional[str] = None) -> int:
     start = datetime.combine(target_date, datetime.min.time())
     end = datetime.combine(target_date, datetime.max.time())
     n = (
         db.query(CashEntry)
-        .filter(CashEntry.entry_date >= start, CashEntry.entry_date <= end)
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            _activity_filter(activity),
+        )
         .delete(synchronize_session=False)
     )
     db.commit()
     return int(n)
 
 
-def delete_entries_for_range(db: Session, date_from: date, date_to: date) -> int:
+def delete_entries_for_range(
+    db: Session, date_from: date, date_to: date, activity: Optional[str] = None
+) -> int:
     start = datetime.combine(date_from, datetime.min.time())
     end = datetime.combine(date_to, datetime.max.time())
     n = (
         db.query(CashEntry)
-        .filter(CashEntry.entry_date >= start, CashEntry.entry_date <= end)
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            _activity_filter(activity),
+        )
         .delete(synchronize_session=False)
     )
     db.commit()
     return int(n)
 
 
-def get_daily_summary(db: Session, target_date: date) -> dict:
+def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = None) -> dict:
     """Ritorna totale entrate, uscite, saldo giornaliero e cumulativo per una data."""
     start = datetime.combine(target_date, datetime.min.time())
     end = datetime.combine(target_date, datetime.max.time())
+    act_clause = _activity_filter(activity)
 
     entrate = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date >= start, CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_fiscale_filter())
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            CashEntry.type == "entrata",
+            _is_fiscale_filter(),
+            act_clause,
+        )
         .scalar()
     )
     uscite = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date >= start, CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_fiscale_filter())
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            CashEntry.type == "uscita",
+            _is_fiscale_filter(),
+            act_clause,
+        )
         .scalar()
     )
 
@@ -203,12 +276,12 @@ def get_daily_summary(db: Session, target_date: date) -> dict:
     # Saldo cumulativo = somma di (entrate - uscite) fino a fine giornata
     entrate_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_fiscale_filter())
+        .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_fiscale_filter(), act_clause)
         .scalar()
     )
     uscite_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_fiscale_filter())
+        .filter(CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_fiscale_filter(), act_clause)
         .scalar()
     )
     saldo_cum = (
@@ -317,8 +390,9 @@ def get_entries_for_export(
     db: Session,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    activity: Optional[str] = None,
 ) -> List[dict]:
-    entries = [e for e in list_entries(db, date_from, date_to) if not _is_extra_cassa(e.conto)]
+    entries = [e for e in list_entries(db, date_from, date_to, activity=activity) if not _is_extra_cassa(e.conto)]
     return [
         {
             "id": e.id,
@@ -329,6 +403,7 @@ def get_entries_for_export(
             "conto": e.conto or "",
             "riferimento_documento": e.riferimento_documento or "",
             "note": e.note or "",
+            "activity": getattr(e, "activity", None) or DEFAULT_PRIMA_NOTA_ACTIVITY,
         }
         for e in entries
     ]

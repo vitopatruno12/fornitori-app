@@ -19,15 +19,26 @@ from ..services import cash_service
 router = APIRouter(prefix="/cash", tags=["cash"])
 
 
+def _validate_activity(activity: Optional[str]) -> Optional[str]:
+    if activity is None:
+        return None
+    try:
+        return cash_service.validate_activity_param(activity)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Attività non valida")
+
+
 @router.get("/entries", response_model=List[CashEntryWithBalance])
 def list_entries(
     date_from: Optional[str] = Query(None, description="Data inizio (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="Data fine (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Attività: risacca, via_lattea, via_abba, via_zanardelli"),
     db: Session = Depends(get_db),
 ):
     dt_from = datetime.fromisoformat(date_from) if date_from else None
     dt_to = datetime.fromisoformat(date_to + "T23:59:59") if date_to else None
-    return cash_service.list_entries_with_balance(db, date_from=dt_from, date_to=dt_to)
+    act = _validate_activity(activity)
+    return cash_service.list_entries_with_balance(db, date_from=dt_from, date_to=dt_to, activity=act)
 
 
 @router.get("/entries/{entry_id}", response_model=CashEntryRead)
@@ -54,19 +65,22 @@ def update_entry(entry_id: int, data: CashEntryCreate, db: Session = Depends(get
 @router.delete("/entries/day", status_code=status.HTTP_204_NO_CONTENT)
 def delete_entries_for_day(
     date_str: str = Query(..., description="Data (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Attività: risacca, via_lattea, via_abba, via_zanardelli"),
     db: Session = Depends(get_db),
 ):
     try:
         d = date.fromisoformat(date_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Data non valida")
-    cash_service.delete_entries_for_day(db, d)
+    act = _validate_activity(activity)
+    cash_service.delete_entries_for_day(db, d, activity=act)
 
 
 @router.delete("/entries/range", status_code=status.HTTP_204_NO_CONTENT)
 def delete_entries_for_range(
     date_from: str = Query(..., description="Data inizio (YYYY-MM-DD)"),
     date_to: str = Query(..., description="Data fine (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Attività: risacca, via_lattea, via_abba, via_zanardelli"),
     db: Session = Depends(get_db),
 ):
     try:
@@ -76,7 +90,8 @@ def delete_entries_for_range(
         raise HTTPException(status_code=400, detail="Intervallo date non valido")
     if d_from > d_to:
         raise HTTPException(status_code=400, detail="Data inizio successiva alla data fine")
-    cash_service.delete_entries_for_range(db, d_from, d_to)
+    act = _validate_activity(activity)
+    cash_service.delete_entries_for_range(db, d_from, d_to, activity=act)
 
 
 @router.delete("/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -94,33 +109,37 @@ def get_prima_nota_link_options(db: Session = Depends(get_db)):
 @router.get("/summary", response_model=DailySummary)
 def get_daily_summary(
     date_str: str = Query(..., description="Data (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Attività: risacca, via_lattea, via_abba, via_zanardelli"),
     db: Session = Depends(get_db),
 ):
     try:
         d = date.fromisoformat(date_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Data non valida")
-    return cash_service.get_daily_summary(db, d)
+    act = _validate_activity(activity)
+    return cash_service.get_daily_summary(db, d, activity=act)
 
 
 @router.get("/export/csv")
 def export_csv(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    activity: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     dt_from = datetime.fromisoformat(date_from) if date_from else None
     dt_to = datetime.fromisoformat(date_to + "T23:59:59") if date_to else None
-    rows = cash_service.get_entries_for_export(db, date_from=dt_from, date_to=dt_to)
+    act = _validate_activity(activity)
+    rows = cash_service.get_entries_for_export(db, date_from=dt_from, date_to=dt_to, activity=act)
 
     def _esc(s):
         return (s or "").replace(";", ",")
 
     buf = io.StringIO()
-    buf.write("Data;Tipo;Importo;Descrizione;Conto;Rif. documento fiscale;Note\n")
+    buf.write("Data;Tipo;Importo;Descrizione;Conto;Rif. documento fiscale;Note;Attività\n")
     for r in rows:
         buf.write(
-            f"{r['data'][:10]};{r['tipo']};{r['importo']:.2f};{_esc(r['descrizione'])};{_esc(r['conto'])};{_esc(r['riferimento_documento'])};{_esc(r['note'])}\n"
+            f"{r['data'][:10]};{r['tipo']};{r['importo']:.2f};{_esc(r['descrizione'])};{_esc(r['conto'])};{_esc(r['riferimento_documento'])};{_esc(r['note'])};{_esc(r.get('activity', ''))}\n"
         )
 
     buf.seek(0)

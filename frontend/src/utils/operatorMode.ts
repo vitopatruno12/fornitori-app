@@ -5,6 +5,9 @@ export const OPERATOR_ORDER_PATH = '/operatore-ordine'
 export const OPERATOR_DELIVERY_PATH = '/operatore-consegne'
 export const OPERATOR_DELIVERY_HISTORY_SUFFIX = '/storico'
 
+/** Percorso pubblico: Prima Nota di cassa (per locale / attività). */
+export const OPERATOR_PRIMA_NOTA_PATH = '/operatore-prima-nota'
+
 export type OperatorDeliveryView = 'new-delivery' | 'history'
 
 function normalizePathname(): string {
@@ -53,6 +56,13 @@ export function isOperatorDeliveryMode(): boolean {
   return queryMatches('operatore-consegne')
 }
 
+export function isOperatorPrimaNotaMode(): boolean {
+  if (typeof window === 'undefined') return false
+  if (pathMatches(OPERATOR_PRIMA_NOTA_PATH)) return true
+  if (hashMatches('operatore-prima-nota')) return true
+  return queryMatches('operatore-prima-nota')
+}
+
 export function getOperatorDeliveryView(): OperatorDeliveryView {
   if (typeof window === 'undefined') return 'new-delivery'
   const path = normalizePathname()
@@ -73,9 +83,13 @@ export function getOperatorOrderPublicUrl(): string {
   return buildPublicUrl(OPERATOR_ORDER_PATH)
 }
 
-/** Un solo link da conmotione: apre Nuova consegna e Storico (schede in pagina). */
+/** Un solo link da condividere: apre Nuova consegna e Storico (schede in pagina). */
 export function getOperatorDeliveryPublicUrl(): string {
   return buildPublicUrl(OPERATOR_DELIVERY_PATH)
+}
+
+export function getOperatorPrimaNotaPublicUrl(): string {
+  return buildPublicUrl(OPERATOR_PRIMA_NOTA_PATH)
 }
 
 /** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia scheda; resta sullo stesso percorso base. */

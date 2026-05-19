@@ -4,11 +4,20 @@ import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDa
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
 import { checkAiAnomalies, suggestPrimaNota } from '../services/aiService'
+import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
+import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
+import { getOperatorPrimaNotaPublicUrl } from '../utils/operatorMode.ts'
+import {
+  DEFAULT_PRIMA_NOTA_ACTIVITY,
+  loadPrimaNotaLocales,
+  localeLabel,
+  normalizePrimaNotaActivity,
+} from '../constants/primaNotaLocales'
 
 const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
 
-export default function PrimaNotaPage() {
+export default function PrimaNotaPage({ operatorMode = false }) {
   const formatLocalIsoDate = (d) => {
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -20,6 +29,19 @@ export default function PrimaNotaPage() {
   const currentMonthFrom = `${currentYearMonth}-01`
   const monthStart = new Date(`${currentYearMonth}-01T00:00:00`)
   const currentMonthTo = formatLocalIsoDate(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0))
+
+  const [locales, setLocales] = useState(() => loadPrimaNotaLocales())
+  const [activeActivity, setActiveActivity] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('primaNotaActivity')
+      const list = loadPrimaNotaLocales()
+      if (saved) return normalizePrimaNotaActivity(saved, list)
+    } catch {
+      // ignore
+    }
+    return DEFAULT_PRIMA_NOTA_ACTIVITY
+  })
+  const activeActivityLabel = localeLabel(activeActivity, locales)
 
   const [suppliers, setSuppliers] = useState([])
   const [entries, setEntries] = useState([])
@@ -286,11 +308,25 @@ export default function PrimaNotaPage() {
 
   useEffect(() => {
     loadSummary()
-  }, [selectedDate])
+  }, [selectedDate, activeActivity])
 
   useEffect(() => {
     loadEntries()
-  }, [movementPeriodFrom, movementPeriodTo])
+  }, [movementPeriodFrom, movementPeriodTo, activeActivity])
+
+  function selectActivity(activityId) {
+    if (activityId === activeActivity) return
+    setActiveActivity(activityId)
+    try {
+      sessionStorage.setItem('primaNotaActivity', activityId)
+    } catch {
+      // ignore
+    }
+    handleCancelEdit()
+    setDrawerEntry(null)
+    setHighlightEntryId(null)
+    setOpeningCashInput('')
+  }
 
   async function loadSuppliers() {
     try {
@@ -315,6 +351,7 @@ export default function PrimaNotaPage() {
       const data = await fetchEntries({
         date_from: from || undefined,
         date_to: to || undefined,
+        activity: activeActivity,
       })
       setEntries(data)
     } catch (e) {
@@ -326,7 +363,7 @@ export default function PrimaNotaPage() {
 
   async function loadSummary() {
     try {
-      const data = await fetchDailySummary(selectedDate)
+      const data = await fetchDailySummary(selectedDate, activeActivity)
       setSummary(data)
     } catch {
       setSummary(null)
@@ -386,11 +423,11 @@ export default function PrimaNotaPage() {
   }
 
   async function handleEliminaGiornata() {
-    if (!window.confirm(`Eliminare tutti i movimenti del ${formatDate(selectedDate)}? Il riepilogo tornerà a zero.`)) return
+    if (!window.confirm(`Eliminare tutti i movimenti di ${activeActivityLabel} del ${formatDate(selectedDate)}? Il riepilogo tornerà a zero.`)) return
     try {
       setDeletingDay(true)
       setError('')
-      await deleteEntriesForDay(selectedDate)
+      await deleteEntriesForDay(selectedDate, activeActivity)
       handleCancelEdit()
       setOpeningCashInput('')
       await loadEntries()
@@ -412,11 +449,11 @@ export default function PrimaNotaPage() {
       setError('La data inizio non puo essere successiva alla data fine')
       return
     }
-    if (!window.confirm(`Eliminare tutti i movimenti dal ${formatDate(resetRangeFrom)} al ${formatDate(resetRangeTo)}?`)) return
+    if (!window.confirm(`Eliminare tutti i movimenti di ${activeActivityLabel} dal ${formatDate(resetRangeFrom)} al ${formatDate(resetRangeTo)}?`)) return
     try {
       setDeletingRange(true)
       setError('')
-      await deleteEntriesForRange(resetRangeFrom, resetRangeTo)
+      await deleteEntriesForRange(resetRangeFrom, resetRangeTo, activeActivity)
       handleCancelEdit()
       setOpeningCashInput('')
       await loadEntries()
@@ -469,6 +506,7 @@ export default function PrimaNotaPage() {
         account_id: formAccountId ? Number(formAccountId) : null,
         payment_method_id: formPaymentMethodId ? Number(formPaymentMethodId) : null,
         category_id: formCategoryId ? Number(formCategoryId) : null,
+        activity: activeActivity,
       }
 
       if (editingId) {
@@ -562,7 +600,7 @@ export default function PrimaNotaPage() {
 
   function handleDownloadReport(e) {
     e.preventDefault()
-    const url = getExportUrl(exportDateFrom || undefined, exportDateTo || undefined)
+    const url = getExportUrl(exportDateFrom || undefined, exportDateTo || undefined, activeActivity)
     window.open(url, '_blank')
   }
 
@@ -804,11 +842,39 @@ export default function PrimaNotaPage() {
     <div>
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Prima Nota di Cassa</h1>
-        <p className="staff-page-lead">Riepilogo sulla giornata selezionata; l’elenco movimenti può essere filtrato per intervallo di date insieme alla ricerca testuale.</p>
+        <p className="staff-page-lead">
+          {operatorMode ? (
+            <>
+              Registra entrate e uscite per il locale scelto in <strong>Locali prima nota</strong>. Stessi dati e salvataggio del
+              gestionale ATLAS.
+            </>
+          ) : (
+            <>
+              Registro separato per locale: <strong>{activeActivityLabel}</strong>.
+              Riepilogo sulla giornata selezionata; l’elenco movimenti può essere filtrato per intervallo di date insieme alla ricerca testuale.
+            </>
+          )}
+        </p>
       </section>
+
+      {!operatorMode && (
+        <OperatorLinkCard
+          title="Link operatore (prima nota)"
+          description="Condividi questo indirizzo con chi deve registrare la cassa di un locale: vede Prima Nota senza menu Home, ordini, fatture ecc. I movimenti salvati compaiono nel gestionale completo, filtrati per locale."
+          links={[{ label: 'Link prima nota', url: getOperatorPrimaNotaPublicUrl() }]}
+        />
+      )}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+
+      <PrimaNotaLocalePicker
+        locales={locales}
+        activeActivity={activeActivity}
+        onSelect={selectActivity}
+        onLocalesChange={setLocales}
+        onNotify={(msg) => setSuccess(msg)}
+      />
 
       <div className="ui-toolbar-one card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem' }}>
         <div className="form-group">
@@ -882,6 +948,7 @@ export default function PrimaNotaPage() {
             Aggiorna
           </button>
         </div>
+        {!operatorMode && (
         <div className="form-group" style={{ flex: '1 1 320px' }}>
           <label>Comando AI movimento</label>
           <div style={{ display: 'flex', gap: '0.45rem' }}>
@@ -900,7 +967,8 @@ export default function PrimaNotaPage() {
             </div>
           )}
         </div>
-        {dashboardFilterActive && (
+        )}
+        {!operatorMode && dashboardFilterActive && (
           <div className="ui-filter-pill">
             <span>Dashboard · {selectedDate.slice(0, 7)} · {movementKind}</span>
             <button type="button" className="btn btn-secondary btn-sm" onClick={resetDashboardFilters}>Reset</button>
@@ -1280,6 +1348,7 @@ export default function PrimaNotaPage() {
           <button type="button" className="btn btn-secondary" onClick={handleAzzeraCassaIniziale}>
             Azzera cassa iniziale
           </button>
+          {!operatorMode && (
           <button
             type="button"
             className="btn btn-outline-danger"
@@ -1289,7 +1358,9 @@ export default function PrimaNotaPage() {
           >
             {deletingDay ? 'Eliminazione...' : 'Elimina tutti i movimenti del giorno'}
           </button>
+          )}
         </div>
+        {!operatorMode && (
         <div className="form-row" style={{ alignItems: 'end', marginBottom: '0.75rem' }}>
           <div className="form-group">
             <label>Reset movimenti intervallo - data inizio</label>
@@ -1323,6 +1394,7 @@ export default function PrimaNotaPage() {
             </button>
           </div>
         </div>
+        )}
 
         {summary && (
           <div className="table-wrap" style={{ marginTop: '1rem' }}>

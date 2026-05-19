@@ -15,7 +15,8 @@ import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, sugge
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
-import { isOperatorDeliveryMode, isOperatorOrderMode } from './utils/operatorMode.ts'
+import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
+import { isOperatorDeliveryMode, isOperatorOrderMode, isOperatorPrimaNotaMode } from './utils/operatorMode.ts'
 
 type PageKey =
   | 'home'
@@ -708,6 +709,7 @@ function App() {
 function pickRootApp() {
   if (isOperatorOrderMode()) return OperatorOrderApp
   if (isOperatorDeliveryMode()) return OperatorDeliveryApp
+  if (isOperatorPrimaNotaMode()) return OperatorPrimaNotaApp
   return App
 }
 

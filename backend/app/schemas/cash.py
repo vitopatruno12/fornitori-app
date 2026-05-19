@@ -20,6 +20,7 @@ class CashEntryBase(BaseModel):
     account_id: Optional[int] = None
     payment_method_id: Optional[int] = None
     category_id: Optional[int] = None
+    activity: Optional[str] = None
 
 
 class CashEntryCreate(CashEntryBase):

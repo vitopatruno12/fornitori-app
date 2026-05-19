@@ -2053,6 +2053,133 @@ select.form-control {
   max-width: 52rem;
 }
 
+.prima-nota-locale-picker {
+  position: relative;
+  margin-bottom: 1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+  overflow: visible;
+}
+
+.prima-nota-locale-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.65rem 1rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.prima-nota-locale-trigger-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0d9488;
+}
+
+.prima-nota-locale-trigger-sub {
+  flex: 1;
+  font-size: 0.95rem;
+  color: var(--text-muted, #64748b);
+}
+
+.prima-nota-locale-trigger-caret {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.prima-nota-locale-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: min(100%, 22rem);
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+
+.prima-nota-locale-panel-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.prima-nota-locale-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.prima-nota-locale-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font-size: 0.92rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.prima-nota-locale-item:hover {
+  background: #f0fdfa;
+  border-color: #99f6e4;
+}
+
+.prima-nota-locale-item.is-active {
+  background: #0d9488;
+  color: #fff;
+  font-weight: 600;
+}
+
+.prima-nota-locale-custom-tag {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+.prima-nota-locale-add label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.prima-nota-locale-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.prima-nota-locale-add-row .form-control {
+  flex: 1 1 10rem;
+  min-width: 8rem;
+}
+
+.prima-nota-locale-panel-actions {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
 .support-section {
   margin-bottom: 1.25rem;
 }
