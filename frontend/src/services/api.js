@@ -1,11 +1,11 @@
 function normalizeApiBase(raw) {
   const s = String(raw ?? '').trim()
-  if (!s) return 'http://localhost:8000'
+  if (!s) return '/api'
   return s.replace(/\/+$/, '')
 }
 
 /** Base URL API: nessuno slash finale (evita //path e 404 su alcuni proxy). */
-export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
+export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL || '/api')
 
 export function apiUrl(path) {
   const p = String(path || '')
