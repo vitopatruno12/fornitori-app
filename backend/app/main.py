@@ -13,7 +13,8 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from . import models  # noqa: F401
 from .database import Base, engine
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, ai, supplier_orders, staff, support_technicians, vne, aruba, sdi
+from .ai.module import register_ai_module
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, aruba, sdi
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -167,7 +168,7 @@ app.include_router(dashboard.router)
 app.include_router(reference.router)
 app.include_router(customers.router)
 app.include_router(attachments.router)
-app.include_router(ai.router)
+register_ai_module(app)
 app.include_router(supplier_orders.router)
 app.include_router(staff.router)
 app.include_router(support_technicians.router)

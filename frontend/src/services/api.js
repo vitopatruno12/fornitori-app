@@ -4,8 +4,8 @@ function normalizeApiBase(raw) {
   return s.replace(/\/+$/, '')
 }
 
-/** Base URL API: nessuno slash finale (evita //path e 404 su alcuni proxy). */
-export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL || '/api')
+/** Base URL API (env VITE_API_BASE_URL; fallback /api in produzione via proxy). */
+export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL)
 
 export function apiUrl(path) {
   const p = String(path || '')

@@ -1,68 +1,114 @@
-import { apiFetch } from './api'
+import { apiFetch, API_BASE_URL } from './api'
+
+/** Base URL AI: VITE_AI_API_URL in dev (Nest); altrimenti stesso proxy API (/api). */
+const AI_API_BASE = String(import.meta.env.VITE_AI_API_URL || '')
+  .trim()
+  .replace(/\/+$/, '') || API_BASE_URL
+
+async function aiFetch(path, options = {}) {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const url = `${AI_API_BASE}${p}`
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  const res = await fetch(url, { ...options, headers })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `Errore API AI ${res.status}`)
+  }
+  if (res.status === 204) return null
+  return res.json()
+}
 
 export async function suggestSupplierFields(text, existingData = {}) {
-  return apiFetch('/ai/suppliers/suggest', {
+  return aiFetch('/ai/suppliers/suggest', {
     method: 'POST',
-    body: JSON.stringify({
-      text,
-      existing_data: existingData,
-    }),
+    body: JSON.stringify({ text, existing_data: existingData }),
   })
 }
 
 export async function suggestPrimaNota(text, context = {}) {
-  return apiFetch('/ai/prima-nota/suggest', {
+  return aiFetch('/ai/prima-nota/suggest', {
     method: 'POST',
-    body: JSON.stringify({
-      text,
-      context,
-    }),
+    body: JSON.stringify({ text, context }),
   })
 }
 
 export async function suggestInvoiceFields(text, existingData = {}) {
-  return apiFetch('/ai/invoices/suggest', {
+  return aiFetch('/ai/invoices/suggest', {
     method: 'POST',
-    body: JSON.stringify({
-      text,
-      existing_data: existingData,
-    }),
+    body: JSON.stringify({ text, existing_data: existingData }),
   })
 }
 
 export async function suggestOrderLines(text) {
-  return apiFetch('/ai/orders/suggest', {
+  return aiFetch('/ai/orders/suggest', {
     method: 'POST',
     body: JSON.stringify({ text }),
   })
 }
 
 export async function suggestOrderFull(text, supplierNames = []) {
-  return apiFetch('/ai/orders/suggest-full', {
+  return aiFetch('/ai/orders/suggest-full', {
     method: 'POST',
     body: JSON.stringify({ text, supplier_names: supplierNames }),
   })
 }
 
-export async function checkAiAnomalies(entityType, payload, history = {}) {
-  return apiFetch('/ai/anomalies/check', {
+async function staffShiftViaBase(path, body, signal) {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const url = `${API_BASE_URL}${p}`
+  const res = await fetch(url, {
     method: 'POST',
-    body: JSON.stringify({
-      entity_type: entityType,
-      payload,
-      history,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `Errore API AI ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function suggestStaffShift(text, memberNames = [], context = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 120000)
+  const body = { text, member_names: memberNames, context }
+  try {
+    const primary = await aiFetch('/ai/staff/shift-suggest', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    const shifts = primary?.suggested_shifts
+    const hasShifts = Array.isArray(shifts) && shifts.length > 0
+    const sf = primary?.suggested_fields
+    const hasFields = sf && typeof sf === 'object' && (sf.staff_member_name || sf.time_start)
+    if (primary?.quota_exceeded && !hasShifts && !hasFields) {
+      try {
+        const fallback = await staffShiftViaBase('/ai/staff/shift-suggest', body, controller.signal)
+        if (fallback?.local_fallback || (Array.isArray(fallback?.suggested_shifts) && fallback.suggested_shifts.length)) {
+          return fallback
+        }
+      } catch {
+        /* frontend heuristic in StaffPage */
+      }
+    }
+    return primary
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function checkAiAnomalies(entityType, payload, history = {}) {
+  return aiFetch('/ai/anomalies/check', {
+    method: 'POST',
+    body: JSON.stringify({ entity_type: entityType, payload, history }),
   })
 }
 
 export async function askAi(question, module = '', context = {}) {
-  return apiFetch('/ai/ask', {
+  return aiFetch('/ai/ask', {
     method: 'POST',
-    body: JSON.stringify({
-      question,
-      module,
-      context,
-    }),
+    body: JSON.stringify({ question, module, context }),
   })
 }
-

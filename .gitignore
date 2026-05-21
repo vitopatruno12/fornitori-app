@@ -10,6 +10,7 @@ backend/.pytest_cache/
 
 # File ambiente (mai committarli: contengono segreti)
 backend/.env
+backend-nest/.env
 backend/.env.local
 backend/.env.production
 backend/.env.staging
@@ -34,6 +35,11 @@ Thumbs.db
 # Build frontend
 frontend/dist/
 frontend/node_modules/
+
+# Dipendenze root e Nest (mai in repo)
+node_modules/
+backend-nest/node_modules/
+backend-nest/dist/
 
 # File temporanei git
 .git/COMMIT_MSG_TMP.txt

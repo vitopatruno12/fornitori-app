@@ -4,61 +4,7 @@ import { fetchInvoices } from '../services/invoicesService'
 import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestSupplierFields } from '../services/aiService'
-
-const SpeechRecognition = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-
-function parseVoiceToSupplier(text) {
-  const t = text.trim()
-  if (!t) return {}
-
-  let nameVal = ''
-  let vat = ''
-  let emailVal = ''
-  let phoneVal = ''
-  let cityVal = ''
-
-  const vatM = t.match(/(?:partita\s*iva|p\.?\s*iva|piva)\s*[:\s]*(?:it\s*)?([0-9\s]{9,13})/i)
-  if (vatM) vat = vatM[1].replace(/\s/g, '').slice(-11)
-
-  const emailM = t.match(/(?:email|e-?mail)\s*[:\s]*([^\s,]+(?:\s+[^\s,]+)*)/i)
-  if (emailM) {
-    emailVal = emailM[1]
-      .replace(/\s*(at|@)\s*/gi, '@')
-      .replace(/\s*punto\s*/gi, '.')
-      .replace(/\s/g, '')
-      .trim()
-  }
-  if (!emailVal && /@/.test(t)) {
-    const e = t.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i)
-    if (e) emailVal = e[0]
-  }
-
-  const phoneM = t.match(/(?:telefono|tel|cellulare|cell)\s*[:\s]*([0-9\s\-\.\/]{6,20})/i)
-  if (phoneM) phoneVal = phoneM[1].replace(/\s/g, '').replace(/[^\d+]/g, '').slice(0, 15)
-
-  const cityM = t.match(/(?:città|citta|city)\s*[:\s]*([a-zàèéìòù\s]{2,50})/i)
-  if (cityM) cityVal = cityM[1].trim()
-
-  const firstKeyword = t.search(/(?:partita\s*iva|p\.?\s*iva|piva|email|e-?mail|telefono|tel|cellulare|città|citta|city)\s*[:\s]/i)
-  if (firstKeyword > 0) {
-    nameVal = t.slice(0, firstKeyword).replace(/\s*,\s*$/, '').trim()
-  } else if (!vat && !emailVal && !phoneVal && !cityVal) {
-    nameVal = t
-  } else {
-    const idx = Math.min(
-      ...[vatM?.index, emailM?.index, phoneM?.index, cityM?.index].filter((i) => i != null && i >= 0)
-    )
-    if (idx > 0) nameVal = t.slice(0, idx).replace(/\s*,\s*$/, '').trim()
-  }
-
-  return {
-    name: nameVal,
-    vat_number: vat,
-    email: emailVal,
-    phone: phoneVal,
-    city: cityVal,
-  }
-}
+import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 
 function formatEuro(n) {
   if (n == null || Number.isNaN(Number(n))) return '–'
@@ -113,18 +59,7 @@ export default function SuppliersPage() {
   const [isActive, setIsActive] = useState(true)
   const [isExpired, setIsExpired] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [listening, setListening] = useState(false)
-  const [voiceError, setVoiceError] = useState('')
-  const [voiceGuideActive, setVoiceGuideActive] = useState(false)
-  const [voiceGuideStep, setVoiceGuideStep] = useState(0)
-  const [voiceGuidePrompt, setVoiceGuidePrompt] = useState('')
-  const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
-  const [assistantActive, setAssistantActive] = useState(false)
-  const [assistantTranscript, setAssistantTranscript] = useState('')
-  const assistantRecognitionRef = useRef(null)
-  const assistantCancelledRef = useRef(false)
-  const assistantConfirmRef = useRef(null)
-  const submitBtnRef = React.useRef(null)
+  const [aiError, setAiError] = useState('')
   const supplierListSectionRef = React.useRef(null)
   const supplierFormSectionRef = React.useRef(null)
   const [deletingAll, setDeletingAll] = useState(false)
@@ -136,6 +71,7 @@ export default function SuppliersPage() {
   const [drawerPrices, setDrawerPrices] = useState([])
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [aiSupplierText, setAiSupplierText] = useState('')
+  const [aiSupplierLoading, setAiSupplierLoading] = useState(false)
   const [aiMissing, setAiMissing] = useState([])
   const [aiSupplierAnomalies, setAiSupplierAnomalies] = useState([])
   const [ibanPanelOpen, setIbanPanelOpen] = useState(false)
@@ -246,28 +182,6 @@ export default function SuppliersPage() {
     setIsExpired(false)
   }
 
-  function resetVoiceFields() {
-    if (voiceGuideActive) stopVoiceGuide()
-    if (assistantActive) {
-      assistantCancelledRef.current = true
-      setAssistantActive(false)
-      try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
-    }
-    try { assistantConfirmRef.current?.stop() } catch { /* noop */ }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch { /* noop */ }
-    }
-    setAssistantTranscript('')
-    resetForm()
-    setAiSupplierText('')
-    setAiMissing([])
-    setAiSupplierAnomalies([])
-    setVoiceGuideHeard('')
-    setVoiceGuidePrompt('')
-    setVoiceError('')
-    setListening(false)
-  }
-
   function handleEdit(s) {
     setEditingId(s.id)
     setName(s.name || '')
@@ -286,379 +200,6 @@ export default function SuppliersPage() {
     setIsExpired(!!s.is_expired)
     setError('')
   }
-
-  function startVoiceAssistant() {
-    if (!SpeechRecognition) {
-      setVoiceError("L'assistente vocale non è supportato da questo browser (usa Chrome o Edge)")
-      return
-    }
-    if (assistantActive) return
-    setVoiceError('')
-    setVoiceGuideHeard('')
-    setVoiceGuidePrompt('Assistente attivo: parla liberamente. Compilo i campi mentre parli. Premi "Ferma" quando hai finito.')
-    setAssistantTranscript('')
-    assistantCancelledRef.current = false
-    setAssistantActive(true)
-    startAssistantLoop()
-  }
-
-  function startAssistantLoop() {
-    if (assistantCancelledRef.current) return
-    if (!SpeechRecognition) return
-    let rec
-    try {
-      rec = new SpeechRecognition()
-    } catch {
-      setVoiceError('Riconoscimento vocale non disponibile')
-      return
-    }
-    rec.lang = 'it-IT'
-    rec.continuous = true
-    rec.interimResults = false
-    rec.onstart = () => setListening(true)
-    rec.onend = () => {
-      setListening(false)
-      if (assistantCancelledRef.current) return
-      window.setTimeout(() => {
-        if (!assistantCancelledRef.current) startAssistantLoop()
-      }, 200)
-    }
-    rec.onerror = (e) => {
-      if (e?.error === 'not-allowed') {
-        setVoiceError('Microfono non autorizzato')
-        assistantCancelledRef.current = true
-        setAssistantActive(false)
-      }
-    }
-    rec.onresult = (e) => {
-      const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
-      const additions = []
-      for (let i = startIdx; i < e.results.length; i++) {
-        const r = e.results[i]
-        if (!r || !r.isFinal) continue
-        const phrase = String(r[0]?.transcript || '').trim()
-        if (phrase) additions.push(phrase)
-      }
-      if (!additions.length) return
-      const added = additions.join(' ')
-      setVoiceGuideHeard(added)
-      setAssistantTranscript((prev) => {
-        const merged = prev ? `${prev}. ${added}`.trim() : added
-        setAiSupplierText(merged)
-        const parsed = parseVoiceToSupplier(merged)
-        if (parsed.name) setName(parsed.name)
-        if (parsed.vat_number) setVatNumber(parsed.vat_number)
-        if (parsed.email) setEmail(parsed.email)
-        if (parsed.phone) setPhone(parsed.phone)
-        if (parsed.city) setCity(parsed.city)
-        window.setTimeout(() => {
-          handleAiSuggestSupplier(merged)
-        }, 100)
-        return merged
-      })
-    }
-    assistantRecognitionRef.current = rec
-    try {
-      rec.start()
-    } catch {
-      setListening(false)
-    }
-  }
-
-  function stopVoiceAssistant() {
-    if (!assistantActive) return
-    assistantCancelledRef.current = true
-    setAssistantActive(false)
-    setListening(false)
-    try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
-    askSaveOrReset()
-  }
-
-  function askSaveOrReset() {
-    setVoiceGuidePrompt('Vuoi salvare il fornitore? Rispondi sì o no.')
-    if (!SpeechRecognition || typeof window === 'undefined') {
-      const ok = window.confirm('Vuoi salvare il fornitore appena dettato?\nOK = salva  •  Annulla = resetta')
-      if (ok) {
-        if (!name.trim()) setVoiceError('Manca la ragione sociale: completa e salva manualmente.')
-        else window.setTimeout(() => submitBtnRef.current?.click(), 150)
-      } else {
-        resetVoiceFields()
-      }
-      return
-    }
-    const speakAndListen = () => {
-      const utter = new SpeechSynthesisUtterance('Vuoi salvare il fornitore? Rispondi sì o no.')
-      utter.lang = 'it-IT'
-      utter.rate = 1
-      utter.onend = () => window.setTimeout(listenForSaveAnswer, 150)
-      try {
-        window.speechSynthesis.cancel()
-        window.speechSynthesis.speak(utter)
-      } catch {
-        listenForSaveAnswer()
-      }
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      speakAndListen()
-    } else {
-      listenForSaveAnswer()
-    }
-  }
-
-  function listenForSaveAnswer() {
-    if (!SpeechRecognition) return
-    let rec
-    try {
-      rec = new SpeechRecognition()
-    } catch {
-      return
-    }
-    rec.lang = 'it-IT'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.onstart = () => setListening(true)
-    rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
-    rec.onresult = (e) => {
-      const transcript = Array.from(e.results).map((r) => r[0].transcript).join(' ').trim()
-      setVoiceGuideHeard(transcript)
-      const yes = /\b(si|sì|salva|ok|conferma|procedi|va bene|certo|certamente)\b/i.test(transcript)
-      const no = /\b(no|annulla|cancella|resetta|reset|non salvare)\b/i.test(transcript)
-      if (yes && !no) {
-        if (!name.trim()) {
-          setVoiceError('Manca la ragione sociale: non posso salvare automaticamente. Completa e premi Salva.')
-        } else {
-          window.setTimeout(() => submitBtnRef.current?.click(), 200)
-          setVoiceGuidePrompt('Salvataggio in corso...')
-        }
-      } else if (no && !yes) {
-        resetVoiceFields()
-        setVoiceGuidePrompt('Campi azzerati. Pronto per ricominciare.')
-      } else {
-        setVoiceError(`Non ho capito "${transcript}". Premi Salva o 🔁 Reset campi manualmente.`)
-      }
-      window.setTimeout(() => setVoiceGuidePrompt(''), 4000)
-    }
-    assistantConfirmRef.current = rec
-    try { rec.start() } catch { /* noop */ }
-  }
-
-  function applyGuidedVoiceValue(key, value) {
-    const v = (value || '').trim()
-    if (!v) return
-    if (key === 'name') setName(v)
-    if (key === 'vat_number') setVatNumber(v.replace(/\s/g, '').slice(-11))
-    if (key === 'fiscal_code') setFiscalCode(v.replace(/\s+/g, '').toUpperCase().slice(0, 16))
-    if (key === 'email') setEmail(v.replace(/\s/g, ''))
-    if (key === 'phone') setPhone(v.replace(/[^\d+]/g, '').slice(0, 15))
-    if (key === 'city') setCity(v)
-    if (key === 'contact_person') setContactPerson(v)
-    if (key === 'iban') setIban(v.replace(/\s+/g, '').toUpperCase())
-    if (key === 'merchandise_category') setMerchandiseCategory(v)
-    if (key === 'price_list_label') setPriceListLabel(v)
-    if (key === 'payment_terms') setPaymentTerms(v)
-    if (key === 'notes') setNotes(v)
-  }
-
-  function stopVoiceGuide() {
-    setVoiceGuideActive(false)
-    setVoiceGuidePrompt('')
-    setVoiceGuideStep(0)
-    setListening(false)
-  }
-
-  function startVoiceGuide() {
-    if (!SpeechRecognition) {
-      setVoiceError('L\'assistente vocale non è supportato da questo browser (usa Chrome o Edge)')
-      return
-    }
-    setVoiceError('')
-    setVoiceGuideHeard('')
-    setVoiceGuideActive(true)
-    setVoiceGuideStep(0)
-  }
-
-  useEffect(() => {
-    if (!voiceGuideActive) return
-    const steps = [
-      { key: 'name', prompt: 'Dimmi la ragione sociale del fornitore.' },
-      { key: 'vat_number', prompt: 'Dimmi la partita IVA, solo numeri.' },
-      { key: 'fiscal_code', prompt: 'Dimmi il codice fiscale, lettera per lettera. Se non lo hai di\' "passa".' },
-      { key: 'email', prompt: 'Dimmi la email.' },
-      { key: 'phone', prompt: 'Dimmi il telefono.' },
-      { key: 'contact_person', prompt: 'Dimmi il referente.' },
-      { key: 'city', prompt: 'Dimmi la città.' },
-      { key: 'iban', prompt: 'Dimmi l\'IBAN. Se non lo hai di\' "passa".' },
-      { key: 'merchandise_category', prompt: 'Dimmi la categoria merceologica (es. ortofrutta, bevande, carne).' },
-      { key: 'price_list_label', prompt: 'Dimmi il listino associato, ovvero un\'etichetta o un riferimento del prezzario. Di\' "passa" se non serve.' },
-      { key: 'payment_terms', prompt: 'Dimmi le condizioni di pagamento (es. bonifico 30 giorni).' },
-      { key: 'notes', prompt: 'Dimmi eventuali note finali.' },
-      { key: '__confirm__', prompt: 'Vuoi salvare adesso? Rispondi sì o no.' },
-    ]
-
-    if (voiceGuideStep >= steps.length) {
-      setVoiceGuidePrompt('Compilazione vocale completata.')
-      setVoiceGuideActive(false)
-      setListening(false)
-      return undefined
-    }
-
-    const step = steps[voiceGuideStep]
-    setVoiceGuidePrompt(step.prompt)
-
-    const TERMINATOR_RX = /\b(andiamo\s+avanti|vai\s+avanti|prossim[oa]|continu[ai]|sono\s+pronto|pronto\s+ad?\s+andare|avanti)\b/i
-    const SKIP_RX = /^(passa|salta|skip|nessuno|vuoto|nulla)\b/i
-    const REPEAT_RX = /^(ripeti|ripet[iy]|di nuovo|repeat)\b/i
-    const YES_RX = /\b(si|sì|ok|confermo|salva|procedi|va bene)\b/i
-
-    let cancelled = false
-    let recognition = null
-    let buffer = ''
-    let inactivityTimer = null
-    let advancing = false
-
-    const speak = (text, cb) => {
-      if (cancelled) return
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          const u = new SpeechSynthesisUtterance(text)
-          u.lang = 'it-IT'
-          u.rate = 1
-          if (cb) u.onend = () => window.setTimeout(cb, 200)
-          window.speechSynthesis.cancel()
-          window.speechSynthesis.speak(u)
-          return
-        } catch {
-          /* fallthrough */
-        }
-      }
-      if (cb) window.setTimeout(cb, 200)
-    }
-
-    const armInactivityTimer = () => {
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      inactivityTimer = window.setTimeout(() => {
-        if (cancelled || advancing) return
-        speak('Sei pronto ad andare avanti?')
-        armInactivityTimer()
-      }, 30000)
-    }
-
-    const advance = () => {
-      if (advancing || cancelled) return
-      advancing = true
-      cancelled = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      window.setTimeout(() => setVoiceGuideStep((s) => s + 1), 50)
-    }
-
-    const applyAndAdvance = (rawText) => {
-      const text = (rawText || '').trim()
-      const isSkip = SKIP_RX.test(text)
-      const valueText = isSkip ? '' : text
-      if (step.key === '__confirm__') {
-        const yes = YES_RX.test(text)
-        if (yes) {
-          if (!name.trim()) {
-            setVoiceError('Manca la ragione sociale: non posso salvare automaticamente.')
-          } else {
-            window.setTimeout(() => submitBtnRef.current?.click(), 200)
-          }
-        }
-      } else if (valueText) {
-        applyGuidedVoiceValue(step.key, valueText)
-      }
-      advance()
-    }
-
-    const startRecognition = () => {
-      if (cancelled) return
-      if (!SpeechRecognition) {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      try {
-        recognition = new SpeechRecognition()
-        recognition.lang = 'it-IT'
-        recognition.continuous = true
-        recognition.interimResults = false
-      } catch {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      recognition.onstart = () => {
-        setListening(true)
-        armInactivityTimer()
-      }
-      recognition.onend = () => {
-        setListening(false)
-        if (cancelled) return
-        window.setTimeout(() => {
-          if (!cancelled) startRecognition()
-        }, 250)
-      }
-      recognition.onerror = () => {
-        // Lascia che onend riavvii
-      }
-      recognition.onresult = (e) => {
-        armInactivityTimer()
-        const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
-        for (let i = startIdx; i < e.results.length; i++) {
-          const r = e.results[i]
-          if (!r || !r.isFinal) continue
-          const phrase = String(r[0]?.transcript || '').trim()
-          if (!phrase) continue
-          setVoiceGuideHeard(phrase)
-
-          if (REPEAT_RX.test(phrase)) {
-            speak(step.prompt)
-            continue
-          }
-
-          if (step.key === '__confirm__') {
-            applyAndAdvance(phrase)
-            return
-          }
-
-          if (TERMINATOR_RX.test(phrase)) {
-            const cleaned = phrase.replace(TERMINATOR_RX, '').trim()
-            if (cleaned) buffer = (buffer + ' ' + cleaned).trim()
-            applyAndAdvance(buffer)
-            return
-          }
-
-          if (SKIP_RX.test(phrase)) {
-            applyAndAdvance('')
-            return
-          }
-
-          buffer = (buffer + ' ' + phrase).trim()
-        }
-      }
-      try {
-        recognition.start()
-      } catch {
-        setListening(false)
-      }
-    }
-
-    speak(step.prompt, startRecognition)
-
-    return () => {
-      cancelled = true
-      advancing = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel() } catch { /* noop */ }
-      }
-      setListening(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceGuideActive, voiceGuideStep])
 
   function handleCancelEdit() {
     setEditingId(null)
@@ -739,11 +280,12 @@ export default function SuppliersPage() {
   async function handleAiSuggestSupplier(textOverride) {
     const text = (textOverride != null ? textOverride : aiSupplierText).trim()
     if (!text) {
-      setVoiceError('Scrivi o detta un testo prima di compilare con AI')
+      setAiError('Parla o scrivi un comando prima di inviare a Gemini')
       return
     }
     try {
-      setVoiceError('')
+      setAiSupplierLoading(true)
+      setAiError('')
       const res = await suggestSupplierFields(text, {
         name,
         vat_number: vatNumber,
@@ -759,10 +301,12 @@ export default function SuppliersPage() {
       const applied = applyAiSupplierSuggestion(res?.suggested_fields)
       setAiMissing(res?.missing_fields || [])
       if (!applied.length) {
-        setVoiceError('AI non ha estratto dati nuovi dal testo')
+        setAiError('Gemini non ha estratto dati dal comando. Riprova con più dettagli.')
       }
     } catch {
-      setVoiceError('Assistente AI non disponibile al momento')
+      setAiError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
+    } finally {
+      setAiSupplierLoading(false)
     }
   }
 
@@ -776,7 +320,7 @@ export default function SuppliersPage() {
       })
       setAiSupplierAnomalies(res?.anomalies || [])
     } catch {
-      setVoiceError('Controllo anomalie AI non disponibile')
+      setAiError('Controllo anomalie AI non disponibile')
     }
   }
 
@@ -796,69 +340,16 @@ export default function SuppliersPage() {
       <section className="card" ref={supplierFormSectionRef}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           {editingId ? 'Modifica fornitore' : 'Nuovo fornitore'}
-          {SpeechRecognition && (
-            <>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={startVoiceAssistant}
-                disabled={assistantActive || voiceGuideActive}
-                style={{ marginLeft: '1rem', padding: '0.4rem 0.8rem' }}
-                title="Assistente vocale: parla liberamente, l'AI compila i campi finché non premi Ferma"
-              >
-                {assistantActive ? '🎤 In ascolto...' : '🎤 Assistente vocale'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-warning"
-                onClick={stopVoiceAssistant}
-                disabled={!assistantActive}
-                style={{ marginLeft: '0.5rem', padding: '0.4rem 0.8rem' }}
-                title="Ferma l'assistente: poi ti chiede se salvare o resettare"
-              >
-                ⏹️ Ferma
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={voiceGuideActive ? stopVoiceGuide : startVoiceGuide}
-                disabled={assistantActive || (listening && !voiceGuideActive)}
-                style={{ marginLeft: '0.5rem', padding: '0.4rem 0.8rem' }}
-                title="Modalità guidata: ti fa domande e compila i campi"
-              >
-                {voiceGuideActive ? '⏹️ Ferma guida vocale' : '🗣️ Guida vocale passo-passo'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-danger"
-                onClick={resetVoiceFields}
-                style={{ marginLeft: '0.5rem', padding: '0.4rem 0.8rem' }}
-                title="Cancella tutti i campi compilati a voce/AI per ricominciare"
-              >
-                🔁 Reset campi
-              </button>
-            </>
-          )}
         </h2>
-        {voiceError && <div className="alert alert-danger" style={{ marginTop: '0.5rem' }}>{voiceError}</div>}
-        {voiceGuidePrompt && (
-          <div className="alert alert-info" style={{ marginTop: '0.5rem' }}>
-            <strong>Guida vocale:</strong> {voiceGuidePrompt}
-            {voiceGuideHeard ? <div style={{ marginTop: '0.35rem', color: 'var(--text-muted)' }}>Hai detto: "{voiceGuideHeard}"</div> : null}
-          </div>
-        )}
-        {SpeechRecognition && (
-          <div className="alert alert-info" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
-            <strong>🎤 Assistente vocale (libera):</strong> premi <strong>Assistente vocale</strong>, parla quanto vuoi (l&apos;AI compila i campi mentre parli) e quando hai finito premi <strong>⏹️ Ferma</strong>.
-            L&apos;assistente ti chiederà <em>&quot;Vuoi salvare? sì o no&quot;</em>: se rispondi <strong>sì</strong> salva, se rispondi <strong>no</strong> resetta.
-            <br />
-            <strong>🗣️ Guida vocale passo-passo:</strong> ti fa una domanda alla volta. Per ogni campo parla, poi di&apos; <strong>&quot;andiamo avanti&quot;</strong>; comandi utili: <em>passa</em> per saltare, <em>ripeti</em> per riascoltare. Dopo 30s di silenzio chiede &quot;sei pronto ad andare avanti?&quot;.
-            <br />
-            Se sbagli, premi <strong>🔁 Reset campi</strong> e ricominci.
-            <br />
-            <em>Esempio frase libera:</em> &quot;Mario Rossi srl, partita iva 12345678901, email mario@rossi.it, telefono 3331234567, città Lecce, IBAN IT60..., bonifico 30 giorni&quot;.
-          </div>
-        )}
+        <GeminiVoiceAssistant
+          label="Fornitore a voce (Gemini)"
+          hint='Esempio: "Bar Roma partita IVA 12345678901 email info@bar.it telefono 0801234567". Gemini compila i campi sotto.'
+          text={aiSupplierText}
+          onTextChange={setAiSupplierText}
+          onCompile={(spoken) => handleAiSuggestSupplier(spoken)}
+          compiling={aiSupplierLoading}
+        />
+        {aiError && <div className="alert alert-danger" style={{ marginTop: '0.5rem' }}>{aiError}</div>}
         {(aiMissing.length > 0 || aiSupplierAnomalies.length > 0) && (
           <div className="alert alert-info" style={{ marginTop: '0.45rem', marginBottom: '0.9rem' }}>
             {aiMissing.length > 0 && <div><strong>Campi mancanti:</strong> {aiMissing.join(', ')}</div>}
@@ -932,9 +423,6 @@ export default function SuppliersPage() {
           </div>
           <div className="btn-group" style={{ marginTop: '0.75rem' }}>
             <button type="submit" className="btn btn-primary">
-              {editingId ? 'Salva modifiche' : 'Aggiungi fornitore'}
-            </button>
-            <button ref={submitBtnRef} type="submit" className="btn btn-primary" style={{ display: 'none' }} aria-hidden>
               {editingId ? 'Salva modifiche' : 'Aggiungi fornitore'}
             </button>
             {editingId && (

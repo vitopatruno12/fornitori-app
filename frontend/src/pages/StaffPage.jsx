@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   fetchStaffMembers,
   fetchStaffShifts,
@@ -13,389 +13,11 @@ import {
 } from '../services/staffService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
+import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import { suggestStaffShift } from '../services/aiService'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
-const SpeechRecognition =
-  typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
-
-const VOICE_ITALIAN_MONTHS = {
-  gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6,
-  luglio: 7, agosto: 8, settembre: 9, ottobre: 10, novembre: 11, dicembre: 12,
-}
-const VOICE_ITALIAN_DAYS = {
-  lunedi: 1, lunedì: 1, martedi: 2, martedì: 2, mercoledi: 3, mercoledì: 3,
-  giovedi: 4, giovedì: 4, venerdi: 5, venerdì: 5, sabato: 6, domenica: 0,
-}
-
-/** Ore in parole (riconoscimento vocale IT). Chiavi senza accenti. */
-const VOICE_ITALIAN_HOUR_WORDS = {
-  zero: 0,
-  mezzanotte: 0,
-  uno: 1, un: 1, una: 1,
-  due: 2,
-  tre: 3,
-  quattro: 4,
-  cinque: 5,
-  sei: 6,
-  sette: 7,
-  otto: 8,
-  nove: 9,
-  dieci: 10,
-  undici: 11,
-  dodici: 12,
-  mezzogiorno: 12,
-  tredici: 13,
-  quattordici: 14,
-  quindici: 15,
-  sedici: 16,
-  diciassette: 17,
-  diciotto: 18,
-  diciannove: 19,
-  venti: 20,
-  ventuno: 21,
-  ventidue: 22,
-  ventitre: 23,
-  ventitré: 23,
-  ventiquattro: 24,
-}
-
-function voiceStripAccents(s) {
-  return (s || '').normalize('NFD').replace(/\p{M}/gu, '')
-}
-
-function voiceNormalizeTimePhrase(text) {
-  return voiceStripAccents((text || '').toLowerCase())
-    .replace(/[^\p{L}\p{N}\s:.,\-–h]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function voicePadHour(h) {
-  return String(Math.min(23, Math.max(0, h))).padStart(2, '0')
-}
-
-function voicePadMinutes(m) {
-  return String(Math.min(59, Math.max(0, m))).padStart(2, '0')
-}
-
-/** Da token (parola o cifra) a ora 0–23, oppure null. */
-function voiceTokenToHour(token) {
-  const t = voiceStripAccents((token || '').trim().toLowerCase())
-  if (!t) return null
-  if (/^\d{1,2}$/.test(t)) {
-    const n = Number(t)
-    if (n >= 0 && n <= 24) return n === 24 ? 0 : n
-    return null
-  }
-  if (Object.prototype.hasOwnProperty.call(VOICE_ITALIAN_HOUR_WORDS, t)) {
-    return VOICE_ITALIAN_HOUR_WORDS[t]
-  }
-  return null
-}
-
-/**
- * Un solo orario HH:MM da frase vocale: "otto", "otto e mezza", "8:30", "alle 16", "sedici e mezza".
- */
-function voiceParseSingleTime(text) {
-  const t = voiceNormalizeTimePhrase(text)
-  if (!t) return null
-
-  let m = t.match(
-    /(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s*[:.,h]\s*(\d{1,2})(?:\b|$)/,
-  )
-  if (!m) {
-    m = t.match(/(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s+(\d{2})(?:\b|$)/)
-  }
-  if (m) {
-    const h = Number(m[1])
-    const min = Number(m[2])
-    if (h >= 0 && h <= 24 && min >= 0 && min <= 59) {
-      return `${voicePadHour(h === 24 ? 0 : h)}:${voicePadMinutes(min)}`
-    }
-  }
-
-  m = t.match(
-    /(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})\s+e\s+(mezza|un\s+quarto|trenta|(\d{1,2}))(?:\b|$)/,
-  )
-  if (m) {
-    const h = Number(m[1])
-    let min = 0
-    if (m[2] === 'mezza' || m[2] === 'trenta') min = 30
-    else if (/quarto/.test(m[2])) min = 15
-    else if (m[3]) min = Number(m[3])
-    if (h >= 0 && h <= 24) return `${voicePadHour(h === 24 ? 0 : h)}:${voicePadMinutes(min)}`
-  }
-
-  m = t.match(/(?:^|\b)(?:ore?\s+|alle?\s+)?(\d{1,2})(?:\b|$)/)
-  if (m) {
-    const h = Number(m[1])
-    if (h >= 0 && h <= 24) return `${voicePadHour(h === 24 ? 0 : h)}:00`
-  }
-
-  const wordHourRe =
-    /\b(?:ore?\s+|alle?\s+)?(zero|mezzanotte|uno|un|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|undici|dodici|mezzogiorno|tredici|quattordici|quindici|sedici|diciassette|diciotto|diciannove|venti|ventuno|ventidue|ventitre|ventiquattro)(?:\s+e\s+(mezza|un\s+quarto|trenta|(\d{1,2})))?\b/
-  m = t.match(wordHourRe)
-  if (m) {
-    const h = voiceTokenToHour(m[1])
-    if (h == null) return null
-    let min = 0
-    if (m[2] === 'mezza' || m[2] === 'trenta') min = 30
-    else if (m[2] && /quarto/.test(m[2])) min = 15
-    else if (m[3]) min = Number(m[3])
-    return `${voicePadHour(h)}:${voicePadMinutes(min)}`
-  }
-
-  return null
-}
-
-function voiceParseDateIso(text) {
-  const t = (text || '').toLowerCase().trim()
-  if (!t) return ''
-  const today = new Date()
-  if (t === 'oggi' || /^stesso giorno/.test(t)) {
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  }
-  if (t === 'domani') {
-    const d = new Date(today.getTime() + 86400000)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  if (t === 'dopodomani') {
-    const d = new Date(today.getTime() + 2 * 86400000)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  for (const [name, dow] of Object.entries(VOICE_ITALIAN_DAYS)) {
-    if (t.includes(name)) {
-      const cur = today.getDay()
-      let delta = (dow - cur + 7) % 7
-      if (delta === 0) delta = 7
-      const d = new Date(today.getTime() + delta * 86400000)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    }
-  }
-  let m = t.match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)(?:\s+(\d{2,4}))?/)
-  if (m) {
-    const dd = Number(m[1])
-    const mm = VOICE_ITALIAN_MONTHS[m[2]]
-    let yy = m[3] ? Number(m[3]) : today.getFullYear()
-    if (yy < 100) yy += 2000
-    if (dd >= 1 && dd <= 31 && mm) {
-      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  m = t.match(/(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/)
-  if (m) {
-    const dd = Number(m[1])
-    const mm = Number(m[2])
-    let yy = m[3] ? Number(m[3]) : today.getFullYear()
-    if (yy < 100) yy += 2000
-    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
-      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  return ''
-}
-
-/** Estrae un orario ignorando parole come inizio, fine, turno. */
-function voiceExtractTimeFromPhrase(text) {
-  const t = voiceNormalizeTimePhrase(text)
-  if (!t) return null
-  const cleaned = t
-    .replace(
-      /\b(inizio|inizia|comincia|partenza|apertura|fine|finisce|termine|chiusura|uscita|del|della|di|il|la|lo|turno|turni|orario|lavoro|ore?|alle?|dalle?|a|da|fino|sino|e|il|un|una)\b/g,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .trim()
-  return voiceParseSingleTime(cleaned) || voiceParseSingleTime(t)
-}
-
-const VOICE_START_KW_RX = /\b(inizio|inizia|comincia|partenza|apertura)\b/
-const VOICE_END_KW_RX = /\b(fine|finisce|termine|chiusura|uscita)\b/
-
-/** Estrae orario dopo parola-chiave inizio/fine (es. "inizio turno 9" → 09:00). */
-function voiceParseLabeledShiftTime(text, role) {
-  const t = voiceNormalizeTimePhrase(text)
-  if (!t) return null
-  if (role === 'start') {
-    if (!VOICE_START_KW_RX.test(t)) return null
-    const m = t.match(
-      /\b(?:inizio|inizia|comincia|partenza|apertura)(?:\s+(?:del|di|il|la|lo))?\s*(?:turno|orario)?\s*(.+?)(?=\s*\.?\s*\b(?:fine|finisce|termine|chiusura|uscita)\b|$)/,
-    )
-    return m ? voiceExtractTimeFromPhrase(m[1]) : voiceExtractTimeFromPhrase(t)
-  }
-  if (!VOICE_END_KW_RX.test(t)) return null
-  const m = t.match(
-    /\b(?:fine|finisce|termine|chiusura|uscita)(?:\s+(?:del|di|il|la|lo))?\s*(?:turno|orario)?\s*(.+?)$/,
-  )
-  return m ? voiceExtractTimeFromPhrase(m[1]) : voiceExtractTimeFromPhrase(t)
-}
-
-/**
- * Orari turno con ruolo esplicito: "inizio turno 9", "fine turno 17",
- * oppure intervallo "dalle 8 alle 16". Evita di scambiare inizio/fine.
- */
-function voiceParseShiftTimesWithRoles(text) {
-  const raw = (text || '').trim()
-  if (!raw) return null
-  const t = voiceNormalizeTimePhrase(raw)
-  const hasStartKw = VOICE_START_KW_RX.test(t)
-  const hasEndKw = VOICE_END_KW_RX.test(t)
-
-  if (hasStartKw || hasEndKw) {
-    const start = hasStartKw ? voiceParseLabeledShiftTime(raw, 'start') : null
-    const end = hasEndKw ? voiceParseLabeledShiftTime(raw, 'end') : null
-    if (start || end) return { start, end }
-  }
-
-  const range = voiceParseShiftTimesRange(raw)
-  if (range?.start && range?.end) return range
-  if (range?.start || range?.end) return range
-
-  if (hasStartKw || hasEndKw) return null
-
-  const single = voiceExtractTimeFromPhrase(t)
-  if (single) return { start: single, end: null }
-
-  return null
-}
-
-/** Intervalli espliciti (dalle/alle, 8-16) senza spezzare frasi con inizio/fine. */
-function voiceParseShiftTimesRange(text) {
-  const raw = (text || '').trim()
-  if (!raw) return null
-  const t = voiceNormalizeTimePhrase(raw)
-  if (VOICE_START_KW_RX.test(t) && VOICE_END_KW_RX.test(t)) return null
-
-  let m = t.match(
-    /(?:dalle?|da)\s+(.+?)\s+(?:alle?|fino\s+alle?|sino\s+alle?|a)\s+(.+)/,
-  )
-  if (m) {
-    const start = voiceParseSingleTime(m[1])
-    const end = voiceParseSingleTime(m[2])
-    if (start && end) return { start, end }
-  }
-
-  m = t.match(/(\d{1,2})[:.,h]\s*(\d{1,2})\s*[-–]\s*(\d{1,2})[:.,h]\s*(\d{1,2})/)
-  if (m) {
-    return {
-      start: `${voicePadHour(Number(m[1]))}:${voicePadMinutes(Number(m[2]))}`,
-      end: `${voicePadHour(Number(m[3]))}:${voicePadMinutes(Number(m[4]))}`,
-    }
-  }
-
-  m = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/)
-  if (m) {
-    return {
-      start: `${voicePadHour(Number(m[1]))}:00`,
-      end: `${voicePadHour(Number(m[2]))}:00`,
-    }
-  }
-
-  const parts = t.split(/\s+/).filter(Boolean)
-  if (parts.length === 2) {
-    const h1 = voiceTokenToHour(parts[0])
-    const h2 = voiceTokenToHour(parts[1])
-    if (h1 != null && h2 != null) {
-      return { start: `${voicePadHour(h1)}:00`, end: `${voicePadHour(h2)}:00` }
-    }
-  }
-
-  return null
-}
-
-function voiceParseShiftTimes(text) {
-  const raw = (text || '').trim()
-  if (!raw) return null
-  const withRoles = voiceParseShiftTimesWithRoles(raw)
-  if (withRoles) return withRoles
-  return voiceParseShiftTimesRange(raw)
-}
-
-/** Nel dettato libero: ogni frase aggiorna solo il campo giusto (inizio/fine). */
-function voiceMergeTimesFromPhrases(phrases) {
-  let start = null
-  let end = null
-  for (const phrase of phrases || []) {
-    const p = (phrase || '').trim()
-    if (!p) continue
-    const labeled = voiceParseShiftTimesWithRoles(p)
-    if (labeled?.start) start = labeled.start
-    if (labeled?.end) end = labeled.end
-  }
-  if (start || end) return { start, end }
-  const merged = (phrases || []).join('. ').trim()
-  return merged ? voiceParseShiftTimesWithRoles(merged) || voiceParseShiftTimesRange(merged) : null
-}
-
-/** Applica orario/i turno al form (inizio/fine). */
-function voiceApplyShiftTimesToForm(times, setters) {
-  if (!times) return false
-  let ok = false
-  if (times.start) {
-    setters.setFormStart(times.start)
-    ok = true
-  }
-  if (times.end) {
-    setters.setFormEnd(times.end)
-    ok = true
-  }
-  return ok
-}
-
-/** Risposta vocale sufficiente per passare allo step orario successivo. */
-function voiceTimeStepLooksComplete(stepKey, phrase) {
-  const p = (phrase || '').trim()
-  if (!p || /^(passa|salta|skip)\b/i.test(p)) return true
-  if (stepKey === 'time_range') {
-    const r = voiceParseShiftTimesWithRoles(p)
-    return !!(r?.start && r?.end)
-  }
-  if (stepKey === 'time_start') return !!voiceParseSingleTime(p)
-  if (stepKey === 'time_end') return !!voiceParseSingleTime(p)
-  return false
-}
-
-function voiceParseEntryKind(text) {
-  const lo = (text || '').toLowerCase()
-  if (/\b(malatti[ae]|malat[oa])\b/.test(lo)) return 'sick'
-  if (/\b(permess[oi])\b/.test(lo)) return 'permission'
-  if (/\b(assenz[ae]|assente|assenti)\b/.test(lo)) return 'absence'
-  if (/\b(turno|turni)\b/.test(lo)) return 'shift'
-  return null
-}
-
-function voiceMatchMember(text, members) {
-  if (!text || !members || !members.length) return null
-  const norm = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim()
-  const ttext = norm(text)
-  if (!ttext) return null
-  let found = members.find((m) => norm(m.name) === ttext)
-  if (found) return found
-  found = members.find((m) => ttext && norm(m.name).includes(ttext))
-  if (found) return found
-  found = members.find((m) => norm(m.name) && ttext.includes(norm(m.name)))
-  return found || null
-}
-
-function voiceParseShift(text, members) {
-  const out = {}
-  if (!text) return out
-  const member = voiceMatchMember(text, members)
-  if (member) out.staff_member_id = String(member.id)
-  const iso = voiceParseDateIso(text)
-  if (iso) out.work_date = iso
-  const kind = voiceParseEntryKind(text)
-  if (kind) out.entry_kind = kind
-  const times = voiceParseShiftTimesWithRoles(text) || voiceParseShiftTimesRange(text)
-  if (times) {
-    if (times.start) out.time_start = times.start
-    if (times.end) out.time_end = times.end
-  }
-  const noteM = text.match(/\b(?:note?|nota)\s*[:\s]*(.{2,200})/i)
-  if (noteM) out.notes = noteM[1].trim()
-  return out
-}
 
 const KIND_LABELS = {
   shift: 'Turno',
@@ -443,6 +65,222 @@ function timeInputValue(t) {
   return String(t).slice(0, 5)
 }
 
+function normalizeTimeInput(v) {
+  if (v == null || v === '') return ''
+  const s = String(v).trim()
+  const m24 = s.match(/^(\d{1,2}):(\d{2})/)
+  if (m24) {
+    return `${String(Number(m24[1])).padStart(2, '0')}:${m24[2].slice(0, 2)}`
+  }
+  const mH = s.match(/^(\d{1,2})$/)
+  if (mH) return `${String(Number(mH[1])).padStart(2, '0')}:00`
+  return s.slice(0, 5)
+}
+
+function parseShiftTimesFromText(text) {
+  const raw = String(text || '')
+  const toT = (h, min) => {
+    const hh = String(Number(h)).padStart(2, '0')
+    const mm = min != null && String(min).length ? String(min).padStart(2, '0') : '00'
+    return `${hh}:${mm}`
+  }
+  const m1 = raw.match(/(\d{1,2})[:.](\d{2})?\s*[-–]\s*(\d{1,2})[:.](\d{2})?/i)
+  if (m1) return { start: toT(m1[1], m1[2]), end: toT(m1[3], m1[4]) }
+  const m2 = raw.match(/dalle?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:alle?|a)\s*(\d{1,2})(?:[:.](\d{2}))?/i)
+  if (m2) return { start: toT(m2[1], m2[2]), end: toT(m2[3], m2[4]) }
+  const m3 = raw.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/)
+  if (m3) return { start: toT(m3[1], null), end: toT(m3[2], null) }
+  return { start: '', end: '' }
+}
+
+function resolveStaffMemberId(nameHint, members, spoken) {
+  const q = String(nameHint || '').trim().toLowerCase()
+  if (q) {
+    let hit = members.find((m) => (m.name || '').toLowerCase() === q)
+    if (!hit) hit = members.find((m) => (m.name || '').toLowerCase().includes(q))
+    if (!hit) hit = members.find((m) => q.includes((m.name || '').toLowerCase()))
+    if (hit) return hit.id
+  }
+  const spokenL = String(spoken || '').toLowerCase()
+  for (const m of members) {
+    const tokens = (m.name || '').toLowerCase().split(/\s+/).filter((p) => p.length >= 3)
+    if (tokens.some((p) => spokenL.includes(p))) return m.id
+  }
+  return null
+}
+
+function buildShiftApiPayload(staffId, workDate, entryKind, timeStart, timeEnd, notes) {
+  const payload = {
+    staff_member_id: staffId,
+    work_date: workDate,
+    time_start: entryKind === 'shift' || entryKind === 'permission' ? `${timeStart}:00` : null,
+    time_end: entryKind === 'shift' || entryKind === 'permission' ? `${timeEnd}:00` : null,
+    entry_kind: entryKind,
+    notes: notes.trim() || null,
+  }
+  if (entryKind === 'shift') {
+    if (!timeStart || !timeEnd) return { error: 'Per il turno servono ora inizio e fine' }
+  }
+  if (entryKind === 'permission') {
+    if ((timeStart && !timeEnd) || (!timeStart && timeEnd)) {
+      return { error: 'Permesso: indicare sia inizio sia fine, oppure lasciare vuoto e usare le note' }
+    }
+    if (!timeStart) {
+      payload.time_start = null
+      payload.time_end = null
+    }
+  }
+  if (entryKind === 'absence' || entryKind === 'sick') {
+    payload.time_start = timeStart ? `${timeStart}:00` : null
+    payload.time_end = timeEnd ? `${timeEnd}:00` : null
+  }
+  return { data: payload }
+}
+
+function expandBulkShiftsHeuristic(spoken, members, context) {
+  const t = String(spoken || '').toLowerCase()
+  if (
+    !/(tutti|tutte|ogni\s+dipendente|tutti\s+i\s+dipendenti|tutto\s+il\s+personale|intero\s+staff|tutto\s+il\s+team)/i.test(
+      t,
+    )
+  ) {
+    return null
+  }
+  const times = parseShiftTimesFromText(spoken)
+  if (!times.start || !times.end) return null
+
+  let dates = []
+  const ws = context?.week_start
+  const we = context?.week_end
+  if (ws && we && /^\d{4}-\d{2}-\d{2}$/.test(ws) && /^\d{4}-\d{2}-\d{2}$/.test(we)) {
+    dates = enumerateDayCells(parseYMD(ws), parseYMD(we)).map(toYMD)
+  }
+  if (dates.length === 0 && context?.selected_date) {
+    dates = [context.selected_date]
+  }
+  if (/luned[iì].*venerd[iì]|lun.*ven|da\s+luned[iì]\s+a\s+venerd[iì]/i.test(t)) {
+    dates = dates.filter((d) => {
+      const dow = parseYMD(d).getDay()
+      return dow >= 1 && dow <= 5
+    })
+  }
+  if (/solo\s+sabato/i.test(t)) {
+    dates = dates.filter((d) => parseYMD(d).getDay() === 6)
+  }
+  if (dates.length === 0) return null
+
+  const targetMembers = members.filter((m) => m.is_active !== false)
+  const list = targetMembers.length ? targetMembers : members
+  const out = []
+  for (const m of list) {
+    for (const wd of dates) {
+      out.push({
+        staff_member_name: m.name,
+        work_date: wd,
+        entry_kind: 'shift',
+        time_start: times.start,
+        time_end: times.end,
+        notes: '',
+      })
+    }
+  }
+  return out.length ? out : null
+}
+
+function collectShiftsFromGemini(r, members, spoken, defaultDate, context) {
+  const list = []
+  if (Array.isArray(r?.suggested_shifts)) {
+    for (const item of r.suggested_shifts) {
+      if (item && typeof item === 'object') list.push(item)
+    }
+  }
+  const sf = r?.suggested_fields
+  if (sf && typeof sf === 'object' && (sf.staff_member_name || sf.work_date || sf.time_start || sf.time_end)) {
+    list.push(sf)
+  }
+  if (list.length === 0) {
+    const bulk = expandBulkShiftsHeuristic(spoken, members, context)
+    if (bulk?.length) return bulk
+    const single = expandSingleShiftHeuristic(spoken, members, defaultDate, context)
+    if (single?.length) return single
+  }
+  return list
+}
+
+function expandSingleShiftHeuristic(spoken, members, defaultDate, context) {
+  const times = parseShiftTimesFromText(spoken)
+  if (!times.start || !times.end) return null
+  const spokenL = String(spoken || '').toLowerCase()
+  for (const m of members) {
+    const tokens = (m.name || '').toLowerCase().split(/\s+/).filter((p) => p.length >= 3)
+    if (tokens.some((p) => spokenL.includes(p))) {
+      let workDate = defaultDate
+      const ws = context?.week_start
+      const we = context?.week_end
+      if (/luned[iì].*venerd[iì]|lun.*ven/i.test(spoken) && ws && we) {
+        const dates = enumerateDayCells(parseYMD(ws), parseYMD(we))
+          .map(toYMD)
+          .filter((d) => {
+            const dow = parseYMD(d).getDay()
+            return dow >= 1 && dow <= 5
+          })
+        if (dates.length === 1) workDate = dates[0]
+        else if (dates.length > 1) {
+          return dates.map((wd) => ({
+            staff_member_name: m.name,
+            work_date: wd,
+            entry_kind: 'shift',
+            time_start: times.start,
+            time_end: times.end,
+            notes: '',
+          }))
+        }
+      }
+      return [
+        {
+          staff_member_name: m.name,
+          work_date: workDate,
+          entry_kind: 'shift',
+          time_start: times.start,
+          time_end: times.end,
+          notes: '',
+        },
+      ]
+    }
+  }
+  return null
+}
+
+function resolveOneShiftSuggestion(item, members, spoken, defaultDate) {
+  const staffId = resolveStaffMemberId(item.staff_member_name, members, spoken)
+  if (!staffId) return { error: 'dipendente non riconosciuto' }
+
+  let workDate = defaultDate
+  if (item.work_date) {
+    const wd = String(item.work_date).slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(wd)) workDate = wd
+  }
+
+  const entryKind =
+    item.entry_kind && ['shift', 'permission', 'absence', 'sick'].includes(String(item.entry_kind))
+      ? String(item.entry_kind)
+      : 'shift'
+
+  let timeStart = normalizeTimeInput(item.time_start)
+  let timeEnd = normalizeTimeInput(item.time_end)
+  if ((entryKind === 'shift' || entryKind === 'permission') && (!timeStart || !timeEnd)) {
+    const parsed = parseShiftTimesFromText(spoken)
+    if (!timeStart) timeStart = parsed.start
+    if (!timeEnd) timeEnd = parsed.end
+  }
+
+  const notes = item.notes ? String(item.notes) : ''
+  const built = buildShiftApiPayload(staffId, workDate, entryKind, timeStart, timeEnd, notes)
+  if (built.error) return { error: built.error }
+  const memberName = members.find((m) => m.id === staffId)?.name || 'dipendente'
+  return { data: built.data, staffId, workDate, memberName, entryKind, timeStart, timeEnd }
+}
+
 function todayDate() {
   const n = new Date()
   return new Date(n.getFullYear(), n.getMonth(), n.getDate())
@@ -480,6 +318,8 @@ function enumerateDayCells(start, end) {
 }
 
 const MAX_PLANNING_PERIOD_DAYS = 93
+/** Limite turni creati in un solo comando vocale Gemini (es. 10 dipendenti × 7 giorni). */
+const MAX_GEMINI_SHIFTS_BATCH = 80
 /** Limite prudente per `https://wa.me/?text=…` (query troppo lunghe = link rotto o bloccato dal browser). */
 const WA_ME_URL_MAX_LEN = 7200
 const STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY = 'staffMembersByLocale'
@@ -671,44 +511,9 @@ export default function StaffPage() {
   const [editingShiftId, setEditingShiftId] = useState(null)
   /** Evita richieste duplicate (doppio clic / Invio mentre parte un’altra azione). */
   const [shiftBusy, setShiftBusy] = useState(false)
-
-  const [voiceListening, setVoiceListening] = useState(false)
-  const [voiceError, setVoiceError] = useState('')
-  const [voiceGuideActive, setVoiceGuideActive] = useState(false)
-  const [voiceGuideStep, setVoiceGuideStep] = useState(0)
-  const [voiceGuidePrompt, setVoiceGuidePrompt] = useState('')
-  const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
-  const [assistantActive, setAssistantActive] = useState(false)
-  const [assistantTranscript, setAssistantTranscript] = useState('')
-  const [voiceGuideInfoOpen, setVoiceGuideInfoOpen] = useState(false)
-  const assistantRecognitionRef = useRef(null)
-  const [assistantPhrases, setAssistantPhrases] = useState([])
-  const assistantCancelledRef = useRef(false)
-  const assistantConfirmRef = useRef(null)
-  const voiceSubmitBtnRef = useRef(null)
-  const voiceShiftFormRef = useRef(null)
-
-  function stopVoiceShiftConfirmListen() {
-    try {
-      assistantConfirmRef.current?.stop()
-    } catch {
-      /* noop */
-    }
-    assistantConfirmRef.current = null
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel()
-      } catch {
-        /* noop */
-      }
-    }
-    setVoiceListening(false)
-  }
-
-  function dismissVoiceShiftSessionPrompt() {
-    stopVoiceShiftConfirmListen()
-    setVoiceGuidePrompt('')
-  }
+  const [aiShiftText, setAiShiftText] = useState('')
+  const [aiShiftLoading, setAiShiftLoading] = useState(false)
+  const [aiShiftSummary, setAiShiftSummary] = useState('')
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -893,14 +698,6 @@ export default function StaffPage() {
     }
   }, [planView, periodLoStr, editingShiftId])
 
-  useEffect(() => {
-    if (!voiceGuideInfoOpen) return
-    const onKey = (e) => {
-      if (e.key === 'Escape') setVoiceGuideInfoOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [voiceGuideInfoOpen])
 
   function shiftLine(s) {
     const name = s.staff_member_name
@@ -1324,19 +1121,136 @@ export default function StaffPage() {
     }
   }
 
+  async function handleGeminiShiftCompile(spoken) {
+    const t = String(spoken || '').trim()
+    if (!t) return
+    if (editingShiftId) {
+      setError('Termina la modifica in corso prima di aggiungere un turno con Gemini.')
+      return
+    }
+    const selectedDate = formDate || dayStr
+    const geminiContext = {
+      selected_date: selectedDate,
+      today: toYMD(new Date()),
+      plan_view: planView,
+      week_start: rangeFromStr,
+      week_end: rangeToStr,
+    }
+    setAiShiftText(t)
+    try {
+      setAiShiftLoading(true)
+      setError('')
+      setAiShiftSummary('Gemini analizza il comando…')
+      const memberNames = members.map((m) => m.name).filter(Boolean)
+      const r = await suggestStaffShift(t, memberNames, geminiContext)
+      const rawItems = collectShiftsFromGemini(r, members, t, selectedDate, geminiContext)
+
+      if (!rawItems.length) {
+        const warnings = (r?.warnings || []).join(' · ')
+        const quota = r?.quota_exceeded
+        setError(
+          quota
+            ? `${warnings} Puoi ancora usare comandi semplici (es. "Marianna 8-16" o "tutti lunedì-venerdì 8-16") con compilazione locale.`
+            : warnings
+              || 'Comando non compreso. Per tutti: "tutti i dipendenti lunedì-venerdì turno 8-16" (vista Settimana). Per uno: "Marianna martedì 8-16".',
+        )
+        setAiShiftSummary('')
+        return
+      }
+
+      const usedLocal = r?.quota_exceeded || r?.local_fallback
+
+      const resolved = []
+      const seen = new Set()
+      for (const item of rawItems) {
+        const one = resolveOneShiftSuggestion(item, members, t, selectedDate)
+        if (one.error || !one.data) continue
+        const key = `${one.staffId}|${one.workDate}|${one.data.entry_kind}|${one.data.time_start}|${one.data.time_end}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        resolved.push(one)
+      }
+
+      if (!resolved.length) {
+        setError('Nessun turno valido: indica dipendente e orari (es. 8-16).')
+        setAiShiftSummary('')
+        return
+      }
+
+      let toSave = resolved
+      let truncated = false
+      if (toSave.length > MAX_GEMINI_SHIFTS_BATCH) {
+        toSave = toSave.slice(0, MAX_GEMINI_SHIFTS_BATCH)
+        truncated = true
+      }
+
+      const first = toSave[0]
+      setFormMemberId(String(first.staffId))
+      setFormDate(first.workDate)
+      setFormKind(first.entryKind)
+      setFormStart(first.timeStart)
+      setFormEnd(first.timeEnd)
+
+      setShiftBusy(true)
+      let ok = 0
+      let fail = 0
+      for (let i = 0; i < toSave.length; i += 1) {
+        setAiShiftSummary(`Salvataggio turni ${i + 1} / ${toSave.length}…`)
+        try {
+          await createStaffShift(toSave[i].data)
+          ok += 1
+        } catch {
+          fail += 1
+        }
+      }
+
+      const lastDate = toSave[toSave.length - 1].workDate
+      focusPlanningOnWorkDate(lastDate)
+      const localNote = usedLocal ? ' (compilazione locale — quota Gemini esaurita)' : ''
+      if (toSave.length === 1) {
+        const timesLabel =
+          first.timeStart && first.timeEnd ? ` ${first.timeStart}–${first.timeEnd}` : ''
+        setSuccess(`Turno aggiunto: ${first.memberName}, ${first.workDate}${timesLabel}.${localNote}`)
+      } else {
+        setSuccess(
+          `Aggiunti ${ok} turni${fail ? ` (${fail} non salvati)` : ''}${truncated ? ` — limite ${MAX_GEMINI_SHIFTS_BATCH}, riduci il periodo` : ''}.${localNote}`,
+        )
+      }
+      setAiShiftSummary(ok > 1 ? `${ok} turni in pianificazione` : 'Salvato in pianificazione')
+      setAiShiftText('')
+      resetForm()
+      if (planView === 'day') {
+        setFormDate(lastDate)
+        setDayFocus(parseYMD(lastDate))
+      }
+      await reloadPlanning()
+    } catch (err) {
+      const msg = String(err?.message || '')
+      if (err?.name === 'AbortError') {
+        setError('Gemini ha impiegato troppo tempo. Prova comandi più corti o meno giorni.')
+      } else if (msg.includes('400')) {
+        setError(msg.replace(/^400:\s*/, '') || 'Richiesta non valida: controlla dipendente e orari.')
+      } else {
+        setError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
+      }
+      setAiShiftSummary('')
+    } finally {
+      setAiShiftLoading(false)
+      setShiftBusy(false)
+    }
+  }
+
   async function handleSubmitShift(e) {
     e.preventDefault()
     if (shiftBusy) return
     if (!formMemberId) {
       setError('Seleziona un dipendente')
-      dismissVoiceShiftSessionPrompt()
       return
     }
     const staffId = Number(formMemberId)
     if (!Number.isFinite(staffId) || !members.some((m) => m.id === staffId)) {
       setError('Il dipendente selezionato non è più in elenco. Scegli un altro nome dal menu.')
       await refreshMembers()
-      dismissVoiceShiftSessionPrompt()
       return
     }
     const savedWorkDate = formDate
@@ -1351,14 +1265,12 @@ export default function StaffPage() {
     if (formKind === 'shift') {
       if (!formStart || !formEnd) {
         setError('Per il turno servono ora inizio e fine')
-        dismissVoiceShiftSessionPrompt()
         return
       }
     }
     if (formKind === 'permission') {
       if ((formStart && !formEnd) || (!formStart && formEnd)) {
         setError('Permesso: indicare sia inizio sia fine, oppure lasciare vuoto e usare le note')
-        dismissVoiceShiftSessionPrompt()
         return
       }
       if (!formStart) {
@@ -1402,7 +1314,6 @@ export default function StaffPage() {
       }
     } finally {
       setShiftBusy(false)
-      dismissVoiceShiftSessionPrompt()
     }
   }
 
@@ -1502,481 +1413,6 @@ export default function StaffPage() {
     }
   }
 
-  function submitVoiceShiftForm(options = {}) {
-    const { showSavingPrompt = false } = options
-    // Bug pregresso: cliccare un bottone display:none non triggera il form submit
-    // in nessun browser. Qui prima provo requestSubmit() sul <form>, poi se non
-    // disponibile faccio fallback al bottone "Aggiungi" visibile cercandolo nel form.
-    const form = voiceShiftFormRef.current
-    if (form && typeof form.reportValidity === 'function' && !form.reportValidity()) {
-      setVoiceError('Controlla dipendente, data e campi obbligatori prima di salvare.')
-      dismissVoiceShiftSessionPrompt()
-      return false
-    }
-    if (showSavingPrompt) setVoiceGuidePrompt('Salvataggio in corso…')
-    if (form && typeof form.requestSubmit === 'function') {
-      try {
-        form.requestSubmit()
-        return true
-      } catch {
-        /* prosegui col fallback */
-      }
-    }
-    if (form) {
-      const submitBtn = form.querySelector('button[type="submit"]:not([style*="display: none"])')
-      if (submitBtn) {
-        submitBtn.click()
-        return true
-      }
-    }
-    // Ultima spiaggia: click sul bottone vocale dedicato (storicamente non funzionante).
-    voiceSubmitBtnRef.current?.click()
-    return true
-  }
-
-  function applyVoiceShiftFields(parsed, options = {}) {
-    if (!parsed) return []
-    const applied = []
-    if (parsed.staff_member_id) {
-      setFormMemberId(String(parsed.staff_member_id))
-      const member = members.find((mm) => String(mm.id) === String(parsed.staff_member_id))
-      applied.push(`Dipendente: ${member ? member.name : parsed.staff_member_id}`)
-    }
-    if (parsed.work_date) {
-      setFormDate(parsed.work_date)
-      applied.push(`Data: ${parsed.work_date}`)
-    }
-    if (parsed.entry_kind) {
-      setFormKind(parsed.entry_kind)
-      applied.push(`Tipo: ${KIND_LABELS[parsed.entry_kind] || parsed.entry_kind}`)
-    }
-    if (parsed.time_start) {
-      setFormStart(parsed.time_start)
-      applied.push(`Inizio: ${parsed.time_start}`)
-    }
-    if (parsed.time_end) {
-      setFormEnd(parsed.time_end)
-      applied.push(`Fine: ${parsed.time_end}`)
-    }
-    if (parsed.notes && !options.skipNotes) {
-      setFormNotes(parsed.notes)
-      applied.push('Note aggiornate')
-    }
-    return applied
-  }
-
-  function resetVoiceShiftFields() {
-    if (voiceGuideActive) stopVoiceShiftGuide()
-    if (assistantActive) {
-      assistantCancelledRef.current = true
-      setAssistantActive(false)
-      try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
-    }
-    stopVoiceShiftConfirmListen()
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch { /* noop */ }
-    }
-    setAssistantPhrases([])
-    setAssistantTranscript('')
-    resetForm()
-    setVoiceGuideHeard('')
-    setVoiceGuidePrompt('')
-    setVoiceError('')
-    setVoiceListening(false)
-    setSuccess('Campi turno azzerati. Pronto a ricominciare.')
-  }
-
-  function reapplyAssistantDictation(phrases) {
-    resetForm()
-    const merged = (phrases || []).join('. ').trim()
-    setAssistantTranscript(merged)
-    if (merged) {
-      const parsed = voiceParseShift(merged, members)
-      const times = voiceMergeTimesFromPhrases(phrases)
-      if (times?.start) parsed.time_start = times.start
-      if (times?.end) parsed.time_end = times.end
-      applyVoiceShiftFields(parsed)
-    }
-    setVoiceGuideHeard(phrases.length ? phrases[phrases.length - 1] : '')
-  }
-
-  function clearAssistantDictation() {
-    if (!assistantActive) return
-    setAssistantPhrases([])
-    setAssistantTranscript('')
-    setVoiceGuideHeard('')
-    setVoiceError('')
-    resetForm()
-  }
-
-  function undoLastAssistantDictationPhrase() {
-    if (!assistantActive || assistantPhrases.length === 0) return
-    const next = assistantPhrases.slice(0, -1)
-    setAssistantPhrases(next)
-    reapplyAssistantDictation(next)
-  }
-
-  function startVoiceShiftAssistant() {
-    if (!SpeechRecognition) {
-      setVoiceError("L'assistente vocale non è supportato (usa Chrome o Edge)")
-      return
-    }
-    if (assistantActive || voiceGuideActive) return
-    setVoiceError('')
-    setVoiceGuideHeard('')
-    setVoiceGuidePrompt('Assistente attivo: dimmi liberamente dipendente, data, ora di inizio e fine. Premi "Ferma" quando hai finito.')
-    setAssistantPhrases([])
-    setAssistantTranscript('')
-    assistantCancelledRef.current = false
-    setAssistantActive(true)
-    startVoiceShiftLoop()
-  }
-
-  function startVoiceShiftLoop() {
-    if (assistantCancelledRef.current) return
-    if (!SpeechRecognition) return
-    let rec
-    try {
-      rec = new SpeechRecognition()
-    } catch {
-      setVoiceError('Riconoscimento vocale non disponibile')
-      return
-    }
-    rec.lang = 'it-IT'
-    rec.continuous = true
-    rec.interimResults = false
-    rec.onstart = () => setVoiceListening(true)
-    rec.onend = () => {
-      setVoiceListening(false)
-      if (assistantCancelledRef.current) return
-      window.setTimeout(() => {
-        if (!assistantCancelledRef.current) startVoiceShiftLoop()
-      }, 200)
-    }
-    rec.onerror = (e) => {
-      if (e?.error === 'not-allowed') {
-        setVoiceError('Microfono non autorizzato')
-        assistantCancelledRef.current = true
-        setAssistantActive(false)
-      }
-    }
-    rec.onresult = (e) => {
-      const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
-      const additions = []
-      for (let i = startIdx; i < e.results.length; i++) {
-        const r = e.results[i]
-        if (!r || !r.isFinal) continue
-        const phrase = String(r[0]?.transcript || '').trim()
-        if (phrase) additions.push(phrase)
-      }
-      if (!additions.length) return
-      const added = additions.join(' ')
-      let nextPhrases = assistantPhrases
-      setAssistantPhrases((prev) => {
-        nextPhrases = [...prev, added]
-        return nextPhrases
-      })
-      reapplyAssistantDictation(nextPhrases)
-    }
-    assistantRecognitionRef.current = rec
-    try { rec.start() } catch { setVoiceListening(false) }
-  }
-
-  function stopVoiceShiftAssistant() {
-    if (!assistantActive) return
-    assistantCancelledRef.current = true
-    setAssistantActive(false)
-    setVoiceListening(false)
-    try { assistantRecognitionRef.current?.stop() } catch { /* noop */ }
-    askVoiceShiftSaveOrReset()
-  }
-
-  function askVoiceShiftSaveOrReset() {
-    stopVoiceShiftConfirmListen()
-    setVoiceGuidePrompt('Vuoi salvare il turno? Rispondi sì o no.')
-    if (!SpeechRecognition || typeof window === 'undefined') {
-      const ok = window.confirm('Vuoi salvare il turno appena dettato?\nOK = salva  •  Annulla = resetta')
-      if (ok) {
-        if (!formMemberId) setVoiceError('Manca il dipendente: completa e salva manualmente.')
-        else window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 150)
-      } else {
-        resetVoiceShiftFields()
-      }
-      return
-    }
-    const speakAndListen = () => {
-      try {
-        const utter = new SpeechSynthesisUtterance('Vuoi salvare il turno? Rispondi sì o no.')
-        utter.lang = 'it-IT'
-        utter.rate = 1
-        utter.onend = () => window.setTimeout(listenForVoiceShiftAnswer, 150)
-        window.speechSynthesis.cancel()
-        window.speechSynthesis.speak(utter)
-      } catch {
-        listenForVoiceShiftAnswer()
-      }
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      speakAndListen()
-    } else {
-      listenForVoiceShiftAnswer()
-    }
-  }
-
-  function listenForVoiceShiftAnswer() {
-    if (!SpeechRecognition) return
-    let rec
-    try { rec = new SpeechRecognition() } catch { return }
-    rec.lang = 'it-IT'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.onstart = () => setVoiceListening(true)
-    rec.onend = () => setVoiceListening(false)
-    rec.onerror = () => setVoiceListening(false)
-    rec.onresult = (e) => {
-      const transcript = Array.from(e.results).map((r) => r[0].transcript).join(' ').trim()
-      setVoiceGuideHeard(transcript)
-      const yes = /\b(si|sì|salva|ok|conferma|procedi|va bene|aggiungi|certo)\b/i.test(transcript)
-      const no = /\b(no|annulla|cancella|resetta|reset|non salvare)\b/i.test(transcript)
-      if (yes && !no) {
-        if (!formMemberId) {
-          setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
-          window.setTimeout(() => dismissVoiceShiftSessionPrompt(), 4000)
-        } else {
-          window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
-        }
-      } else if (no && !yes) {
-        resetVoiceShiftFields()
-        setVoiceGuidePrompt('Campi azzerati. Pronto per ricominciare.')
-      } else {
-        setVoiceError(`Non ho capito "${transcript}". Premi Aggiungi o 🔁 Reset manualmente.`)
-        window.setTimeout(() => dismissVoiceShiftSessionPrompt(), 4000)
-      }
-    }
-    assistantConfirmRef.current = rec
-    try { rec.start() } catch { /* noop */ }
-  }
-
-  function stopVoiceShiftGuide() {
-    stopVoiceShiftConfirmListen()
-    setVoiceGuideActive(false)
-    setVoiceGuidePrompt('')
-    setVoiceGuideStep(0)
-    setVoiceGuideHeard('')
-    setVoiceListening(false)
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch { /* noop */ }
-    }
-  }
-
-  function startVoiceShiftGuide() {
-    if (!SpeechRecognition) {
-      setVoiceError("L'assistente vocale non è supportato (usa Chrome o Edge)")
-      return
-    }
-    if (assistantActive) return
-    setVoiceError('')
-    setVoiceGuideHeard('')
-    setVoiceGuideActive(true)
-    setVoiceGuideStep(0)
-  }
-
-  useEffect(() => {
-    if (!voiceGuideActive) return
-    const memberPrompt = formMemberId
-      ? `Dipendente attuale: ${(members.find((m) => String(m.id) === String(formMemberId)) || {}).name || ''}. Per cambiarlo dimmi un altro nome.`
-      : 'Per chi è il turno? Dimmi il nome del dipendente.'
-    const steps = [
-      { key: 'member', prompt: memberPrompt },
-      { key: 'kind', prompt: 'Che tipo? Dimmi turno, permesso, assenza o malattia.' },
-      { key: 'work_date', prompt: 'Che giorno? Oggi, domani, lunedì o una data.' },
-      { key: 'time_range', prompt: 'Orario? Es. inizio turno 9, fine turno 17, oppure dalle 9 alle 17, 9-17.' },
-      { key: 'notes', prompt: 'Vuoi aggiungere note? Dimmi le note oppure passa.' },
-      { key: '__confirm__', prompt: 'Aggiungo questo turno? Rispondi sì o no.' },
-    ]
-    if (voiceGuideStep >= steps.length) {
-      setVoiceGuidePrompt('Compilazione vocale completata.')
-      setVoiceGuideActive(false)
-      setVoiceListening(false)
-      return undefined
-    }
-    const step = steps[voiceGuideStep]
-    setVoiceGuidePrompt(step.prompt)
-
-    const TERMINATOR_RX = /\b(andiamo\s+avanti|vai\s+avanti|prossim[oa]|continu[ai]|sono\s+pronto|pronto\s+ad?\s+andare|avanti)\b/i
-    const SKIP_RX = /^(passa|salta|skip|nessuno|vuoto|nulla)\b/i
-    const REPEAT_RX = /^(ripeti|ripet[iy]|di nuovo|repeat)\b/i
-    const YES_RX = /\b(si|sì|ok|confermo|salva|procedi|va bene|aggiungi)\b/i
-
-    let cancelled = false
-    let recognition = null
-    let buffer = ''
-    let inactivityTimer = null
-    let advancing = false
-
-    const speak = (text, cb) => {
-      if (cancelled) return
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          const u = new SpeechSynthesisUtterance(text)
-          u.lang = 'it-IT'
-          u.rate = 1.22
-          if (cb) u.onend = () => window.setTimeout(cb, 60)
-          window.speechSynthesis.cancel()
-          window.speechSynthesis.speak(u)
-          return
-        } catch { /* fallthrough */ }
-      }
-      if (cb) window.setTimeout(cb, 60)
-    }
-    const isTimeStep = step.key === 'time_range' || step.key === 'time_start' || step.key === 'time_end'
-    const armInactivityTimer = () => {
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      inactivityTimer = window.setTimeout(() => {
-        if (cancelled || advancing) return
-        speak(isTimeStep ? 'Dimmi l\'orario, oppure passa.' : 'Sei pronto ad andare avanti?')
-        armInactivityTimer()
-      }, isTimeStep ? 12000 : 30000)
-    }
-    const advance = () => {
-      if (advancing || cancelled) return
-      advancing = true
-      cancelled = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      window.setTimeout(() => setVoiceGuideStep((s) => s + 1), 50)
-    }
-    const applyAndAdvance = (rawText) => {
-      const text = (rawText || '').trim()
-      const isSkip = SKIP_RX.test(text)
-      const valueText = isSkip ? '' : text
-      if (step.key === 'member') {
-        if (valueText) {
-          const m = voiceMatchMember(valueText, members)
-          if (m) setFormMemberId(String(m.id))
-          else if (!formMemberId) setVoiceError(`Dipendente "${valueText}" non trovato. Selezionalo manualmente.`)
-        }
-      } else if (step.key === 'kind') {
-        const k = voiceParseEntryKind(text) || 'shift'
-        setFormKind(k)
-      } else if (step.key === 'work_date') {
-        const iso = voiceParseDateIso(valueText || text)
-        if (iso) setFormDate(iso)
-      } else if (step.key === 'time_range' || step.key === 'time_start' || step.key === 'time_end') {
-        if (valueText) {
-          let t = voiceParseShiftTimesWithRoles(valueText)
-          if (!t?.start && step.key === 'time_start') {
-            const one = voiceExtractTimeFromPhrase(valueText)
-            if (one) t = { start: one, end: null }
-          }
-          if (!t?.end && step.key === 'time_end') {
-            const one = voiceExtractTimeFromPhrase(valueText)
-            if (one) t = { start: null, end: one }
-          }
-          voiceApplyShiftTimesToForm(t, { setFormStart, setFormEnd })
-        }
-      } else if (step.key === 'notes') {
-        if (valueText) setFormNotes(valueText)
-      } else if (step.key === '__confirm__') {
-        const yes = YES_RX.test(text)
-        if (yes) {
-          if (!formMemberId) {
-            setVoiceError('Manca il dipendente: non posso salvare automaticamente.')
-          } else {
-            window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
-          }
-        }
-      }
-      advance()
-    }
-
-    const startRecognition = () => {
-      if (cancelled) return
-      if (!SpeechRecognition) {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      try {
-        recognition = new SpeechRecognition()
-        recognition.lang = 'it-IT'
-        recognition.continuous = true
-        recognition.interimResults = false
-      } catch {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      recognition.onstart = () => {
-        setVoiceListening(true)
-        armInactivityTimer()
-      }
-      recognition.onend = () => {
-        setVoiceListening(false)
-        if (cancelled) return
-        window.setTimeout(() => {
-          if (!cancelled) startRecognition()
-        }, isTimeStep ? 80 : 180)
-      }
-      recognition.onerror = () => { /* onend riavvia */ }
-      recognition.onresult = (e) => {
-        armInactivityTimer()
-        const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
-        for (let i = startIdx; i < e.results.length; i++) {
-          const r = e.results[i]
-          if (!r || !r.isFinal) continue
-          const phrase = String(r[0]?.transcript || '').trim()
-          if (!phrase) continue
-          setVoiceGuideHeard(phrase)
-
-          if (REPEAT_RX.test(phrase)) {
-            speak(step.prompt)
-            continue
-          }
-          if (step.key === '__confirm__') {
-            applyAndAdvance(phrase)
-            return
-          }
-          if (TERMINATOR_RX.test(phrase)) {
-            const cleaned = phrase.replace(TERMINATOR_RX, '').trim()
-            if (cleaned) buffer = (buffer + ' ' + cleaned).trim()
-            applyAndAdvance(buffer)
-            return
-          }
-          if (SKIP_RX.test(phrase)) {
-            applyAndAdvance('')
-            return
-          }
-          buffer = (buffer + ' ' + phrase).trim()
-          if (isTimeStep) {
-            const partial = voiceParseShiftTimesWithRoles(buffer)
-            if (partial?.start) setFormStart(partial.start)
-            if (partial?.end) setFormEnd(partial.end)
-            if (voiceTimeStepLooksComplete(step.key, buffer)) {
-              applyAndAdvance(buffer)
-              return
-            }
-            continue
-          }
-        }
-      }
-      try { recognition.start() } catch { setVoiceListening(false) }
-    }
-
-    speak(step.prompt, startRecognition)
-
-    return () => {
-      cancelled = true
-      advancing = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel() } catch { /* noop */ }
-      }
-      setVoiceListening(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceGuideActive, voiceGuideStep])
 
   return (
     <div className="staff-page">
@@ -2563,83 +1999,25 @@ export default function StaffPage() {
       </section>
 
       <section id="staff-shift-form-card" className="card" style={{ order: 2 }}>
-        <h2 className="page-subheader" style={{ marginTop: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <span>{editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}</span>
-          {SpeechRecognition && (
-            <>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={startVoiceShiftGuide}
-                disabled={assistantActive || voiceGuideActive}
-                style={{ marginLeft: '0.5rem', padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Assistente vocale: ti fa le domande una alla volta (dipendente, tipo, giorno, orari…). Le domande compaiono anche in un riquadro in primo piano."
-              >
-                🎤 Assistente vocale
-              </button>
-              <button
-                type="button"
-                className="btn btn-warning"
-                onClick={() => {
-                  if (assistantActive) stopVoiceShiftAssistant()
-                  else if (voiceGuideActive) stopVoiceShiftGuide()
-                }}
-                disabled={!assistantActive && !voiceGuideActive}
-                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Interrompe il dettato libero oppure la guida vocale"
-              >
-                ⏹️ Ferma
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                onClick={startVoiceShiftAssistant}
-                disabled={assistantActive || voiceGuideActive}
-                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Microfono continuo: detta tutto in una volta, poi Ferma; niente domande passo-passo"
-              >
-                🎧 Dettato libero
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-danger"
-                onClick={resetVoiceShiftFields}
-                style={{ padding: '0.35rem 0.7rem', fontSize: '0.85rem' }}
-                title="Cancella i campi del turno per ricominciare"
-              >
-                🔁 Reset campi
-              </button>
-            </>
-          )}
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>
+          {editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}
         </h2>
-        {SpeechRecognition && (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: '0.75rem',
-              marginBottom: '0.75rem',
-            }}
-          >
-            <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', flex: '1 1 240px', maxWidth: '100%' }}>
-              Usa <strong>Assistente vocale</strong> per le <strong>domande passo-passo</strong> (anche in un riquadro in primo piano), <strong>Dettato libero</strong> per parlare in continuo, <strong>Ferma</strong> per interrompere, <strong>Reset campi</strong> per azzerare. Per il dettaglio apri{' '}
-              <strong>Info guida</strong>.
-            </p>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              style={{ flexShrink: 0 }}
-              onClick={() => setVoiceGuideInfoOpen(true)}
-            >
-              Info guida
-            </button>
+        <GeminiVoiceAssistant
+          label="Turno a voce (Gemini)"
+          hint='Un dipendente: "Marianna martedì 8-16". Tutti insieme (vista Settimana): "tutti i dipendenti da lunedì a venerdì turno 8-16". Salvataggio automatico di tutti i turni.'
+          text={aiShiftText}
+          onTextChange={setAiShiftText}
+          onCompile={handleGeminiShiftCompile}
+          compiling={aiShiftLoading}
+          disabled={shiftBusy}
+          onClear={() => setAiShiftSummary('')}
+        />
+        {aiShiftSummary ? (
+          <div className="alert alert-success" style={{ marginBottom: '0.75rem' }}>
+            <strong>Gemini:</strong> {aiShiftSummary}
           </div>
-        )}
-        {voiceError ? <div className="alert alert-warning" style={{ marginBottom: '0.5rem' }}>{voiceError}</div> : null}
+        ) : null}
         <form
-          ref={voiceShiftFormRef}
           onSubmit={handleSubmitShift}
           className="form-row"
           style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}
@@ -2713,16 +2091,6 @@ export default function StaffPage() {
             <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
               {shiftBusy ? 'Attendere…' : editingShiftId ? 'Salva modifiche' : 'Aggiungi'}
             </button>
-            <button
-              ref={voiceSubmitBtnRef}
-              type="submit"
-              className="btn btn-primary"
-              style={{ display: 'none' }}
-              aria-hidden
-              tabIndex={-1}
-            >
-              Salva (vocale)
-            </button>
             {editingShiftId && (
               <button
                 type="button"
@@ -2748,180 +2116,6 @@ export default function StaffPage() {
         </form>
       </section>
       </div>
-
-      {(assistantActive || voiceGuideActive || (voiceGuidePrompt || '').trim() !== '') && (
-        <div className="staff-report-modal-backdrop" role="presentation">
-          <div
-            className="card staff-report-modal"
-            style={{ maxWidth: 520, width: 'min(94vw, 520px)' }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="staff-voice-session-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="staff-voice-session-title" className="page-subheader" style={{ marginTop: 0 }}>
-              {voiceGuideActive
-                ? 'Assistente vocale — domande'
-                : assistantActive
-                  ? 'Dettato libero'
-                  : /vuoi salvare/i.test(voiceGuidePrompt || '')
-                    ? 'Conferma salvataggio'
-                    : 'Assistente vocale'}
-            </h3>
-            <p style={{ fontSize: '1.05rem', lineHeight: 1.5, margin: '0 0 1rem', color: 'var(--text-heading)' }}>{voiceGuidePrompt}</p>
-            {voiceGuideHeard ? (
-              <p style={{ margin: '0 0 0.75rem', color: 'var(--text-muted)', fontSize: '0.92rem' }}>
-                Ultimo riconoscimento: &quot;{voiceGuideHeard}&quot;
-              </p>
-            ) : null}
-            {assistantActive && assistantPhrases.length > 0 ? (
-              <details open style={{ marginBottom: '0.85rem', fontSize: '0.88rem' }}>
-                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
-                  Frasi raccolte ({assistantPhrases.length})
-                </summary>
-                <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.2rem', color: 'var(--text-muted)' }}>
-                  {assistantPhrases.map((phrase, idx) => (
-                    <li key={`${idx}-${phrase.slice(0, 24)}`} style={{ marginBottom: '0.25rem' }}>
-                      {phrase}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-            {(voiceListening && (assistantActive || voiceGuideActive)) ? (
-              <p className="loading" style={{ margin: '0 0 1rem' }}>
-                Microfono in ascolto…
-              </p>
-            ) : null}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {(assistantActive || voiceGuideActive) && (
-                  <button
-                    type="button"
-                    className="btn btn-warning"
-                    onClick={() => {
-                      if (assistantActive) stopVoiceShiftAssistant()
-                      else if (voiceGuideActive) stopVoiceShiftGuide()
-                    }}
-                  >
-                    ⏹️ Ferma
-                  </button>
-                )}
-                {assistantActive && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-outline-danger"
-                      onClick={() => clearAssistantDictation()}
-                      disabled={assistantPhrases.length === 0}
-                      title="Azzera testo dettato e campi del modulo"
-                    >
-                      Cancella tutto
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary"
-                      onClick={() => undoLastAssistantDictationPhrase()}
-                      disabled={assistantPhrases.length === 0}
-                      title="Rimuove l’ultima frase riconosciuta e ricalcola i campi"
-                    >
-                      Annulla ultima frase
-                    </button>
-                  </>
-                )}
-                {!assistantActive &&
-                  !voiceGuideActive &&
-                  /vuoi salvare/i.test(voiceGuidePrompt || '') &&
-                  !/salvataggio in corso/i.test(voiceGuidePrompt || '') && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => {
-                          if (!formMemberId) {
-                            setVoiceError('Manca il dipendente: non posso salvare.')
-                            return
-                          }
-                          window.setTimeout(() => submitVoiceShiftForm({ showSavingPrompt: true }), 200)
-                        }}
-                      >
-                        Salva
-                      </button>
-                      <button type="button" className="btn btn-secondary" onClick={() => resetVoiceShiftFields()}>
-                        Annulla
-                      </button>
-                    </>
-                  )}
-                {!assistantActive &&
-                  !voiceGuideActive &&
-                  /vuoi salvare/i.test(voiceGuidePrompt || '') &&
-                  voiceListening &&
-                  !/salvataggio in corso/i.test(voiceGuidePrompt || '') && (
-                    <button type="button" className="btn btn-outline-secondary" onClick={() => stopVoiceShiftConfirmListen()}>
-                      Interrompi ascolto
-                    </button>
-                  )}
-                {!assistantActive &&
-                  !voiceGuideActive &&
-                  /salvataggio in corso/i.test(voiceGuidePrompt || '') &&
-                  !shiftBusy && (
-                    <button type="button" className="btn btn-secondary" onClick={() => dismissVoiceShiftSessionPrompt()}>
-                      Chiudi
-                    </button>
-                  )}
-                {!assistantActive && !voiceGuideActive && /completat/i.test(voiceGuidePrompt || '') && (
-                  <button type="button" className="btn btn-primary" onClick={() => setVoiceGuidePrompt('')}>
-                    Chiudi
-                  </button>
-                )}
-              </div>
-              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setVoiceGuideInfoOpen(true)}>
-                Info guida
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {voiceGuideInfoOpen && (
-        <div
-          className="staff-report-modal-backdrop"
-          role="presentation"
-          onClick={() => setVoiceGuideInfoOpen(false)}
-        >
-          <div
-            className="card staff-report-modal"
-            style={{ maxWidth: 520, width: 'min(96vw, 520px)' }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="staff-voice-guide-info-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="staff-voice-guide-info-title" className="page-subheader" style={{ marginTop: 0 }}>
-              Assistente e guida vocale (Personale)
-            </h3>
-            <div style={{ fontSize: '0.92rem', lineHeight: 1.55, color: 'var(--text-body)' }}>
-              <p style={{ margin: '0 0 0.75rem' }}>
-                <strong>Assistente vocale:</strong> avvia la <strong>guida con domande</strong> (dipendente, tipo, giorno, orari…). Ogni domanda compare anche in un <strong>riquadro in primo piano</strong>. Per parlare in continuo senza domande usa <strong>Dettato libero</strong>, poi <strong>Ferma</strong>; ti chiederà se salvare.
-              </p>
-              <p style={{ margin: '0 0 0.75rem' }}>
-                <strong>Dettato libero:</strong> microfono continuo; detta tutto insieme (es. &quot;Mario, domani, turno 8–16&quot;) e premi <strong>Ferma</strong>. Poi &quot;vuoi salvare?&quot;: <strong>sì</strong> salva, <strong>no</strong> azzera.
-              </p>
-              <p style={{ margin: '0 0 0.75rem' }}>
-                <strong>Orario:</strong> puoi dire <em>inizio turno 9</em> e <em>fine turno 17</em> (anche in due frasi), oppure <em>dalle 9 alle 17</em>, <em>9-17</em>. <em>Inizio</em> va nel campo Inizio, <em>fine</em> nel campo Fine. Quando hai entrambi si passa avanti.
-              </p>
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Suggerimento: usa Chrome o Edge per il riconoscimento vocale. Chiudi con <strong>Chiudi</strong>, clic fuori dalla finestra o tasto <strong>Esc</strong>. Per annullare i campi usa <strong>Reset campi</strong>.
-              </p>
-            </div>
-            <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button type="button" className="btn btn-primary" onClick={() => setVoiceGuideInfoOpen(false)}>
-                Chiudi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <WeeklyStaffReportModal
         open={reportModalOpen}

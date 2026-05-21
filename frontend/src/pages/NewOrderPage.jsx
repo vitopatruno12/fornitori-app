@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchPriceList } from '../services/priceListService'
-import { checkAiAnomalies, suggestOrderLines, suggestOrderFull } from '../services/aiService'
-
-const SpeechRecognition =
-  typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
+import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
+import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 import {
   createSupplierOrder,
   deleteSupplierOrder,
@@ -43,62 +41,6 @@ function todayIso() {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-const ITALIAN_MONTHS = {
-  gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6,
-  luglio: 7, agosto: 8, settembre: 9, ottobre: 10, novembre: 11, dicembre: 12,
-}
-
-const ITALIAN_DAYS = {
-  lunedi: 1, lunedì: 1, martedi: 2, martedì: 2, mercoledi: 3, mercoledì: 3,
-  giovedi: 4, giovedì: 4, venerdi: 5, venerdì: 5, sabato: 6, domenica: 0,
-}
-
-/** Parse natural language date (oggi, domani, lunedì, "12 marzo", "12/03/2026") into yyyy-mm-dd. */
-function parseSpokenDateToIso(text) {
-  const t = (text || '').toLowerCase().trim()
-  if (!t) return ''
-  const today = new Date()
-  if (t === 'oggi' || /^stesso giorno/.test(t)) return todayIso()
-  if (t === 'domani') {
-    const d = new Date(today.getTime() + 86400000)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  if (t === 'dopodomani') {
-    const d = new Date(today.getTime() + 2 * 86400000)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  for (const [name, dow] of Object.entries(ITALIAN_DAYS)) {
-    if (t.includes(name)) {
-      const cur = today.getDay()
-      let delta = (dow - cur + 7) % 7
-      if (delta === 0) delta = 7
-      const d = new Date(today.getTime() + delta * 86400000)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    }
-  }
-  let m = t.match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)(?:\s+(\d{2,4}))?/)
-  if (m) {
-    const dd = Number(m[1])
-    const mm = ITALIAN_MONTHS[m[2]]
-    let yy = m[3] ? Number(m[3]) : today.getFullYear()
-    if (yy < 100) yy += 2000
-    if (dd >= 1 && dd <= 31 && mm) {
-      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  m = t.match(/(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/)
-  if (m) {
-    const dd = Number(m[1])
-    const mm = Number(m[2])
-    let yy = m[3] ? Number(m[3]) : today.getFullYear()
-    if (yy < 100) yy += 2000
-    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
-      return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
-    }
-  }
-  return ''
 }
 
 function statusLabel(s) {
@@ -231,17 +173,8 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
   const [anomalyReport, setAnomalyReport] = useState(null)
   const [copyFromOrderId, setCopyFromOrderId] = useState('')
   const [deletingAllOrders, setDeletingAllOrders] = useState(false)
-  const [voiceListening, setVoiceListening] = useState(false)
-  const [voiceError, setVoiceError] = useState('')
   const [aiSummary, setAiSummary] = useState('')
-  const [voiceGuideActive, setVoiceGuideActive] = useState(false)
-  const [voiceGuideStep, setVoiceGuideStep] = useState(0)
-  const [voiceGuidePrompt, setVoiceGuidePrompt] = useState('')
-  const [voiceGuideHeard, setVoiceGuideHeard] = useState('')
-  const [voiceGuideProducts, setVoiceGuideProducts] = useState([])
-  const [voiceGuideInfoOpen, setVoiceGuideInfoOpen] = useState(false)
   const [operatorLinkCopied, setOperatorLinkCopied] = useState(false)
-  const recognitionRef = useRef(null)
 
   const operatorOrderUrl = useMemo(() => getOperatorOrderPublicUrl(), [])
 
@@ -343,15 +276,6 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
     window.addEventListener('ai-apply-order', fn)
     return () => window.removeEventListener('ai-apply-order', fn)
   }, [])
-
-  useEffect(() => {
-    if (!voiceGuideInfoOpen) return
-    const onKey = (e) => {
-      if (e.key === 'Escape') setVoiceGuideInfoOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [voiceGuideInfoOpen])
 
   useEffect(() => {
     if (!supplierId) {
@@ -462,27 +386,6 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
     setRows([emptyRow()])
     setSuccessDetail(null)
     setAnomalyReport(null)
-  }
-
-  function resetVoiceFields() {
-    if (voiceGuideActive) stopVoiceGuide()
-    setSupplierId('')
-    setOrderDate(todayIso())
-    setVatPercent('23')
-    setExpectedDeliveryDate('')
-    setDeliveryLocation('')
-    setOrderSignedBy('')
-    setUnloadingSignedBy('')
-    setOrderNote('')
-    setRows([emptyRow()])
-    setAiOrderText('')
-    setAiSummary('')
-    setVoiceGuideProducts([])
-    setVoiceGuideHeard('')
-    setVoiceGuidePrompt('')
-    setVoiceError('')
-    setError('')
-    setSuccess('Campi compilati a voce/AI azzerati. Puoi riprovare.')
   }
 
   function updateRow(index, field, value) {
@@ -659,13 +562,12 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
   async function handleAiSuggestFull(textOverride) {
     const t = (textOverride != null ? textOverride : aiOrderText).trim()
     if (!t) {
-      setError('Scrivi o detta un testo prima di compilare con AI')
+      setError('Parla o scrivi un comando prima di inviare a Gemini')
       return
     }
     try {
       setAiOrderLoading(true)
       setError('')
-      setVoiceError('')
       setAiSummary('')
       const supplierNames = suppliers.map((s) => s.name).filter(Boolean)
       const r = await suggestOrderFull(t, supplierNames)
@@ -724,342 +626,18 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
 
       const warnings = (r?.warnings || []).join(' · ')
       if (applied.length) {
-        setSuccess(`AI ha compilato: ${applied.join(', ')}. Controlla e salva.`)
+        setSuccess(`Gemini ha compilato: ${applied.join(', ')}. Controlla e salva.`)
         setAiSummary(applied.join(' • '))
       } else {
-        setError("AI non e' riuscita a estrarre dati dal testo")
+        setError('Gemini non ha estratto dati dal comando. Riprova con più dettagli.')
       }
-      if (warnings) setVoiceError(warnings)
+      if (warnings) setError(warnings)
     } catch {
-      setError('Servizio AI non disponibile')
+      setError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
     } finally {
       setAiOrderLoading(false)
     }
   }
-
-  function handleVoiceCapture() {
-    if (!SpeechRecognition) {
-      setVoiceError("L'assistente vocale non e' supportato (usa Chrome o Edge)")
-      return
-    }
-    setVoiceError('')
-    const rec = new SpeechRecognition()
-    rec.lang = 'it-IT'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.onstart = () => setVoiceListening(true)
-    rec.onend = () => setVoiceListening(false)
-    rec.onerror = (e) => {
-      setVoiceListening(false)
-      if (e?.error === 'not-allowed') setVoiceError('Microfono non autorizzato')
-      else setVoiceError('Errore rilevamento vocale')
-    }
-    rec.onresult = (e) => {
-      const transcript = Array.from(e.results).map((r) => r[0].transcript).join(' ').trim()
-      const next = aiOrderText ? `${aiOrderText.replace(/\s+$/, '')}\n${transcript}` : transcript
-      setAiOrderText(next)
-      window.setTimeout(() => handleAiSuggestFull(next), 250)
-    }
-    recognitionRef.current = rec
-    try {
-      rec.start()
-    } catch {
-      setVoiceListening(false)
-    }
-  }
-
-  function stopVoiceGuide() {
-    setVoiceGuideActive(false)
-    setVoiceGuidePrompt('')
-    setVoiceGuideStep(0)
-    setVoiceGuideHeard('')
-    setVoiceListening(false)
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel()
-      } catch {
-        /* noop */
-      }
-    }
-  }
-
-  function startVoiceGuide() {
-    if (!SpeechRecognition) {
-      setVoiceError("L'assistente vocale non e' supportato (usa Chrome o Edge)")
-      return
-    }
-    setVoiceError('')
-    setVoiceGuideHeard('')
-    setVoiceGuideProducts([])
-    setVoiceGuideActive(true)
-    setVoiceGuideStep(0)
-  }
-
-  useEffect(() => {
-    if (!voiceGuideActive) return
-    const supplierPrompt = supplierId
-      ? `Fornitore attuale: ${supplierLabel}. Se va bene non dire nulla. Per cambiarlo dimmi il nuovo nome.`
-      : "Dimmi il nome del fornitore."
-    const steps = [
-      { key: 'supplier', prompt: supplierPrompt },
-      { key: 'order_date', prompt: "Quando e' la data dell'ordine? Puoi dire oggi, oppure una data come 12 marzo." },
-      { key: 'expected_delivery_date', prompt: "Quando e' prevista la consegna? Dimmi una data oppure passa." },
-      { key: 'delivery_location', prompt: 'Dimmi la destinazione di scarico o spedizione.' },
-      { key: 'order_signed_by', prompt: "Chi sta facendo l'ordine? Dimmi nome e cognome." },
-      { key: 'note', prompt: 'Vuoi aggiungere note al fornitore? Dimmi le note se vuoi.' },
-      { key: 'products_intro', prompt: 'Adesso passiamo ai prodotti.' },
-      { key: 'product_loop', prompt: "Dimmi un prodotto con quantita' (es. \"10 kg arance\" o \"5 pasta\"). Dopo ogni prodotto di' \"andiamo avanti\". Quando hai finito tutti i prodotti, di' \"fine\"." },
-      { key: '__confirm__', prompt: "Vuoi salvare l'ordine? Rispondi si' o no." },
-    ]
-    if (voiceGuideStep >= steps.length) {
-      setVoiceGuidePrompt('Compilazione vocale completata.')
-      setVoiceGuideActive(false)
-      setVoiceListening(false)
-      return undefined
-    }
-    const step = steps[voiceGuideStep]
-    setVoiceGuidePrompt(step.prompt)
-
-    const TERMINATOR_RX = /\b(andiamo\s+avanti|vai\s+avanti|prossim[oa]|continu[ai]|sono\s+pronto|pronto\s+ad?\s+andare|avanti)\b/i
-    const SKIP_RX = /^(passa|salta|skip|nessuno|vuoto|nulla)\b/i
-    const REPEAT_RX = /^(ripeti|ripet[iy]|di nuovo|repeat)\b/i
-    const FINE_RX = /\b(fine|finito|finisci|basta|stop)\b/i
-    const YES_RX = /\b(si|sì|ok|conferma|salva|procedi|va bene)\b/i
-    const NO_RX = /\b(no|annulla|non salvare|cancella)\b/i
-
-    let cancelled = false
-    let recognition = null
-    let buffer = ''
-    let inactivityTimer = null
-    let advancing = false
-
-    const speak = (text, cb) => {
-      if (cancelled) return
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          const u = new SpeechSynthesisUtterance(text)
-          u.lang = 'it-IT'
-          u.rate = 1
-          if (cb) u.onend = () => window.setTimeout(cb, 200)
-          window.speechSynthesis.cancel()
-          window.speechSynthesis.speak(u)
-          return
-        } catch {
-          /* fallthrough */
-        }
-      }
-      if (cb) window.setTimeout(cb, 200)
-    }
-
-    const armInactivityTimer = () => {
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      inactivityTimer = window.setTimeout(() => {
-        if (cancelled || advancing) return
-        speak('Sei pronto ad andare avanti?')
-        armInactivityTimer()
-      }, 30000)
-    }
-
-    const advance = () => {
-      if (advancing || cancelled) return
-      advancing = true
-      cancelled = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      window.setTimeout(() => setVoiceGuideStep((s) => s + 1), 50)
-    }
-
-    const applyAndAdvance = (rawText) => {
-      const text = (rawText || '').trim()
-      const isSkip = SKIP_RX.test(text)
-      const valueText = isSkip ? '' : text
-      if (step.key === 'supplier') {
-        if (valueText) {
-          const norm = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim()
-          const tnorm = norm(valueText)
-          const found = suppliers.find((s) => norm(s.name) === tnorm)
-            || suppliers.find((s) => tnorm && norm(s.name).includes(tnorm))
-            || suppliers.find((s) => tnorm && tnorm.includes(norm(s.name)))
-          if (found) setSupplierId(String(found.id))
-          else if (!supplierId) setVoiceError(`Fornitore "${valueText}" non trovato. Selezionalo manualmente.`)
-        }
-      } else if (step.key === 'order_date') {
-        if (valueText) {
-          const iso = parseSpokenDateToIso(valueText)
-          if (iso) setOrderDate(iso)
-          else setOrderDate(todayIso())
-        } else if (!orderDate) {
-          setOrderDate(todayIso())
-        }
-      } else if (step.key === 'expected_delivery_date') {
-        if (valueText) {
-          const iso = parseSpokenDateToIso(valueText)
-          if (iso) setExpectedDeliveryDate(iso)
-        }
-      } else if (step.key === 'delivery_location') {
-        if (valueText) setDeliveryLocation(valueText)
-      } else if (step.key === 'order_signed_by') {
-        if (valueText) setOrderSignedBy(valueText)
-      } else if (step.key === 'note') {
-        if (valueText) setOrderNote(valueText)
-      } else if (step.key === '__confirm__') {
-        const yes = YES_RX.test(text)
-        const no = NO_RX.test(text)
-        if (yes && !no) {
-          window.setTimeout(() => {
-            if (!supplierId) {
-              setVoiceError('Manca il fornitore: non posso salvare automaticamente.')
-              return
-            }
-            if (!orderSignedBy.trim()) {
-              setVoiceError("Manca la firma di chi fa l'ordine: non posso salvare automaticamente.")
-              return
-            }
-            handleSave(null, {})
-          }, 200)
-        }
-      }
-      advance()
-    }
-
-    const finalizeProductLoop = () => {
-      setVoiceGuideProducts((prev) => {
-        if (prev.length) {
-          suggestOrderLines(prev.join('\n'))
-            .then((rr) => {
-              const lines = rr?.suggested_lines || []
-              if (lines.length) {
-                setRows(
-                  lines.map((l) => ({
-                    product_description: l.product_description || '',
-                    pieces: l.pieces != null ? String(l.pieces) : '',
-                    weight_kg: l.weight_kg != null && l.weight_kg !== '' ? String(l.weight_kg) : '',
-                    note: l.note || '',
-                  })),
-                )
-              }
-            })
-            .catch(() => undefined)
-        }
-        return prev
-      })
-      advance()
-    }
-
-    const startRecognition = () => {
-      if (cancelled) return
-      if (!SpeechRecognition) {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      try {
-        recognition = new SpeechRecognition()
-        recognition.lang = 'it-IT'
-        recognition.continuous = true
-        recognition.interimResults = false
-      } catch {
-        setVoiceError('Riconoscimento vocale non disponibile')
-        advance()
-        return
-      }
-      recognition.onstart = () => {
-        setVoiceListening(true)
-        armInactivityTimer()
-      }
-      recognition.onend = () => {
-        setVoiceListening(false)
-        if (cancelled) return
-        window.setTimeout(() => {
-          if (!cancelled) startRecognition()
-        }, 250)
-      }
-      recognition.onerror = () => {
-        // Lasciamo che onend riavvii
-      }
-      recognition.onresult = (e) => {
-        armInactivityTimer()
-        const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0
-        for (let i = startIdx; i < e.results.length; i++) {
-          const r = e.results[i]
-          if (!r || !r.isFinal) continue
-          const phrase = String(r[0]?.transcript || '').trim()
-          if (!phrase) continue
-          setVoiceGuideHeard(phrase)
-
-          if (REPEAT_RX.test(phrase)) {
-            speak(step.prompt)
-            continue
-          }
-
-          if (step.key === '__confirm__') {
-            applyAndAdvance(phrase)
-            return
-          }
-
-          if (step.key === 'product_loop' && FINE_RX.test(phrase) && !TERMINATOR_RX.test(phrase)) {
-            const cleanedFine = phrase.replace(FINE_RX, '').trim()
-            if (cleanedFine) {
-              setVoiceGuideProducts((prev) => [...prev, cleanedFine])
-            } else if (buffer.trim()) {
-              const t = buffer.trim()
-              setVoiceGuideProducts((prev) => [...prev, t])
-              buffer = ''
-            }
-            try { recognition.stop() } catch { /* noop */ }
-            cancelled = true
-            if (inactivityTimer) window.clearTimeout(inactivityTimer)
-            window.setTimeout(finalizeProductLoop, 80)
-            return
-          }
-
-          if (TERMINATOR_RX.test(phrase)) {
-            const cleaned = phrase.replace(TERMINATOR_RX, '').trim()
-            if (cleaned) buffer = (buffer + ' ' + cleaned).trim()
-            if (step.key === 'product_loop') {
-              const t = buffer.trim()
-              if (t) {
-                setVoiceGuideProducts((prev) => [...prev, t])
-                buffer = ''
-              }
-              continue
-            }
-            applyAndAdvance(buffer)
-            return
-          }
-
-          if (SKIP_RX.test(phrase)) {
-            if (step.key === 'product_loop') {
-              continue
-            }
-            applyAndAdvance('')
-            return
-          }
-
-          buffer = (buffer + ' ' + phrase).trim()
-        }
-      }
-      try {
-        recognition.start()
-      } catch {
-        setVoiceListening(false)
-      }
-    }
-
-    speak(step.prompt, startRecognition)
-
-    return () => {
-      cancelled = true
-      advancing = true
-      if (inactivityTimer) window.clearTimeout(inactivityTimer)
-      try { recognition && recognition.stop() } catch { /* noop */ }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel() } catch { /* noop */ }
-      }
-      setVoiceListening(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceGuideActive, voiceGuideStep])
 
   async function handleSave(e, opts = {}) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault()
@@ -1654,85 +1232,23 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
             </div>
           </div>
 
-          <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
-            Compila ordine a voce
-          </h3>
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: '0.75rem',
-              marginBottom: '0.75rem',
-            }}
-          >
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0, flex: '1 1 260px', maxWidth: '100%' }}>
-              Detta in linguaggio naturale o usa la guida vocale: l&apos;assistente compila in automatico{' '}
-              <strong>fornitore, date, destinazione, firma e prodotti</strong>. Per le istruzioni dettagliate della guida vocale usa il pulsante a destra.
-            </p>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              style={{ flexShrink: 0 }}
-              onClick={() => setVoiceGuideInfoOpen(true)}
-            >
-              Info guida
-            </button>
-          </div>
-          {voiceError && <div className="alert alert-warning" style={{ marginBottom: '0.5rem' }}>{voiceError}</div>}
-          {voiceGuidePrompt && (
-            <div className="alert alert-info" style={{ marginBottom: '0.5rem' }}>
-              <strong>Guida vocale:</strong> {voiceGuidePrompt}
-              {voiceGuideHeard ? (
-                <div style={{ marginTop: '0.35rem', color: 'var(--text-muted)' }}>Hai detto: &quot;{voiceGuideHeard}&quot;</div>
-              ) : null}
-              {voiceGuideProducts.length > 0 ? (
-                <div style={{ marginTop: '0.35rem', color: 'var(--text-muted)' }}>
-                  Prodotti raccolti: {voiceGuideProducts.join(' • ')}
-                </div>
-              ) : null}
-            </div>
-          )}
-          {aiSummary && !voiceGuidePrompt && (
-            <div className="alert alert-success" style={{ marginBottom: '0.5rem' }}>
-              <strong>Compilato:</strong> {aiSummary}
-            </div>
-          )}
-          <div className="btn-group" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.4rem' }}>
-            {SpeechRecognition && (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleVoiceCapture}
-                  disabled={voiceListening || voiceGuideActive}
-                  title="Detta liberamente: il sistema estrae automaticamente i campi"
-                >
-                  {voiceListening ? '🎤 In ascolto...' : '🎤 Detta'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={voiceGuideActive ? stopVoiceGuide : startVoiceGuide}
-                  disabled={voiceListening && !voiceGuideActive}
-                  title="Guida vocale: l'assistente ti chiede un dato alla volta"
-                >
-                  {voiceGuideActive ? '⏹️ Ferma guida' : '🗣️ Guida vocale passo-passo'}
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="btn btn-outline-danger"
-              onClick={resetVoiceFields}
-              title="Cancella tutti i campi compilati a voce per ricominciare"
-            >
-              🔁 Reset campi
-            </button>
-          </div>
+          <GeminiVoiceAssistant
+            label="Ordine a voce (Gemini)"
+            hint='Esempio: "Ordine a Rossi domani: 10 arance, 5 kg pasta, consegna venerdì". Gemini compila fornitore, date e righe.'
+            text={aiOrderText}
+            onTextChange={setAiOrderText}
+            onCompile={(spoken) => handleAiSuggestFull(spoken)}
+            compiling={aiOrderLoading}
+            onClear={() => setAiSummary('')}
+          />
 
-          <h3 className="page-subheader" style={{ marginTop: '0.5rem' }}>
+          {aiSummary && (
+            <div className="alert alert-success" style={{ marginBottom: '0.5rem' }}>
+              <strong>Gemini:</strong> {aiSummary}
+            </div>
+          )}
+
+          <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
             Prodotti da ordinare
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '-0.35rem', marginBottom: '0.5rem' }}>
@@ -2156,53 +1672,6 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
             </div>
           )}
         </section>
-      )}
-      {voiceGuideInfoOpen && (
-        <div
-          className="staff-report-modal-backdrop"
-          role="presentation"
-          onClick={() => setVoiceGuideInfoOpen(false)}
-        >
-          <div
-            className="card staff-report-modal"
-            style={{ maxWidth: 520, width: 'min(96vw, 520px)' }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="voice-guide-info-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="voice-guide-info-title" className="page-subheader" style={{ marginTop: 0 }}>
-              Come funziona la guida vocale
-            </h3>
-            <div style={{ fontSize: '0.92rem', lineHeight: 1.55, color: 'var(--text-body)' }}>
-              <ul style={{ margin: '0 0 1rem', paddingLeft: '1.25rem' }}>
-                <li>
-                  Per ogni campo l&apos;assistente ti fa una domanda e <strong>resta in ascolto</strong>.
-                </li>
-                <li>
-                  Parla quanto vuoi (anche più frasi), poi di&apos; <strong>&quot;andiamo avanti&quot;</strong> per passare al campo successivo.
-                </li>
-                <li>
-                  Comandi utili: <em>passa</em> per saltare il campo, <em>ripeti</em> per riascoltare, <em>fine</em> per terminare la lista prodotti.
-                </li>
-                <li>
-                  Se resti in silenzio per 30 secondi, l&apos;assistente ti chiede &quot;sei pronto ad andare avanti?&quot; e continua ad aspettare.
-                </li>
-                <li>
-                  Se sbagli, premi <strong>Reset campi</strong> nella sezione qui sopra e ricominci.
-                </li>
-              </ul>
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Suggerimento: usa Chrome o Edge per il riconoscimento vocale. Chiudi questa finestra con <strong>Chiudi</strong>, clic fuori o tasto <strong>Esc</strong>.
-              </p>
-            </div>
-            <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button type="button" className="btn btn-primary" onClick={() => setVoiceGuideInfoOpen(false)}>
-                Chiudi
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   )
