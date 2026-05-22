@@ -202,7 +202,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
     try {
       setLoadingSuppliers(true)
       const data = await fetchSuppliers()
-      setSuppliers(data)
+      setSuppliers(Array.isArray(data) ? data : [])
     } catch (e) {
       setError('Errore nel caricamento fornitori')
     } finally {

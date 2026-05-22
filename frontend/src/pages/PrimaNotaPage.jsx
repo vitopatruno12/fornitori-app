@@ -331,7 +331,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   async function loadSuppliers() {
     try {
       const data = await fetchSuppliers()
-      setSuppliers(data)
+      setSuppliers(Array.isArray(data) ? data : [])
     } catch {
       // noop
     }

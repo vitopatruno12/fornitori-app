@@ -1,7 +1,8 @@
-import { apiFetch, apiUrl } from './api'
+import { apiFetch, apiUrl, asArray } from './api'
 
 export async function fetchSuppliers() {
-  return apiFetch('/suppliers')
+  const data = await apiFetch('/suppliers')
+  return asArray(data, 'fornitori')
 }
 
 export async function createSupplier(data) {

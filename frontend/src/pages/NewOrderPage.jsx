@@ -365,7 +365,7 @@ export default function NewOrderPage({ operatorMode = false }) {
     try {
       setLoadingSuppliers(true)
       const data = await fetchSuppliers()
-      setSuppliers(data)
+      setSuppliers(Array.isArray(data) ? data : [])
     } catch {
       setError('Errore nel caricamento fornitori')
     } finally {

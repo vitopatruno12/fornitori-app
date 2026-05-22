@@ -78,9 +78,10 @@ export default function SuppliersPage() {
   const [quickEditSupplierId, setQuickEditSupplierId] = useState('')
 
   const filteredSuppliers = useMemo(() => {
+    const list = Array.isArray(suppliers) ? suppliers : []
     const q = search.trim().toLowerCase()
-    if (!q) return suppliers
-    return suppliers.filter((s) => {
+    if (!q) return list
+    return list.filter((s) => {
       const blob = [s.name, s.vat_number, s.fiscal_code, s.email, s.phone, s.city, s.iban].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
@@ -119,7 +120,8 @@ export default function SuppliersPage() {
       const data = await fetchSuppliers()
       setSuppliers(data)
     } catch (e) {
-      setError('Errore nel caricamento fornitori')
+      setSuppliers([])
+      setError(e?.message || 'Errore nel caricamento fornitori')
     } finally {
       setLoading(false)
     }

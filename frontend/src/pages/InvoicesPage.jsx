@@ -236,7 +236,7 @@ export default function InvoicesPage() {
   async function loadSuppliers() {
     try {
       const data = await fetchSuppliers()
-      setSuppliers(data)
+      setSuppliers(Array.isArray(data) ? data : [])
     } catch {
       // noop
     }

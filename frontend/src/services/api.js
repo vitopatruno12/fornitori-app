@@ -34,6 +34,24 @@ function formatApiError(status, text) {
   return raw ? `API error ${status}: ${raw}` : `API error ${status}`
 }
 
+const NGINX_HTML_HINT =
+  'Il server ha restituito la pagina web invece dei dati API. Su Nginx configura location ^~ /api/ { proxy_pass http://127.0.0.1:8000/; }'
+
+function looksLikeHtml(text) {
+  const t = String(text || '').trim().slice(0, 200).toLowerCase()
+  return t.startsWith('<!doctype') || t.startsWith('<html') || (t.startsWith('<') && t.includes('<head'))
+}
+
+/** Garantisce un array (evita .map is not a function se l’API risponde male). */
+export function asArray(value, label = 'risposta') {
+  if (Array.isArray(value)) return value
+  if (value == null) return []
+  if (typeof value === 'object' && Array.isArray(value.items)) return value.items
+  if (typeof value === 'object' && Array.isArray(value.data)) return value.data
+  console.warn(`API ${label}: atteso array, ricevuto`, typeof value, value)
+  return []
+}
+
 export async function apiFetch(path, options = {}) {
   const response = await fetch(apiUrl(path), {
     headers: {
@@ -50,15 +68,21 @@ export async function apiFetch(path, options = {}) {
 
   const text = await response.text().catch(() => '')
   const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    const trimmed = text.trim()
-    if (!trimmed) {
-      return null
-    }
+
+  if (contentType.includes('text/html') || looksLikeHtml(text)) {
+    throw new Error(NGINX_HTML_HINT)
+  }
+
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       return JSON.parse(trimmed)
     } catch {
-      return text
+      throw new Error(`Risposta non è JSON valido (${path})`)
     }
   }
 
