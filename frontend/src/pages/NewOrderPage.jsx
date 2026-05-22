@@ -3,6 +3,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 import {
   createSupplierOrder,
   deleteSupplierOrder,
@@ -143,7 +144,8 @@ function buildWhatsAppTextFromOrder(order) {
   return lines.join('\n')
 }
 
-export default function NewOrderPage({ onNavigate, operatorMode = false }) {
+export default function NewOrderPage({ operatorMode = false }) {
+  const appNavigate = useAppNavigate()
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
   const [orderDate, setOrderDate] = useState(todayIso)
@@ -633,7 +635,7 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
       }
       if (warnings) setError(warnings)
     } catch {
-      setError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
+      setError('Atlas AI non disponibile. Avvia Ollama e il backend FastAPI (porta 8000).')
     } finally {
       setAiOrderLoading(false)
     }
@@ -915,8 +917,11 @@ export default function NewOrderPage({ onNavigate, operatorMode = false }) {
       setError('Impossibile preparare la consegna')
       return
     }
-    if (onNavigate) onNavigate('new-delivery')
-    else window.dispatchEvent(new CustomEvent('navigate-app', { detail: { page: 'new-delivery' } }))
+    if (operatorMode) {
+      window.dispatchEvent(new CustomEvent('navigate-app', { detail: { page: 'new-delivery' } }))
+    } else {
+      appNavigate('new-delivery')
+    }
   }
 
   async function handleEditOrder(order) {

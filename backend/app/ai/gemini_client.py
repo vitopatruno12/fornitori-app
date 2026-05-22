@@ -1,8 +1,8 @@
-import json
 import logging
 import os
-import re
 from typing import Any, Dict, Optional
+
+from .json_utils import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +26,6 @@ def _get_model():
     return _model
 
 
-def _parse_json_response(raw: str) -> Optional[Dict[str, Any]]:
-    text = (raw or "").strip()
-    if not text:
-        return None
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
-    text = re.sub(r"\s*```\s*$", "", text)
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        logger.warning("Gemini: risposta non JSON valida")
-        return None
-
-
 def generate_json(system_instruction: str, user_text: str) -> Optional[Dict[str, Any]]:
     """Chiamata Gemini con risposta JSON; None se non configurato o errore."""
     model = _get_model()
@@ -55,7 +41,7 @@ def generate_json(system_instruction: str, user_text: str) -> Optional[Dict[str,
                 "temperature": 0.15,
             },
         )
-        return _parse_json_response(resp.text or "")
+        return parse_json_response(resp.text or "")
     except Exception as exc:
         logger.warning("Gemini generate_json failed: %s", exc)
         return None

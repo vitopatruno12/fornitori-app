@@ -154,29 +154,37 @@ def _env(name: str, default: str = "") -> str:
     return (os.getenv(name, default) or "").strip()
 
 
+def _env_url(name: str, default: str = "") -> str:
+    """Legge URL da env; forza https se nel .env è rimasto http://."""
+    raw = _env(name, default)
+    if raw.lower().startswith("http://"):
+        return "https://" + raw[7:]
+    return raw
+
+
 def _models() -> List[VneModelConfig]:
     """Tre slot modelli VNE (1 configurato, 2-3 pronti)."""
-    m1 = _env("VNE_MODEL_1_STATUS_URL", "http://vneremote.com/27/77/supervlt/stato")
-    m1_sel_ops = _env("VNE_MODEL_1_SEL_OPERAZIONI_URL", "http://vneremote.com/27/77/supervlt/sel_operazioni")
-    m1_ops = _env("VNE_MODEL_1_OPERAZIONI_URL", "http://vneremote.com/27/77/supervlt/operazioni/")
-    m1_sel_chiusure = _env("VNE_MODEL_1_SEL_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/sel_chiusure")
-    m1_chiusure = _env("VNE_MODEL_1_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/chiusure/")
-    m1_contabilita = _env("VNE_MODEL_1_CONTABILITA_URL", "http://vneremote.com/27/77/supervlt/contabilita")
-    m1_ref = _env("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/27/77/supervlt/")
-    m2 = _env("VNE_MODEL_2_STATUS_URL", "http://vneremote.com/17/161/supervlt/stato")
-    m2_sel_ops = _env("VNE_MODEL_2_SEL_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/sel_operazioni")
-    m2_ops = _env("VNE_MODEL_2_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/operazioni/")
-    m2_sel_chiusure = _env("VNE_MODEL_2_SEL_CHIUSURE_URL", "http://vneremote.com/17/161/supervlt/sel_chiusure")
-    m2_chiusure = _env("VNE_MODEL_2_CHIUSURE_URL", "http://vneremote.com/17/161/supervlt/chiusure/")
-    m2_contabilita = _env("VNE_MODEL_2_CONTABILITA_URL", "http://vneremote.com/17/161/supervlt/contabilita")
-    m2_ref = _env("VNE_MODEL_2_REFERER_URL", "http://vneremote.com/17/161/supervlt/?param=NO")
-    m3 = _env("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/24/135/supervlt/stato")
-    m3_sel_ops = _env("VNE_MODEL_3_SEL_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/sel_operazioni")
-    m3_ops = _env("VNE_MODEL_3_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/operazioni/")
-    m3_sel_chiusure = _env("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/sel_chiusure")
-    m3_chiusure = _env("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/chiusure/")
-    m3_contabilita = _env("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/24/135/supervlt/contabilita")
-    m3_ref = _env("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/24/135/supervlt/?param=NO")
+    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "https://vneremote.com/27/77/supervlt/stato")
+    m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "https://vneremote.com/27/77/supervlt/sel_operazioni")
+    m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "https://vneremote.com/27/77/supervlt/operazioni/")
+    m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "https://vneremote.com/27/77/supervlt/sel_chiusure")
+    m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "https://vneremote.com/27/77/supervlt/chiusure/")
+    m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "https://vneremote.com/27/77/supervlt/contabilita")
+    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "https://vneremote.com/27/77/supervlt/")
+    m2 = _env_url("VNE_MODEL_2_STATUS_URL", "https://vneremote.com/17/161/supervlt/stato")
+    m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "https://vneremote.com/17/161/supervlt/sel_operazioni")
+    m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "https://vneremote.com/17/161/supervlt/operazioni/")
+    m2_sel_chiusure = _env_url("VNE_MODEL_2_SEL_CHIUSURE_URL", "https://vneremote.com/17/161/supervlt/sel_chiusure")
+    m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "https://vneremote.com/17/161/supervlt/chiusure/")
+    m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "https://vneremote.com/17/161/supervlt/contabilita")
+    m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "https://vneremote.com/17/161/supervlt/?param=NO")
+    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "https://vneremote.com/24/135/supervlt/stato")
+    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "https://vneremote.com/24/135/supervlt/sel_operazioni")
+    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "https://vneremote.com/24/135/supervlt/operazioni/")
+    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "https://vneremote.com/24/135/supervlt/sel_chiusure")
+    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "https://vneremote.com/24/135/supervlt/chiusure/")
+    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "https://vneremote.com/24/135/supervlt/contabilita")
+    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "https://vneremote.com/24/135/supervlt/?param=NO")
     return [
         VneModelConfig(
             id="model-1",
@@ -352,9 +360,9 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[f
     Login best-effort su VNE Remote.
     Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
     """
-    login_page_url = _env("VNE_LOGIN_URL", "http://www.vneremote.com/accounts/login/?next=/vne/")
-    login_post_url = _env("VNE_LOGIN_POST_URL", "http://www.vneremote.com/login/")
-    landing_url = _env("VNE_LANDING_URL", "http://www.vneremote.com/vne/")
+    login_page_url = _env_url("VNE_LOGIN_URL", "https://www.vneremote.com/accounts/login/?next=/vne/")
+    login_post_url = _env_url("VNE_LOGIN_POST_URL", "https://www.vneremote.com/login/")
+    landing_url = _env_url("VNE_LANDING_URL", "https://www.vneremote.com/vne/")
     username = _env("VNE_USERNAME")
     password = _env("VNE_PASSWORD")
     if not username or not password:

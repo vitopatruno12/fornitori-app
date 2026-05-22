@@ -1,4 +1,4 @@
-"""Modulo AI (equivalente Nest: module / service / controller) con Gemini."""
+"""Modulo AI (Ollama locale + euristiche; Gemini opzionale)."""
 
 from .module import register_ai_module
 from .controller import router

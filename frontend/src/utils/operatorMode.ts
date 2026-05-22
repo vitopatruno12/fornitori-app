@@ -10,6 +10,40 @@ export const OPERATOR_PRIMA_NOTA_PATH = '/operatore-prima-nota'
 
 export type OperatorDeliveryView = 'new-delivery' | 'history'
 
+/** Converte http:// in https:// (tranne localhost per test in dev). */
+export function ensureHttpsUrl(url: string): string {
+  const raw = String(url || '').trim()
+  if (!raw) return raw
+  try {
+    const u = new URL(raw)
+    const host = u.hostname.toLowerCase()
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+    if (u.protocol === 'http:' && !isLocal) {
+      u.protocol = 'https:'
+    }
+    return u.href
+  } catch {
+    return raw.replace(/^http:\/\//i, 'https://')
+  }
+}
+
+/** Origine pubblica per link satelliti (sempre https in produzione se VITE_PUBLIC_APP_URL è impostato). */
+export function getPublicAppOrigin(): string {
+  const fromEnv = String(import.meta.env.VITE_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '')
+  if (fromEnv) {
+    const withProto = /^https?:\/\//i.test(fromEnv) ? fromEnv : `https://${fromEnv}`
+    return ensureHttpsUrl(withProto).replace(/\/+$/, '')
+  }
+  if (typeof window === 'undefined') return ''
+  let origin = window.location.origin
+  const host = window.location.hostname.toLowerCase()
+  const isLocal = host === 'localhost' || host === '127.0.0.1'
+  if (origin.startsWith('http://') && !isLocal) {
+    origin = `https://${origin.slice(7)}`
+  }
+  return origin
+}
+
 function normalizePathname(): string {
   if (typeof window === 'undefined') return '/'
   return (window.location.pathname || '/').replace(/\/$/, '') || '/'
@@ -21,10 +55,12 @@ function normalizeHash(): string {
 }
 
 function buildPublicUrl(pathSegment: string): string {
-  if (typeof window === 'undefined') return pathSegment
+  const origin = getPublicAppOrigin()
+  if (!origin) return pathSegment
   const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
   const path = `${base}${pathSegment}`.replace(/\/{2,}/g, '/')
-  return `${window.location.origin}${path.startsWith('/') ? path : `/${path}`}`
+  const full = `${origin}${path.startsWith('/') ? path : `/${path}`}`
+  return ensureHttpsUrl(full)
 }
 
 function pathMatches(segment: string): boolean {
@@ -96,6 +132,6 @@ export function getOperatorPrimaNotaPublicUrl(): string {
 export function syncOperatorDeliveryViewInUrl(view: OperatorDeliveryView): void {
   if (typeof window === 'undefined') return
   const base = getOperatorDeliveryPublicUrl()
-  const url = view === 'history' ? `${base}?pagina=storico` : base
+  const url = ensureHttpsUrl(view === 'history' ? `${base}?pagina=storico` : base)
   window.history.replaceState(null, '', url)
 }

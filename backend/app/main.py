@@ -102,7 +102,10 @@ if _cors == "*":
         allow_headers=["*"],
     )
 else:
-    _origins = [o.strip() for o in _cors.split(",") if o.strip()] or ["http://localhost:5173"]
+    _origins = [o.strip() for o in _cors.split(",") if o.strip()] or [
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+    ]
     logger.info("CORS: allow_origins=%s (credentials enabled), regex=%s", _origins, _cors_regex)
     app.add_middleware(
         CORSMiddleware,

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchDashboardSummary } from '../services/dashboardService'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 
 function eur(n) {
   if (n == null || n === '') return '—'
@@ -132,7 +133,8 @@ function Last6MonthsTrend({ rows, onOpenInvoices }) {
   )
 }
 
-export default function HomePage({ onNavigate }) {
+export default function HomePage() {
+  const onNavigate = useAppNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

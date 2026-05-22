@@ -85,6 +85,6 @@ systemctl --no-pager --full status fornitori-api | head -20 || true
 echo
 echo "================================================================"
 echo "  Log live:   journalctl -u fornitori-api -f"
-echo "  Health:     curl http://127.0.0.1:8000/health"
+echo "  Health:     curl -sf https://www.atlass.it/api/health"
 echo "  Restart:    systemctl restart fornitori-api"
 echo "================================================================"

@@ -1,6 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './style.css'
+import { pathnameToPage, pageToPath, VALID_PAGES, type PageKey } from './appPaths'
 import HomePage from './pages/HomePage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
@@ -16,19 +18,12 @@ import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
 import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
-import { isOperatorDeliveryMode, isOperatorOrderMode, isOperatorPrimaNotaMode } from './utils/operatorMode.ts'
+import {
+  OPERATOR_DELIVERY_PATH,
+  OPERATOR_ORDER_PATH,
+  OPERATOR_PRIMA_NOTA_PATH,
+} from './utils/operatorMode.ts'
 
-type PageKey =
-  | 'home'
-  | 'suppliers'
-  | 'new-order'
-  | 'new-delivery'
-  | 'history'
-  | 'invoices'
-  | 'prima-nota'
-  | 'staff'
-  | 'support-tech'
-  | 'vne'
 type AiHistoryItem = {
   id: string
   page: PageKey
@@ -52,7 +47,9 @@ function App() {
   const [loginError, setLoginError] = React.useState('')
   const [showPassword, setShowPassword] = React.useState(false)
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
-  const [page, setPage] = React.useState<PageKey>('home')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const page = pathnameToPage(location.pathname)
   const [navOpen, setNavOpen] = React.useState(false)
   const [aiOpen, setAiOpen] = React.useState(false)
   const [aiInput, setAiInput] = React.useState('')
@@ -65,10 +62,17 @@ function App() {
   const [aiToastClosing, setAiToastClosing] = React.useState(false)
   const [aiHistory, setAiHistory] = React.useState<AiHistoryItem[]>([])
 
-  const navigateTo = React.useCallback((p: PageKey) => {
-    setPage(p)
+  const navigateTo = React.useCallback(
+    (p: PageKey) => {
+      navigate(pageToPath(p))
+      setNavOpen(false)
+    },
+    [navigate],
+  )
+
+  React.useEffect(() => {
     setNavOpen(false)
-  }, [])
+  }, [location.pathname])
 
   React.useEffect(() => {
     try {
@@ -114,30 +118,18 @@ function App() {
     const goPrimaNota = () => navigateTo('prima-nota')
     window.addEventListener('open-prima-nota', goPrimaNota)
     return () => window.removeEventListener('open-prima-nota', goPrimaNota)
-  }, [navigateTo])
+  }, [navigate])
 
   React.useEffect(() => {
     const onNavigate = (e: Event) => {
       const detail = (e as CustomEvent).detail
       const target = detail?.page as PageKey | undefined
       if (!target) return
-      const valid: PageKey[] = [
-        'home',
-        'suppliers',
-        'new-order',
-        'new-delivery',
-        'history',
-        'invoices',
-        'prima-nota',
-        'staff',
-        'support-tech',
-        'vne',
-      ]
-      if (valid.includes(target)) navigateTo(target)
+      if (VALID_PAGES.includes(target)) navigate(pageToPath(target))
     }
     window.addEventListener('navigate-app', onNavigate as EventListener)
     return () => window.removeEventListener('navigate-app', onNavigate as EventListener)
-  }, [navigateTo])
+  }, [navigate])
 
   React.useEffect(() => {
     if (!navOpen) return
@@ -488,7 +480,7 @@ function App() {
     setNavOpen(false)
     setIsAuthenticated(false)
     setLoginPassword('')
-    setPage('home')
+    navigate('/')
   }
 
   React.useEffect(() => {
@@ -565,33 +557,21 @@ function App() {
               <span className="app-nav-toggle-bar" aria-hidden />
               <span className="app-nav-toggle-bar" aria-hidden />
             </button>
-            <h1
-              className="app-nav-title app-nav-title--atlas"
-              title="ATLAS"
-              onClick={() => navigateTo('home')}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  navigateTo('home')
-                }
-              }}
-            >
+            <Link to="/" className="app-nav-title app-nav-title--atlas" title="ATLAS" onClick={() => setNavOpen(false)}>
               <img src="/atlas-logo.svg" alt="ATLAS Software Gestionale" className="atlas-nav-logo" />
-            </h1>
+            </Link>
           </div>
           <div id="app-nav-menu" className={`app-nav-links${navOpen ? ' is-open' : ''}`}>
-            <a href="#" className={page === 'home' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('home'); }}>Home</a>
-            <a href="#" className={page === 'suppliers' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('suppliers'); }}>Fornitori</a>
-            <a href="#" className={page === 'new-order' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('new-order'); }}>Nuovo ordine</a>
-            <a href="#" className={page === 'new-delivery' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('new-delivery'); }}>Nuova consegna</a>
-            <a href="#" className={page === 'history' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('history'); }}>Storico consegne</a>
-            <a href="#" className={page === 'invoices' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('invoices'); }}>Fatture fornitori</a>
-            <a href="#" className={page === 'prima-nota' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('prima-nota'); }}>Prima Nota Cassa</a>
-            <a href="#" className={page === 'staff' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('staff'); }}>Personale</a>
-            <a href="#" className={page === 'support-tech' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('support-tech'); }}>Assistenza tecnici</a>
-            <a href="#" className={page === 'vne' ? 'active' : ''} onClick={(e) => { e.preventDefault(); navigateTo('vne'); }}>VNE</a>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Home</NavLink>
+            <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fornitori</NavLink>
+            <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuovo ordine</NavLink>
+            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuova consegna</NavLink>
+            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
+            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fatture fornitori</NavLink>
+            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Prima Nota Cassa</NavLink>
+            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Personale</NavLink>
+            <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
+            <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
             <div className="app-nav-right">
               <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
             </div>
@@ -608,16 +588,19 @@ function App() {
       <div className="app-version-strip" aria-label="Versione software">Versione 1.0</div>
 
       <main className="app-main">
-        {page === 'home' && <HomePage onNavigate={navigateTo} />}
-        {page === 'suppliers' && <SuppliersPage />}
-        {page === 'new-order' && <NewOrderPage onNavigate={navigateTo} />}
-        {page === 'new-delivery' && <NewDeliveryPage />}
-        {page === 'history' && <DeliveriesHistoryPage />}
-        {page === 'invoices' && <InvoicesPage />}
-        {page === 'prima-nota' && <PrimaNotaPage />}
-        {page === 'staff' && <StaffPage />}
-        {page === 'support-tech' && <SupportTechniciansPage />}
-        {page === 'vne' && <VnePage />}
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route path="/new-order" element={<NewOrderPage />} />
+          <Route path="/new-delivery" element={<NewDeliveryPage />} />
+          <Route path="/history" element={<DeliveriesHistoryPage />} />
+          <Route path="/invoices" element={<InvoicesPage />} />
+          <Route path="/prima-nota" element={<PrimaNotaPage />} />
+          <Route path="/staff" element={<StaffPage />} />
+          <Route path="/support-tech" element={<SupportTechniciansPage />} />
+          <Route path="/vne" element={<VnePage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
 
       <button type="button" className="ai-global-fab" onClick={() => setAiOpen(true)} title="Apri assistente operativo AI">
@@ -706,17 +689,21 @@ function App() {
   )
 }
 
-function pickRootApp() {
-  if (isOperatorOrderMode()) return OperatorOrderApp
-  if (isOperatorDeliveryMode()) return OperatorDeliveryApp
-  if (isOperatorPrimaNotaMode()) return OperatorPrimaNotaApp
-  return App
+function RootRouter() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
+        <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
+        <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
+        <Route path="/*" element={<App />} />
+      </Routes>
+    </BrowserRouter>
+  )
 }
-
-const RootApp = pickRootApp()
 
 ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
   <React.StrictMode>
-    <RootApp />
+    <RootRouter />
   </React.StrictMode>,
 )

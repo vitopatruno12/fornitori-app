@@ -85,5 +85,5 @@ echo
 echo "================================================================"
 echo "  Import completato. Ricorda di:"
 echo "  - Riavviare il backend:  systemctl restart fornitori-api"
-echo "  - Verificare:            curl http://127.0.0.1:8000/health"
+echo "  - Verificare:            curl -sf https://www.atlass.it/api/health"
 echo "================================================================"

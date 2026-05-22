@@ -304,7 +304,7 @@ export default function SuppliersPage() {
         setAiError('Gemini non ha estratto dati dal comando. Riprova con più dettagli.')
       }
     } catch {
-      setAiError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
+      setAiError('Atlas AI non disponibile. Avvia Ollama e il backend FastAPI (porta 8000).')
     } finally {
       setAiSupplierLoading(false)
     }

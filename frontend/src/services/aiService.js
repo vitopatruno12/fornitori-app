@@ -1,9 +1,7 @@
 import { apiFetch, API_BASE_URL } from './api'
 
-/** Base URL AI: VITE_AI_API_URL in dev (Nest); altrimenti stesso proxy API (/api). */
-const AI_API_BASE = String(import.meta.env.VITE_AI_API_URL || '')
-  .trim()
-  .replace(/\/+$/, '') || API_BASE_URL
+/** Tutte le chiamate AI passano da FastAPI (/api/ai → Ollama). */
+const AI_API_BASE = API_BASE_URL
 
 async function aiFetch(path, options = {}) {
   const p = path.startsWith('/') ? path : `/${path}`
@@ -71,7 +69,7 @@ async function staffShiftViaBase(path, body, signal) {
 
 export async function suggestStaffShift(text, memberNames = [], context = {}) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 120000)
+  const timer = setTimeout(() => controller.abort(), 60000)
   const body = { text, member_names: memberNames, context }
   try {
     const primary = await aiFetch('/ai/staff/shift-suggest', {

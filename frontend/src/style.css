@@ -104,6 +104,8 @@ a:hover {
   line-height: 1;
   letter-spacing: 0;
   cursor: pointer;
+  text-decoration: none;
+  color: inherit;
 }
 
 .app-nav-title--atlas:focus-visible {

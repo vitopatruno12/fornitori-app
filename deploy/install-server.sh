@@ -55,7 +55,7 @@ if ! command -v psql >/dev/null 2>&1; then
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] \
-http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list
     apt-get update -y
     apt-get install -y postgresql-16

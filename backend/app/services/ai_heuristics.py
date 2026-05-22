@@ -675,6 +675,31 @@ def _parse_shift_times(text: str) -> Tuple[str, str]:
     return "", ""
 
 
+_WEEKDAY_IT_PATTERNS: List[tuple] = [
+    (r"\blunedi\b", 0),
+    (r"\bmartedi\b", 1),
+    (r"\bmercoledi\b", 2),
+    (r"\bgiovedi\b", 3),
+    (r"\bvenerdi\b", 4),
+    (r"\bsabato\b", 5),
+    (r"\bdomenica\b", 6),
+]
+
+
+def _filter_dates_by_weekday_mention(text: str, dates: List[str]) -> List[str]:
+    lo = _normalize_for_match(text)
+    for pat, target_dow in _WEEKDAY_IT_PATTERNS:
+        if re.search(pat, lo):
+            out = [
+                d
+                for d in dates
+                if datetime.strptime(d, "%Y-%m-%d").weekday() == target_dow
+            ]
+            if out:
+                return out
+    return dates
+
+
 def _dates_from_context(text: str, context: Dict[str, Any]) -> List[str]:
     ws = str(context.get("week_start") or "")
     we = str(context.get("week_end") or "")
@@ -690,14 +715,68 @@ def _dates_from_context(text: str, context: Dict[str, Any]) -> List[str]:
     if not dates and re.match(r"^\d{4}-\d{2}-\d{2}$", sel):
         dates = [sel]
     lo = _normalize_for_match(text)
-    if re.search(r"luned[iì].*venerd[iì]|lun.*ven", lo):
+    if re.search(r"lunedi.*venerdi|lun.*ven|da\s+lunedi\s+a\s+venerdi", lo):
         out = []
         for d in dates:
             dow = datetime.strptime(d, "%Y-%m-%d").weekday()
             if 0 <= dow <= 4:
                 out.append(d)
         dates = out or dates
+    elif re.search(r"\bsabato\b", lo) and not re.search(r"\bdomenica\b", lo):
+        dates = [d for d in dates if datetime.strptime(d, "%Y-%m-%d").weekday() == 5] or dates
+    dates = _filter_dates_by_weekday_mention(text, dates)
     return dates
+
+
+def _staff_shifts_from_payload(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    shifts: List[Dict[str, Any]] = []
+    for item in data.get("suggested_shifts") or []:
+        if isinstance(item, dict):
+            shifts.append(item)
+    sf = data.get("suggested_fields")
+    if isinstance(sf, dict) and (
+        sf.get("staff_member_name") or sf.get("work_date") or sf.get("time_start") or sf.get("time_end")
+    ):
+        shifts.append(sf)
+    return shifts
+
+
+def enrich_staff_shift_response(
+    data: Dict[str, Any],
+    text: str,
+    member_names: List[str],
+    context: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Completa date/nomi mancanti dopo risposta LLM."""
+    if not data:
+        return data
+    dates = _dates_from_context(text, context)
+    sel = str(context.get("selected_date") or "")
+    if not dates and re.match(r"^\d{4}-\d{2}-\d{2}$", sel):
+        dates = [sel]
+    enriched: List[Dict[str, Any]] = []
+    for raw in _staff_shifts_from_payload(data):
+        item = dict(raw)
+        wd = str(item.get("work_date") or "").strip()[:10]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", wd):
+            if len(dates) == 1:
+                item["work_date"] = dates[0]
+            elif re.match(r"^\d{4}-\d{2}-\d{2}$", sel):
+                item["work_date"] = sel
+        name = str(item.get("staff_member_name") or "").strip()
+        if not name:
+            hit = _match_member_name(text, member_names)
+            if hit:
+                item["staff_member_name"] = hit
+        enriched.append(item)
+    if not enriched and dates:
+        h = suggest_staff_shift(text, member_names, context)
+        if h.get("suggested_shifts"):
+            return h
+    out = dict(data)
+    out["suggested_shifts"] = enriched
+    out["suggested_fields"] = None
+    return out
 
 
 def _match_member_name(text: str, member_names: List[str]) -> Optional[str]:
@@ -719,7 +798,7 @@ def suggest_staff_shift(
     member_names: Optional[List[str]] = None,
     context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Fallback locale quando Gemini non risponde (es. quota 429)."""
+    """Compilazione locale turni (veloce, usa date settimana/giorno dalla UI)."""
     names = member_names or []
     ctx = context or {}
     t_start, t_end = _parse_shift_times(text)
@@ -743,6 +822,19 @@ def suggest_staff_shift(
         r"(tutti|tutte|ogni\s+dipendente|tutti\s+i\s+dipendenti|tutto\s+il\s+personale)",
         lo,
     )
+    mentions_span = bool(
+        all_kw
+        or re.search(
+            r"lunedi|martedi|mercoledi|giovedi|venerdi|sabato|domenica|lun.*ven|settimana|ogni\s+giorno",
+            lo,
+        )
+    )
+    if len(dates) > 1 and not mentions_span:
+        sel = str(ctx.get("selected_date") or "")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", sel) and sel in dates:
+            dates = [sel]
+        else:
+            dates = [dates[0]]
     if all_kw and dates:
         for name in names:
             for wd in dates:

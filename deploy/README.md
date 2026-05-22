@@ -79,7 +79,7 @@ Salva, poi:
 
 ```bash
 systemctl restart fornitori-api
-curl http://127.0.0.1:8000/health
+curl -sf https://www.atlass.it/api/health
 # atteso: {"status":"ok"}
 ```
 

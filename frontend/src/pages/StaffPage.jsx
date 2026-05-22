@@ -198,11 +198,17 @@ function collectShiftsFromGemini(r, members, spoken, defaultDate, context) {
   if (sf && typeof sf === 'object' && (sf.staff_member_name || sf.work_date || sf.time_start || sf.time_end)) {
     list.push(sf)
   }
+  const bulk = expandBulkShiftsHeuristic(spoken, members, context)
+  const single = expandSingleShiftHeuristic(spoken, members, defaultDate, context)
+  const heuristic = bulk?.length ? bulk : single?.length ? single : null
   if (list.length === 0) {
-    const bulk = expandBulkShiftsHeuristic(spoken, members, context)
-    if (bulk?.length) return bulk
-    const single = expandSingleShiftHeuristic(spoken, members, defaultDate, context)
-    if (single?.length) return single
+    return heuristic || []
+  }
+  if (heuristic?.length) {
+    const probe = list.slice(0, 3).map((item) => resolveOneShiftSuggestion(item, members, spoken, defaultDate))
+    const okProbe = probe.filter((p) => p.data).length
+    if (okProbe === 0) return heuristic
+    if (heuristic.length > list.length) return heuristic
   }
   return list
 }
@@ -217,7 +223,11 @@ function expandSingleShiftHeuristic(spoken, members, defaultDate, context) {
       let workDate = defaultDate
       const ws = context?.week_start
       const we = context?.week_end
-      if (/luned[iì].*venerd[iì]|lun.*ven/i.test(spoken) && ws && we) {
+      const dayOnly =
+        !/(tutti|lun.*ven|luned|marted|mercol|gioved|venerd|sabato|domenica|settimana)/i.test(spoken)
+      if (dayOnly) {
+        workDate = defaultDate
+      } else if (/luned[iì].*venerd[iì]|lun.*ven/i.test(spoken) && ws && we) {
         const dates = enumerateDayCells(parseYMD(ws), parseYMD(we))
           .map(toYMD)
           .filter((d) => {
@@ -1140,7 +1150,7 @@ export default function StaffPage() {
     try {
       setAiShiftLoading(true)
       setError('')
-      setAiShiftSummary('Gemini analizza il comando…')
+      setAiShiftSummary('Atlas AI elabora il comando…')
       const memberNames = members.map((m) => m.name).filter(Boolean)
       const r = await suggestStaffShift(t, memberNames, geminiContext)
       const rawItems = collectShiftsFromGemini(r, members, t, selectedDate, geminiContext)
@@ -1231,7 +1241,7 @@ export default function StaffPage() {
       } else if (msg.includes('400')) {
         setError(msg.replace(/^400:\s*/, '') || 'Richiesta non valida: controlla dipendente e orari.')
       } else {
-        setError('Gemini non disponibile. Avvia backend-nest (porta 3001) e verifica GEMINI_API_KEY.')
+        setError('Atlas AI non disponibile. Avvia Ollama (ollama serve) e il backend FastAPI (porta 8000).')
       }
       setAiShiftSummary('')
     } finally {
