@@ -1,0 +1,26 @@
+# Esempio Caddy per www.atlass.it (frontend + API sullo stesso server).
+# Copia in /etc/caddy/Caddyfile e: systemctl reload caddy
+#
+# Richiede: deploy/build-frontend.sh e fornitori-api su 127.0.0.1:8000
+
+www.atlass.it, atlass.it {
+	encode zstd gzip
+
+	# API FastAPI
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy 127.0.0.1:8000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# SPA React (cartella dist dopo npm run build)
+	handle {
+		root * /opt/fornitori-app/frontend/dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+}

@@ -81,7 +81,22 @@ Salva, poi:
 systemctl restart fornitori-api
 curl -sf https://www.atlass.it/api/health
 
-### Frontend Vercel / Netlify (Mixed Content)
+### Frontend senza Vercel (www.atlass.it sul server)
+
+Dopo aver cancellato Vercel, il sito va servito da **Caddy** sul VPS:
+
+```bash
+cd /opt/fornitori-app
+sudo git pull origin main
+sudo bash deploy/build-frontend.sh
+# Poi Caddy: vedi deploy/Caddyfile.atlass.example
+sudo cp deploy/Caddyfile.atlass.example /etc/caddy/Caddyfile   # adatta percorsi
+sudo systemctl reload caddy
+```
+
+DNS: record `A` di `www` e `@` → IP del server (non più Vercel).
+
+### Mixed Content (errore http://www.atlass.it/suppliers/)
 
 Imposta **solo**:
 
