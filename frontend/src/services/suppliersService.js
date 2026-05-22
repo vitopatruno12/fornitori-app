@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 export async function fetchSuppliers() {
   return apiFetch('/suppliers')
@@ -19,7 +19,7 @@ export async function updateSupplier(id, data) {
 }
 
 export async function deleteSupplier(id) {
-  const res = await fetch(`${API_BASE_URL}/suppliers/${id}`, { method: 'DELETE' })
+  const res = await fetch(apiUrl(`/suppliers/${id}`), { method: 'DELETE' })
   if (!res.ok) throw new Error('Errore eliminazione fornitore')
 }
 

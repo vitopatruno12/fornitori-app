@@ -10,22 +10,9 @@ export const OPERATOR_PRIMA_NOTA_PATH = '/operatore-prima-nota'
 
 export type OperatorDeliveryView = 'new-delivery' | 'history'
 
-/** Converte http:// in https:// (tranne localhost per test in dev). */
-export function ensureHttpsUrl(url: string): string {
-  const raw = String(url || '').trim()
-  if (!raw) return raw
-  try {
-    const u = new URL(raw)
-    const host = u.hostname.toLowerCase()
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
-    if (u.protocol === 'http:' && !isLocal) {
-      u.protocol = 'https:'
-    }
-    return u.href
-  } catch {
-    return raw.replace(/^http:\/\//i, 'https://')
-  }
-}
+import { ensureHttpsUrl } from './urlSecurity'
+
+export { ensureHttpsUrl }
 
 /** Origine pubblica per link satelliti (sempre https in produzione se VITE_PUBLIC_APP_URL è impostato). */
 export function getPublicAppOrigin(): string {

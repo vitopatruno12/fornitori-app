@@ -3,7 +3,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored, fetchArubaReceivedInvoices, getArubaInvoiceDownloadUrl, assignArubaInvoiceSection } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { API_BASE_URL } from '../services/api'
+import { apiUrl } from '../services/api'
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
@@ -817,7 +817,7 @@ export default function InvoicesPage() {
                     <td onClick={e => e.stopPropagation()}>
                       {inv.file_path ? (
                         <a
-                          href={`${API_BASE_URL}/${inv.file_path}`}
+                          href={apiUrl(`/${inv.file_path}`)}
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-primary"

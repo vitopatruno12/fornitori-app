@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 export async function fetchPriceList(supplierId) {
   if (!supplierId) return []
@@ -20,6 +20,6 @@ export async function addPriceListBatch(data) {
 }
 
 export async function deletePriceListItem(id) {
-  const res = await fetch(`${API_BASE_URL}/price-list/${id}`, { method: 'DELETE' })
+  const res = await fetch(apiUrl(`/price-list/${id}`), { method: 'DELETE' })
   if (!res.ok) throw new Error('Errore eliminazione voce prezzario')
 }

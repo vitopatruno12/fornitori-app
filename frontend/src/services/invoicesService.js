@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 export async function fetchInvoices(params = {}) {
   const searchParams = new URLSearchParams()
@@ -11,7 +11,7 @@ export async function fetchInvoices(params = {}) {
 }
 
 export async function createInvoice(formData) {
-  const response = await fetch(`${API_BASE_URL}/invoices`, {
+  const response = await fetch(apiUrl('/invoices'), {
     method: 'POST',
     body: formData,
   })
@@ -79,7 +79,7 @@ export async function fetchArubaReceivedInvoices(params = {}) {
 
 export function getArubaInvoiceDownloadUrl(filename, kind = 'xml') {
   const search = new URLSearchParams({ filename: String(filename), kind: String(kind) })
-  return `${API_BASE_URL}/aruba/invoices/download?${search.toString()}`
+  return apiUrl(`/aruba/invoices/download?${search.toString()}`)
 }
 
 export async function assignArubaInvoiceSection(filename, section) {

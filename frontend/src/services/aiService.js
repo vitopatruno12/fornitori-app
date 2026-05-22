@@ -1,11 +1,9 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 /** Tutte le chiamate AI passano da FastAPI (/api/ai → Ollama). */
-const AI_API_BASE = API_BASE_URL
-
 async function aiFetch(path, options = {}) {
   const p = path.startsWith('/') ? path : `/${path}`
-  const url = `${AI_API_BASE}${p}`
+  const url = apiUrl(p)
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
   const res = await fetch(url, { ...options, headers })
   if (!res.ok) {
@@ -53,7 +51,7 @@ export async function suggestOrderFull(text, supplierNames = []) {
 
 async function staffShiftViaBase(path, body, signal) {
   const p = path.startsWith('/') ? path : `/${path}`
-  const url = `${API_BASE_URL}${p}`
+  const url = apiUrl(p)
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 export async function createDelivery(data) {
   return apiFetch('/deliveries', {
@@ -40,7 +40,7 @@ export async function fetchPriceAnalytics({ supplier_id, product_description }) 
 }
 
 export async function deleteAllDeliveries() {
-  const res = await fetch(`${API_BASE_URL}/deliveries/all`, { method: 'DELETE' })
+  const res = await fetch(apiUrl('/deliveries/all'), { method: 'DELETE' })
   if (!res.ok) {
     throw new Error('Errore nell\'eliminazione dello storico scarichi')
   }

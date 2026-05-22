@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 export async function createSupplierOrder(payload) {
   return apiFetch('/supplier-orders', {
@@ -24,7 +24,7 @@ export async function deleteAllSupplierOrders({ supplierId } = {}) {
   const q = new URLSearchParams()
   if (supplierId) q.set('supplier_id', String(supplierId))
   const qs = q.toString()
-  const res = await fetch(`${API_BASE_URL}/supplier-orders/all${qs ? `?${qs}` : ''}`, { method: 'DELETE' })
+  const res = await fetch(apiUrl(`/supplier-orders/all${qs ? `?${qs}` : ''}`), { method: 'DELETE' })
   if (!res.ok) {
     throw new Error("Errore nell'eliminazione dello storico ordini")
   }
@@ -43,7 +43,7 @@ export async function fetchSupplierOrders({ supplierId, dateFrom, dateTo, status
 
 /** URL assoluto per scaricare il PDF ordine (apri in nuova scheda o link). */
 export function supplierOrderPdfUrl(orderId) {
-  return `${API_BASE_URL}/supplier-orders/${orderId}/pdf`
+  return apiUrl(`/supplier-orders/${orderId}/pdf`)
 }
 
 export async function fetchSupplierOrder(id) {

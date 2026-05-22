@@ -80,6 +80,17 @@ Salva, poi:
 ```bash
 systemctl restart fornitori-api
 curl -sf https://www.atlass.it/api/health
+
+### Frontend Vercel / Netlify (Mixed Content)
+
+Imposta **solo**:
+
+- `VITE_API_BASE_URL` = `/api` (consigliato, stesso dominio HTTPS)
+- oppure `https://www.atlass.it/api` (mai `http://`)
+
+**Non** usare `http://www.atlass.it` né `https://www.atlass.it` senza `/api`: le chiamate finirebbero su `/suppliers` (pagina SPA) e il browser blocca HTTP da HTTPS.
+
+Dopo aver corretto le variabili: **Redeploy** con cache pulita.
 # atteso: {"status":"ok"}
 ```
 

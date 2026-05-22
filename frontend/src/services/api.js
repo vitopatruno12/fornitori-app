@@ -1,16 +1,16 @@
-function normalizeApiBase(raw) {
-  const s = String(raw ?? '').trim()
-  if (!s) return '/api'
-  return s.replace(/\/+$/, '')
-}
+import { normalizeApiBase, secureAbsoluteUrl } from '../utils/urlSecurity'
 
-/** Base URL API (env VITE_API_BASE_URL; fallback /api in produzione via proxy). */
+/** Base URL API (env VITE_API_BASE_URL; in produzione preferire /api su HTTPS). */
 export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL)
 
 export function apiUrl(path) {
   const p = String(path || '')
   const q = p.startsWith('/') ? p : `/${p}`
-  return `${API_BASE_URL}${q}`
+  const base = API_BASE_URL
+  if (base.startsWith('/')) {
+    return `${base}${q}`
+  }
+  return secureAbsoluteUrl(`${base}${q}`)
 }
 
 /** Estrae messaggio leggibile da risposte FastAPI (detail string o elenco errori validazione). */

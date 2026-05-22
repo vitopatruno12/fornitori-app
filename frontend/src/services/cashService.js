@@ -1,4 +1,4 @@
-import { apiFetch, API_BASE_URL } from './api'
+import { apiFetch, apiUrl } from './api'
 
 function appendActivity(searchParams, activity) {
   if (activity) searchParams.append('activity', activity)
@@ -45,7 +45,7 @@ export async function updateEntry(id, data) {
 
 
 export async function deleteEntry(id) {
-  const response = await fetch(`${API_BASE_URL}/cash/entries/${id}`, {
+  const response = await fetch(apiUrl(`/cash/entries/${id}`), {
     method: 'DELETE',
   })
   if (!response.ok) {
@@ -57,7 +57,7 @@ export async function deleteEntriesForDay(dateStr, activity) {
   const params = new URLSearchParams({ date_str: dateStr })
   appendActivity(params, activity)
   const response = await fetch(
-    `${API_BASE_URL}/cash/entries/day?${params.toString()}`,
+    apiUrl(`/cash/entries/day?${params.toString()}`),
     { method: 'DELETE' },
   )
   if (!response.ok) {
@@ -70,7 +70,7 @@ export async function deleteEntriesForRange(dateFrom, dateTo, activity) {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
   appendActivity(params, activity)
   const response = await fetch(
-    `${API_BASE_URL}/cash/entries/range?${params.toString()}`,
+    apiUrl(`/cash/entries/range?${params.toString()}`),
     { method: 'DELETE' },
   )
   if (!response.ok) {
@@ -91,5 +91,5 @@ export function getExportUrl(dateFrom, dateTo, activity) {
   if (dateTo) params.append('date_to', dateTo)
   appendActivity(params, activity)
   const q = params.toString()
-  return `${API_BASE_URL}/cash/export/csv${q ? '?' + q : ''}`
+  return apiUrl(`/cash/export/csv${q ? '?' + q : ''}`)
 }
