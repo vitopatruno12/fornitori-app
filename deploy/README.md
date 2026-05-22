@@ -96,7 +96,36 @@ sudo systemctl reload caddy
 
 DNS: record `A` di `www` e `@` → IP del server (non più Vercel).
 
-### Mixed Content (errore http://www.atlass.it/suppliers/)
+### Mixed Content — causa reale (verificato su www.atlass.it)
+
+Il browser carica la pagina in **HTTPS**, poi chiama `https://www.atlass.it/api/suppliers` e **Nginx risponde**:
+
+```http
+307 Temporary Redirect
+Location: http://www.atlass.it/suppliers/
+```
+
+Il browser **blocca** il redirect verso HTTP → errore *Mixed Content*.
+
+**Non è (solo) Vercel/Netlify**: è la **configurazione Nginx** sul server. `/api/health` può funzionare mentre `/api/suppliers` viene reindirizzato male.
+
+**Correzione** (sul VPS):
+
+```bash
+sudo nano /etc/nginx/sites-enabled/atlass   # o il tuo file sito
+# Usa deploy/nginx-atlass.example: blocco location ^~ /api/ → proxy 127.0.0.1:8000
+sudo nginx -t
+sudo systemctl reload nginx
+curl -I https://www.atlass.it/api/suppliers   # deve essere 200 JSON, NON 307 verso http
+```
+
+Poi aggiorna anche il frontend (build nuovo):
+
+```bash
+cd /opt/fornitori-app && sudo git pull && sudo bash deploy/build-frontend.sh
+```
+
+### Mixed Content — variabile build sbagliata (secondario)
 
 Imposta **solo**:
 
