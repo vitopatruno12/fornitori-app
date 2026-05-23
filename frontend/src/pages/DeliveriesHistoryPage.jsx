@@ -159,6 +159,8 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [analyticsError, setAnalyticsError] = useState('')
 
+  const deliveryList = Array.isArray(deliveries) ? deliveries : []
+
   useEffect(() => {
     loadSuppliers()
     loadDeliveries()
@@ -183,12 +185,14 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
         date_to: dateTo || undefined,
         product_query: productQuery?.trim() || undefined,
       })
-      setDeliveries(data)
+      const list = Array.isArray(data) ? data : []
+      setDeliveries(list)
       setSelectedDeliveryId((prev) => {
-        if (!Array.isArray(data) || data.length === 0) return ''
-        return data.some((d) => String(d.id) === String(prev)) ? String(prev) : String(data[0].id)
+        if (list.length === 0) return ''
+        return list.some((d) => String(d.id) === String(prev)) ? String(prev) : String(list[0].id)
       })
-    } catch (e) {
+    } catch {
+      setDeliveries([])
       setError('Errore nel caricamento delle consegne')
     } finally {
       setLoading(false)
@@ -235,8 +239,8 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
         supplier_id: Number(anSupplierId),
         product_description: anProduct.trim(),
       })
-      setAnalytics(data)
-      if (data.delivery_count === 0) {
+      setAnalytics(data && typeof data === 'object' ? data : null)
+      if (!data || data.delivery_count === 0) {
         setAnalyticsError(
           'Nessuna consegna trovata per questa coppia fornitore/prodotto. Verifica il testo esatto della merce.'
         )
@@ -274,7 +278,11 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
         note: editDocumentNote.trim() || null,
         anomaly_note: editAnomalyNote.trim() || null,
       })
-      setDeliveries((prev) => prev.map((d) => (d.id === editingDeliveryId ? { ...d, ...updated } : d)))
+      setDeliveries((prev) =>
+        (Array.isArray(prev) ? prev : []).map((d) =>
+          d.id === editingDeliveryId ? { ...d, ...updated } : d,
+        ),
+      )
       setSuccess('Note consegna aggiornate')
       closeEditNotes()
     } catch (e) {
@@ -292,7 +300,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
       setError('')
       setSuccess('')
       await deleteDelivery(row.id)
-      setDeliveries((prev) => prev.filter((d) => d.id !== row.id))
+      setDeliveries((prev) => (Array.isArray(prev) ? prev : []).filter((d) => d.id !== row.id))
       if (editingDeliveryId === row.id) closeEditNotes()
       setSuccess('Riga consegna eliminata')
     } catch {
@@ -305,7 +313,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
       setError('Seleziona una riga consegna prima di modificare le note')
       return
     }
-    const row = deliveries.find((d) => String(d.id) === String(selectedDeliveryId))
+    const row = deliveryList.find((d) => String(d.id) === String(selectedDeliveryId))
     if (!row) {
       setError('Riga consegna non trovata')
       return
@@ -318,7 +326,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
       setError('Seleziona una riga consegna prima di eliminare')
       return
     }
-    const row = deliveries.find((d) => String(d.id) === String(selectedDeliveryId))
+    const row = deliveryList.find((d) => String(d.id) === String(selectedDeliveryId))
     if (!row) {
       setError('Riga consegna non trovata')
       return
@@ -418,8 +426,8 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
               onChange={(e) => setSelectedDeliveryId(e.target.value)}
               style={{ minWidth: 320 }}
             >
-              {deliveries.length === 0 && <option value="">Nessuna riga disponibile</option>}
-              {deliveries.map((d) => (
+              {deliveryList.length === 0 && <option value="">Nessuna riga disponibile</option>}
+              {deliveryList.map((d) => (
                 <option key={d.id} value={d.id}>
                   {formatDate(d.delivery_date)} · DDT {d.ddt_number || '—'} · {d.product_description || '—'}
                 </option>
@@ -429,7 +437,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={!deliveries.length}
+            disabled={!deliveryList.length}
             onClick={handleOpenSelectedNotes}
           >
             Modifica note
@@ -437,7 +445,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           <button
             type="button"
             className="btn btn-outline-danger"
-            disabled={!deliveries.length}
+            disabled={!deliveryList.length}
             onClick={handleDeleteSelectedRow}
           >
             Elimina riga
@@ -512,7 +520,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                 </tr>
               </thead>
               <tbody>
-                {deliveries.map((d) => {
+                {deliveryList.map((d) => {
                   const parsed = splitDeliveryNote(d.note)
                   return (
                   <tr key={d.id}>
@@ -548,7 +556,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                     <td>{String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : '—'}</td>
                   </tr>
                 )})}
-                {deliveries.length === 0 && (
+                {deliveryList.length === 0 && (
                   <tr>
                     <td colSpan={16} className="empty-state">
                       Nessuna consegna registrata.
@@ -599,7 +607,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           </button>
         </form>
         {analyticsError && <div className="alert alert-danger">{analyticsError}</div>}
-        {analytics && analytics.delivery_count > 0 && (
+        {analytics && analytics.delivery_count > 0 && Array.isArray(analytics.series) && (
           <div style={{ marginTop: '1rem' }}>
             <p style={{ marginBottom: '0.75rem' }}>
               <strong>{analytics.product_description}</strong>

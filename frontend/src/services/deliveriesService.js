@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from './api'
+import { apiFetch, apiUrl, asArray } from './api'
 
 export async function createDelivery(data) {
   return apiFetch('/deliveries', {
@@ -28,7 +28,8 @@ export async function fetchDeliveries(params = {}) {
 
   const query = searchParams.toString()
   const path = query ? `/deliveries?${query}` : '/deliveries'
-  return apiFetch(path)
+  const data = await apiFetch(path)
+  return asArray(data, 'consegne')
 }
 
 export async function fetchPriceAnalytics({ supplier_id, product_description }) {
