@@ -22,6 +22,7 @@ class StaffMemberCreate(BaseModel):
     city: Optional[str] = Field(None, max_length=128)
     birth_date: Optional[date] = None
     sort_order: int = 0
+    hourly_rate: Optional[float] = Field(None, ge=0)
     is_active: bool = True
 
     @model_validator(mode="after")
@@ -75,6 +76,7 @@ class StaffMemberRead(BaseModel):
     city: Optional[str] = None
     birth_date: Optional[date] = None
     sort_order: int
+    hourly_rate: Optional[float] = None
     is_active: bool
 
     class Config:

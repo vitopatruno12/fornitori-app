@@ -11,7 +11,7 @@ from .json_utils import parse_json_response
 logger = logging.getLogger(__name__)
 
 DEFAULT_GENERATE_URL = "http://localhost:11434/api/generate"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "qwen2.5:7b"
 
 
 def is_configured() -> bool:

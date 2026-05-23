@@ -13,10 +13,31 @@ import {
 } from '../services/staffService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
+import StaffPayrollDaysModal from '../components/StaffPayrollDaysModal.jsx'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 import { suggestStaffShift } from '../services/aiService'
+import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/staffWeeklyReport.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
+
+function formatEurAmount(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '—'
+  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n)
+}
+
+function formatHoursDecimal(h) {
+  if (h == null || !Number.isFinite(h) || h <= 0) return ''
+  if (Math.abs(h - Math.round(h)) < 0.001) return String(Math.round(h))
+  return h.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+function parseDecimalInput(raw) {
+  const s = String(raw ?? '').trim().replace(',', '.')
+  if (!s) return 0
+  const n = Number(s)
+  return Number.isFinite(n) ? n : 0
+}
 
 
 const KIND_LABELS = {
@@ -524,6 +545,14 @@ export default function StaffPage() {
   const [aiShiftText, setAiShiftText] = useState('')
   const [aiShiftLoading, setAiShiftLoading] = useState(false)
   const [aiShiftSummary, setAiShiftSummary] = useState('')
+  /** Ore manuali per dipendente (chiave = id); se assente si usano ore da turni nel periodo. */
+  const [hoursOverride, setHoursOverride] = useState({})
+  /** Prezzo/ora in modifica nella tabella costi (chiave = id dipendente). */
+  const [rateDraft, setRateDraft] = useState({})
+  /** Importi calcolati su richiesta (Calcola); assente = non mostrato. */
+  const [payrollImporto, setPayrollImporto] = useState({})
+  /** Modale giorni/ore turni dalla tabella costi. */
+  const [payrollDaysInfoMemberId, setPayrollDaysInfoMemberId] = useState(null)
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -535,6 +564,98 @@ export default function StaffPage() {
   const periodHiStr = periodFromStr <= periodToStr ? periodToStr : periodFromStr
   const rangeFromStr = planView === 'week' ? fromStr : planView === 'day' ? dayStr : periodLoStr
   const rangeToStr = planView === 'week' ? toStr : planView === 'day' ? dayStr : periodHiStr
+
+  const oreTurnoByMemberId = useMemo(() => {
+    const map = new Map()
+    for (const row of aggregateWeeklyStaffStats(members, shifts, rangeFromStr, rangeToStr)) {
+      map.set(row.memberId, row.oreTurno)
+    }
+    return map
+  }, [members, shifts, rangeFromStr, rangeToStr])
+
+  const payrollRows = useMemo(() => {
+    return members.map((m) => {
+      const computedOre = oreTurnoByMemberId.get(m.id) ?? 0
+      const ore =
+        hoursOverride[m.id] !== undefined
+          ? parseDecimalInput(hoursOverride[m.id])
+          : computedOre
+      return {
+        member: m,
+        ore,
+        computedOre,
+      }
+    })
+  }, [members, oreTurnoByMemberId, hoursOverride])
+
+  const payrollTotalImporto = useMemo(
+    () => Object.values(payrollImporto).reduce((sum, v) => sum + (Number(v) || 0), 0),
+    [payrollImporto],
+  )
+
+  useEffect(() => {
+    setHoursOverride({})
+    setPayrollImporto({})
+  }, [rangeFromStr, rangeToStr, planView])
+
+  useEffect(() => {
+    setRateDraft((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const m of members) {
+        if (next[m.id] === undefined) {
+          next[m.id] = m.hourly_rate != null ? String(m.hourly_rate) : ''
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [members])
+
+  const calculatePayrollImporto = useCallback(
+    (memberId) => {
+      const row = payrollRows.find((r) => r.member.id === memberId)
+      if (!row) return
+      const rate = parseDecimalInput(rateDraft[memberId] ?? row.member.hourly_rate)
+      setPayrollImporto((prev) => ({ ...prev, [memberId]: row.ore * rate }))
+    },
+    [payrollRows, rateDraft],
+  )
+
+  const clearPayrollImporto = useCallback((memberId) => {
+    setPayrollImporto((prev) => {
+      if (prev[memberId] === undefined) return prev
+      const next = { ...prev }
+      delete next[memberId]
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (payrollDaysInfoMemberId == null) return
+    if (!members.some((m) => m.id === payrollDaysInfoMemberId)) {
+      setPayrollDaysInfoMemberId(null)
+    }
+  }, [members, payrollDaysInfoMemberId])
+
+  const payrollDaysInfo = useMemo(() => {
+    if (payrollDaysInfoMemberId == null) return null
+    const member = members.find((m) => m.id === payrollDaysInfoMemberId)
+    if (!member) return null
+    const worked = aggregateMemberWorkedDays(
+      payrollDaysInfoMemberId,
+      shifts,
+      rangeFromStr,
+      rangeToStr,
+    )
+    return {
+      member,
+      periodFrom: rangeFromStr,
+      periodTo: rangeToStr,
+      ...worked,
+    }
+  }, [payrollDaysInfoMemberId, members, shifts, rangeFromStr, rangeToStr])
+
   const dayLongLabel = useMemo(
     () =>
       dayFocus.toLocaleDateString('it-IT', {
@@ -1654,6 +1775,146 @@ export default function StaffPage() {
         </div>
       </section>
 
+      <section className="card" style={{ order: 2, marginBottom: '1rem' }}>
+        <h2 className="page-subheader" style={{ marginTop: 0 }}>
+          Ore lavorate e costo
+        </h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
+          Periodo: <strong>{rangeFromStr}</strong> → <strong>{rangeToStr}</strong>.
+          Le ore si calcolano dai turni nel periodo (puoi modificarle).
+          <strong> Info giorni lavorati</strong> apre il dettaglio giorno per giorno (come nel report turni).
+          <strong> Calcola</strong> ottiene l&apos;importo (ore × prezzo/ora); <strong>Cancella</strong> azzera
+          l&apos;importo della riga.
+          {!planningLoaded && (
+            <span> Carica il planning per aggiornare le ore dai turni.</span>
+          )}
+        </p>
+        <div className="table-wrap">
+          <table className="app-table app-table--compact">
+            <thead>
+              <tr>
+                <th>Dipendente</th>
+                <th style={{ minWidth: 100 }}>Ore lavorate</th>
+                <th style={{ minWidth: 100 }}>Prezzo / ora (€)</th>
+                <th className="text-end" style={{ minWidth: 120 }}>
+                  Importo
+                </th>
+                <th style={{ minWidth: 220 }}>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payrollRows.map(({ member: m, computedOre }) => (
+                <tr key={m.id}>
+                  <td style={{ fontWeight: 600 }}>{m.name}</td>
+                  <td>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      className="form-control"
+                      style={{ width: 96 }}
+                      value={
+                        hoursOverride[m.id] !== undefined
+                          ? hoursOverride[m.id]
+                          : formatHoursDecimal(computedOre)
+                      }
+                      onChange={(e) =>
+                        setHoursOverride((prev) => ({ ...prev, [m.id]: e.target.value }))
+                      }
+                      title={
+                        computedOre > 0
+                          ? `Ore da turni nel periodo: ${formatHoursDecimal(computedOre)}`
+                          : 'Nessun turno nel periodo'
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="form-control"
+                      style={{ width: 96 }}
+                      value={rateDraft[m.id] ?? (m.hourly_rate != null ? String(m.hourly_rate) : '')}
+                      onChange={(e) =>
+                        setRateDraft((prev) => ({ ...prev, [m.id]: e.target.value }))
+                      }
+                      onBlur={async (e) => {
+                        const raw = e.target.value.trim()
+                        const v = raw === '' ? null : parseDecimalInput(raw)
+                        const prev = m.hourly_rate == null ? null : Number(m.hourly_rate)
+                        if (v === prev || (v == null && prev == null)) return
+                        try {
+                          await updateStaffMember(m.id, { hourly_rate: v })
+                          await refreshMembers()
+                        } catch {
+                          setError('Salvataggio prezzo/ora non riuscito')
+                        }
+                      }}
+                    />
+                  </td>
+                  <td className="text-end amount" style={{ fontWeight: 600 }}>
+                    {payrollImporto[m.id] !== undefined
+                      ? formatEurAmount(payrollImporto[m.id])
+                      : '—'}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={() => setPayrollDaysInfoMemberId(m.id)}
+                        title="Giorni e ore dai turni nel periodo"
+                      >
+                        Info giorni lavorati
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => calculatePayrollImporto(m.id)}
+                      >
+                        Calcola
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={() => clearPayrollImporto(m.id)}
+                        disabled={payrollImporto[m.id] === undefined}
+                        title="Elimina importo calcolato"
+                      >
+                        Cancella
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {members.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="empty-state">
+                    Aggiungi dipendenti per calcolare ore e importi.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            {members.length > 0 && (
+              <tfoot>
+                <tr>
+                  <td colSpan={3} className="text-end" style={{ fontWeight: 600 }}>
+                    Totale importi calcolati
+                  </td>
+                  <td className="text-end amount" style={{ fontWeight: 700 }}>
+                    {Object.keys(payrollImporto).length > 0
+                      ? formatEurAmount(payrollTotalImporto)
+                      : '—'}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </section>
+
       <section className="card" style={{ order: 3, marginBottom: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem' }}>
           <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
@@ -2143,6 +2404,17 @@ export default function StaffPage() {
         onClose={() => !memberInfoSaving && setMemberInfoId(null)}
         onSave={handleSaveMemberInfo}
         saving={memberInfoSaving}
+      />
+
+      <StaffPayrollDaysModal
+        open={payrollDaysInfo != null}
+        memberName={payrollDaysInfo?.member?.name ?? ''}
+        periodFrom={payrollDaysInfo?.periodFrom ?? ''}
+        periodTo={payrollDaysInfo?.periodTo ?? ''}
+        days={payrollDaysInfo?.days ?? []}
+        totalHours={payrollDaysInfo?.totalHours ?? 0}
+        giorniLavorati={payrollDaysInfo?.giorniLavorati ?? 0}
+        onClose={() => setPayrollDaysInfoMemberId(null)}
       />
     </div>
   )

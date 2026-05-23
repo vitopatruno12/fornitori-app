@@ -198,6 +198,39 @@ export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYm
 }
 
 /**
+ * Dettaglio giorni lavorati (solo turni) per un dipendente nel periodo — stessa logica del report PDF.
+ * @param {number} memberId
+ * @param {Array<object>} shifts
+ * @param {string} dateFromYmd
+ * @param {string} dateToYmd
+ */
+export function aggregateMemberWorkedDays(memberId, shifts, dateFromYmd, dateToYmd) {
+  const byDate = new Map()
+  const id = Number(memberId)
+  for (const s of shifts || []) {
+    if (!s || Number(s.staff_member_id) !== id) continue
+    if (s.work_date < dateFromYmd || s.work_date > dateToYmd) continue
+    if (s.entry_kind !== 'shift') continue
+    const h = hoursBetween(s.time_start, s.time_end)
+    if (!byDate.has(s.work_date)) {
+      byDate.set(s.work_date, { workDate: s.work_date, entries: [], hours: 0 })
+    }
+    const day = byDate.get(s.work_date)
+    day.entries.push({
+      timeStart: s.time_start,
+      timeEnd: s.time_end,
+      hours: h,
+      notes: s.notes || '',
+    })
+    day.hours += h
+  }
+  const days = [...byDate.values()].sort((a, b) => a.workDate.localeCompare(b.workDate))
+  const totalHours = days.reduce((sum, d) => sum + d.hours, 0)
+  const giorniLavorati = days.filter((d) => d.hours > 0).length
+  return { days, totalHours, giorniLavorati }
+}
+
+/**
  * Testo breve per WhatsApp quando non si può allegare il PDF.
  */
 export function buildWeeklyReportWhatsAppText(periodTitle, rows) {

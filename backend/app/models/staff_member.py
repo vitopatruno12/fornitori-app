@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -17,6 +17,7 @@ class StaffMember(Base):
     city = Column(String(128), nullable=True)
     birth_date = Column(Date, nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0")
+    hourly_rate = Column(Numeric(10, 2), nullable=True)
     is_active = Column(Boolean, nullable=False, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

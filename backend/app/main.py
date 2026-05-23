@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_orders_sequence_number_column()
         _ensure_order_delivery_signature_columns()
         _ensure_cash_entries_activity_column()
+        _ensure_staff_member_hourly_rate_column()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -334,10 +335,30 @@ def _ensure_cash_entries_activity_column() -> None:
         )
 
 
+def _ensure_staff_member_hourly_rate_column() -> None:
+    """Backward-compat: tariffa oraria dipendente (migr. 20260519_staff_hourly_rate.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE staff_members
+                    ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(10, 2)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare staff_members.hourly_rate: %s",
+            e,
+        )
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
         required = [
+            ("staff_members", "hourly_rate", "20260519_staff_hourly_rate.sql"),
             ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
             ("cash_entries", "activity", "20260519_cash_entries_activity.sql"),
             ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),

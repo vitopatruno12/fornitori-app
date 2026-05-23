@@ -30,6 +30,7 @@ def create_member(db: Session, payload: staff_schema.StaffMemberCreate) -> Staff
         city=payload.city,
         birth_date=payload.birth_date,
         sort_order=payload.sort_order,
+        hourly_rate=payload.hourly_rate,
         is_active=payload.is_active,
     )
     db.add(row)
@@ -45,6 +46,8 @@ def update_member(db: Session, member_id: int, payload: staff_schema.StaffMember
     data = payload.model_dump(exclude_unset=True)
     if "sort_order" in data:
         row.sort_order = data["sort_order"]
+    if "hourly_rate" in data:
+        row.hourly_rate = data["hourly_rate"]
     if "is_active" in data:
         row.is_active = data["is_active"]
     if "email" in data:
