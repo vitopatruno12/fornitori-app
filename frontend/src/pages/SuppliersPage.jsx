@@ -119,9 +119,9 @@ export default function SuppliersPage() {
       setError('')
       const data = await fetchSuppliers()
       setSuppliers(data)
-    } catch (e) {
+    } catch {
       setSuppliers([])
-      setError(e?.message || 'Errore nel caricamento fornitori')
+      setError('Errore nel caricamento fornitori')
     } finally {
       setLoading(false)
     }

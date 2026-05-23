@@ -34,9 +34,6 @@ function formatApiError(status, text) {
   return raw ? `API error ${status}: ${raw}` : `API error ${status}`
 }
 
-const NGINX_HTML_HINT =
-  'Il server ha restituito la pagina web invece dei dati API. Su Nginx configura location ^~ /api/ { proxy_pass http://127.0.0.1:8000/; }'
-
 function looksLikeHtml(text) {
   const t = String(text || '').trim().slice(0, 200).toLowerCase()
   return t.startsWith('<!doctype') || t.startsWith('<html') || (t.startsWith('<') && t.includes('<head'))
@@ -70,7 +67,12 @@ export async function apiFetch(path, options = {}) {
   const contentType = response.headers.get('content-type') || ''
 
   if (contentType.includes('text/html') || looksLikeHtml(text)) {
-    throw new Error(NGINX_HTML_HINT)
+    console.warn(
+      '[API] Risposta HTML al posto di JSON per',
+      path,
+      '— verifica proxy Nginx: location ^~ /api/ { proxy_pass http://127.0.0.1:8000/; }',
+    )
+    return null
   }
 
   const trimmed = text.trim()
