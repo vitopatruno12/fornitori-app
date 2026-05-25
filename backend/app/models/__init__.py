@@ -15,6 +15,7 @@ from .attachment import Attachment  # noqa: F401
 from .supplier_order import SupplierOrder, SupplierOrderItem  # noqa: F401
 from .staff_member import StaffMember  # noqa: F401
 from .staff_shift_entry import StaffShiftEntry  # noqa: F401
+from .staff_payroll_month import StaffPayrollMonth  # noqa: F401
 from .support_technician import SupportTechnician, TechnicianActivity, TechnicianInvoiceFile  # noqa: F401
 from .sdi_invoice import SdiInvoice  # noqa: F401
 

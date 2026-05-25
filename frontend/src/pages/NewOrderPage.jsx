@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
+import { mapOrderLinesToRows } from '../utils/orderLinesNormalize.js'
+import { applyOrderAiResponse, mergeOrderProductRows } from '../utils/orderAiApply.js'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import {
@@ -266,14 +268,7 @@ export default function NewOrderPage({ operatorMode = false }) {
     const fn = (e) => {
       const lines = e.detail?.suggested_lines || e.detail?.lines
       if (!Array.isArray(lines) || !lines.length) return
-      setRows(
-        lines.map((l) => ({
-          product_description: l.product_description || '',
-          pieces: l.pieces != null ? String(l.pieces) : '',
-          weight_kg: l.weight_kg != null && l.weight_kg !== '' ? String(l.weight_kg) : '',
-          note: l.note || '',
-        })),
-      )
+      setRows((prev) => mergeOrderProductRows(prev, mapOrderLinesToRows(lines)))
     }
     window.addEventListener('ai-apply-order', fn)
     return () => window.removeEventListener('ai-apply-order', fn)
@@ -564,78 +559,53 @@ export default function NewOrderPage({ operatorMode = false }) {
   async function handleAiSuggestFull(textOverride) {
     const t = (textOverride != null ? textOverride : aiOrderText).trim()
     if (!t) {
-      setError('Parla o scrivi un comando prima di inviare a Gemini')
+      setError('Parla o scrivi un comando prima di inviare')
+      return
+    }
+    if (loadingSuppliers) {
+      setError('Attendi il caricamento fornitori, poi riprova.')
       return
     }
     try {
       setAiOrderLoading(true)
       setError('')
+      setSuccess('')
       setAiSummary('')
       const supplierNames = suppliers.map((s) => s.name).filter(Boolean)
       const r = await suggestOrderFull(t, supplierNames)
-      const f = r?.suggested_fields || {}
-      const lines = r?.suggested_lines || []
-      const applied = []
+      const result = applyOrderAiResponse(r, suppliers, {
+        setSupplierId,
+        setOrderDate,
+        setExpectedDeliveryDate,
+        setDeliveryLocation,
+        setOrderSignedBy,
+        setUnloadingSignedBy,
+        setVatPercent,
+        setOrderNote,
+        setRows,
+      })
 
-      if (f.supplier_name) {
-        const matched = suppliers.find(
-          (s) => (s.name || '').toLowerCase() === String(f.supplier_name).toLowerCase(),
-        )
-        if (matched) {
-          setSupplierId(String(matched.id))
-          applied.push(`Fornitore: ${matched.name}`)
-        }
-      }
-      if (f.order_date) {
-        setOrderDate(String(f.order_date).slice(0, 10))
-        applied.push(`Data ordine: ${formatDateIt(f.order_date)}`)
-      }
-      if (f.expected_delivery_date) {
-        setExpectedDeliveryDate(String(f.expected_delivery_date).slice(0, 10))
-        applied.push(`Consegna prevista: ${formatDateIt(f.expected_delivery_date)}`)
-      }
-      if (f.delivery_location) {
-        setDeliveryLocation(String(f.delivery_location))
-        applied.push(`Destinazione: ${f.delivery_location}`)
-      }
-      if (f.order_signed_by) {
-        setOrderSignedBy(String(f.order_signed_by))
-        applied.push(`Firma ordine: ${f.order_signed_by}`)
-      }
-      if (f.unloading_signed_by) {
-        setUnloadingSignedBy(String(f.unloading_signed_by))
-        applied.push(`Firma scarico: ${f.unloading_signed_by}`)
-      }
-      if (f.vat_percent != null) {
-        setVatPercent(String(f.vat_percent))
-        applied.push(`IVA: ${f.vat_percent}%`)
-      }
-      if (f.note) {
-        setOrderNote(String(f.note))
-        applied.push('Note al fornitore aggiornate')
-      }
-      if (lines.length) {
-        setRows(
-          lines.map((l) => ({
-            product_description: l.product_description || '',
-            pieces: l.pieces != null ? String(l.pieces) : '',
-            weight_kg: l.weight_kg != null && l.weight_kg !== '' ? String(l.weight_kg) : '',
-            note: l.note || '',
-          })),
-        )
-        applied.push(`${lines.length} riga/e prodotto`)
-      }
-
-      const warnings = (r?.warnings || []).join(' · ')
+      const { applied, warnings } = result
+      const viaAi = Boolean(r?.ai_used)
+      const fast = Boolean(r?.local_fallback)
       if (applied.length) {
-        setSuccess(`Gemini ha compilato: ${applied.join(', ')}. Controlla e salva.`)
+        setSuccess(
+          `${viaAi ? 'Atlas AI' : fast ? 'Analisi rapida' : 'Compilato'}: ${applied.join(', ')}. Controlla e salva.`,
+        )
         setAiSummary(applied.join(' • '))
-      } else {
-        setError('Gemini non ha estratto dati dal comando. Riprova con più dettagli.')
       }
-      if (warnings) setError(warnings)
-    } catch {
-      setError('Atlas AI non disponibile. Avvia Ollama e il backend FastAPI (porta 8000).')
+      const warnText = warnings.filter(Boolean).join(' · ')
+      if (!applied.length) {
+        setError(
+          warnText ||
+            'Nessun dato estratto dal comando. Esempio: «Ordine a Rossi: 10 arance, 5 kg pasta».',
+        )
+      } else if (warnText) {
+        setAiSummary((prev) => [prev, warnText].filter(Boolean).join(' • '))
+      }
+    } catch (err) {
+      console.warn('[ordine AI]', err)
+      setError('Atlas AI non disponibile. Avvia Ollama e il backend (porta 8000), poi riprova.')
     } finally {
       setAiOrderLoading(false)
     }
@@ -1238,13 +1208,19 @@ export default function NewOrderPage({ operatorMode = false }) {
           </div>
 
           <GeminiVoiceAssistant
-            label="Ordine a voce (Gemini)"
-            hint='Esempio: "Ordine a Rossi domani: 10 arance, 5 kg pasta, consegna venerdì". Gemini compila fornitore, date e righe.'
+            label="Ordine a voce (Atlas AI)"
+            hint='L’AI distingue le sezioni: fornitore/date (intestazione) e prodotti (una riga ciascuno con Pezzi/Kg separati). Es: «Ordine a Rossi domani: 10 arance, 5 kg pasta, 3 carciofi». Dopo Compila il testo si cancella; puoi parlare di nuovo per aggiungere righe.'
             text={aiOrderText}
             onTextChange={setAiOrderText}
             onCompile={(spoken) => handleAiSuggestFull(spoken)}
             compiling={aiOrderLoading}
-            onClear={() => setAiSummary('')}
+            compileLabel={aiOrderLoading ? 'Compilazione…' : 'Compila ordine'}
+            showInterimResults={false}
+            onClear={() => {
+              setAiSummary('')
+              setError('')
+              setSuccess('')
+            }}
           />
 
           {aiSummary && (
@@ -1257,9 +1233,10 @@ export default function NewOrderPage({ operatorMode = false }) {
             Prodotti da ordinare
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '-0.35rem', marginBottom: '0.5rem' }}>
-            Nella colonna <strong>Listino</strong> compare il <strong>prezzo unitario (€/u)</strong> preso dal{' '}
-            <strong>prezzario del fornitore</strong> (stessa descrizione prodotto che in Nuova consegna → Prezzario). È un
-            promemoria in compilazione, non un prezzo vincolante sull’ordine.
+            Ogni prodotto = <strong>una riga</strong>. <strong>Prodotto</strong> solo il nome (es. arance);{' '}
+            <strong>Pezzi</strong> solo il numero (es. 10); <strong>Kg</strong> solo il peso (es. 5).
+            Anche a voce: «arance 10 pezzi», «arance kg 5», «5 kg pasta».
+            Con voce/AI le righe si <strong>aggiungono</strong> a quelle già presenti. Listino = prezzo promemoria dal prezzario.
           </p>
           {priceListLoading && supplierId && (
             <p className="loading" style={{ fontSize: '0.85rem' }}>

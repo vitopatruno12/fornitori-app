@@ -101,3 +101,50 @@ def delete_shift(shift_id: int, db: Session = Depends(get_db)):
     ok = staff_service.delete_shift(db, shift_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voce non trovata")
+
+
+@router.get("/payroll-months", response_model=List[staff_schema.StaffPayrollMonthRead])
+def list_payroll_months(db: Session = Depends(get_db)):
+    return staff_service.list_payroll_months(db)
+
+
+@router.get("/payroll-months/{month_id}", response_model=staff_schema.StaffPayrollMonthRead)
+def get_payroll_month(month_id: int, db: Session = Depends(get_db)):
+    row = staff_service.get_payroll_month(db, month_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese non trovato")
+    return row
+
+
+@router.post(
+    "/payroll-months",
+    response_model=staff_schema.StaffPayrollMonthRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_payroll_month(payload: staff_schema.StaffPayrollMonthCreate, db: Session = Depends(get_db)):
+    try:
+        return staff_service.create_payroll_month(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/payroll-months/{month_id}", response_model=staff_schema.StaffPayrollMonthRead)
+def update_payroll_month(
+    month_id: int,
+    payload: staff_schema.StaffPayrollMonthUpdate,
+    db: Session = Depends(get_db),
+):
+    try:
+        row = staff_service.update_payroll_month(db, month_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese non trovato")
+    return row
+
+
+@router.delete("/payroll-months/{month_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_payroll_month(month_id: int, db: Session = Depends(get_db)):
+    ok = staff_service.delete_payroll_month(db, month_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese non trovato")

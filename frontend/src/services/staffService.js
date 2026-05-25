@@ -43,3 +43,23 @@ export function deleteStaffShiftsBulk(from, to) {
   const q = new URLSearchParams({ from, to })
   return apiFetch(`/staff/shifts/bulk?${q}`, { method: 'DELETE' })
 }
+
+export function fetchStaffPayrollMonths() {
+  return apiFetch('/staff/payroll-months')
+}
+
+export function fetchStaffPayrollMonth(id) {
+  return apiFetch(`/staff/payroll-months/${id}`)
+}
+
+export function createStaffPayrollMonth(data) {
+  return apiFetch('/staff/payroll-months', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateStaffPayrollMonth(id, data) {
+  return apiFetch(`/staff/payroll-months/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export function deleteStaffPayrollMonth(id) {
+  return apiFetch(`/staff/payroll-months/${id}`, { method: 'DELETE' })
+}

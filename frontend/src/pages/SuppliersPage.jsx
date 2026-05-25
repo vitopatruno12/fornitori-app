@@ -5,6 +5,7 @@ import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestSupplierFields } from '../services/aiService'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import { parseSupplierVoiceLocal } from '../utils/supplierVoiceParse.js'
 
 function formatEuro(n) {
   if (n == null || Number.isNaN(Number(n))) return '–'
@@ -72,6 +73,7 @@ export default function SuppliersPage() {
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [aiSupplierText, setAiSupplierText] = useState('')
   const [aiSupplierLoading, setAiSupplierLoading] = useState(false)
+  const [aiSupplierSummary, setAiSupplierSummary] = useState('')
   const [aiMissing, setAiMissing] = useState([])
   const [aiSupplierAnomalies, setAiSupplierAnomalies] = useState([])
   const [ibanPanelOpen, setIbanPanelOpen] = useState(false)
@@ -279,34 +281,95 @@ export default function SuppliersPage() {
     return applied
   }
 
+  function finishSupplierAiSummary(applied, { instant = false, viaAi = false, localOnly = false } = {}) {
+    if (applied.length) {
+      const prefix = localOnly
+        ? 'Compilato subito'
+        : instant
+          ? 'Compilato (istantaneo)'
+          : viaAi
+            ? 'Atlas AI'
+            : 'Compilato'
+      setAiSupplierSummary(`${prefix}: ${applied.join(' · ')}`)
+    } else {
+      setAiError(
+        'Nessun campo estratto. Esempio: «Bar Roma, P.IVA 12345678901, email info@bar.it, tel 0801234567» oppure «fornitore Bar Peroni nome Mario Rossi».',
+      )
+    }
+  }
+
   async function handleAiSuggestSupplier(textOverride) {
     const text = (textOverride != null ? textOverride : aiSupplierText).trim()
     if (!text) {
-      setAiError('Parla o scrivi un comando prima di inviare a Gemini')
+      setAiError('Parla o scrivi un comando prima di Compila')
       return
     }
+    setAiSupplierLoading(true)
+    setAiError('')
+    setAiSupplierSummary('')
+
+    const existingPayload = {
+      name,
+      vat_number: vatNumber,
+      email,
+      phone,
+      city,
+      contact_person: contactPerson,
+      payment_terms: paymentTerms,
+      iban,
+      notes,
+      fiscal_code: fiscalCode,
+      merchandise_category: merchandiseCategory,
+    }
+
+    const local = parseSupplierVoiceLocal(text)
+    if (local.completeEnough) {
+      const appliedLocal = applyAiSupplierSuggestion(local.suggested_fields)
+      if (appliedLocal.length) {
+        finishSupplierAiSummary(appliedLocal, { localOnly: true })
+        setAiSupplierLoading(false)
+        suggestSupplierFields(text, existingPayload)
+          .then((res) => {
+            const applied = applyAiSupplierSuggestion(res?.suggested_fields)
+            if (!applied.length) return
+            setAiMissing(res?.missing_fields || [])
+            finishSupplierAiSummary(applied, {
+              instant: Boolean(res?.fast_path),
+              viaAi: Boolean(res?.ai_used),
+            })
+          })
+          .catch(() => {})
+        return
+      }
+    }
+
     try {
-      setAiSupplierLoading(true)
-      setAiError('')
-      const res = await suggestSupplierFields(text, {
-        name,
-        vat_number: vatNumber,
-        email,
-        phone,
-        city,
-        contact_person: contactPerson,
-        payment_terms: paymentTerms,
-        iban,
-        notes,
-        fiscal_code: fiscalCode,
-      })
+      const res = await suggestSupplierFields(text, existingPayload)
       const applied = applyAiSupplierSuggestion(res?.suggested_fields)
       setAiMissing(res?.missing_fields || [])
-      if (!applied.length) {
-        setAiError('Gemini non ha estratto dati dal comando. Riprova con più dettagli.')
+      const viaAi = Boolean(res?.ai_used)
+      const instant = Boolean(res?.fast_path || (res?.local_fallback && !res?.ai_used))
+      finishSupplierAiSummary(applied, { instant, viaAi })
+    } catch (err) {
+      const msg = String(err?.message || '')
+      if (err?.name === 'AbortError') {
+        const fallback = parseSupplierVoiceLocal(text)
+        const applied = applyAiSupplierSuggestion(fallback.suggested_fields)
+        if (applied.length) {
+          finishSupplierAiSummary(applied, { localOnly: true })
+        } else {
+          setAiError('Tempo scaduto. Includi ragione sociale e almeno P.IVA o email nel comando.')
+        }
+      } else if (msg.includes('500') || msg.includes('NameError') || msg.includes('Internal Server')) {
+        setAiError('Errore server AI. Riavvia il backend FastAPI (porta 8000) e riprova.')
+      } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        setAiError('Backend non raggiungibile. Avvia: npm run dev (FastAPI porta 8000).')
+      } else {
+        setAiError(
+          msg.replace(/^400:\s*/, '') ||
+            'Atlas AI non disponibile. Usa un comando con nome, P.IVA o email espliciti.',
+        )
       }
-    } catch {
-      setAiError('Atlas AI non disponibile. Avvia Ollama e il backend FastAPI (porta 8000).')
     } finally {
       setAiSupplierLoading(false)
     }
@@ -344,13 +407,24 @@ export default function SuppliersPage() {
           {editingId ? 'Modifica fornitore' : 'Nuovo fornitore'}
         </h2>
         <GeminiVoiceAssistant
-          label="Fornitore a voce (Gemini)"
-          hint='Esempio: "Bar Roma partita IVA 12345678901 email info@bar.it telefono 0801234567". Gemini compila i campi sotto.'
+          label="Fornitore a voce (Atlas AI)"
+          hint='Dì chiaramente «partita IVA» + 11 cifre e «codice fiscale» + codice (16 caratteri). Es: «Bar Roma partita IVA 12345678901 codice fiscale RSSMRA80A01H501U email info@bar.it tel 0801234567». Dopo Compila il testo si cancella.'
           text={aiSupplierText}
           onTextChange={setAiSupplierText}
           onCompile={(spoken) => handleAiSuggestSupplier(spoken)}
           compiling={aiSupplierLoading}
+          compileLabel={aiSupplierLoading ? 'Compilo…' : 'Compila fornitore'}
+          showInterimResults={false}
+          onClear={() => {
+            setAiSupplierSummary('')
+            setAiError('')
+          }}
         />
+        {aiSupplierSummary ? (
+          <div className="alert alert-success" style={{ marginTop: '0.35rem', marginBottom: '0.5rem' }}>
+            <strong>Atlas AI:</strong> {aiSupplierSummary}
+          </div>
+        ) : null}
         {aiError && <div className="alert alert-danger" style={{ marginTop: '0.5rem' }}>{aiError}</div>}
         {(aiMissing.length > 0 || aiSupplierAnomalies.length > 0) && (
           <div className="alert alert-info" style={{ marginTop: '0.45rem', marginBottom: '0.9rem' }}>

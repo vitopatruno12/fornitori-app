@@ -14,11 +14,20 @@ async function aiFetch(path, options = {}) {
   return res.json()
 }
 
+const SUPPLIER_AI_TIMEOUT_MS = 8000
+
 export async function suggestSupplierFields(text, existingData = {}) {
-  return aiFetch('/ai/suppliers/suggest', {
-    method: 'POST',
-    body: JSON.stringify({ text, existing_data: existingData }),
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SUPPLIER_AI_TIMEOUT_MS)
+  try {
+    return await aiFetch('/ai/suppliers/suggest', {
+      method: 'POST',
+      body: JSON.stringify({ text, existing_data: existingData }),
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function suggestPrimaNota(text, context = {}) {

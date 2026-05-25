@@ -52,35 +52,11 @@ function categoryLabel(cat) {
 }
 
 export default function AiManagerPopups({ enabled = true }) {
-  const [visible, setVisible] = React.useState([])
   const [panelOpen, setPanelOpen] = React.useState(false)
   const [allInsights, setAllInsights] = React.useState([])
   const [lastError, setLastError] = React.useState('')
-  const [muted, setMuted] = React.useState(() => {
-    try {
-      return sessionStorage.getItem('aiManagerMuted') === '1'
-    } catch {
-      return false
-    }
-  })
   const dismissedRef = React.useRef(loadDismissed())
-  const spokenRef = React.useRef(new Set())
-
-  const speak = React.useCallback(
-    (text) => {
-      if (muted) return
-      try {
-        const utter = new SpeechSynthesisUtterance(text)
-        utter.lang = 'it-IT'
-        utter.rate = 1.05
-        window.speechSynthesis?.cancel()
-        window.speechSynthesis?.speak(utter)
-      } catch {
-        /* ignore */
-      }
-    },
-    [muted],
-  )
+  const [dismissVersion, setDismissVersion] = React.useState(0)
 
   const refresh = React.useCallback(async () => {
     try {
@@ -88,27 +64,10 @@ export default function AiManagerPopups({ enabled = true }) {
       const list = Array.isArray(data?.insights) ? data.insights : []
       setAllInsights(list)
       setLastError('')
-      const dismissed = dismissedRef.current
-      const fresh = list.filter((it) => it && it.id && !dismissed.has(String(it.id)))
-      setVisible((prev) => {
-        const prevIds = new Set(prev.map((x) => String(x.id)))
-        const next = [...prev]
-        for (const it of fresh) {
-          if (!prevIds.has(String(it.id))) {
-            next.unshift(it)
-          }
-        }
-        return next.slice(0, 5)
-      })
-      const critical = fresh.find((it) => it.severity === 'critical')
-      if (critical && !spokenRef.current.has(critical.id)) {
-        spokenRef.current.add(critical.id)
-        speak(`Attenzione: ${critical.title}`)
-      }
     } catch (e) {
       setLastError(e?.message || 'Errore nel recupero insight')
     }
-  }, [speak])
+  }, [])
 
   React.useEffect(() => {
     if (!enabled) return undefined
@@ -132,7 +91,7 @@ export default function AiManagerPopups({ enabled = true }) {
     const set = dismissedRef.current
     set.add(String(id))
     saveDismissed(set)
-    setVisible((prev) => prev.filter((x) => String(x.id) !== String(id)))
+    setDismissVersion((v) => v + 1)
   }, [])
 
   const goTo = React.useCallback((insight) => {
@@ -150,71 +109,26 @@ export default function AiManagerPopups({ enabled = true }) {
     setPanelOpen(false)
   }, [dismiss])
 
-  const toggleMuted = React.useCallback(() => {
-    setMuted((m) => {
-      const next = !m
-      try {
-        sessionStorage.setItem('aiManagerMuted', next ? '1' : '0')
-      } catch {
-        /* ignore */
-      }
-      if (!next) {
-        try {
-          window.speechSynthesis?.cancel()
-        } catch {
-          /* ignore */
-        }
-      }
-      return next
-    })
-  }, [])
-
-  const totalActive = allInsights.filter(
-    (it) => it && it.id && !dismissedRef.current.has(String(it.id)),
-  ).length
-  const critCount = allInsights.filter((it) => it.severity === 'critical').length
+  const activeInsights = React.useMemo(() => {
+    void dismissVersion
+    return allInsights.filter(
+      (it) => it && it.id && !dismissedRef.current.has(String(it.id)),
+    )
+  }, [allInsights, dismissVersion])
+  const totalActive = activeInsights.length
+  const critCount = activeInsights.filter((it) => it.severity === 'critical').length
 
   if (!enabled) return null
 
   return (
     <>
-      <div className="ai-manager-popups" aria-live="polite">
-        {visible.map((it) => (
-          <div key={it.id} className={`ai-manager-toast severity-${it.severity}`}>
-            <div className="ai-manager-toast-head">
-              <span className="ai-manager-toast-icon" aria-hidden>{severityIcon(it.severity)}</span>
-              <span className="ai-manager-toast-cat">{categoryLabel(it.category)}</span>
-              <button
-                type="button"
-                className="ai-manager-toast-close"
-                onClick={() => dismiss(it.id)}
-                aria-label="Chiudi"
-              >
-                ×
-              </button>
-            </div>
-            <div className="ai-manager-toast-title">{it.title}</div>
-            <div className="ai-manager-toast-msg">{it.message}</div>
-            <div className="ai-manager-toast-actions">
-              {it.target_page ? (
-                <button type="button" className="btn btn-sm btn-primary" onClick={() => goTo(it)}>
-                  Vai →
-                </button>
-              ) : null}
-              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => dismiss(it.id)}>
-                Ignora
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
       <button
         type="button"
         className={`ai-manager-fab ${critCount ? 'has-critical' : ''}`}
         onClick={() => setPanelOpen((v) => !v)}
-        title="Manager AI: avvisi e suggerimenti"
-        aria-label={`AI Manager: ${totalActive} avvisi`}
+        title="Manager AI: clicca per vedere avvisi e suggerimenti"
+        aria-label={`AI Manager: ${totalActive} avvisi. Clicca per aprire.`}
+        aria-expanded={panelOpen}
       >
         <span aria-hidden className="ai-manager-fab-emoji">🧑‍💼</span>
         {totalActive > 0 ? <span className="ai-manager-fab-count">{totalActive}</span> : null}
@@ -226,14 +140,6 @@ export default function AiManagerPopups({ enabled = true }) {
             <div className="ai-manager-panel-head">
               <strong>AI Manager — Avvisi e suggerimenti</strong>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-secondary"
-                  onClick={toggleMuted}
-                  title={muted ? 'Riattiva voce' : 'Silenzia voce'}
-                >
-                  {muted ? '🔇' : '🔊'}
-                </button>
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-secondary"
@@ -254,11 +160,11 @@ export default function AiManagerPopups({ enabled = true }) {
             </div>
             <div className="ai-manager-panel-body">
               {lastError ? <div className="alert alert-warning">{lastError}</div> : null}
-              {allInsights.length === 0 ? (
+              {activeInsights.length === 0 ? (
                 <div className="alert alert-info">Tutto sotto controllo. Nessun avviso al momento.</div>
               ) : (
                 <ul className="ai-manager-panel-list">
-                  {allInsights.map((it) => (
+                  {activeInsights.map((it) => (
                     <li key={it.id} className={`ai-manager-panel-item severity-${it.severity}`}>
                       <div className="ai-manager-panel-item-head">
                         <span aria-hidden>{severityIcon(it.severity)}</span>

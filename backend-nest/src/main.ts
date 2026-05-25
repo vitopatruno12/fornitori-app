@@ -10,6 +10,6 @@ async function bootstrap() {
   app.enableCors({ origin: origins.length ? origins : true, credentials: true });
   const port = Number(process.env.PORT || 3001);
   await app.listen(port);
-  console.log(`Nest AI service listening on https://localhost:${port} (TLS terminato dal proxy in produzione)`);
+  console.log(`Nest AI service on http://localhost:${port} (opzionale: il frontend dev usa FastAPI :8000)`);
 }
 bootstrap();

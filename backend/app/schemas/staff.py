@@ -1,5 +1,5 @@
 from datetime import date, time
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -54,6 +54,7 @@ class StaffMemberUpdate(BaseModel):
     city: Optional[str] = None
     birth_date: Optional[date] = None
     sort_order: Optional[int] = None
+    hourly_rate: Optional[float] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
     @field_validator("email", "phone", "city", "first_name", "last_name", mode="before")
@@ -135,3 +136,45 @@ class StaffShiftsBulkDeleteResult(BaseModel):
 
 class StaffMembersBulkDeleteResult(BaseModel):
     deleted: int
+
+
+class StaffPayrollMonthLine(BaseModel):
+    staff_member_id: int
+    name: str = Field(..., max_length=255)
+    hours: float = Field(ge=0)
+    hourly_rate: float = Field(ge=0)
+    amount: float = Field(ge=0)
+
+
+class StaffPayrollMonthCreate(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    period_from: date
+    period_to: date
+    lines: List[StaffPayrollMonthLine]
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def period_order(self):
+        if self.period_to < self.period_from:
+            raise ValueError("period_to deve essere >= period_from")
+        return self
+
+
+class StaffPayrollMonthUpdate(BaseModel):
+    lines: List[StaffPayrollMonthLine]
+    notes: Optional[str] = None
+    period_from: Optional[date] = None
+    period_to: Optional[date] = None
+
+
+class StaffPayrollMonthRead(BaseModel):
+    id: int
+    year_month: str
+    period_from: date
+    period_to: date
+    lines: List[StaffPayrollMonthLine]
+    total_amount: float
+    notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True

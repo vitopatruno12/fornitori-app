@@ -10,10 +10,12 @@ import {
   updateStaffShift,
   deleteStaffShift,
   deleteStaffShiftsBulk,
+  fetchStaffPayrollMonths,
 } from '../services/staffService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
 import StaffPayrollDaysModal from '../components/StaffPayrollDaysModal.jsx'
+import StaffPayrollMonthPanel from '../components/StaffPayrollMonthPanel.jsx'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 import { suggestStaffShift } from '../services/aiService'
 import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/staffWeeklyReport.js'
@@ -66,6 +68,22 @@ function toYMD(d) {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+function currentPayrollYm() {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthBoundsFromYm(ym) {
+  const [y, m] = String(ym || '').split('-').map(Number)
+  if (!y || !m) {
+    const t = todayDate()
+    return { fromStr: toYMD(t), toStr: toYMD(t) }
+  }
+  const from = new Date(y, m - 1, 1)
+  const to = new Date(y, m, 0)
+  return { fromStr: toYMD(from), toStr: toYMD(to) }
 }
 
 function parseYMD(s) {
@@ -208,6 +226,16 @@ function expandBulkShiftsHeuristic(spoken, members, context) {
   return out.length ? out : null
 }
 
+function isBulkStaffVoiceCommand(spoken) {
+  const t = String(spoken || '').toLowerCase()
+  return (
+    /(tutti|tutte|ogni\s+dipendente|tutti\s+i\s+dipendenti|tutto\s+il\s+personale|intero\s+staff|tutto\s+il\s+team)/i.test(
+      t,
+    ) ||
+    /luned[iì].*venerd[iì]|lun.*ven|da\s+luned[iì]\s+a\s+venerd[iì]|settimana|ogni\s+giorno/i.test(t)
+  )
+}
+
 function collectShiftsFromGemini(r, members, spoken, defaultDate, context) {
   const list = []
   if (Array.isArray(r?.suggested_shifts)) {
@@ -222,10 +250,10 @@ function collectShiftsFromGemini(r, members, spoken, defaultDate, context) {
   const bulk = expandBulkShiftsHeuristic(spoken, members, context)
   const single = expandSingleShiftHeuristic(spoken, members, defaultDate, context)
   const heuristic = bulk?.length ? bulk : single?.length ? single : null
-  if (list.length === 0) {
-    return heuristic || []
-  }
+  const bulkVoice = isBulkStaffVoiceCommand(spoken)
   if (heuristic?.length) {
+    if (list.length === 0) return heuristic
+    if (bulkVoice && bulk?.length && bulk.length >= list.length) return bulk
     const probe = list.slice(0, 3).map((item) => resolveOneShiftSuggestion(item, members, spoken, defaultDate))
     const okProbe = probe.filter((p) => p.data).length
     if (okProbe === 0) return heuristic
@@ -553,6 +581,9 @@ export default function StaffPage() {
   const [payrollImporto, setPayrollImporto] = useState({})
   /** Modale giorni/ore turni dalla tabella costi. */
   const [payrollDaysInfoMemberId, setPayrollDaysInfoMemberId] = useState(null)
+  /** Mese solare per stipendi (YYYY-MM) e turni caricati per quel mese. */
+  const [payrollMonthYm, setPayrollMonthYm] = useState(currentPayrollYm)
+  const [payrollShifts, setPayrollShifts] = useState([])
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -565,13 +596,32 @@ export default function StaffPage() {
   const rangeFromStr = planView === 'week' ? fromStr : planView === 'day' ? dayStr : periodLoStr
   const rangeToStr = planView === 'week' ? toStr : planView === 'day' ? dayStr : periodHiStr
 
+  const payrollMonthBounds = useMemo(() => monthBoundsFromYm(payrollMonthYm), [payrollMonthYm])
+  const payrollFromStr = payrollMonthBounds.fromStr
+  const payrollToStr = payrollMonthBounds.toStr
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchStaffShifts(payrollFromStr, payrollToStr)
+        if (!cancelled) setPayrollShifts(Array.isArray(data) ? data : [])
+      } catch {
+        if (!cancelled) setPayrollShifts([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [payrollFromStr, payrollToStr])
+
   const oreTurnoByMemberId = useMemo(() => {
     const map = new Map()
-    for (const row of aggregateWeeklyStaffStats(members, shifts, rangeFromStr, rangeToStr)) {
+    for (const row of aggregateWeeklyStaffStats(members, payrollShifts, payrollFromStr, payrollToStr)) {
       map.set(row.memberId, row.oreTurno)
     }
     return map
-  }, [members, shifts, rangeFromStr, rangeToStr])
+  }, [members, payrollShifts, payrollFromStr, payrollToStr])
 
   const payrollRows = useMemo(() => {
     return members.map((m) => {
@@ -592,11 +642,6 @@ export default function StaffPage() {
     () => Object.values(payrollImporto).reduce((sum, v) => sum + (Number(v) || 0), 0),
     [payrollImporto],
   )
-
-  useEffect(() => {
-    setHoursOverride({})
-    setPayrollImporto({})
-  }, [rangeFromStr, rangeToStr, planView])
 
   useEffect(() => {
     setRateDraft((prev) => {
@@ -631,6 +676,80 @@ export default function StaffPage() {
     })
   }, [])
 
+  const calculateAllPayrollImporto = useCallback(() => {
+    const next = {}
+    for (const row of payrollRows) {
+      const rate = parseDecimalInput(rateDraft[row.member.id] ?? row.member.hourly_rate)
+      next[row.member.id] = row.ore * rate
+    }
+    setPayrollImporto(next)
+  }, [payrollRows, rateDraft])
+
+  const buildPayrollLinesForSave = useCallback(() => {
+    const lines = []
+    for (const row of payrollRows) {
+      const amount = payrollImporto[row.member.id]
+      if (amount === undefined) continue
+      const rate = parseDecimalInput(rateDraft[row.member.id] ?? row.member.hourly_rate)
+      lines.push({
+        staff_member_id: row.member.id,
+        name: row.member.name,
+        hours: row.ore,
+        hourly_rate: rate,
+        amount: Number(amount) || 0,
+      })
+    }
+    return lines
+  }, [payrollRows, payrollImporto, rateDraft])
+
+  const applyPayrollMonthSnapshot = useCallback(
+    (rec) => {
+      if (!rec?.lines?.length) {
+        setHoursOverride({})
+        setPayrollImporto({})
+        return
+      }
+      const ho = {}
+      const imp = {}
+      const rd = {}
+      for (const ln of rec.lines) {
+        const id = ln.staff_member_id
+        ho[id] = formatHoursDecimal(ln.hours)
+        imp[id] = ln.amount
+        rd[id] = ln.hourly_rate != null ? String(ln.hourly_rate) : ''
+      }
+      setHoursOverride(ho)
+      setPayrollImporto(imp)
+      setRateDraft((prev) => ({ ...prev, ...rd }))
+    },
+    [],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const months = await fetchStaffPayrollMonths()
+        if (cancelled) return
+        const hit = (months || []).find((m) => m.year_month === payrollMonthYm)
+        if (hit) {
+          applyPayrollMonthSnapshot(hit)
+        } else {
+          setHoursOverride({})
+          setPayrollImporto({})
+        }
+      } catch {
+        if (!cancelled) {
+          setHoursOverride({})
+          setPayrollImporto({})
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [payrollMonthYm, applyPayrollMonthSnapshot])
+
   useEffect(() => {
     if (payrollDaysInfoMemberId == null) return
     if (!members.some((m) => m.id === payrollDaysInfoMemberId)) {
@@ -644,17 +763,17 @@ export default function StaffPage() {
     if (!member) return null
     const worked = aggregateMemberWorkedDays(
       payrollDaysInfoMemberId,
-      shifts,
-      rangeFromStr,
-      rangeToStr,
+      payrollShifts,
+      payrollFromStr,
+      payrollToStr,
     )
     return {
       member,
-      periodFrom: rangeFromStr,
-      periodTo: rangeToStr,
+      periodFrom: payrollFromStr,
+      periodTo: payrollToStr,
       ...worked,
     }
-  }, [payrollDaysInfoMemberId, members, shifts, rangeFromStr, rangeToStr])
+  }, [payrollDaysInfoMemberId, members, payrollShifts, payrollFromStr, payrollToStr])
 
   const dayLongLabel = useMemo(
     () =>
@@ -1780,15 +1899,31 @@ export default function StaffPage() {
           Ore lavorate e costo
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
-          Periodo: <strong>{rangeFromStr}</strong> → <strong>{rangeToStr}</strong>.
-          Le ore si calcolano dai turni nel periodo (puoi modificarle).
-          <strong> Info giorni lavorati</strong> apre il dettaglio giorno per giorno (come nel report turni).
-          <strong> Calcola</strong> ottiene l&apos;importo (ore × prezzo/ora); <strong>Cancella</strong> azzera
-          l&apos;importo della riga.
-          {!planningLoaded && (
-            <span> Carica il planning per aggiornare le ore dai turni.</span>
-          )}
+          Le ore si calcolano dai turni del <strong>mese selezionato</strong> (puoi modificarle).
+          <strong> Calcola tutti</strong> o <strong>Calcola</strong> per riga.
+          <strong> Salva</strong> / <strong>Ricarica in archivio</strong> memorizzano il mese nel menu Archivio (compatto, senza lista lunga).
         </p>
+        <StaffPayrollMonthPanel
+          payrollMonthYm={payrollMonthYm}
+          onPayrollMonthYmChange={setPayrollMonthYm}
+          periodFromStr={payrollFromStr}
+          periodToStr={payrollToStr}
+          buildLinesForSave={buildPayrollLinesForSave}
+          applySnapshot={applyPayrollMonthSnapshot}
+          onNotifyError={setError}
+          onNotifySuccess={setSuccess}
+          disabled={shiftBusy}
+        />
+        <div style={{ marginBottom: '0.65rem' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={calculateAllPayrollImporto}
+            disabled={members.length === 0}
+          >
+            Calcola tutti gli importi
+          </button>
+        </div>
         <div className="table-wrap">
           <table className="app-table app-table--compact">
             <thead>

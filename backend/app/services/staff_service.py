@@ -1,9 +1,11 @@
+import json
 from datetime import date, time, timedelta
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from ..models.staff_member import StaffMember
+from ..models.staff_payroll_month import StaffPayrollMonth
 from ..models.staff_shift_entry import StaffShiftEntry
 from ..schemas import staff as staff_schema
 
@@ -226,3 +228,116 @@ def sunday_start(d: date) -> date:
 
 def saturday_end(sunday: date) -> date:
     return sunday + timedelta(days=6)
+
+
+def _lines_to_json(lines: List[staff_schema.StaffPayrollMonthLine]) -> str:
+    return json.dumps([ln.model_dump() for ln in lines], ensure_ascii=False)
+
+
+def _lines_from_json(raw: str) -> List[staff_schema.StaffPayrollMonthLine]:
+    try:
+        data = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        data = []
+    out: List[staff_schema.StaffPayrollMonthLine] = []
+    if not isinstance(data, list):
+        return out
+    for item in data:
+        if isinstance(item, dict):
+            out.append(staff_schema.StaffPayrollMonthLine.model_validate(item))
+    return out
+
+
+def _total_from_lines(lines: List[staff_schema.StaffPayrollMonthLine]) -> float:
+    return round(sum(float(ln.amount or 0) for ln in lines), 2)
+
+
+def payroll_month_to_read(row: StaffPayrollMonth) -> staff_schema.StaffPayrollMonthRead:
+    lines = _lines_from_json(row.lines_json)
+    return staff_schema.StaffPayrollMonthRead(
+        id=row.id,
+        year_month=row.year_month,
+        period_from=row.period_from,
+        period_to=row.period_to,
+        lines=lines,
+        total_amount=float(row.total_amount or 0),
+        notes=row.notes,
+    )
+
+
+def list_payroll_months(db: Session) -> List[staff_schema.StaffPayrollMonthRead]:
+    rows = (
+        db.query(StaffPayrollMonth)
+        .order_by(StaffPayrollMonth.year_month.desc())
+        .all()
+    )
+    return [payroll_month_to_read(r) for r in rows]
+
+
+def get_payroll_month(db: Session, month_id: int) -> Optional[staff_schema.StaffPayrollMonthRead]:
+    row = db.query(StaffPayrollMonth).filter(StaffPayrollMonth.id == month_id).first()
+    if not row:
+        return None
+    return payroll_month_to_read(row)
+
+
+def get_payroll_month_by_ym(db: Session, year_month: str) -> Optional[staff_schema.StaffPayrollMonthRead]:
+    row = db.query(StaffPayrollMonth).filter(StaffPayrollMonth.year_month == year_month).first()
+    if not row:
+        return None
+    return payroll_month_to_read(row)
+
+
+def create_payroll_month(
+    db: Session, payload: staff_schema.StaffPayrollMonthCreate
+) -> staff_schema.StaffPayrollMonthRead:
+    existing = (
+        db.query(StaffPayrollMonth)
+        .filter(StaffPayrollMonth.year_month == payload.year_month)
+        .first()
+    )
+    if existing:
+        raise ValueError(f"Esiste già un archivio per {payload.year_month}")
+    total = _total_from_lines(payload.lines)
+    row = StaffPayrollMonth(
+        year_month=payload.year_month,
+        period_from=payload.period_from,
+        period_to=payload.period_to,
+        lines_json=_lines_to_json(payload.lines),
+        total_amount=total,
+        notes=payload.notes,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return payroll_month_to_read(row)
+
+
+def update_payroll_month(
+    db: Session, month_id: int, payload: staff_schema.StaffPayrollMonthUpdate
+) -> Optional[staff_schema.StaffPayrollMonthRead]:
+    row = db.query(StaffPayrollMonth).filter(StaffPayrollMonth.id == month_id).first()
+    if not row:
+        return None
+    if payload.period_from is not None:
+        row.period_from = payload.period_from
+    if payload.period_to is not None:
+        row.period_to = payload.period_to
+    if payload.period_from and payload.period_to and payload.period_to < payload.period_from:
+        raise ValueError("period_to deve essere >= period_from")
+    row.lines_json = _lines_to_json(payload.lines)
+    row.total_amount = _total_from_lines(payload.lines)
+    if payload.notes is not None:
+        row.notes = payload.notes.strip() or None
+    db.commit()
+    db.refresh(row)
+    return payroll_month_to_read(row)
+
+
+def delete_payroll_month(db: Session, month_id: int) -> bool:
+    row = db.query(StaffPayrollMonth).filter(StaffPayrollMonth.id == month_id).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True

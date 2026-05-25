@@ -1,4 +1,4 @@
-import { normalizeApiBase, secureAbsoluteUrl } from '../utils/urlSecurity'
+import { ensureLocalDevHttp, normalizeApiBase, secureAbsoluteUrl } from '../utils/urlSecurity'
 
 /** Base URL API (env VITE_API_BASE_URL; in produzione preferire /api su HTTPS). */
 export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL)
@@ -10,7 +10,7 @@ export function apiUrl(path) {
   if (base.startsWith('/')) {
     return `${base}${q}`
   }
-  return secureAbsoluteUrl(`${base}${q}`)
+  return ensureLocalDevHttp(secureAbsoluteUrl(`${base}${q}`))
 }
 
 /** Estrae messaggio leggibile da risposte FastAPI (detail string o elenco errori validazione). */

@@ -56,6 +56,24 @@ class StaffShiftAiTests(unittest.TestCase):
         )
         self.assertTrue(r.get("suggested_shifts"))
 
+    def test_bulk_command_fast_path(self):
+        self.assertTrue(
+            ai_heuristics.is_staff_bulk_command("tutti i dipendenti lunedì venerdì 8-16")
+        )
+        ctx = {
+            "selected_date": "2026-05-18",
+            "week_start": "2026-05-18",
+            "week_end": "2026-05-24",
+        }
+        names = ["Anna Verdi", "Luca Bianchi"]
+        r = ai_service.suggest_staff_shift(
+            "tutti i dipendenti lunedì venerdì 8-16", names, ctx
+        )
+        shifts = r.get("suggested_shifts") or []
+        self.assertGreaterEqual(len(shifts), 10)
+        if r.get("fast_path"):
+            self.assertEqual(len(shifts), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

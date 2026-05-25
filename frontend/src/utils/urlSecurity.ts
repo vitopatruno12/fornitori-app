@@ -1,19 +1,44 @@
 /** Host del sito gestionale: API same-origin sotto /api (non la root SPA). */
 const FRONTEND_APP_HOSTS = new Set(['www.atlass.it', 'atlass.it'])
 
+export function isLocalDevHost(hostname: string): boolean {
+  const host = String(hostname || '').toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+}
+
+/** FastAPI in locale è sempre HTTP: evita https://127.0.0.1:8000 (ERR_SSL_PROTOCOL_ERROR). */
+export function ensureLocalDevHttp(url: string): string {
+  const raw = String(url || '').trim()
+  if (!raw || raw.startsWith('/')) return raw
+  try {
+    const u = new URL(raw)
+    if (isLocalDevHost(u.hostname) && u.protocol === 'https:') {
+      u.protocol = 'http:'
+    }
+    return u.href
+  } catch {
+    return raw
+  }
+}
+
 /** Converte http→https (tranne localhost). */
 export function ensureHttpsUrl(url: string): string {
   const raw = String(url || '').trim()
   if (!raw) return raw
   try {
     const u = new URL(raw)
-    const host = u.hostname.toLowerCase()
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
-    if (u.protocol === 'http:' && !isLocal) {
+    if (isLocalDevHost(u.hostname)) {
+      if (u.protocol === 'https:') u.protocol = 'http:'
+      return u.href
+    }
+    if (u.protocol === 'http:') {
       u.protocol = 'https:'
     }
     return u.href
   } catch {
+    if (/^https:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(raw)) {
+      return raw.replace(/^https:/i, 'http:')
+    }
     return raw.replace(/^http:\/\//i, 'https://')
   }
 }
@@ -36,8 +61,10 @@ export function normalizeApiBase(raw: unknown): string {
   try {
     const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`)
     const host = u.hostname.toLowerCase()
-    const isLocal = host === 'localhost' || host === '127.0.0.1'
-    if (u.protocol === 'http:' && !isLocal) {
+    const isLocal = isLocalDevHost(host)
+    if (isLocal) {
+      u.protocol = 'http:'
+    } else if (u.protocol === 'http:') {
       u.protocol = 'https:'
     }
     let path = (u.pathname || '/').replace(/\/+$/, '')

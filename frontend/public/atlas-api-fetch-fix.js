@@ -8,9 +8,18 @@
   var apiPaths =
     /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|aruba|support-technicians|vne|health)(\/|$)/
 
+  function isLocalHost(hostname) {
+    var h = (hostname || '').toLowerCase()
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
+  }
+
   function fixUrl(url) {
     try {
       var u = new URL(url, window.location.href)
+      if (isLocalHost(u.hostname)) {
+        if (u.protocol === 'https:') u.protocol = 'http:'
+        return u.toString()
+      }
       if (!hosts[u.hostname]) return url
       if (u.protocol === 'http:') u.protocol = 'https:'
       var p = u.pathname || '/'

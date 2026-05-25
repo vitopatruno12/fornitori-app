@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         _ensure_order_delivery_signature_columns()
         _ensure_cash_entries_activity_column()
         _ensure_staff_member_hourly_rate_column()
+        _ensure_staff_payroll_months_table()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -354,11 +355,49 @@ def _ensure_staff_member_hourly_rate_column() -> None:
         )
 
 
+def _ensure_staff_payroll_months_table() -> None:
+    """Archivio stipendi mensili (migr. 20260524_staff_payroll_months.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS staff_payroll_months (
+                      id SERIAL PRIMARY KEY,
+                      year_month VARCHAR(7) NOT NULL,
+                      period_from DATE NOT NULL,
+                      period_to DATE NOT NULL,
+                      lines_json TEXT NOT NULL DEFAULT '[]',
+                      total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                      notes TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_staff_payroll_months_year_month UNIQUE (year_month)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_staff_payroll_months_year_month
+                    ON staff_payroll_months (year_month DESC)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare staff_payroll_months: %s",
+            e,
+        )
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
         required = [
             ("staff_members", "hourly_rate", "20260519_staff_hourly_rate.sql"),
+            ("staff_payroll_months", "year_month", "20260524_staff_payroll_months.sql"),
             ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
             ("cash_entries", "activity", "20260519_cash_entries_activity.sql"),
             ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),

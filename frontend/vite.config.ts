@@ -17,6 +17,18 @@ export default defineConfig(({ mode }) => {
   define: {
     'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBase),
   },
+  plugins: [
+    {
+      name: 'atlas-csp-dev',
+      transformIndexHtml(html) {
+        if (mode === 'production') return html
+        return html.replace(
+          /<meta\s+http-equiv="Content-Security-Policy"\s+content="upgrade-insecure-requests"\s*\/?>\s*/i,
+          '',
+        )
+      },
+    },
+  ],
   server: {
     proxy: {
       '/api': {
