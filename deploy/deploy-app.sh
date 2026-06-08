@@ -15,9 +15,24 @@ set -euo pipefail
 REPO_URL="${1:-https://github.com/vitopatruno12/fornitori-app.git}"
 BRANCH="${2:-main}"
 APP_DIR="${APP_DIR:-/opt/fornitori-app}"
-VENV_DIR="$APP_DIR/backend/.venv"
 
 log() { printf "\n\033[1;32m==> %s\033[0m\n" "$*"; }
+
+resolve_venv_dir() {
+    if [[ -n "${VENV_DIR:-}" ]]; then
+        echo "$VENV_DIR"
+        return
+    fi
+    if [[ -d "$APP_DIR/backend/venv" ]]; then
+        echo "$APP_DIR/backend/venv"
+        return
+    fi
+    if [[ -d "$APP_DIR/backend/.venv" ]]; then
+        echo "$APP_DIR/backend/.venv"
+        return
+    fi
+    echo "$APP_DIR/backend/venv"
+}
 
 resolve_app_user() {
     if [[ -n "${APP_USER:-}" ]] && id "$APP_USER" &>/dev/null; then
@@ -41,7 +56,8 @@ resolve_app_user() {
 
 APP_USER="$(resolve_app_user)"
 APP_GROUP="$(id -gn "$APP_USER" 2>/dev/null || echo "$APP_USER")"
-log "Utente deploy: $APP_USER:$APP_GROUP (APP_DIR=$APP_DIR)"
+VENV_DIR="$(resolve_venv_dir)"
+log "Utente deploy: $APP_USER:$APP_GROUP (APP_DIR=$APP_DIR, VENV=$VENV_DIR)"
 
 if [[ $EUID -ne 0 ]]; then
    echo "Devi essere root (usa: sudo bash $0)"
@@ -103,7 +119,9 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 log "Installazione systemd unit fornitori-api"
-sed -e "s|/opt/fornitori-app|$APP_DIR|g" \
+sed -e "s|/opt/fornitori-app/backend/venv|$VENV_DIR|g" \
+    -e "s|/opt/fornitori-app/backend/.venv|$VENV_DIR|g" \
+    -e "s|/opt/fornitori-app|$APP_DIR|g" \
     -e "s|^User=fornitori|User=$APP_USER|" \
     -e "s|^Group=fornitori|Group=$APP_GROUP|" \
     "$APP_DIR/deploy/fornitori-api.service" > /etc/systemd/system/fornitori-api.service
