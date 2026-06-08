@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_orders_sequence_number_column()
         _ensure_order_delivery_signature_columns()
         _ensure_cash_entries_activity_column()
+        _ensure_supplier_locales_column()
         _ensure_staff_member_hourly_rate_column()
         _ensure_staff_payroll_months_table()
     except OperationalError as e:
@@ -333,6 +334,25 @@ def _ensure_cash_entries_activity_column() -> None:
     except Exception as e:
         logger.warning(
             "Impossibile verificare/aggiornare cash_entries.activity: %s",
+            e,
+        )
+
+
+def _ensure_supplier_locales_column() -> None:
+    """Locali/punti vendita in cui il fornitore è presente (slug CSV, es. risacca,via_lattea)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE suppliers
+                    ADD COLUMN IF NOT EXISTS locales VARCHAR(255)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare suppliers.locales: %s",
             e,
         )
 

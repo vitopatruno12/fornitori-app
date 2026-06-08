@@ -22,6 +22,7 @@ class Supplier(Base):
   merchandise_category = Column(String(120), nullable=True)
   notes = Column(Text, nullable=True)
   price_list_label = Column(String(255), nullable=True)
+  locales = Column(String(255), nullable=True)
   is_active = Column(Boolean, nullable=False, server_default="1")
   is_expired = Column(Boolean, nullable=False, server_default="0")
   created_at = Column(DateTime(timezone=True), server_default=func.now())

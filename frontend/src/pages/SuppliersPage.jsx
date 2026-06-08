@@ -5,6 +5,12 @@ import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestSupplierFields } from '../services/aiService'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import { loadPrimaNotaLocales, localeLabel } from '../constants/primaNotaLocales'
+import {
+  formatSupplierLocales,
+  parseSupplierLocales,
+  serializeSupplierLocales,
+} from '../utils/supplierLocales.js'
 import {
   enrichSupplierFields,
   mergeSupplierFields,
@@ -61,6 +67,8 @@ export default function SuppliersPage() {
   const [merchandiseCategory, setMerchandiseCategory] = useState('')
   const [notes, setNotes] = useState('')
   const [priceListLabel, setPriceListLabel] = useState('')
+  const [supplierLocales, setSupplierLocales] = useState([])
+  const [localePick, setLocalePick] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [isExpired, setIsExpired] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -82,16 +90,39 @@ export default function SuppliersPage() {
   const [aiSupplierAnomalies, setAiSupplierAnomalies] = useState([])
   const [ibanPanelOpen, setIbanPanelOpen] = useState(false)
   const [quickEditSupplierId, setQuickEditSupplierId] = useState('')
+  const localeOptions = useMemo(() => loadPrimaNotaLocales(), [])
 
   const filteredSuppliers = useMemo(() => {
     const list = Array.isArray(suppliers) ? suppliers : []
     const q = search.trim().toLowerCase()
     if (!q) return list
     return list.filter((s) => {
-      const blob = [s.name, s.vat_number, s.fiscal_code, s.email, s.phone, s.city, s.iban].filter(Boolean).join(' ').toLowerCase()
+      const blob = [
+        s.name,
+        s.vat_number,
+        s.fiscal_code,
+        s.email,
+        s.phone,
+        s.city,
+        s.iban,
+        formatSupplierLocales(s.locales, localeOptions),
+      ].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
-  }, [suppliers, search])
+  }, [suppliers, search, localeOptions])
+
+  function toggleSupplierLocale(id) {
+    if (!id) return
+    setSupplierLocales((prev) => (
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    ))
+  }
+
+  function addLocaleFromSelect() {
+    if (!localePick || supplierLocales.includes(localePick)) return
+    setSupplierLocales((prev) => [...prev, localePick])
+    setLocalePick('')
+  }
 
   useEffect(() => {
     if (!quickEditSupplierId) return
@@ -151,6 +182,7 @@ export default function SuppliersPage() {
         merchandise_category: merchandiseCategory.trim() || undefined,
         notes: notes.trim() || undefined,
         price_list_label: priceListLabel.trim() || undefined,
+        locales: serializeSupplierLocales(supplierLocales),
         is_active: isActive,
         is_expired: isExpired,
       }
@@ -186,6 +218,8 @@ export default function SuppliersPage() {
     setMerchandiseCategory('')
     setNotes('')
     setPriceListLabel('')
+    setSupplierLocales([])
+    setLocalePick('')
     setIsActive(true)
     setIsExpired(false)
   }
@@ -204,6 +238,8 @@ export default function SuppliersPage() {
     setMerchandiseCategory(s.merchandise_category || '')
     setNotes(s.notes || '')
     setPriceListLabel(s.price_list_label || '')
+    setSupplierLocales(parseSupplierLocales(s.locales))
+    setLocalePick('')
     setIsActive(s.is_active !== false)
     setIsExpired(!!s.is_expired)
     setError('')
@@ -492,6 +528,51 @@ export default function SuppliersPage() {
             </div>
           </div>
           <div className="form-group">
+            <label htmlFor="sup-locale-select">Locali / punti vendita</label>
+            <div className="sup-locale-picker">
+              <select
+                id="sup-locale-select"
+                className="form-control"
+                value={localePick}
+                onChange={(e) => setLocalePick(e.target.value)}
+              >
+                <option value="">Seleziona locale…</option>
+                {localeOptions
+                  .filter((l) => !supplierLocales.includes(l.id))
+                  .map((l) => (
+                    <option key={l.id} value={l.id}>{l.label}</option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!localePick}
+                onClick={addLocaleFromSelect}
+              >
+                Aggiungi
+              </button>
+            </div>
+            {supplierLocales.length > 0 ? (
+              <div className="sup-locale-tags" aria-label="Locali selezionati">
+                {supplierLocales.map((id) => (
+                  <span key={id} className="sup-locale-tag">
+                    {localeLabel(id, localeOptions)}
+                    <button
+                      type="button"
+                      className="sup-locale-tag-remove"
+                      onClick={() => toggleSupplierLocale(id)}
+                      aria-label={`Rimuovi ${localeLabel(id, localeOptions)}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="sup-locale-hint">Nessun locale selezionato (es. Risacca, La Via Lattea, Mediazione).</p>
+            )}
+          </div>
+          <div className="form-group">
             <label>Condizioni di pagamento</label>
             <textarea className="form-control" value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} rows={2} placeholder="Es. 30gg fine mese, RID, bonifico" />
           </div>
@@ -586,11 +667,12 @@ export default function SuppliersPage() {
         </div>
         {loading && <p className="loading">Caricamento...</p>}
         {!loading && !error && (
-          <div className="table-wrap pn-table-wrap" style={{ fontSize: '0.88rem' }}>
+          <div className="table-wrap sup-table-wrap" style={{ fontSize: '0.88rem' }}>
             <table className="app-table">
               <thead>
                 <tr>
                   <th>Ragione sociale</th>
+                  <th>Locali</th>
                   <th>P.IVA / CF</th>
                   <th>Contatti</th>
                   <th>Referente</th>
@@ -604,7 +686,7 @@ export default function SuppliersPage() {
                   <th>Ult. consegna</th>
                   <th>Ult. fattura</th>
                   <th className="text-end">Scad. aperte</th>
-                  <th>Azioni</th>
+                  <th className="sup-actions-col">Azioni</th>
                 </tr>
               </thead>
               <tbody>
@@ -616,6 +698,9 @@ export default function SuppliersPage() {
                     title="Apri scheda fornitore"
                   >
                     <td style={{ fontWeight: 600 }}>{s.name}</td>
+                    <td className="sup-locales-cell" title={formatSupplierLocales(s.locales, localeOptions)}>
+                      {formatSupplierLocales(s.locales, localeOptions)}
+                    </td>
                     <td>
                       <div>{s.vat_number || '–'}</div>
                       <div style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>{s.fiscal_code || ''}</div>
@@ -643,21 +728,19 @@ export default function SuppliersPage() {
                     <td>{formatDateTime(s.ultima_consegna)}</td>
                     <td>{formatDateTime(s.ultima_fattura)}</td>
                     <td className="text-end">{s.scadenze_aperte ?? 0}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', justifyContent: 'flex-end' }}>
+                    <td className="sup-actions-col" onClick={(e) => e.stopPropagation()}>
+                      <div className="sup-actions-btns">
                         <button
                           type="button"
-                          className="btn btn-primary"
-                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.85rem' }}
+                          className="btn btn-primary btn-sm"
                           onClick={() => handleEdit(s)}
-                          title="Apri il modulo in alto per modificare l’anagrafica"
+                          title="Modifica anagrafica"
                         >
-                          Modifica fornitore
+                          Modifica
                         </button>
                         <button
                           type="button"
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                          className="btn btn-secondary btn-sm"
                           onClick={() => openSupplierDrawer(s)}
                           title="Scheda e documenti"
                         >
@@ -665,9 +748,9 @@ export default function SuppliersPage() {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-outline-danger"
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                          className="btn btn-outline-danger btn-sm"
                           onClick={() => handleDelete(s)}
+                          title="Elimina fornitore"
                         >
                           Elimina
                         </button>
@@ -677,7 +760,7 @@ export default function SuppliersPage() {
                 ))}
                 {filteredSuppliers.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="empty-state">{suppliers.length === 0 ? 'Nessun fornitore presente.' : 'Nessun risultato per la ricerca.'}</td>
+                    <td colSpan={16} className="empty-state">{suppliers.length === 0 ? 'Nessun fornitore presente.' : 'Nessun risultato per la ricerca.'}</td>
                   </tr>
                 )}
               </tbody>

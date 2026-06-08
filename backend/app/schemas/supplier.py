@@ -1,7 +1,29 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+from ..constants.prima_nota import LEGACY_ACTIVITY_ALIASES, PRIMA_NOTA_ACTIVITIES, is_valid_activity_slug
+
+
+def normalize_supplier_locales(raw: Optional[str]) -> Optional[str]:
+  if raw is None:
+    return None
+  text = str(raw).strip()
+  if not text:
+    return None
+  known = set(PRIMA_NOTA_ACTIVITIES)
+  slugs: list[str] = []
+  for part in text.split(","):
+    slug = part.strip().lower()
+    if not slug:
+      continue
+    if slug in LEGACY_ACTIVITY_ALIASES:
+      slug = LEGACY_ACTIVITY_ALIASES[slug]
+    if slug in known or is_valid_activity_slug(slug):
+      if slug not in slugs:
+        slugs.append(slug)
+  return ",".join(slugs) if slugs else None
 
 
 class SupplierBase(BaseModel):
@@ -19,8 +41,14 @@ class SupplierBase(BaseModel):
   merchandise_category: Optional[str] = None
   notes: Optional[str] = None
   price_list_label: Optional[str] = None
+  locales: Optional[str] = None
   is_active: bool = True
   is_expired: bool = False
+
+  @field_validator("locales", mode="before")
+  @classmethod
+  def _normalize_locales(cls, value):
+    return normalize_supplier_locales(value)
 
 
 class SupplierCreate(SupplierBase):
@@ -42,8 +70,14 @@ class SupplierUpdate(BaseModel):
   merchandise_category: Optional[str] = None
   notes: Optional[str] = None
   price_list_label: Optional[str] = None
+  locales: Optional[str] = None
   is_active: Optional[bool] = None
   is_expired: Optional[bool] = None
+
+  @field_validator("locales", mode="before")
+  @classmethod
+  def _normalize_locales(cls, value):
+    return normalize_supplier_locales(value)
 
 
 class SupplierRead(SupplierBase):
