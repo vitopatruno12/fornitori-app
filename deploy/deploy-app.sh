@@ -102,6 +102,12 @@ else
     sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
 fi
 
+log "Directory scrivibili per systemd (ReadWritePaths)"
+mkdir -p "$APP_DIR/backend/app/uploads" "$APP_DIR/backups"
+if id "$APP_USER" &>/dev/null; then
+    chown -R "$APP_USER:$APP_GROUP" "$APP_DIR/backend/app/uploads" "$APP_DIR/backups"
+fi
+
 log "Verifica file .env produzione"
 ENV_FILE="$APP_DIR/backend/.env"
 if [[ ! -f "$ENV_FILE" ]]; then

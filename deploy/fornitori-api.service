@@ -9,6 +9,7 @@ User=fornitori
 Group=fornitori
 WorkingDirectory=/opt/fornitori-app/backend
 EnvironmentFile=/opt/fornitori-app/backend/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/fornitori-app/backend/venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 \
     --port 8000 \
