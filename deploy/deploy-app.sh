@@ -14,11 +14,34 @@ set -euo pipefail
 
 REPO_URL="${1:-https://github.com/vitopatruno12/fornitori-app.git}"
 BRANCH="${2:-main}"
-APP_USER="${APP_USER:-fornitori}"
 APP_DIR="${APP_DIR:-/opt/fornitori-app}"
 VENV_DIR="$APP_DIR/backend/.venv"
 
 log() { printf "\n\033[1;32m==> %s\033[0m\n" "$*"; }
+
+resolve_app_user() {
+    if [[ -n "${APP_USER:-}" ]] && id "$APP_USER" &>/dev/null; then
+        echo "$APP_USER"
+        return
+    fi
+    if id fornitori &>/dev/null; then
+        echo fornitori
+        return
+    fi
+    if [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" &>/dev/null; then
+        echo "$SUDO_USER"
+        return
+    fi
+    if [[ -d "$APP_DIR" ]]; then
+        stat -c '%U' "$APP_DIR" 2>/dev/null || true
+        return
+    fi
+    echo root
+}
+
+APP_USER="$(resolve_app_user)"
+APP_GROUP="$(id -gn "$APP_USER" 2>/dev/null || echo "$APP_USER")"
+log "Utente deploy: $APP_USER:$APP_GROUP (APP_DIR=$APP_DIR)"
 
 if [[ $EUID -ne 0 ]]; then
    echo "Devi essere root (usa: sudo bash $0)"
@@ -40,14 +63,28 @@ else
     git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 fi
 
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-
-log "Creazione/aggiornamento virtualenv Python 3.12"
-if [[ ! -d "$VENV_DIR" ]]; then
-    sudo -u "$APP_USER" python3.12 -m venv "$VENV_DIR"
+if id "$APP_USER" &>/dev/null; then
+    chown -R "$APP_USER:$APP_GROUP" "$APP_DIR"
+else
+    log "Salto chown: utente $APP_USER non trovato"
 fi
-sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip wheel
-sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+
+log "Creazione/aggiornamento virtualenv Python"
+PY_BOOT="$(command -v python3.12 || command -v python3)"
+if [[ ! -d "$VENV_DIR" ]]; then
+    if [[ "$(id -un)" == "$APP_USER" ]]; then
+        "$PY_BOOT" -m venv "$VENV_DIR"
+    else
+        sudo -u "$APP_USER" "$PY_BOOT" -m venv "$VENV_DIR"
+    fi
+fi
+if [[ "$(id -un)" == "$APP_USER" ]]; then
+    "$VENV_DIR/bin/pip" install --upgrade pip wheel
+    "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+else
+    sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip wheel
+    sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt"
+fi
 
 log "Verifica file .env produzione"
 ENV_FILE="$APP_DIR/backend/.env"
@@ -66,7 +103,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 log "Installazione systemd unit fornitori-api"
-install -m 644 "$APP_DIR/deploy/fornitori-api.service" /etc/systemd/system/fornitori-api.service
+sed -e "s|/opt/fornitori-app|$APP_DIR|g" \
+    -e "s|^User=fornitori|User=$APP_USER|" \
+    -e "s|^Group=fornitori|Group=$APP_GROUP|" \
+    "$APP_DIR/deploy/fornitori-api.service" > /etc/systemd/system/fornitori-api.service
+chmod 644 /etc/systemd/system/fornitori-api.service
 systemctl daemon-reload
 systemctl enable fornitori-api
 
