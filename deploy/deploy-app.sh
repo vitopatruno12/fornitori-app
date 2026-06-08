@@ -124,6 +124,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "================================================================"
 fi
 
+log "Verifica import app (preflight)"
+if ! sudo -u "$APP_USER" bash -c "cd '$APP_DIR/backend' && '$VENV_DIR/bin/python' -c 'from app.main import app; print(\"import OK\")'" 2>&1; then
+    echo
+    echo "================================================================"
+    echo "  ERRORE: l'app non si importa. Correggi prima di avviare systemd."
+    echo "  Prova manualmente:"
+    echo "    cd $APP_DIR/backend"
+    echo "    sudo -u $APP_USER $VENV_DIR/bin/python -c 'from app.main import app'"
+    echo "================================================================"
+    exit 1
+fi
+
 log "Installazione systemd unit fornitori-api"
 sed -e "s|/opt/fornitori-app/backend/venv|$VENV_DIR|g" \
     -e "s|/opt/fornitori-app/backend/.venv|$VENV_DIR|g" \
@@ -146,6 +158,12 @@ fi
 sleep 2
 log "Stato del servizio"
 systemctl --no-pager --full status fornitori-api | head -20 || true
+
+if ! systemctl is-active --quiet fornitori-api; then
+    echo
+    log "Ultimi log fornitori-api (diagnostica)"
+    journalctl -u fornitori-api -n 40 --no-pager || true
+fi
 
 echo
 echo "================================================================"
