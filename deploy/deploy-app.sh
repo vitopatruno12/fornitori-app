@@ -136,11 +136,34 @@ if ! sudo -u "$APP_USER" bash -c "cd '$APP_DIR/backend' && '$VENV_DIR/bin/python
     exit 1
 fi
 
+port_8000_pid() {
+    ss -tlnp "sport = :8000" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1 || true
+}
+
+port_8000_managed_by_pm2() {
+    local pid
+    pid="$(port_8000_pid)"
+    [[ -n "$pid" && -r "/proc/$pid/cgroup" ]] && grep -q 'pm2' "/proc/$pid/cgroup"
+}
+
 free_api_port() {
     local port=8000
     systemctl stop fornitori-api 2>/dev/null || true
     systemctl reset-failed fornitori-api 2>/dev/null || true
+    systemctl stop atlas.service 2>/dev/null || true
     sleep 1
+    if port_8000_managed_by_pm2; then
+        echo
+        echo "================================================================"
+        echo "  Porta 8000 gestita da PM2 (pm2-mic04.service), non da fornitori-api."
+        echo "  PM2 riavvia uvicorn dopo ogni kill — va rimosso da PM2:"
+        echo "    pm2 list"
+        echo "    pm2 delete <nome|id>    # processo uvicorn su :8000"
+        echo "    pm2 save"
+        echo "  Poi rilancia: sudo APP_DIR=$APP_DIR bash deploy/deploy-app.sh"
+        echo "================================================================"
+        exit 1
+    fi
     if command -v ss &>/dev/null && ss -tln "sport = :$port" 2>/dev/null | grep -q ":$port"; then
         log "Porta $port occupata — termino processo uvicorn orfano"
         if command -v fuser &>/dev/null; then
