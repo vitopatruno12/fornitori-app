@@ -10,7 +10,8 @@ from ..services import price_list_service
 router = APIRouter(prefix="/price-list", tags=["price-list"])
 
 
-@router.get("/", response_model=List[PriceListItemRead])
+@router.get("", response_model=List[PriceListItemRead])
+@router.get("/", response_model=List[PriceListItemRead], include_in_schema=False)
 def list_by_supplier(
     supplier_id: int = Query(..., description="ID fornitore"),
     db: Session = Depends(get_db),
@@ -18,7 +19,8 @@ def list_by_supplier(
     return price_list_service.list_by_supplier(db, supplier_id)
 
 
-@router.post("/", response_model=PriceListItemRead)
+@router.post("", response_model=PriceListItemRead)
+@router.post("/", response_model=PriceListItemRead, include_in_schema=False)
 def add_or_update(payload: PriceListItemCreate, db: Session = Depends(get_db)):
     if not payload.product_description or not payload.product_description.strip():
         raise HTTPException(status_code=400, detail="Inserisci il tipo di merce")

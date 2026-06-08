@@ -28,7 +28,8 @@ def get_price_analytics(
     return delivery_service.price_analytics(db, supplier_id=supplier_id, product_description=product_description)
 
 
-@router.get("/", response_model=List[DeliveryReadEnriched])
+@router.get("", response_model=List[DeliveryReadEnriched])
+@router.get("/", response_model=List[DeliveryReadEnriched], include_in_schema=False)
 def list_deliveries(
     supplier_id: Optional[int] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
@@ -45,7 +46,8 @@ def list_deliveries(
     )
 
 
-@router.post("/", response_model=DeliveryRead)
+@router.post("", response_model=DeliveryRead)
+@router.post("/", response_model=DeliveryRead, include_in_schema=False)
 def create_delivery(payload: DeliveryCreate, db: Session = Depends(get_db)):
     return delivery_service.create_delivery(db, payload)
 

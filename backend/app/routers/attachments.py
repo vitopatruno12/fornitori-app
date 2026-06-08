@@ -10,7 +10,8 @@ from ..schemas.attachment import AttachmentRead
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
 
-@router.get("/", response_model=List[AttachmentRead])
+@router.get("", response_model=List[AttachmentRead])
+@router.get("/", response_model=List[AttachmentRead], include_in_schema=False)
 def list_attachments(
     cash_entry_id: Optional[int] = Query(None),
     invoice_id: Optional[int] = Query(None),

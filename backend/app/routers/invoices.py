@@ -61,7 +61,8 @@ def export_invoices_csv(
   )
 
 
-@router.get("/", response_model=List[InvoiceListOut])
+@router.get("", response_model=List[InvoiceListOut])
+@router.get("/", response_model=List[InvoiceListOut], include_in_schema=False)
 def list_invoices(
   supplier_id: Optional[int] = Query(default=None),
   due_filter: Optional[str] = Query(
@@ -89,7 +90,8 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
   return inv
 
 
-@router.post("/", response_model=InvoiceRead)
+@router.post("", response_model=InvoiceRead)
+@router.post("/", response_model=InvoiceRead, include_in_schema=False)
 async def create_invoice(
   supplier_id: int = Form(...),
   invoice_number: str = Form(...),

@@ -10,11 +10,13 @@ from ..services import customer_service
 router = APIRouter(prefix="/customers", tags=["customers"])
 
 
-@router.get("/", response_model=List[CustomerRead])
+@router.get("", response_model=List[CustomerRead])
+@router.get("/", response_model=List[CustomerRead], include_in_schema=False)
 def list_customers(db: Session = Depends(get_db)):
     return customer_service.list_customers(db)
 
 
-@router.post("/", response_model=CustomerRead)
+@router.post("", response_model=CustomerRead)
+@router.post("/", response_model=CustomerRead, include_in_schema=False)
 def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)):
     return customer_service.create_customer(db, payload)

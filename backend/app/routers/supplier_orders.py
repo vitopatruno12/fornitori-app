@@ -13,12 +13,14 @@ from ..services.order_pdf import build_order_pdf_bytes
 router = APIRouter(prefix="/supplier-orders", tags=["supplier-orders"])
 
 
-@router.post("/", response_model=SupplierOrderRead)
+@router.post("", response_model=SupplierOrderRead)
+@router.post("/", response_model=SupplierOrderRead, include_in_schema=False)
 def create_supplier_order(payload: SupplierOrderCreate, db: Session = Depends(get_db)):
     return supplier_order_service.create_order(db, payload)
 
 
-@router.get("/", response_model=List[SupplierOrderRead])
+@router.get("", response_model=List[SupplierOrderRead])
+@router.get("/", response_model=List[SupplierOrderRead], include_in_schema=False)
 def list_supplier_orders(
     supplier_id: Optional[int] = Query(default=None),
     date_from: Optional[date] = Query(default=None),
