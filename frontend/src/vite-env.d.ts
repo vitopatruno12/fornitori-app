@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly VITE_AI_API_URL?: string
   /** Origine HTTPS per link satelliti (es. https://www.atlass.it) */
   readonly VITE_PUBLIC_APP_URL?: string
+  /** Username login ATLAS */
+  readonly VITE_ATLAS_LOGIN_USER?: string
+  /** Password login ATLAS */
+  readonly VITE_ATLAS_LOGIN_PASSWORD?: string
 }
 
 interface ImportMeta {

@@ -1,4 +1,5 @@
 import React from 'react'
+import { validateAtlasLogin } from '../utils/atlasAuth'
 
 export type OperatorNavItem = {
   id: string
@@ -56,6 +57,10 @@ export default function OperatorSatelliteShell({
     const p = loginPassword.trim()
     if (!u || !p) {
       setLoginError('Inserisci username e password')
+      return
+    }
+    if (!validateAtlasLogin(u, p)) {
+      setLoginError('Username o password non corretti')
       return
     }
     setLoginError('')
