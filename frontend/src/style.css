@@ -2048,6 +2048,12 @@ select.form-control {
   margin-left: 0;
 }
 
+.staff-member-order {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  width: 3.5rem;
+}
+
 /* Dashboard: skeleton durante caricamento API */
 @keyframes dash-skeleton-shimmer {
   0% {

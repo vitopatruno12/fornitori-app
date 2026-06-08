@@ -1138,7 +1138,6 @@ export default function StaffPage() {
       } else {
         await createStaffMember({
           ...payload,
-          sort_order: members.length,
           is_active: true,
         })
         setSuccess('Dipendente aggiunto')
@@ -1317,7 +1316,6 @@ export default function StaffPage() {
           phone: m.phone || null,
           city: m.city || null,
           birth_date: m.birth_date || null,
-          sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
           is_active: m.is_active !== false,
         })
       }
@@ -1667,7 +1665,7 @@ export default function StaffPage() {
       for (const r of expandDemoRows()) names.add(r.name)
       for (const n of names) {
         if (!mem.find((m) => m.name === n)) {
-          await createStaffMember({ name: n, sort_order: 0, is_active: true })
+          await createStaffMember({ name: n, is_active: true })
         }
       }
       mem = await fetchStaffMembers()
@@ -1724,9 +1722,7 @@ export default function StaffPage() {
           {editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem', maxWidth: 720, lineHeight: 1.45 }}>
-          La colonna <strong>Ordine</strong> serve a definire in che sequenza compaiono i dipendenti negli elenchi caricati dal server (in particolare il menu a tendina quando aggiungi o modifichi una voce in pianificazione).
-          <br />
-          Usa numeri crescenti: chi ha il valore più basso viene elencato per primo; a parità di ordine vale l’ordine alfabetico sul nome.
+          La colonna <strong>Ordine</strong> viene assegnata automaticamente all’aggiunta di ogni dipendente e definisce la sequenza negli elenchi e nel menu a tendina della pianificazione.
         </p>
         <form onSubmit={handleAddMember} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 140px' }}>
@@ -1843,7 +1839,7 @@ export default function StaffPage() {
               </tr>
             </thead>
             <tbody>
-              {members.map((m) => (
+              {members.map((m, idx) => (
                 <tr key={m.id}>
                   <td style={{ fontWeight: 600 }}>{m.name}</td>
                   <td style={{ fontSize: '0.9rem', maxWidth: 200 }} title={m.email || ''}>
@@ -1863,29 +1859,8 @@ export default function StaffPage() {
                   <td style={{ fontSize: '0.9rem', maxWidth: 140 }} title={m.city || ''}>
                     {m.city || <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
-                  <td>
-                    <input
-                      type="number"
-                      className="form-control"
-                      style={{ width: 72 }}
-                      defaultValue={m.sort_order}
-                      onBlur={async (e) => {
-                        const v = Number(e.target.value)
-                        if (Number.isNaN(v) || v === m.sort_order) return
-                        try {
-                          await updateStaffMember(m.id, { sort_order: v })
-                          await refreshMembers()
-                        } catch (err) {
-                          const msg = String(err?.message || '')
-                          await refreshMembers()
-                          if (msg.includes('404') || msg.includes('non trovato')) {
-                            setError('Dipendente non più presente: elenco aggiornato.')
-                          } else {
-                            setError('Aggiornamento ordine non riuscito')
-                          }
-                        }
-                      }}
-                    />
+                  <td className="text-center staff-member-order" title={`Ordine automatico (posizione ${idx + 1})`}>
+                    {idx + 1}
                   </td>
                   <td>
                     <input

@@ -2,6 +2,7 @@ import json
 from datetime import date, time, timedelta
 from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models.staff_member import StaffMember
@@ -22,6 +23,11 @@ def get_member(db: Session, member_id: int) -> Optional[StaffMember]:
     return db.query(StaffMember).filter(StaffMember.id == member_id).first()
 
 
+def _next_member_sort_order(db: Session) -> int:
+    current_max = db.query(func.coalesce(func.max(StaffMember.sort_order), -1)).scalar()
+    return int(current_max) + 1
+
+
 def create_member(db: Session, payload: staff_schema.StaffMemberCreate) -> StaffMember:
     row = StaffMember(
         name=payload.name.strip(),
@@ -31,7 +37,7 @@ def create_member(db: Session, payload: staff_schema.StaffMemberCreate) -> Staff
         phone=payload.phone,
         city=payload.city,
         birth_date=payload.birth_date,
-        sort_order=payload.sort_order,
+        sort_order=_next_member_sort_order(db),
         hourly_rate=payload.hourly_rate,
         is_active=payload.is_active,
     )
