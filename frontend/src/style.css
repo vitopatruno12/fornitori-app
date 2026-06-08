@@ -2035,6 +2035,19 @@ select.form-control {
   line-height: 1.35;
 }
 
+.staff-member-actions {
+  white-space: nowrap;
+  min-width: 11rem;
+}
+
+.staff-member-actions .btn-sm {
+  margin-left: 0.3rem;
+}
+
+.staff-member-actions .btn-sm:first-child {
+  margin-left: 0;
+}
+
 /* Dashboard: skeleton durante caricamento API */
 @keyframes dash-skeleton-shimmer {
   0% {

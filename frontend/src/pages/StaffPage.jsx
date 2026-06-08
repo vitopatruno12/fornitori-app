@@ -548,6 +548,8 @@ export default function StaffPage() {
   const [newMemberPhone, setNewMemberPhone] = useState('')
   const [newMemberCity, setNewMemberCity] = useState('')
   const [newMemberBirthDate, setNewMemberBirthDate] = useState('')
+  const [editingMemberId, setEditingMemberId] = useState(null)
+  const memberFormSectionRef = React.useRef(null)
   const [memberInfoId, setMemberInfoId] = useState(null)
   const [memberInfoSaving, setMemberInfoSaving] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
@@ -1081,6 +1083,36 @@ export default function StaffPage() {
     setReportPdfBlob(null)
   }
 
+  function resetMemberForm() {
+    setEditingMemberId(null)
+    setNewMemberFirstName('')
+    setNewMemberLastName('')
+    setNewMemberEmail('')
+    setNewMemberPhone('')
+    setNewMemberCity('')
+    setNewMemberBirthDate('')
+  }
+
+  function handleEditMember(m) {
+    setEditingMemberId(m.id)
+    setNewMemberFirstName(m.first_name || '')
+    setNewMemberLastName(m.last_name || '')
+    if (!m.first_name && !m.last_name && m.name) {
+      const parts = String(m.name).trim().split(/\s+/)
+      setNewMemberFirstName(parts[0] || '')
+      setNewMemberLastName(parts.slice(1).join(' ') || '')
+    }
+    setNewMemberEmail(m.email || '')
+    setNewMemberPhone(m.phone || '')
+    setNewMemberCity(m.city || '')
+    setNewMemberBirthDate(m.birth_date ? String(m.birth_date).slice(0, 10) : '')
+    setError('')
+    setSuccess('')
+    window.requestAnimationFrame(() => {
+      memberFormSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
   async function handleAddMember(e) {
     e.preventDefault()
     const fn = newMemberFirstName.trim()
@@ -1089,29 +1121,32 @@ export default function StaffPage() {
       setError('Indica almeno nome o cognome')
       return
     }
+    const payload = {
+      name: `${fn} ${ln}`.trim(),
+      first_name: fn || null,
+      last_name: ln || null,
+      email: newMemberEmail.trim() || null,
+      phone: newMemberPhone.trim() || null,
+      city: newMemberCity.trim() || null,
+      birth_date: newMemberBirthDate.trim() || null,
+    }
     try {
       setError('')
-      await createStaffMember({
-        name: `${fn} ${ln}`.trim(),
-        first_name: fn || null,
-        last_name: ln || null,
-        email: newMemberEmail.trim() || null,
-        phone: newMemberPhone.trim() || null,
-        city: newMemberCity.trim() || null,
-        birth_date: newMemberBirthDate.trim() || null,
-        sort_order: members.length,
-        is_active: true,
-      })
-      setNewMemberFirstName('')
-      setNewMemberLastName('')
-      setNewMemberEmail('')
-      setNewMemberPhone('')
-      setNewMemberCity('')
-      setNewMemberBirthDate('')
-      setSuccess('Dipendente aggiunto')
+      if (editingMemberId) {
+        await updateStaffMember(editingMemberId, payload)
+        setSuccess('Dipendente aggiornato')
+      } else {
+        await createStaffMember({
+          ...payload,
+          sort_order: members.length,
+          is_active: true,
+        })
+        setSuccess('Dipendente aggiunto')
+      }
+      resetMemberForm()
       await refreshMembers()
     } catch (err) {
-      setError(err?.message || 'Errore salvataggio')
+      setError(err?.message || (editingMemberId ? 'Errore aggiornamento' : 'Errore salvataggio'))
     }
   }
 
@@ -1150,6 +1185,7 @@ export default function StaffPage() {
   async function handleDeleteMember(m) {
     if (!window.confirm(`Rimuovere ${m.name} e tutte le sue voci in pianificazione?`)) return
     try {
+      if (editingMemberId === m.id) resetMemberForm()
       if (memberInfoId === m.id) setMemberInfoId(null)
       await deleteStaffMember(m.id)
       setSuccess('Dipendente rimosso')
@@ -1683,9 +1719,9 @@ export default function StaffPage() {
       {success && <div className="alert alert-info">{success}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <section className="card" style={{ order: 1, marginBottom: 0 }}>
+      <section className="card" ref={memberFormSectionRef} style={{ order: 1, marginBottom: 0 }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
-          Dipendenti
+          {editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem', maxWidth: 720, lineHeight: 1.45 }}>
           La colonna <strong>Ordine</strong> serve a definire in che sequenza compaiono i dipendenti negli elenchi caricati dal server (in particolare il menu a tendina quando aggiungi o modifichi una voce in pianificazione).
@@ -1718,8 +1754,13 @@ export default function StaffPage() {
             <input type="date" className="form-control" value={newMemberBirthDate} onChange={(e) => setNewMemberBirthDate(e.target.value)} />
           </div>
           <button type="submit" className="btn btn-primary">
-            Aggiungi
+            {editingMemberId ? 'Salva modifiche' : 'Aggiungi'}
           </button>
+          {editingMemberId && (
+            <button type="button" className="btn btn-secondary" onClick={resetMemberForm}>
+              Annulla
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-outline-danger"
@@ -1866,13 +1907,20 @@ export default function StaffPage() {
                       }}
                     />
                   </td>
-                  <td className="text-end" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="text-end staff-member-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleEditMember(m)}
+                      title="Modifica anagrafica nel modulo sopra"
+                    >
+                      Modifica
+                    </button>
                     <button
                       type="button"
                       className="btn btn-outline-secondary btn-sm"
-                      style={{ marginRight: '0.35rem' }}
                       onClick={() => setMemberInfoId(m.id)}
-                      title="Scheda anagrafica: nome, cognome, email, telefono, città, età"
+                      title="Scheda rapida: nome, cognome, email, telefono, città, età"
                     >
                       Info
                     </button>
