@@ -136,6 +136,25 @@ if ! sudo -u "$APP_USER" bash -c "cd '$APP_DIR/backend' && '$VENV_DIR/bin/python
     exit 1
 fi
 
+free_api_port() {
+    local port=8000
+    systemctl stop fornitori-api 2>/dev/null || true
+    sleep 1
+    if command -v ss &>/dev/null && ss -tln "sport = :$port" 2>/dev/null | grep -q ":$port"; then
+        log "Porta $port occupata — termino processo uvicorn orfano"
+        if command -v fuser &>/dev/null; then
+            fuser -k "${port}/tcp" 2>/dev/null || true
+        elif command -v lsof &>/dev/null; then
+            local pids
+            pids="$(lsof -ti ":$port" 2>/dev/null || true)"
+            if [[ -n "$pids" ]]; then
+                kill $pids 2>/dev/null || true
+            fi
+        fi
+        sleep 1
+    fi
+}
+
 log "Installazione systemd unit fornitori-api"
 sed -e "s|/opt/fornitori-app/backend/venv|$VENV_DIR|g" \
     -e "s|/opt/fornitori-app/backend/.venv|$VENV_DIR|g" \
@@ -146,6 +165,7 @@ sed -e "s|/opt/fornitori-app/backend/venv|$VENV_DIR|g" \
 chmod 644 /etc/systemd/system/fornitori-api.service
 systemctl daemon-reload
 systemctl enable fornitori-api
+free_api_port
 
 if systemctl is-active --quiet fornitori-api; then
     log "Restart fornitori-api"
