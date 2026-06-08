@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, cast
+from sqlalchemy import func, cast, or_
 from sqlalchemy.types import Numeric
 from sqlalchemy.orm import Session
 
 from ..models.cash_entry import CashEntry
 from ..models.delivery import Delivery
+from ..models.delivery_document import DeliveryDocument
 from ..models.invoice import Invoice
 from ..models.supplier import Supplier
+from ..models.supplier_order import SupplierOrder, SupplierOrderItem
 from ..models.supplier_price_list import SupplierPriceList
 from ..schemas import supplier as supplier_schema
 from ..schemas.supplier import SupplierRead, SupplierWithStats
@@ -109,21 +111,72 @@ def update_supplier(
   return supplier
 
 
+def _purge_supplier_dependencies(db: Session, supplier_id: Optional[int] = None) -> None:
+  """Rimuove dati collegati ai fornitori prima della delete (evita FK violation)."""
+  delivery_q = db.query(Delivery)
+  document_q = db.query(DeliveryDocument)
+  invoice_q = db.query(Invoice)
+  price_q = db.query(SupplierPriceList)
+
+  if supplier_id is not None:
+    delivery_q = delivery_q.filter(Delivery.supplier_id == supplier_id)
+    document_q = document_q.filter(DeliveryDocument.supplier_id == supplier_id)
+    invoice_q = invoice_q.filter(Invoice.supplier_id == supplier_id)
+    price_q = price_q.filter(SupplierPriceList.supplier_id == supplier_id)
+
+    invoice_ids = [iid for (iid,) in db.query(Invoice.id).filter(Invoice.supplier_id == supplier_id).all()]
+    delivery_ids = [did for (did,) in db.query(Delivery.id).filter(Delivery.supplier_id == supplier_id).all()]
+    cash_filters = [CashEntry.supplier_id == supplier_id]
+    if invoice_ids:
+      cash_filters.append(CashEntry.invoice_id.in_(invoice_ids))
+    if delivery_ids:
+      cash_filters.append(CashEntry.delivery_id.in_(delivery_ids))
+    db.query(CashEntry).filter(or_(*cash_filters)).update(
+      {
+        CashEntry.supplier_id: None,
+        CashEntry.invoice_id: None,
+        CashEntry.delivery_id: None,
+      },
+      synchronize_session=False,
+    )
+  else:
+    db.query(CashEntry).update(
+      {
+        CashEntry.supplier_id: None,
+        CashEntry.invoice_id: None,
+        CashEntry.delivery_id: None,
+      },
+      synchronize_session=False,
+    )
+
+  # Scarichi prima (FK opzionali verso fatture e DDT)
+  delivery_q.delete(synchronize_session=False)
+  document_q.delete(synchronize_session=False)
+
+  # Ordini fornitore (testata + righe)
+  if supplier_id is not None:
+    order_ids = [
+      oid for (oid,) in db.query(SupplierOrder.id).filter(SupplierOrder.supplier_id == supplier_id).all()
+    ]
+    if order_ids:
+      db.query(SupplierOrderItem).filter(SupplierOrderItem.order_id.in_(order_ids)).delete(
+        synchronize_session=False
+      )
+      db.query(SupplierOrder).filter(SupplierOrder.id.in_(order_ids)).delete(synchronize_session=False)
+  else:
+    db.query(SupplierOrderItem).delete(synchronize_session=False)
+    db.query(SupplierOrder).delete(synchronize_session=False)
+
+  invoice_q.delete(synchronize_session=False)
+  price_q.delete(synchronize_session=False)
+
+
 def delete_supplier(db: Session, supplier_id: int) -> bool:
   supplier = get_supplier(db, supplier_id)
   if not supplier:
     return False
 
-  # Ordine: scarichi (possono riferire fatture), fatture, prezzario, stacca cassa — poi fornitore
-  db.query(Delivery).filter(Delivery.supplier_id == supplier_id).delete(synchronize_session=False)
-  db.query(Invoice).filter(Invoice.supplier_id == supplier_id).delete(synchronize_session=False)
-  db.query(SupplierPriceList).filter(SupplierPriceList.supplier_id == supplier_id).delete(
-    synchronize_session=False
-  )
-  db.query(CashEntry).filter(CashEntry.supplier_id == supplier_id).update(
-    {CashEntry.supplier_id: None},
-    synchronize_session=False,
-  )
+  _purge_supplier_dependencies(db, supplier_id)
   db.delete(supplier)
   db.commit()
   return True
@@ -132,13 +185,7 @@ def delete_supplier(db: Session, supplier_id: int) -> bool:
 def delete_all_suppliers(db: Session) -> int:
   """Elimina tutti i fornitori e i dati collegati (scarichi, fatture, prezzario; stacca fornitore dalla cassa)."""
   n = db.query(Supplier).count()
-  db.query(Delivery).delete(synchronize_session=False)
-  db.query(Invoice).delete(synchronize_session=False)
-  db.query(CashEntry).filter(CashEntry.supplier_id.isnot(None)).update(
-    {CashEntry.supplier_id: None},
-    synchronize_session=False,
-  )
-  db.query(SupplierPriceList).delete(synchronize_session=False)
+  _purge_supplier_dependencies(db)
   db.query(Supplier).delete(synchronize_session=False)
   db.commit()
   return int(n)
