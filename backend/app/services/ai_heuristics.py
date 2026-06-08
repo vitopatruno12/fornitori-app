@@ -14,8 +14,35 @@ _KEYWORD_TOKENS = (
     "iban",
     "referente", "responsabile", "contatto", "persona",
     "pagamento", "pagamenti", "bonifico", "rid", "ricevuta",
+    "condizioni di pagamento", "condizioni pagamento",
     "categoria", "merce", "merceologica", "settore",
-    "note", "nota",
+    "listino associato", "listino",
+    "note interne", "note",
+)
+
+_SUPPLIER_FIELD_BOUNDARY = re.compile(
+    r"\s+(?=(?:"
+    r"citt[aà]|city|"
+    r"categoria(?:\s+merceologica)?|"
+    r"listino(?:\s+associato)?|"
+    r"note(?:\s+interne)?|"
+    r"condizioni(?:\s+di)?\s+pagamento|pagament[oi]|"
+    r"email|e-?mail|pec|telefono|tel\.?|cell|cellulare|iban|"
+    r"partit[a]?\s*iva|piva|codice\s*fiscale|cod\.?\s*fisc|"
+    r"referente|contatto|responsabile|nome|"
+    r"indirizzo|via\b|piazza\b|viale\b|corso\b"
+    r")\b)",
+    re.I,
+)
+
+_CATEGORY_KEYWORDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("bevande", ("bevande", "acqua", "vino", "birra", "bibita")),
+    ("ortofrutta", ("ortofrutta", "frutta", "verdura", "ortaggi")),
+    ("carne", ("carne", "macelleria", "salumi", "salumeria")),
+    ("pesce", ("pesce", "pescheria", "ittico")),
+    ("panificio", ("panificio", "pane", "panetteria", "pasticceria", "dolci")),
+    ("utenze", ("luce", "gas", "acquedotto", "energia", "utenze")),
+    ("manutenzione", ("manutenzione",)),
 )
 
 
@@ -30,6 +57,116 @@ def _normalize_for_match(s: str) -> str:
 def _split_sentences(t: str) -> List[str]:
     parts = re.split(r"[\n;]+|(?:,\s+(?=(?:partita|p\.?\s?iva|piva|email|e-?mail|tel|cell|telefono|citta|città|indirizzo|iban|pec|referente|note|categoria|pagamento|bonifico)))", t, flags=re.I)
     return [p.strip(" ,;.\t") for p in parts if p and p.strip(" ,;.\t")]
+
+
+def _trim_at_next_supplier_field(val: str) -> str:
+    """Tronca un valore estratto al primo campo anagrafica successivo."""
+    if not val:
+        return ""
+    s = val.strip()
+    m = _SUPPLIER_FIELD_BOUNDARY.search(s)
+    if m:
+        s = s[: m.start()].strip()
+    return s.rstrip(" ,;.-")
+
+
+_CATEGORY_STOP = (
+    r"(?=\s+(?:listino(?:\s+associato)?|note(?:\s+interne)?|"
+    r"condizioni(?:\s+di)?\s+pagamento|pagament[oi]|email|telefono|iban|citt[aà])\b|\s*$)"
+)
+
+
+def _clean_merchandise_category_value(val: str) -> str:
+    """Solo settore merceologico, mai listino/note/pagamento."""
+    s = _trim_at_next_supplier_field(val)
+    s = re.split(r"\s+listino(?:\s+associato)?\b", s, maxsplit=1, flags=re.I)[0].strip()
+    s = re.split(r"\s+note(?:\s+interne)?\b", s, maxsplit=1, flags=re.I)[0].strip()
+    words = [
+        w
+        for w in s.split()
+        if w.lower() not in ("listino", "associato", "merceologica", "categoria")
+    ]
+    if not words:
+        return ""
+    lo = " ".join(words).lower()
+    for label, keys in _CATEGORY_KEYWORDS:
+        if lo in keys or any(w.lower() in keys for w in words):
+            return label.title()
+    return " ".join(words[:3]).strip().title()
+
+
+def _clean_price_list_label_value(val: str) -> str:
+    """Solo nome/etichetta listino (es. «Listino 2024»), senza ripetere l'etichetta campo."""
+    s = _trim_at_next_supplier_field(val).strip()
+    s = re.sub(r"^listino\s+associato\s+", "", s, flags=re.I).strip()
+    s = re.sub(r"^associato\s+", "", s, flags=re.I).strip()
+    s = re.split(r"\s+note(?:\s+interne)?\b", s, maxsplit=1, flags=re.I)[0].strip()
+    return s[:80] if len(s) >= 2 else ""
+
+
+def _extract_contact_person(t: str) -> str:
+    m = re.search(
+        r"\b(?:nome|referente|contatto|responsabile|persona)\s+(?:del\s+referente\s+)?(?:è\s+)?"
+        r"([A-Za-zÀ-ÿ' .\-]{2,60})",
+        t,
+        re.I,
+    )
+    if not m:
+        return ""
+    ref = _trim_at_next_supplier_field(re.split(r"[,;\n]", m.group(1))[0].strip())
+    return ref[:60] if 2 <= len(ref) <= 60 else ""
+
+
+def _extract_city(t: str) -> str:
+    m = re.search(r"(?:citt[aà]|city)\s*[:\s]+([A-Za-zÀ-ÿ' .\-]{2,50})", t, re.I)
+    if not m:
+        return ""
+    city = _trim_at_next_supplier_field(m.group(1).strip())
+    return city[:50] if len(city) >= 2 else ""
+
+
+def _extract_merchandise_category(t: str) -> str:
+    m = re.search(
+        r"categoria\s*(?:merceologica)?\s*[:\s]+"
+        r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]*?)"
+        + _CATEGORY_STOP,
+        t,
+        re.I,
+    )
+    if m:
+        return _clean_merchandise_category_value(m.group(1))
+    lo = _normalize_for_match(t)
+    if re.search(r"\bcategoria\b", lo):
+        return ""
+    for label, keys in _CATEGORY_KEYWORDS:
+        for k in keys:
+            if re.search(rf"\b{re.escape(k)}\b", lo):
+                return label.title()
+    return ""
+
+
+def _extract_price_list_label(t: str) -> str:
+    m = re.search(
+        r"listino(?:\s+associato)?(?:\s*\([^)]*\))?\s*(?:è\s+)?(?:[:\s]+)?",
+        t,
+        re.I,
+    )
+    if not m:
+        return ""
+    return _clean_price_list_label_value(t[m.end() :])
+
+
+def _extract_supplier_notes(t: str) -> str:
+    m = re.search(
+        r"\bnote(?:\s+interne)?\s*[:\s]+"
+        r"(.+?)(?=\s+(?:condizioni(?:\s+di)?\s+pagamento|pagament[oi]|listino|categoria|email|telefono|iban|citt[aà])\b|\s*$)",
+        t,
+        re.I | re.DOTALL,
+    )
+    if not m:
+        return ""
+    notes = _trim_at_next_supplier_field(m.group(1).strip())
+    return notes[:500] if len(notes) >= 2 else ""
 
 
 def _find_first_keyword_index(t: str) -> int:
@@ -47,6 +184,39 @@ def _extract_name(t: str) -> str:
     return _extract_supplier_name(t)
 
 
+_NAME_FIELD_STOP = (
+    r"(?=\s+(?:partit[a]?\s*iva|partiva\s*iva|p\.?\s*iva|piva|codice\s*fiscale|cod\.?\s*fisc|"
+    r"email|e-?mail|pec|telefono|tel\.?|cell|cellulare|iban|"
+    r"categoria|listino|note|condizioni|pagament|referente|contatto|citt[aà]|city)\b|\s*$)"
+)
+
+
+def _clean_supplier_name_value(val: str) -> str:
+    """Solo ragione sociale: niente P.IVA, email, telefono o altre sezioni."""
+    s = (val or "").strip()
+    s = re.sub(
+        r"^(?:ragione\s+sociale|denominazione|nome(?:\s+fornitore)?|fornitore|ditta)\s*[:\s]*",
+        "",
+        s,
+        flags=re.I,
+    ).strip()
+    s = _trim_at_next_supplier_field(s)
+    s = re.split(
+        r"\s+(?:partit[a]?\s*iva|partiva\s*iva|p\.?\s*iva|piva|codice\s*fiscale|cod\.?\s*fisc|"
+        r"email|e-?mail|pec|telefono|tel\.?|cell|iban|categoria|listino|note|condizioni|"
+        r"pagament|referente|contatto|responsabile|citt[aà]|city)\b",
+        s,
+        maxsplit=1,
+        flags=re.I,
+    )[0].strip()
+    s = re.sub(r"\s+\d{11}\b.*$", "", s).strip()
+    s = re.sub(r"\s+IT\s*\d{11}\b.*$", "", s, flags=re.I).strip()
+    s = re.sub(r"\s+[a-z0-9._%+-]+@[^\s,;]+.*$", "", s, flags=re.I).strip()
+    s = re.sub(r"\s+(?:\+?39\s?)?0[0-9](?:[\s./-]*\d){6,}.*$", "", s).strip()
+    s = s.rstrip(" ,;.-")
+    return s[:80] if len(s) >= 2 else ""
+
+
 def _parse_fornitore_voice_phrase(t: str) -> Dict[str, str]:
     """Es. «fornitore Bar Peroni nome Georgio Rossi» → ragione sociale + referente."""
     out: Dict[str, str] = {}
@@ -56,24 +226,18 @@ def _parse_fornitore_voice_phrase(t: str) -> Dict[str, str]:
     m = re.search(
         r"(?:fornitore|ditta)\s+(.+?)"
         r"(?=\s+(?:nome|referente|contatto|responsabile|persona|partita|p\.?\s*iva|piva|"
-        r"codice\s*fiscale|email|e-?mail|pec|telefono|tel\.?|cell|iban|categoria|indirizzo|via)\b|$)",
+        r"codice\s*fiscale|email|e-?mail|pec|telefono|tel\.?|cell|iban|categoria|"
+        r"citt[aà]|city|listino|note|condizioni|pagament|indirizzo|via)\b|$)",
         s,
         re.I | re.DOTALL,
     )
     if m:
-        name = m.group(1).strip().rstrip(" ,;.-")
-        if 2 <= len(name) <= 80:
+        name = _clean_supplier_name_value(m.group(1))
+        if name:
             out["name"] = name
-    m_ref = re.search(
-        r"\b(?:nome|referente|contatto|responsabile|persona)\s+(?:del\s+referente\s+)?(?:è\s+)?"
-        r"([A-Za-zÀ-ÿ' .]{2,60})",
-        s,
-        re.I,
-    )
-    if m_ref:
-        ref = re.split(r"[,;\n]", m_ref.group(1))[0].strip()
-        if 2 <= len(ref) <= 60:
-            out["contact_person"] = ref
+    ref = _extract_contact_person(s)
+    if ref:
+        out["contact_person"] = ref
     return out
 
 
@@ -85,40 +249,25 @@ def _extract_supplier_name(t: str) -> str:
     if voice.get("name"):
         return voice["name"]
     m = re.search(
-        r"(?:ragione\s+sociale|denominazione|nome\s+fornitore|ditta)\s*[:\s]+([^,;\n]{2,80})",
+        r"(?:ragione\s+sociale|denominazione|nome\s+fornitore|ditta)\s*[:\s]+"
+        r"([A-Za-zÀ-ÿ0-9' .&\-]{2,80}?)"
+        + _NAME_FIELD_STOP,
         s,
         re.I,
     )
     if m:
-        return m.group(1).strip().rstrip(" ,;.-")
+        cleaned = _clean_supplier_name_value(m.group(1))
+        if cleaned:
+            return cleaned
     seg = re.split(r"[,;\n]", s)[0].strip()
-    seg = re.sub(r"^fornitore\s+", "", seg, flags=re.I).strip()
-    parts = re.split(
-        r"\s+(?=(?:partita|p\.?\s*iva|piva|cod\.?\s*fisc|codice\s*fiscale|c\.?f\.?|"
-        r"email|e-?mail|pec|telefono|tel\.?|cell\.?|cellulare|iban|swift|"
-        r"categoria|bonifico|pagament|condizioni|indirizzo|via |piazza |viale |corso |"
-        r"referente|contatto|responsabile)\b)",
-        seg,
-        maxsplit=1,
-        flags=re.I,
-    )[0].strip()
-    parts = re.sub(r"\s+\d{11}\b.*$", "", parts).strip()
-    parts = re.sub(r"\s+[a-z0-9._%+-]+@[^\s,;]+.*$", "", parts, flags=re.I).strip()
-    parts = re.sub(r"\s+(?:\+?39\s?)?0[0-9](?:[\s./-]*\d){6,}.*$", "", parts).strip()
-    if 2 <= len(parts) <= 80:
-        return parts
+    cleaned = _clean_supplier_name_value(seg)
+    if cleaned:
+        return cleaned
     cut = _find_first_keyword_index(s)
     candidate = s if cut < 0 else s[:cut]
     candidate = candidate.split(",")[0].split("\n")[0].strip(" ,;.-")
-    candidate = re.sub(
-        r"^(?:ragione\s+sociale|denominazione|nome(?:\s+fornitore)?|fornitore|ditta)\s*[:\s]*",
-        "",
-        candidate,
-        flags=re.I,
-    ).strip(" ,;.-")
-    if 2 <= len(candidate) <= 80:
-        return candidate
-    return ""
+    cleaned = _clean_supplier_name_value(candidate)
+    return cleaned
 
 
 _DAY_WORDS = {
@@ -163,35 +312,102 @@ def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
 
+_IT_SPOKEN_DIGITS = {
+    "zero": "0",
+    "zeri": "0",
+    "uno": "1",
+    "una": "1",
+    "un": "1",
+    "due": "2",
+    "tre": "3",
+    "quattro": "4",
+    "cinque": "5",
+    "sei": "6",
+    "sette": "7",
+    "otto": "8",
+    "nove": "9",
+}
+
+
+def _spoken_italian_digits(s: str) -> str:
+    """Converte «uno due tre …» in cifre per P.IVA dettata a voce."""
+    if not s:
+        return ""
+    lo = _normalize_for_match(s)
+    out: List[str] = []
+    for raw in re.split(r"\s+", lo):
+        w = re.sub(r"[^a-z0-9]", "", raw)
+        if not w:
+            continue
+        if w.isdigit():
+            out.append(w)
+            continue
+        d = _IT_SPOKEN_DIGITS.get(w)
+        if d is not None and len(d) == 1:
+            out.append(d)
+    return "".join(out)
+
+
+def _vat_label_pattern() -> str:
+    return (
+        r"(?:partit[a]?\s*iva|partitaiva|partiva\s*iva|parita\s*iva|"
+        r"p\.?\s*i\.?\s*v\.?a?\.?|piva|pi\s+va|\biva\b)"
+        r"(?:\s*(?:numero|n\.?|°|e|è))?"
+    )
+
+
+def _vat_chunk_after_label(t: str, end: int) -> str:
+    rest = t[end : end + 120]
+    return re.split(
+        r"\s+(?=codice\s+fiscale|cod\.?\s*fisc|email|e-?mail|telefono|tel\.?|cell|iban|categoria|nome|referente|partita|piva)\b",
+        rest,
+        maxsplit=1,
+        flags=re.I,
+    )[0]
+
+
+def _digits_from_vat_chunk(chunk: str) -> str:
+    d = _digits_only(chunk)
+    if len(d) >= 11:
+        return d[-11:]
+    spoken = _spoken_italian_digits(chunk)
+    if len(spoken) >= 11:
+        return spoken[-11:]
+    return ""
+
+
 def _extract_vat_number(t: str) -> str:
-    """P.IVA: etichetta esplicita o 11 cifre (non telefono che inizia con 0)."""
+    """P.IVA: etichetta esplicita, IT+11 cifre, cifre/numeri parlati, o 11 cifre nel testo."""
     if not t:
         return ""
-    vat_labels = (
-        r"(?:partit[a]?\s*iva|partiva\s*iva|p\.?\s*i\.?\s*v\.?a?\.?|piva|pi\s+va)"
-        r"(?:\s*(?:numero|n\.?|°))?"
-    )
+    lo_norm = _normalize_for_match(t)
+    vat_labels = _vat_label_pattern()
     m = re.search(vat_labels + r"\s*[:\s]*(?:it\s*)?", t, re.I)
     if m:
-        rest = t[m.end() : m.end() + 48]
-        chunk = re.split(
-            r"\s+(?=codice\s+fiscale|cod\.?\s*fisc|email|e-?mail|telefono|tel\.?|cell|iban|categoria|nome|referente|partita|piva)\b",
-            rest,
-            maxsplit=1,
-            flags=re.I,
-        )[0]
-        d = _digits_only(chunk)
-        if len(d) >= 11:
-            return d[-11:]
+        d = _digits_from_vat_chunk(_vat_chunk_after_label(t, m.end()))
+        if d:
+            return d
     m = re.search(
         vat_labels + r"\s*[:\s]*(?:it\s*)?([\d][\d\s./-]{9,28})",
         t,
         re.I,
     )
     if m:
+        d = _digits_from_vat_chunk(m.group(1))
+        if d:
+            return d
+    m_it = re.search(r"\bIT\s*(\d[\d\s./-]{9,18})\b", t, re.I)
+    if m_it:
         d = _digits_only(m.group(1))
         if len(d) >= 11:
             return d[-11:]
+    has_vat_hint = bool(
+        re.search(r"partit|partitaiva|piva|parita\s*iva|\biva\b", lo_norm, re.I)
+    )
+    if has_vat_hint:
+        m = re.search(r"\b(\d{11})\b", t)
+        if m:
+            return m.group(1)
     for m in re.finditer(r"\b(\d[\d\s./-]{9,18}\d)\b", t):
         d = _digits_only(m.group(1))
         if len(d) == 11 and not d.startswith("0"):
@@ -239,21 +455,32 @@ def _extract_fiscal_code(t: str) -> str:
     return ""
 
 
-def _detect_payment_terms(lo: str) -> Optional[str]:
-    m = re.search(r"(?:pagament[oi]|condizioni)\s*[:\s]*([^,;\n]{2,80})", lo, re.I)
+def _extract_payment_terms(t: str) -> Optional[str]:
+    lo = _normalize_for_match(t)
+    m = re.search(
+        r"(?:condizioni\s+(?:di\s+)?pagamento|pagament[oi])\s*[:\s]+"
+        r"(.+?)(?=\s+(?:listino|note(?:\s+interne)?|categoria|email|telefono|iban|citt[aà]|referente)\b|\s*$)",
+        t,
+        re.I | re.DOTALL,
+    )
     if m:
-        return m.group(1).strip()
-    if "bonifico" in lo and "30" in lo and ("giorni" in lo or "gg" in lo):
-        return "Bonifico 30 giorni"
-    if "bonifico" in lo and "60" in lo and ("giorni" in lo or "gg" in lo):
-        return "Bonifico 60 giorni"
-    if "bonifico" in lo:
+        val = _trim_at_next_supplier_field(m.group(1).strip())
+        if val:
+            return val[:80]
+    m_b = re.search(
+        r"\bbonifico\s+(\d+\s*(?:gg|giorni)(?:\s+fine\s+mese)?)\b",
+        t,
+        re.I,
+    )
+    if m_b:
+        return f"Bonifico {m_b.group(1).strip()}"
+    if re.search(r"\bbonifico\b", lo):
         return "Bonifico"
-    if "rid" in lo:
+    if re.search(r"\brid\b", lo):
         return "RID"
     if "ricevuta bancaria" in lo or "ri.ba" in lo:
         return "Ricevuta bancaria"
-    if "contanti" in lo or "contante" in lo:
+    if re.search(r"\bcontanti?\b", lo):
         return "Contanti"
     return None
 
@@ -294,9 +521,9 @@ def suggest_supplier_fields(text: str, existing_data: Dict[str, Any] | None = No
         if m_phone2:
             out["phone"] = re.sub(r"[^\d+]", "", m_phone2.group(1))[:15]
 
-    m_city = re.search(r"(?:citt[aà]|city)\s*[:\s]*([a-zA-ZàèéìòùÀÈÉÌÒÙ'\s]{2,50})", t, re.I)
-    if m_city:
-        out["city"] = re.split(r"[,;\n]", m_city.group(1))[0].strip()
+    city = _extract_city(t)
+    if city:
+        out["city"] = city
 
     m_addr = re.search(r"(?:indirizzo)\s*[:\s]*([^,;\n]{4,120})", t, re.I)
     if m_addr:
@@ -312,42 +539,25 @@ def suggest_supplier_fields(text: str, existing_data: Dict[str, Any] | None = No
         if cand.startswith(("IT", "SM", "VA", "DE", "FR", "ES", "GB", "CH", "AT", "BE", "NL")):
             out["iban"] = cand
 
-    m_ref = re.search(r"(?:referente|responsabile|contatto|persona)\s*[:\s]*([A-Za-zÀ-ÿ' .]{3,60})", t, re.I)
-    if m_ref:
-        out["contact_person"] = re.split(r"[,;\n]", m_ref.group(1))[0].strip()
+    ref = _extract_contact_person(t)
+    if ref and not out.get("contact_person"):
+        out["contact_person"] = ref
 
-    pt = _detect_payment_terms(lo)
+    pt = _extract_payment_terms(t)
     if pt:
         out["payment_terms"] = pt
 
-    m_notes = re.search(r"(?:^|[,;\n])\s*note?\s*[:\s]*([^\n;]{2,500})", t, re.I)
-    if m_notes:
-        out["notes"] = m_notes.group(1).strip()
+    notes = _extract_supplier_notes(t)
+    if notes:
+        out["notes"] = notes
 
-    m_cat = re.search(
-        r"categoria\s*(?:merceologica)?\s*[:\s]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s]{1,40})",
-        t,
-        re.I,
-    )
-    if m_cat:
-        out["merchandise_category"] = re.split(r"[,;\n]", m_cat.group(1))[0].strip().title()
-    else:
-        category = "altro"
-        if any(k in lo for k in ["bevande", "acqua", "vino", "birra", "bibita"]):
-            category = "bevande"
-        elif any(k in lo for k in ["ortofrutta", "frutta", "verdura", "ortaggi"]):
-            category = "ortofrutta"
-        elif any(k in lo for k in ["carne", "macelleria", "salumi", "salumeria"]):
-            category = "carne"
-        elif any(k in lo for k in ["pesce", "pescheria", "ittico"]):
-            category = "pesce"
-        elif any(k in lo for k in ["panificio", "pane", "panetteria", "pasticceria", "dolci"]):
-            category = "panificio"
-        elif any(k in lo for k in ["luce", "gas", "acquedotto", "energia", "utenze"]):
-            category = "utenze"
-        elif "manutenzione" in lo:
-            category = "manutenzione"
-        out["merchandise_category"] = category
+    cat = _extract_merchandise_category(t)
+    if cat:
+        out["merchandise_category"] = cat
+
+    plist = _extract_price_list_label(t)
+    if plist:
+        out["price_list_label"] = plist
 
     current = existing_data or {}
     merged = {**current, **out}
@@ -376,22 +586,65 @@ def _sanitize_supplier_suggested_fields(
     if not isinstance(sf, dict):
         return {}
     out = dict(sf)
-    name = str(out.get("name") or "").strip()
-    bad = (
-        not name
-        or "@" in name
-        or re.search(r"\b\d{11}\b", name)
-        or len(name) > 50
-        or re.search(
-            r"\b(?:partita|p\.?\s*iva|piva|email|telefono|tel\.?|cell\.?|iban|bonifico|pagament|categoria)\b",
-            name,
-            re.I,
-        )
-    )
-    if bad:
-        fixed = _extract_supplier_name(source_text or name)
-        if fixed:
-            out["name"] = fixed
+    src = (source_text or "").strip()
+    if src:
+        ext_name = _extract_supplier_name(src)
+        if ext_name:
+            out["name"] = ext_name
+        else:
+            raw_name = str(out.get("name") or "").strip()
+            if raw_name:
+                cleaned = _clean_supplier_name_value(raw_name)
+                if cleaned:
+                    out["name"] = cleaned
+                else:
+                    out.pop("name", None)
+    else:
+        raw_name = str(out.get("name") or "").strip()
+        if raw_name:
+            cleaned = _clean_supplier_name_value(raw_name)
+            if cleaned:
+                out["name"] = cleaned
+            else:
+                out.pop("name", None)
+    if src:
+        ext_cat = _extract_merchandise_category(src)
+        if ext_cat:
+            out["merchandise_category"] = ext_cat
+        else:
+            raw_cat = str(out.get("merchandise_category") or "").strip()
+            if raw_cat:
+                cleaned = _clean_merchandise_category_value(raw_cat)
+                if cleaned:
+                    out["merchandise_category"] = cleaned
+                else:
+                    out.pop("merchandise_category", None)
+        ext_pl = _extract_price_list_label(src)
+        if ext_pl:
+            out["price_list_label"] = ext_pl
+        else:
+            raw_pl = str(out.get("price_list_label") or "").strip()
+            if raw_pl:
+                cleaned = _clean_price_list_label_value(raw_pl)
+                if cleaned:
+                    out["price_list_label"] = cleaned
+                else:
+                    out.pop("price_list_label", None)
+    else:
+        raw_cat = str(out.get("merchandise_category") or "").strip()
+        if raw_cat:
+            cleaned = _clean_merchandise_category_value(raw_cat)
+            if cleaned:
+                out["merchandise_category"] = cleaned
+            else:
+                out.pop("merchandise_category", None)
+        raw_pl = str(out.get("price_list_label") or "").strip()
+        if raw_pl:
+            cleaned = _clean_price_list_label_value(raw_pl)
+            if cleaned:
+                out["price_list_label"] = cleaned
+            else:
+                out.pop("price_list_label", None)
     return out
 
 
@@ -402,7 +655,7 @@ def coalesce_supplier_ai_response(data: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(data)
     sf = dict(out.get("suggested_fields") or {})
     alias_map = {
-        "name": ("ragione_sociale", "ragione sociale", "company_name", "fornitore", "denominazione"),
+        "name": ("ragione_sociale", "ragione sociale", "company_name", "denominazione"),
         "vat_number": ("partita_iva", "piva", "vat", "partita iva"),
         "fiscal_code": ("codice_fiscale", "cf", "codice fiscale"),
         "email": ("e_mail", "mail", "pec"),
@@ -411,7 +664,8 @@ def coalesce_supplier_ai_response(data: Dict[str, Any]) -> Dict[str, Any]:
         "contact_person": ("referente", "contatto", "responsabile"),
         "payment_terms": ("condizioni_pagamento", "pagamento", "condizioni pagamento"),
         "merchandise_category": ("categoria", "categoria_merceologica", "settore"),
-        "notes": ("note", "nota"),
+        "notes": ("note", "nota", "note_interne"),
+        "price_list_label": ("listino_associato", "listino", "listino associato"),
     }
     for target, aliases in alias_map.items():
         if str(sf.get(target) or "").strip():

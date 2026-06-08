@@ -11,7 +11,8 @@ from ..services import supplier_service
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
 
-@router.get("/", response_model=List[supplier_schema.SupplierWithStats])
+@router.get("", response_model=List[supplier_schema.SupplierWithStats])
+@router.get("/", response_model=List[supplier_schema.SupplierWithStats], include_in_schema=False)
 def list_suppliers(db: Session = Depends(get_db)):
   return supplier_service.list_suppliers_with_stats(db)
 
@@ -24,7 +25,8 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
   return supplier
 
 
-@router.post("/", response_model=supplier_schema.SupplierRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=supplier_schema.SupplierRead, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=supplier_schema.SupplierRead, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_supplier(payload: supplier_schema.SupplierCreate, db: Session = Depends(get_db)):
   return supplier_service.create_supplier(db, payload)
 

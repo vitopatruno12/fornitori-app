@@ -22,8 +22,8 @@ JSON:
 {"suggested_lines":[{"product_description":"arance","pieces":10,"weight_kg":null,"note":null},{"product_description":"pasta","pieces":null,"weight_kg":5.0,"note":null}],"warnings":[],"confidence":0.9}
 """
 
-SUPPLIER_EXTRACT_FAST = """Estrai anagrafica fornitore in JSON. Campi: name (solo ragione sociale), vat_number, email, phone, iban, payment_terms, merchandise_category, notes, fiscal_code, city, contact_person.
-name senza P.IVA/email/tel. Solo JSON: {"suggested_fields":{...},"missing_fields":[],"warnings":[],"confidence":0.9}"""
+SUPPLIER_EXTRACT_FAST = """Estrai anagrafica fornitore in JSON. Campi: name, vat_number, email, phone, iban, payment_terms, merchandise_category, price_list_label, notes, fiscal_code, city, contact_person.
+Un campo per sezione: referente≠città; categoria≠listino≠note≠pagamento. Solo JSON: {"suggested_fields":{...},"missing_fields":[],"warnings":[],"confidence":0.9}"""
 
 SUPPLIER_EXTRACT = f"""Sei un estrattore dati per ANAGRAFICA FORNITORI (form ATLAS, Italia).
 Compito: leggere il testo e riempire SOLO le chiavi JSON corrette. Una informazione = un campo.
@@ -31,7 +31,8 @@ Compito: leggere il testo e riempire SOLO le chiavi JSON corrette. Una informazi
 ═══ SEZIONE suggested_fields (anagrafica) ═══
 • name → SOLO ragione sociale (es. "Bar Roma"). Vietato: P.IVA, email, telefono, frase intera.
 • vat_number → 11 cifre partita IVA
-• fiscal_code, email, phone, city, contact_person, iban, payment_terms, merchandise_category, notes
+• fiscal_code, email, phone, city (solo città), contact_person (solo nome referente), iban
+• merchandise_category (solo settore), price_list_label (listino associato), notes (note interne), payment_terms (condizioni pagamento)
 
 Checklist prima di rispondere:
 1) Il name contiene SOLO il nome dell'azienda?

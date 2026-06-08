@@ -1,6 +1,10 @@
 /** Host del sito gestionale: API same-origin sotto /api (non la root SPA). */
 const FRONTEND_APP_HOSTS = new Set(['www.atlass.it', 'atlass.it'])
 
+/** Path API backend (senza prefisso /api = rischio HTML dalla SPA). */
+const API_RESOURCE_PATH =
+  /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|aruba|support-technicians|vne|health|reference|customers|attachments|sdi)(\/|$)/
+
 export function isLocalDevHost(hostname: string): boolean {
   const host = String(hostname || '').toLowerCase()
   return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
@@ -84,4 +88,32 @@ export function secureAbsoluteUrl(url: string): string {
   if (!raw) return raw
   if (raw.startsWith('/')) return raw
   return ensureHttpsUrl(raw)
+}
+
+/**
+ * Garantisce che le chiamate API su atlass.it usino /api/… e non /suppliers (pagina React).
+ */
+export function ensureApiRequestUrl(url: string): string {
+  const raw = String(url || '').trim()
+  if (!raw) return raw
+  try {
+    const base =
+      typeof window !== 'undefined' ? window.location.href : 'https://www.atlass.it/'
+    const u = new URL(raw, base)
+    const host = u.hostname.toLowerCase()
+    const onApp =
+      FRONTEND_APP_HOSTS.has(host) || isLocalDevHost(host)
+    if (!onApp) return raw
+    let path = u.pathname || '/'
+    if (!path.startsWith('/api/') && API_RESOURCE_PATH.test(path)) {
+      u.pathname = `/api${path}`
+    }
+    if (u.pathname.startsWith('/api/')) {
+      return u.pathname + u.search
+    }
+    if (raw.startsWith('/')) return u.pathname + u.search
+    return u.href
+  } catch {
+    return raw
+  }
 }

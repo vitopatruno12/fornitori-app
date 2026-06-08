@@ -4,7 +4,7 @@ import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
 import { mapOrderLinesToRows } from '../utils/orderLinesNormalize.js'
 import { applyOrderAiResponse, mergeOrderProductRows } from '../utils/orderAiApply.js'
-import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import OrderVoiceFieldAssistant from '../components/OrderVoiceFieldAssistant.jsx'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import {
   createSupplierOrder,
@@ -173,6 +173,7 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [priceList, setPriceList] = useState([])
   const [priceListLoading, setPriceListLoading] = useState(false)
   const [aiOrderText, setAiOrderText] = useState('')
+  const [voiceRowIndex, setVoiceRowIndex] = useState(0)
   const [aiOrderLoading, setAiOrderLoading] = useState(false)
   const [anomalyReport, setAnomalyReport] = useState(null)
   const [copyFromOrderId, setCopyFromOrderId] = useState('')
@@ -186,6 +187,40 @@ export default function NewOrderPage({ operatorMode = false }) {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
     return s ? s.name : ''
   }, [suppliers, supplierId])
+
+  const orderVoiceApplyContext = useMemo(
+    () => ({
+      suppliers,
+      rows,
+      setRows,
+      setSupplierId,
+      setOrderDate,
+      setExpectedDeliveryDate,
+      setDeliveryLocation,
+      setOrderSignedBy,
+      setUnloadingSignedBy,
+      setVatPercent,
+      setOrderNote,
+      setOrderNoteInternal,
+      voiceRowIndex,
+      setVoiceRowIndex,
+      addRow,
+    }),
+    [
+      suppliers,
+      rows,
+      voiceRowIndex,
+      setSupplierId,
+      setOrderDate,
+      setExpectedDeliveryDate,
+      setDeliveryLocation,
+      setOrderSignedBy,
+      setUnloadingSignedBy,
+      setVatPercent,
+      setOrderNote,
+      setOrderNoteInternal,
+    ],
+  )
 
   const selectedSupplier = useMemo(
     () => suppliers.find((x) => String(x.id) === String(supplierId)) || null,
@@ -1180,6 +1215,7 @@ export default function NewOrderPage({ operatorMode = false }) {
             <div className="form-group">
               <label>Consegna prevista</label>
               <input
+                id="order-expected-delivery-date"
                 type="date"
                 className="form-control"
                 value={expectedDeliveryDate}
@@ -1207,20 +1243,13 @@ export default function NewOrderPage({ operatorMode = false }) {
             </div>
           </div>
 
-          <GeminiVoiceAssistant
-            label="Ordine a voce (Atlas AI)"
-            hint='L’AI distingue le sezioni: fornitore/date (intestazione) e prodotti (una riga ciascuno con Pezzi/Kg separati). Es: «Ordine a Rossi domani: 10 arance, 5 kg pasta, 3 carciofi». Dopo Compila il testo si cancella; puoi parlare di nuovo per aggiungere righe.'
+          <OrderVoiceFieldAssistant
             text={aiOrderText}
             onTextChange={setAiOrderText}
-            onCompile={(spoken) => handleAiSuggestFull(spoken)}
+            disabled={loadingSuppliers}
             compiling={aiOrderLoading}
-            compileLabel={aiOrderLoading ? 'Compilazione…' : 'Compila ordine'}
-            showInterimResults={false}
-            onClear={() => {
-              setAiSummary('')
-              setError('')
-              setSuccess('')
-            }}
+            applyContext={orderVoiceApplyContext}
+            onFullCompile={(spoken) => handleAiSuggestFull(spoken)}
           />
 
           {aiSummary && (
@@ -1285,6 +1314,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                       </td>
                       <td>
                         <input
+                          id={`order-line-pcs-${index}`}
                           type="number"
                           min="0"
                           className="form-control"
@@ -1295,6 +1325,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                       </td>
                       <td>
                         <input
+                          id={`order-line-kg-${index}`}
                           type="number"
                           min="0"
                           step="0.001"
@@ -1307,6 +1338,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                       </td>
                       <td>
                         <input
+                          id={`order-line-note-${index}`}
                           className="form-control"
                           value={row.note}
                           onChange={(e) => updateRow(index, 'note', e.target.value)}

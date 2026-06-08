@@ -5,7 +5,11 @@ import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestSupplierFields } from '../services/aiService'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
-import { parseSupplierVoiceLocal } from '../utils/supplierVoiceParse.js'
+import {
+  enrichSupplierFields,
+  mergeSupplierFields,
+  parseSupplierVoiceLocal,
+} from '../utils/supplierVoiceParse.js'
 
 function formatEuro(n) {
   if (n == null || Number.isNaN(Number(n))) return '–'
@@ -277,6 +281,7 @@ export default function SuppliersPage() {
     if (s.iban) { setIban(String(s.iban).toUpperCase()); applied.push(`IBAN: ${s.iban}`) }
     if (s.payment_terms) { setPaymentTerms(String(s.payment_terms)); applied.push(`Pagamento: ${s.payment_terms}`) }
     if (s.merchandise_category) { setMerchandiseCategory(String(s.merchandise_category)); applied.push(`Categoria: ${s.merchandise_category}`) }
+    if (s.price_list_label) { setPriceListLabel(String(s.price_list_label)); applied.push(`Listino: ${s.price_list_label}`) }
     if (s.notes) { setNotes(String(s.notes)); applied.push('Note aggiornate') }
     return applied
   }
@@ -320,17 +325,21 @@ export default function SuppliersPage() {
       notes,
       fiscal_code: fiscalCode,
       merchandise_category: merchandiseCategory,
+      price_list_label: priceListLabel,
+      notes,
     }
 
     const local = parseSupplierVoiceLocal(text)
+    const localFields = enrichSupplierFields(text, local.suggested_fields)
     if (local.completeEnough) {
-      const appliedLocal = applyAiSupplierSuggestion(local.suggested_fields)
+      const appliedLocal = applyAiSupplierSuggestion(localFields)
       if (appliedLocal.length) {
         finishSupplierAiSummary(appliedLocal, { localOnly: true })
         setAiSupplierLoading(false)
         suggestSupplierFields(text, existingPayload)
           .then((res) => {
-            const applied = applyAiSupplierSuggestion(res?.suggested_fields)
+            const merged = mergeSupplierFields(text, localFields, res?.suggested_fields)
+            const applied = applyAiSupplierSuggestion(merged)
             if (!applied.length) return
             setAiMissing(res?.missing_fields || [])
             finishSupplierAiSummary(applied, {
@@ -345,7 +354,8 @@ export default function SuppliersPage() {
 
     try {
       const res = await suggestSupplierFields(text, existingPayload)
-      const applied = applyAiSupplierSuggestion(res?.suggested_fields)
+      const merged = mergeSupplierFields(text, localFields, res?.suggested_fields)
+      const applied = applyAiSupplierSuggestion(merged)
       setAiMissing(res?.missing_fields || [])
       const viaAi = Boolean(res?.ai_used)
       const instant = Boolean(res?.fast_path || (res?.local_fallback && !res?.ai_used))
@@ -354,7 +364,9 @@ export default function SuppliersPage() {
       const msg = String(err?.message || '')
       if (err?.name === 'AbortError') {
         const fallback = parseSupplierVoiceLocal(text)
-        const applied = applyAiSupplierSuggestion(fallback.suggested_fields)
+        const applied = applyAiSupplierSuggestion(
+          enrichSupplierFields(text, fallback.suggested_fields),
+        )
         if (applied.length) {
           finishSupplierAiSummary(applied, { localOnly: true })
         } else {

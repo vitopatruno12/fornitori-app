@@ -62,6 +62,68 @@ def test_supplier_name_not_whole_phrase():
     assert "@" not in sf["name"]
 
 
+def test_partita_iva_spoken_italian_digits():
+    t = "Bar Peroni partita iva uno due tre quattro cinque sei sette otto nove zero uno"
+    r = suggest_supplier_fields(t)
+    assert r["suggested_fields"]["vat_number"] == "12345678901"
+    assert r["suggested_fields"]["name"] == "Bar Peroni"
+
+
+def test_partita_iva_iva_solo_label():
+    r = suggest_supplier_fields("fornitore Acme iva 01234567890 email a@b.it")
+    assert r["suggested_fields"]["vat_number"] == "01234567890"
+
+
+def test_partita_iva_it_prefix():
+    r = suggest_supplier_fields("Bar Roma partita IVA IT12345678901")
+    assert r["suggested_fields"]["vat_number"] == "12345678901"
+
+
+def test_referente_citta_categoria_listino_note_pagamento_separati():
+    t = (
+        "fornitore Bar Peroni referente Georgio Rossi città Lecce "
+        "categoria ortofrutta listino associato Listino 2024 "
+        "note interne cliente storico condizioni di pagamento bonifico 30 giorni"
+    )
+    r = suggest_supplier_fields(t)
+    sf = r["suggested_fields"]
+    assert sf["name"] == "Bar Peroni"
+    assert sf["contact_person"] == "Georgio Rossi"
+    assert sf["city"] == "Lecce"
+    assert sf["merchandise_category"] == "Ortofrutta"
+    assert sf["price_list_label"] == "Listino 2024"
+    assert sf["notes"] == "cliente storico"
+    assert "listino" not in sf["contact_person"].lower()
+    assert "listino" not in sf.get("merchandise_category", "").lower()
+    assert "note" not in sf.get("payment_terms", "").lower()
+    assert "30" in sf["payment_terms"]
+
+
+def test_ragione_sociale_solo_nome_senza_partita_iva():
+    from app.services.ai_heuristics import _sanitize_supplier_suggested_fields
+
+    t = "Bar Roma partita IVA 12345678901 email info@bar.it tel 0801234567"
+    r = suggest_supplier_fields(t)
+    assert r["suggested_fields"]["name"] == "Bar Roma"
+    assert "partita" not in r["suggested_fields"]["name"].lower()
+    assert "12345678901" not in r["suggested_fields"]["name"]
+
+    dirty = {"name": "Bar Roma partita IVA 12345678901 email info@bar.it"}
+    sf = _sanitize_supplier_suggested_fields(dirty, t)
+    assert sf["name"] == "Bar Roma"
+
+
+def test_categoria_senza_listino_nel_valore():
+    from app.services.ai_heuristics import _sanitize_supplier_suggested_fields
+
+    t = "categoria ortofrutta listino associato Listino 2024"
+    dirty = {"merchandise_category": "ortofrutta listino associato Listino 2024", "price_list_label": ""}
+    sf = _sanitize_supplier_suggested_fields(dirty, t)
+    assert sf["merchandise_category"] == "Ortofrutta"
+    assert sf["price_list_label"] == "Listino 2024"
+    assert "listino" not in sf["merchandise_category"].lower()
+
+
 def test_expand_order_single_line_multiple_products():
     from app.services.ai_heuristics import coalesce_order_ai_response
 

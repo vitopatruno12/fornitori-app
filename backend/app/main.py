@@ -75,7 +75,8 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+# Dietro Nginx/Caddy (/api → uvicorn): evita 307 verso /suppliers/ senza prefisso /api.
+app = FastAPI(lifespan=lifespan, redirect_slashes=False)
 
 # CORS subito dopo la creazione dell'app (prima di mount/router): così tutte le risposte
 # (anche errori) passano dal middleware. Con allow_credentials=True + origini fisse il
