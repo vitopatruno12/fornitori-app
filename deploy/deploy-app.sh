@@ -139,6 +139,7 @@ fi
 free_api_port() {
     local port=8000
     systemctl stop fornitori-api 2>/dev/null || true
+    systemctl reset-failed fornitori-api 2>/dev/null || true
     sleep 1
     if command -v ss &>/dev/null && ss -tln "sport = :$port" 2>/dev/null | grep -q ":$port"; then
         log "Porta $port occupata — termino processo uvicorn orfano"
@@ -151,7 +152,12 @@ free_api_port() {
                 kill $pids 2>/dev/null || true
             fi
         fi
-        sleep 1
+        sleep 2
+        if ss -tln "sport = :$port" 2>/dev/null | grep -q ":$port"; then
+            log "Porta $port ancora occupata — kill -9"
+            fuser -k -9 "${port}/tcp" 2>/dev/null || true
+            sleep 1
+        fi
     fi
 }
 

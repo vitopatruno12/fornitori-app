@@ -10,14 +10,19 @@ Group=fornitori
 WorkingDirectory=/opt/fornitori-app/backend
 EnvironmentFile=/opt/fornitori-app/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+# Libera porta 8000 da uvicorn avviato manualmente (evita Errno 98)
+ExecStartPre=-/usr/bin/fuser -k 8000/tcp
+ExecStartPre=/bin/sleep 1
 ExecStart=/opt/fornitori-app/backend/venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 \
     --port 8000 \
     --workers 2 \
     --proxy-headers \
     --forwarded-allow-ips=127.0.0.1
-Restart=always
-RestartSec=3
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=10
 KillSignal=SIGTERM
 TimeoutStopSec=20
 
