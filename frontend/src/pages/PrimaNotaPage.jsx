@@ -874,6 +874,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     ? Number(summary.totale_vendita)
     : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
+  const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : 0
+  const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : 0
+  const saldoGiornalieroFiscale = summary?.saldo_giornaliero != null ? Number(summary.saldo_giornaliero) : Number(fiscaleGiorno || 0)
 
   return (
     <div>
@@ -1433,49 +1436,68 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         </div>
         )}
 
-        {summary && (
-          <div className="table-wrap" style={{ marginTop: '1rem' }}>
-            <table className="app-table">
+        <div className="prima-nota-riepilogo-vendite" style={{ marginTop: '1rem' }}>
+          <h3 className="prima-nota-riepilogo-vendite-title">Vendite del giorno — {activeActivityLabel}</h3>
+          <p className="prima-nota-riepilogo-vendite-hint">
+            Fiscale, non fiscale e POS per il <strong>{formatDate(selectedDate)}</strong>. Il non fiscale non modifica la cassa fisica ma entra nel totale vendita.
+          </p>
+          <div className="table-wrap">
+            <table className="app-table prima-nota-riepilogo-vendite-table">
               <tbody>
                 <tr>
-                  <td><strong>Totale entrate</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(summary.totale_entrate)}</td>
+                  <td><strong>Totale fiscale</strong></td>
+                  <td className="text-end amount">€ {formatAmount(fiscaleGiorno)}</td>
+                </tr>
+                <tr className="prima-nota-riepilogo-row-nf">
+                  <td>
+                    <strong>Totale non fiscale</strong>
+                    <span className="badge-pn badge-pn--nf" style={{ marginLeft: '0.45rem' }}>Non fiscale</span>
+                  </td>
+                  <td className="text-end amount prima-nota-riepilogo-nf-value">€ {formatAmount(nonFiscaleGiorno)}</td>
                 </tr>
                 <tr>
-                  <td><strong>Totale uscite</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(summary.totale_uscite)}</td>
+                  <td><strong>Totale POS</strong></td>
+                  <td className="text-end amount">€ {formatAmount(posGiorno)}</td>
                 </tr>
-                <tr>
-                  <td><strong>Totale fiscale (giorno)</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(fiscaleGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale non fiscale (giorno)</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(nonFiscaleGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale POS (giorno)</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--text-muted)' }}>€ {formatAmount(posGiorno)}</td>
-                </tr>
-                <tr>
+                <tr className="prima-nota-riepilogo-row-totale">
                   <td><strong>Totale vendita (Fiscale + Non fiscale + POS)</strong></td>
-                  <td className="text-end amount" style={{ color: 'var(--text-heading)', fontWeight: 700 }}>€ {formatAmount(totaleVenditaGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Saldo giornaliero</strong></td>
-                  <td className="text-end amount">€ {formatAmount(summary.saldo_giornaliero)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Saldo attuale cassa</strong></td>
-                  <td className="text-end amount">€ {formatAmount(rowsWithLedgerSelectedDay.cassaIniziale)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Cassa finale (schema)</strong></td>
-                  <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(cassaFinaleRiepilogo)}</td>
+                  <td className="text-end amount">€ {formatAmount(totaleVenditaGiorno)}</td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div className="table-wrap" style={{ marginTop: '1rem' }}>
+          <table className="app-table">
+            <tbody>
+              <tr>
+                <td><strong>Totale entrate (fiscale)</strong></td>
+                <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(totaleEntrateGiorno)}</td>
+              </tr>
+              <tr>
+                <td><strong>Totale uscite (fiscale)</strong></td>
+                <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(totaleUsciteGiorno)}</td>
+              </tr>
+              <tr>
+                <td><strong>Saldo giornaliero (solo fiscale)</strong></td>
+                <td className="text-end amount">€ {formatAmount(saldoGiornalieroFiscale)}</td>
+              </tr>
+              <tr>
+                <td><strong>Saldo attuale cassa</strong></td>
+                <td className="text-end amount">€ {formatAmount(rowsWithLedgerSelectedDay.cassaIniziale)}</td>
+              </tr>
+              <tr>
+                <td><strong>Cassa finale (schema vendite)</strong></td>
+                <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(cassaFinaleRiepilogo)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {!summary && (
+          <p className="prima-nota-riepilogo-warn" role="status">
+            Riepilogo cassa dal server non disponibile: i totali vendite sopra usano i movimenti caricati per il giorno selezionato.
+          </p>
         )}
       </section>
 

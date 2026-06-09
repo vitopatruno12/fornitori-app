@@ -2311,6 +2311,55 @@ select.form-control {
   border-top: 1px solid var(--border);
 }
 
+.prima-nota-riepilogo-vendite {
+  padding: 0.85rem 1rem 1rem;
+  border: 2px solid #99f6e4;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f0fdfa 0%, #fff 100%);
+}
+
+.prima-nota-riepilogo-vendite-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  color: #0f766e;
+}
+
+.prima-nota-riepilogo-vendite-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.prima-nota-riepilogo-vendite-table {
+  margin-bottom: 0;
+}
+
+.prima-nota-riepilogo-row-nf {
+  background: #fff7ed;
+}
+
+.prima-nota-riepilogo-row-nf td {
+  border-top: 1px solid #fed7aa;
+  border-bottom: 1px solid #fed7aa;
+}
+
+.prima-nota-riepilogo-nf-value {
+  color: #c2410c;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.prima-nota-riepilogo-row-totale td {
+  font-weight: 700;
+  background: #ecfdf5;
+}
+
+.prima-nota-riepilogo-warn {
+  margin: 0.65rem 0 0;
+  font-size: 0.85rem;
+  color: #b45309;
+}
+
 .support-section {
   margin-bottom: 1.25rem;
 }
