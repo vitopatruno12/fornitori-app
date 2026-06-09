@@ -3,7 +3,6 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions } from '../services/cashService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
-import { checkAiAnomalies, suggestPrimaNota } from '../services/aiService'
 import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
 import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
 import { getOperatorPrimaNotaPublicUrl } from '../utils/operatorMode.ts'
@@ -90,8 +89,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [drawerEntry, setDrawerEntry] = useState(null)
   const [movementSearch, setMovementSearch] = useState('')
   const [movementKind, setMovementKind] = useState('all')
-  const [aiPrimaNotaText, setAiPrimaNotaText] = useState('')
-  const [aiPrimaNotaAnomalies, setAiPrimaNotaAnomalies] = useState([])
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
   const dashboardPreFiltersRef = useRef(null)
 
@@ -407,46 +404,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     await loadEntries()
     await loadSummary()
     setSuccess('Riepilogo aggiornato')
-  }
-
-  async function handleAiSuggestPrimaNota() {
-    if (!aiPrimaNotaText.trim()) return
-    try {
-      const res = await suggestPrimaNota(aiPrimaNotaText, { selectedDate })
-      const s = res?.suggested_fields || {}
-      if (s.description) setFormDescription(String(s.description))
-      if (s.amount != null) setFormAmount(String(s.amount))
-      if (s.type === 'entrata' || s.type === 'uscita') setFormType(s.type)
-      if (s.payment_method_hint) {
-        const hit = paymentMethods.find((p) => (p.name || '').toLowerCase().includes(String(s.payment_method_hint).toLowerCase()))
-        if (hit) setFormPaymentMethodId(String(hit.id))
-      }
-      if (s.category_hint) {
-        const hit = categories.find((c) => (c.name || '').toLowerCase().includes(String(s.category_hint).toLowerCase()))
-        if (hit) setFormCategoryId(String(hit.id))
-      }
-      if (s.account_hint) {
-        const hit = accounts.find((a) => (a.name || '').toLowerCase().includes(String(s.account_hint).toLowerCase()))
-        if (hit) setFormAccountId(String(hit.id))
-      }
-      setSuccess('Bozza Prima Nota compilata con AI: verifica e salva')
-    } catch {
-      setError('Assistente AI non disponibile')
-    }
-  }
-
-  async function handleAiCheckPrimaNota() {
-    try {
-      const res = await checkAiAnomalies('prima-nota', {
-        description: formDescription,
-        amount: Number(formAmount || 0),
-        category_id: formCategoryId || null,
-        payment_method_id: formPaymentMethodId || null,
-      })
-      setAiPrimaNotaAnomalies(res?.anomalies || [])
-    } catch {
-      setError('Controllo anomalie AI non disponibile')
-    }
   }
 
   function handleAzzeraCassaIniziale() {
@@ -1013,26 +970,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             Aggiorna
           </button>
         </div>
-        {!operatorMode && (
-        <div className="form-group" style={{ flex: '1 1 320px' }}>
-          <label>Comando AI movimento</label>
-          <div style={{ display: 'flex', gap: '0.45rem' }}>
-            <input
-              className="form-control"
-              value={aiPrimaNotaText}
-              onChange={e => setAiPrimaNotaText(e.target.value)}
-              placeholder='Es. "pagato fattura bevande aprile 450 euro con bonifico"'
-            />
-            <button type="button" className="btn btn-primary" onClick={handleAiSuggestPrimaNota}>Compila</button>
-            <button type="button" className="btn btn-secondary" onClick={handleAiCheckPrimaNota}>Controlla</button>
-          </div>
-          {aiPrimaNotaAnomalies.length > 0 && (
-            <div className="alert alert-info" style={{ marginTop: '0.45rem', marginBottom: 0 }}>
-              <strong>Anomalie:</strong> {aiPrimaNotaAnomalies.join(' · ')}
-            </div>
-          )}
-        </div>
-        )}
         {!operatorMode && dashboardFilterActive && (
           <div className="ui-filter-pill">
             <span>Dashboard · {selectedDate.slice(0, 7)} · {movementKind}</span>
