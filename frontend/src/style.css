@@ -2360,6 +2360,47 @@ select.form-control {
   color: #b45309;
 }
 
+.pn-movement-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.pn-movement-totals-label {
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.pn-movement-totals-item {
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.pn-movement-totals-item strong {
+  color: var(--text);
+}
+
+.pn-movement-totals-item--nf strong {
+  color: #c2410c;
+}
+
+.pn-table-totals-row td {
+  border-top: 2px solid var(--border);
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
+.pn-table-totals-nf {
+  color: #c2410c;
+  font-weight: 700;
+}
+
 .support-section {
   margin-bottom: 1.25rem;
 }

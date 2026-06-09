@@ -785,6 +785,31 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     })
   }, [rowsWithLedger.rows, movementSearch, movementKind])
 
+  function sumMovementRows(rows) {
+    return (rows || []).reduce(
+      (acc, entry) => ({
+        entrata: acc.entrata + Number(entry.entrata || 0),
+        uscita: acc.uscita + Number(entry.uscita || 0),
+        fiscale: acc.fiscale + (entry.affectsSaldo ? Number(entry.totaleMovimento || 0) : 0),
+        nonFiscale: acc.nonFiscale + Number(entry.nonFiscale || 0),
+        pos: acc.pos + Number(entry.pos || 0),
+        incasso: acc.incasso + Number(entry.incasso || 0),
+        count: acc.count + 1,
+      }),
+      { entrata: 0, uscita: 0, fiscale: 0, nonFiscale: 0, pos: 0, incasso: 0, count: 0 },
+    )
+  }
+
+  const movementPeriodTotals = useMemo(
+    () => sumMovementRows(filteredMovementRows),
+    [filteredMovementRows],
+  )
+
+  const movementPeriodTotalsAll = useMemo(
+    () => sumMovementRows(rowsWithLedger.rows),
+    [rowsWithLedger.rows],
+  )
+
   function supplierName(id) {
     if (!id) return null
     const s = suppliers.find((x) => Number(x.id) === Number(id))
@@ -1234,6 +1259,25 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
         )}
         {loading && <p className="loading">Caricamento...</p>}
+        {!loading && !error && filteredMovementRows.length > 0 && (
+          <div className="pn-movement-totals" aria-label="Totali movimenti nel periodo">
+            <span className="pn-movement-totals-label">
+              Totali periodo ({movementPeriodTotals.count} movimenti)
+            </span>
+            <span className="pn-movement-totals-item">
+              Fiscale: <strong>€ {formatAmount(movementPeriodTotals.fiscale)}</strong>
+            </span>
+            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+              Non fiscale: <strong>€ {formatAmount(movementPeriodTotals.nonFiscale)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Incasso: <strong>€ {formatAmount(movementPeriodTotals.incasso)}</strong>
+            </span>
+          </div>
+        )}
         {!loading && !error && (
           <div className="table-wrap pn-table-wrap">
             <table className="app-table app-table--compact">
@@ -1311,6 +1355,25 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                   </tr>
                 )}
               </tbody>
+              {filteredMovementRows.length > 0 && (
+                <tfoot>
+                  <tr className="pn-table-totals-row">
+                    <td colSpan={3}>
+                      <strong>Totali periodo</strong>
+                      <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.35rem' }}>
+                        ({movementPeriodTotals.count} mov.)
+                      </span>
+                    </td>
+                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.entrata)}</td>
+                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.uscita)}</td>
+                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.fiscale)}</td>
+                    <td className="text-end amount pn-table-totals-nf">€ {formatAmount(movementPeriodTotals.nonFiscale)}</td>
+                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.pos)}</td>
+                    <td className="text-end amount pn-amount-cell">€ {formatAmount(movementPeriodTotals.incasso)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         )}
@@ -1350,7 +1413,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.nonFiscale)} readOnly /></td>
+                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.nonFiscale) || formatAmount(entry.nonFiscale)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.affectsSaldo ? entry.totaleMovimento : 0)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.pos)} readOnly /></td>
                       <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
@@ -1358,6 +1421,16 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                       <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
                     </tr>
                   ))}
+                  <tr className="pn-table-totals-row">
+                    <td colSpan={2}><strong>Totali periodo</strong></td>
+                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.entrata)} readOnly /></td>
+                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.uscita)} readOnly /></td>
+                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.fiscale)} readOnly /></td>
+                    <td><input className="excel-cell excel-cell-num pn-table-totals-nf" value={formatAmount(movementPeriodTotalsAll.nonFiscale)} readOnly /></td>
+                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.fiscale)} readOnly /></td>
+                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.pos)} readOnly /></td>
+                    <td colSpan={3} />
+                  </tr>
                 </tbody>
               </table>
             </div>
