@@ -2173,24 +2173,19 @@ select.form-control {
 .prima-nota-locale-picker {
   position: relative;
   margin-bottom: 1rem;
-  padding: 0;
+  padding: 0.85rem 1rem 1rem;
   border: 1px solid var(--border);
   background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
   overflow: visible;
 }
 
-.prima-nota-locale-trigger {
+.prima-nota-locale-header {
   display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  width: 100%;
-  min-height: 3rem;
-  padding: 0.65rem 1rem;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  color: var(--text);
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .prima-nota-locale-trigger-title {
@@ -2199,29 +2194,76 @@ select.form-control {
   color: #0d9488;
 }
 
-.prima-nota-locale-trigger-sub {
-  flex: 1;
-  font-size: 0.95rem;
+.prima-nota-locale-active-label {
+  font-size: 0.9rem;
   color: var(--text-muted, #64748b);
 }
 
-.prima-nota-locale-trigger-caret {
-  font-size: 0.85rem;
+.prima-nota-locale-active-label strong {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.prima-nota-locale-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.prima-nota-locale-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.85rem;
+  border: 2px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+
+.prima-nota-locale-btn:hover {
+  background: #f0fdfa;
+  border-color: #5eead4;
+}
+
+.prima-nota-locale-btn.is-active {
+  background: #0d9488;
+  border-color: #0f766e;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.28), 0 4px 12px rgba(13, 148, 136, 0.22);
+}
+
+.prima-nota-locale-btn.is-active:hover {
+  background: #0f766e;
+  border-color: #115e59;
+}
+
+.prima-nota-locale-btn-manage {
+  border-style: dashed;
   color: #64748b;
+  background: #f8fafc;
+}
+
+.prima-nota-locale-btn-manage.is-open {
+  border-style: solid;
+  border-color: #94a3b8;
+  background: #e2e8f0;
+  color: #334155;
 }
 
 .prima-nota-locale-panel {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  min-width: min(100%, 22rem);
+  margin-top: 0.85rem;
   padding: 0.85rem 1rem 1rem;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .prima-nota-locale-panel-hint {
@@ -2230,46 +2272,18 @@ select.form-control {
   color: #64748b;
 }
 
-.prima-nota-locale-list {
-  list-style: none;
-  margin: 0 0 0.75rem;
-  padding: 0;
-  max-height: 14rem;
-  overflow-y: auto;
-}
-
-.prima-nota-locale-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 0.65rem;
-  margin-bottom: 0.25rem;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  text-align: left;
-  font-size: 0.92rem;
-  cursor: pointer;
-  color: var(--text);
-}
-
-.prima-nota-locale-item:hover {
-  background: #f0fdfa;
-  border-color: #99f6e4;
-}
-
-.prima-nota-locale-item.is-active {
-  background: #0d9488;
-  color: #fff;
-  font-weight: 600;
-}
-
 .prima-nota-locale-custom-tag {
-  font-size: 0.7rem;
-  opacity: 0.85;
+  font-size: 0.68rem;
+  opacity: 0.9;
   font-weight: 500;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.prima-nota-locale-btn:not(.is-active) .prima-nota-locale-custom-tag {
+  background: #e2e8f0;
+  color: #475569;
 }
 
 .prima-nota-locale-add label {

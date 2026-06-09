@@ -67,39 +67,41 @@ export default function PrimaNotaLocalePicker({
 
   return (
     <div ref={rootRef} className="prima-nota-locale-picker card">
-      <button
-        type="button"
-        className="prima-nota-locale-trigger"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={`Locali prima nota, attivo: ${currentLabel}`}
-      >
+      <div className="prima-nota-locale-header">
         <span className="prima-nota-locale-trigger-title">Locali prima nota</span>
-        <span className="prima-nota-locale-trigger-caret" aria-hidden>
-          ▾
+        <span className="prima-nota-locale-active-label">
+          Locale attivo: <strong>{currentLabel}</strong>
         </span>
-      </button>
+      </div>
+
+      <div className="prima-nota-locale-buttons" role="listbox" aria-label="Seleziona locale">
+        {locales.map((loc) => (
+          <button
+            key={loc.id}
+            type="button"
+            className={`prima-nota-locale-btn${activeActivity === loc.id ? ' is-active' : ''}`}
+            onClick={() => handlePick(loc.id)}
+            role="option"
+            aria-selected={activeActivity === loc.id}
+          >
+            {loc.label}
+            {!loc.builtin && <span className="prima-nota-locale-custom-tag">personalizzato</span>}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`prima-nota-locale-btn prima-nota-locale-btn-manage${open ? ' is-open' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="prima-nota-locale-manage-panel"
+        >
+          {open ? 'Chiudi gestione' : '+ Altro locale'}
+        </button>
+      </div>
 
       {open && (
-        <div className="prima-nota-locale-panel" role="listbox" aria-label="Seleziona locale">
-          <p className="prima-nota-locale-panel-hint">Scegli il locale su cui registrare la prima nota.</p>
-          <ul className="prima-nota-locale-list">
-            {locales.map((loc) => (
-              <li key={loc.id}>
-                <button
-                  type="button"
-                  className={`prima-nota-locale-item${activeActivity === loc.id ? ' is-active' : ''}`}
-                  onClick={() => handlePick(loc.id)}
-                  role="option"
-                  aria-selected={activeActivity === loc.id}
-                >
-                  {loc.label}
-                  {!loc.builtin && <span className="prima-nota-locale-custom-tag">personalizzato</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
+        <div id="prima-nota-locale-manage-panel" className="prima-nota-locale-panel">
+          <p className="prima-nota-locale-panel-hint">Aggiungi un locale personalizzato o ricarica l’elenco.</p>
 
           <form className="prima-nota-locale-add" onSubmit={handleAddLocale}>
             <label htmlFor="prima-nota-new-locale">Aggiungi locale</label>
