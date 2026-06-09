@@ -59,6 +59,40 @@ def _is_extra_cassa(conto: Optional[str]) -> bool:
     return conto in {NON_FISCALE_CONTO, POS_CONTO}
 
 
+def _net_amount_for_day(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    activity: Optional[str],
+    *,
+    conto: Optional[str] = None,
+    fiscale_only: bool = False,
+) -> Decimal:
+    """Saldo netto (entrate − uscite) nel giorno, filtrato per conto o solo fiscale."""
+    act_clause = _activity_filter(activity)
+    entrate_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+        CashEntry.entry_date >= start,
+        CashEntry.entry_date <= end,
+        CashEntry.type == "entrata",
+        act_clause,
+    )
+    uscite_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+        CashEntry.entry_date >= start,
+        CashEntry.entry_date <= end,
+        CashEntry.type == "uscita",
+        act_clause,
+    )
+    if conto is not None:
+        entrate_q = entrate_q.filter(CashEntry.conto == conto)
+        uscite_q = uscite_q.filter(CashEntry.conto == conto)
+    elif fiscale_only:
+        entrate_q = entrate_q.filter(_is_fiscale_filter())
+        uscite_q = uscite_q.filter(_is_fiscale_filter())
+    entrate = Decimal(str(entrate_q.scalar() or 0)).quantize(Decimal("0.01"))
+    uscite = Decimal(str(uscite_q.scalar() or 0)).quantize(Decimal("0.01"))
+    return (entrate - uscite).quantize(Decimal("0.01"))
+
+
 def list_entries(
     db: Session,
     date_from: Optional[datetime] = None,
@@ -246,6 +280,11 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
     end = datetime.combine(target_date, datetime.max.time())
     act_clause = _activity_filter(activity)
 
+    totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
+    totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
+    totale_pos = _net_amount_for_day(db, start, end, activity, conto=POS_CONTO)
+    totale_vendita = (totale_fiscale + totale_non_fiscale + totale_pos).quantize(Decimal("0.01"))
+
     entrate = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
         .filter(
@@ -271,9 +310,9 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
 
     entrate = Decimal(str(entrate or 0)).quantize(Decimal("0.01"))
     uscite = Decimal(str(uscite or 0)).quantize(Decimal("0.01"))
-    saldo_giorno = (entrate - uscite).quantize(Decimal("0.01"))
+    saldo_giorno = totale_fiscale
 
-    # Saldo cumulativo = somma di (entrate - uscite) fino a fine giornata
+    # Saldo cumulativo = somma di (entrate - uscite) fiscali fino a fine giornata
     entrate_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
         .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_fiscale_filter(), act_clause)
@@ -294,6 +333,10 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
         "totale_uscite": uscite,
         "saldo_giornaliero": saldo_giorno,
         "saldo_cumulativo": saldo_cum,
+        "totale_fiscale": totale_fiscale,
+        "totale_non_fiscale": totale_non_fiscale,
+        "totale_pos": totale_pos,
+        "totale_vendita": totale_vendita,
     }
 
 

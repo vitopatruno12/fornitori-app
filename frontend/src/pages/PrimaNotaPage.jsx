@@ -311,6 +311,38 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }, [selectedDate, activeActivity])
 
   useEffect(() => {
+    let cancelled = false
+    async function ensureSelectedDayEntries() {
+      const from = movementPeriodFrom
+      const to = movementPeriodTo
+      if (from && to && from <= selectedDate && selectedDate <= to) return
+      try {
+        const dayEntries = await fetchEntries({
+          date_from: selectedDate,
+          date_to: selectedDate,
+          activity: activeActivity,
+        })
+        if (cancelled || !Array.isArray(dayEntries)) return
+        setEntries((prev) => {
+          const byId = new Map((prev || []).map((e) => [e.id, e]))
+          for (const e of dayEntries) byId.set(e.id, e)
+          return Array.from(byId.values()).sort((a, b) => {
+            const da = String(a.entry_date || '')
+            const db = String(b.entry_date || '')
+            return da.localeCompare(db) || Number(a.id) - Number(b.id)
+          })
+        })
+      } catch {
+        // ignore: il riepilogo usa comunque i totali dal server
+      }
+    }
+    ensureSelectedDayEntries()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDate, activeActivity, movementPeriodFrom, movementPeriodTo])
+
+  useEffect(() => {
     loadEntries()
   }, [movementPeriodFrom, movementPeriodTo, activeActivity])
 
@@ -811,7 +843,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 100)
   }
 
-  const nonFiscaleGiorno = React.useMemo(() => {
+  const nonFiscaleGiornoComputed = React.useMemo(() => {
     return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto !== CONTO_NON_FISCALE) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
@@ -819,7 +851,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 0)
   }, [entriesForSelectedDay])
 
-  const posGiorno = React.useMemo(() => {
+  const posGiornoComputed = React.useMemo(() => {
     return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto !== CONTO_POS) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
@@ -827,7 +859,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 0)
   }, [entriesForSelectedDay])
 
-  const fiscaleGiorno = React.useMemo(() => {
+  const fiscaleGiornoComputed = React.useMemo(() => {
     return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto === CONTO_NON_FISCALE || e.conto === CONTO_POS) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
@@ -835,7 +867,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 0)
   }, [entriesForSelectedDay])
 
-  const totaleVenditaGiorno = Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
+  const nonFiscaleGiorno = summary?.totale_non_fiscale != null ? Number(summary.totale_non_fiscale) : nonFiscaleGiornoComputed
+  const posGiorno = summary?.totale_pos != null ? Number(summary.totale_pos) : posGiornoComputed
+  const fiscaleGiorno = summary?.totale_fiscale != null ? Number(summary.totale_fiscale) : fiscaleGiornoComputed
+  const totaleVenditaGiorno = summary?.totale_vendita != null
+    ? Number(summary.totale_vendita)
+    : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
 
   return (
@@ -1024,7 +1061,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                   type="button"
                   className={formFlowTag === 'non_fiscale' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
                   onClick={() => setFormFlowTag('non_fiscale')}
-                  title="Movimento NON fiscale: viene salvato ma non entra nei conteggi di cassa/riepilogo."
+                  title="Movimento NON fiscale: compare nel riepilogo vendite ma non modifica la cassa fisica."
                 >
                   Non fiscale
                 </button>
@@ -1328,7 +1365,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Riferito al giorno <strong>{formatDate(selectedDate)}</strong> (il blocco sottostante non dipende dal periodo dell’elenco movimenti). I totali con etichetta “(giorno)” usano solo i movimenti di quel giorno tra quelli già caricati. Puoi modificare la <strong>cassa iniziale</strong> per adattare lo schema; per correggere i totali modifica o elimina i movimenti nella tabella sopra.
+          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, non fiscale e POS calcolati dal server per quel giorno. Il saldo cassa usa solo i movimenti fiscali.
         </p>
         <div className="form-row">
           <div className="form-group">

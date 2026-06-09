@@ -48,8 +48,12 @@ class DailySummary(BaseModel):
     date: str
     totale_entrate: Decimal
     totale_uscite: Decimal
-    saldo_giornaliero: Decimal  # entrate - uscite
-    saldo_cumulativo: Decimal  # a fine giornata
+    saldo_giornaliero: Decimal  # entrate - uscite (solo fiscale)
+    saldo_cumulativo: Decimal  # a fine giornata (solo fiscale)
+    totale_fiscale: Decimal = Decimal("0")
+    totale_non_fiscale: Decimal = Decimal("0")
+    totale_pos: Decimal = Decimal("0")
+    totale_vendita: Decimal = Decimal("0")
 
 
 class PrimaNotaLinkInvoice(BaseModel):
