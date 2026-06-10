@@ -416,6 +416,48 @@ const MAX_GEMINI_SHIFTS_BATCH = 80
 /** Limite prudente per `https://wa.me/?text=…` (query troppo lunghe = link rotto o bloccato dal browser). */
 const WA_ME_URL_MAX_LEN = 7200
 const STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY = 'staffMembersByLocale'
+const STAFF_MEMBERS_AUTO_BACKUP_KEY = 'staffMembersLastBackup'
+
+function memberSnapshotFromRow(m) {
+  return {
+    name: m.name || '',
+    first_name: m.first_name || null,
+    last_name: m.last_name || null,
+    email: m.email || null,
+    phone: m.phone || null,
+    city: m.city || null,
+    birth_date: m.birth_date || null,
+    sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
+    is_active: m.is_active !== false,
+  }
+}
+
+function backupMembersToLocal(membersList) {
+  if (!membersList?.length) return
+  try {
+    window.localStorage.setItem(
+      STAFF_MEMBERS_AUTO_BACKUP_KEY,
+      JSON.stringify({
+        saved_at: new Date().toISOString(),
+        members: membersList.map(memberSnapshotFromRow),
+      }),
+    )
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function readMembersAutoBackup() {
+  try {
+    const raw = window.localStorage.getItem(STAFF_MEMBERS_AUTO_BACKUP_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || !Array.isArray(parsed.members) || parsed.members.length === 0) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
 
 async function copyTextToClipboard(text) {
   try {
@@ -682,6 +724,8 @@ export default function StaffPage() {
     [payrollImporto],
   )
 
+  const membersAutoBackup = useMemo(() => readMembersAutoBackup(), [members, success])
+
   useEffect(() => {
     setRateDraft((prev) => {
       const next = { ...prev }
@@ -893,7 +937,9 @@ export default function StaffPage() {
   const refreshMembers = useCallback(async () => {
     try {
       const mem = await fetchStaffMembers()
-      setMembers(Array.isArray(mem) ? mem : [])
+      const list = Array.isArray(mem) ? mem : []
+      setMembers(list)
+      if (list.length > 0) backupMembersToLocal(list)
     } catch (e) {
       setError(e?.message || 'Errore caricamento dipendenti')
     }
@@ -1243,13 +1289,66 @@ export default function StaffPage() {
     }
   }
 
+  async function replaceMembersFromSnapshot(snapshotMembers, successLabel) {
+    if (!Array.isArray(snapshotMembers) || snapshotMembers.length === 0) {
+      throw new Error('Nessun dipendente nel backup da ripristinare')
+    }
+    const oldIds = members.map((m) => m.id)
+    const created = []
+    try {
+      for (const m of snapshotMembers) {
+        const row = await createStaffMember({
+          name: String(m.name || '').trim() || 'Dipendente',
+          first_name: m.first_name || null,
+          last_name: m.last_name || null,
+          email: m.email || null,
+          phone: m.phone || null,
+          city: m.city || null,
+          birth_date: m.birth_date || null,
+          is_active: m.is_active !== false,
+        })
+        created.push(row)
+      }
+      for (const id of oldIds) {
+        await deleteStaffMember(id)
+      }
+    } catch (err) {
+      for (const row of created) {
+        if (row?.id) {
+          try {
+            await deleteStaffMember(row.id)
+          } catch {
+            // ignore rollback errors
+          }
+        }
+      }
+      throw err
+    }
+    markPlanningStale()
+    setMemberInfoId(null)
+    setEditingShiftId(null)
+    setFormMemberId('')
+    setFormDate(toYMD(new Date()))
+    setFormStart('08:00')
+    setFormEnd('16:00')
+    setFormKind('shift')
+    setFormNotes('')
+    await refreshMembers()
+    setSuccess(successLabel || `Ripristinati ${created.length} dipendenti.`)
+  }
+
   async function handleDeleteAllMembers() {
     if (members.length === 0) return
     if (
       !window.confirm(
-        `Eliminare TUTTI i dipendenti (${members.length})?\n\nVerranno rimosse anche tutte le voci di pianificazione (turni, permessi, assenze, malattia) collegate. L’operazione non si può annullare.`,
+        `Eliminare TUTTI i dipendenti (${members.length})?\n\nVerranno rimosse anche tutte le voci di pianificazione collegate. L’operazione non si può annullare.`,
       )
     ) {
+      return
+    }
+    const typed = window.prompt('Per confermare, scrivi ELIMINA (tutto maiuscolo):')
+    if (typed !== 'ELIMINA') {
+      setError(typed == null ? 'Eliminazione annullata.' : 'Conferma errata: scrivi esattamente ELIMINA.')
       return
     }
     try {
@@ -1266,13 +1365,45 @@ export default function StaffPage() {
       setFormKind('shift')
       setFormNotes('')
       await refreshMembers()
+      const backup = readMembersAutoBackup()
       setSuccess(
         n > 0
-          ? `Eliminati ${n} dipendenti e tutta la pianificazione associata.`
+          ? `Eliminati ${n} dipendenti. ${backup ? 'Puoi usare «Ripristina backup» se era un errore.' : ''}`
           : 'Elenco dipendenti già vuoto.',
       )
     } catch (err) {
       setError(err?.message || 'Errore eliminazione elenco dipendenti')
+    }
+  }
+
+  async function handleRestoreMembersBackup() {
+    const backup = readMembersAutoBackup()
+    if (!backup) {
+      setError('Nessun backup automatico trovato nel browser.')
+      return
+    }
+    const when = backup.saved_at
+      ? new Date(backup.saved_at).toLocaleString('it-IT')
+      : 'data sconosciuta'
+    if (
+      !window.confirm(
+        `Ripristinare ${backup.members.length} dipendenti dal backup del ${when}?\n\nL’elenco attuale sul server verrà sostituito.`,
+      )
+    ) {
+      return
+    }
+    try {
+      setShiftBusy(true)
+      setError('')
+      await replaceMembersFromSnapshot(
+        backup.members,
+        `Ripristinati ${backup.members.length} dipendenti dal backup del ${when}.`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Errore ripristino backup dipendenti')
+      await refreshMembers()
+    } finally {
+      setShiftBusy(false)
     }
   }
 
@@ -1314,17 +1445,7 @@ export default function StaffPage() {
     }
     try {
       setError('')
-      const snapshot = members.map((m) => ({
-        name: m.name || '',
-        first_name: m.first_name || null,
-        last_name: m.last_name || null,
-        email: m.email || null,
-        phone: m.phone || null,
-        city: m.city || null,
-        birth_date: m.birth_date || null,
-        sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
-        is_active: Boolean(m.is_active),
-      }))
+      const snapshot = members.map(memberSnapshotFromRow)
       const store = readStaffLocaleStore()
       store[localeName] = {
         saved_at: new Date().toISOString(),
@@ -1355,30 +1476,10 @@ export default function StaffPage() {
     try {
       setError('')
       setShiftBusy(true)
-      await deleteAllStaffMembers()
-      for (const m of pack.members) {
-        await createStaffMember({
-          name: String(m.name || '').trim() || 'Dipendente',
-          first_name: m.first_name || null,
-          last_name: m.last_name || null,
-          email: m.email || null,
-          phone: m.phone || null,
-          city: m.city || null,
-          birth_date: m.birth_date || null,
-          is_active: m.is_active !== false,
-        })
-      }
-      markPlanningStale()
-      setMemberInfoId(null)
-      setEditingShiftId(null)
-      setFormMemberId('')
-      setFormDate(toYMD(new Date()))
-      setFormStart('08:00')
-      setFormEnd('16:00')
-      setFormKind('shift')
-      setFormNotes('')
-      await refreshMembers()
-      setSuccess(`Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi)`)
+      await replaceMembersFromSnapshot(
+        pack.members,
+        `Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi)`,
+      )
     } catch (err) {
       setError(err?.message || 'Errore nel caricamento dipendenti per locale')
       await refreshMembers()
@@ -1860,16 +1961,31 @@ export default function StaffPage() {
               Annulla
             </button>
           )}
+        </form>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
           <button
             type="button"
-            className="btn btn-outline-danger"
+            className="btn btn-secondary btn-sm"
+            disabled={shiftBusy || loading || demoLoading || reportLoading || !membersAutoBackup}
+            onClick={() => void handleRestoreMembersBackup()}
+            title={
+              membersAutoBackup
+                ? `Ripristina ${membersAutoBackup.members.length} dipendenti (backup locale)`
+                : 'Nessun backup automatico in questo browser'
+            }
+          >
+            Ripristina backup{membersAutoBackup ? ` (${membersAutoBackup.members.length})` : ''}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger btn-sm"
             disabled={members.length === 0 || shiftBusy || demoLoading || reportLoading}
             onClick={() => void handleDeleteAllMembers()}
-            title="Rimuove tutti i dipendenti e tutta la pianificazione collegata (irreversibile)"
+            title="Rimuove tutti i dipendenti (richiede conferma ELIMINA)"
           >
-            Elimina elenco dipendenti
+            Elimina tutti i dipendenti
           </button>
-        </form>
+        </div>
         <div
           style={{
             display: 'flex',
