@@ -791,53 +791,69 @@ export default function StaffPage() {
     return lines
   }, [payrollRows, payrollImporto, rateDraft])
 
+  const resolvePayrollLineMemberId = useCallback(
+    (ln) => {
+      const rawId = Number(ln.staff_member_id)
+      if (Number.isFinite(rawId) && members.some((m) => m.id === rawId)) return rawId
+      const name = String(ln.name || '').trim()
+      if (!name) return null
+      const byName = members.find((m) => String(m.name || '').trim() === name)
+      return byName?.id ?? null
+    },
+    [members],
+  )
+
   const applyPayrollMonthSnapshot = useCallback(
     (rec) => {
       if (!rec?.lines?.length) {
         setHoursOverride({})
         setPayrollImporto({})
-        return
+        return 0
       }
       const ho = {}
       const imp = {}
       const rd = {}
+      let matched = 0
       for (const ln of rec.lines) {
-        const id = ln.staff_member_id
-        ho[id] = formatHoursDecimal(ln.hours)
+        const id = resolvePayrollLineMemberId(ln)
+        if (id == null) continue
+        matched += 1
+        const hoursStr = formatHoursDecimal(ln.hours)
+        ho[id] = hoursStr !== '' ? hoursStr : ln.hours != null ? String(ln.hours) : ''
         imp[id] = ln.amount
         rd[id] = ln.hourly_rate != null ? String(ln.hourly_rate) : ''
       }
+      if (matched === 0) return 0
       setHoursOverride(ho)
       setPayrollImporto(imp)
       setRateDraft((prev) => ({ ...prev, ...rd }))
+      return matched
     },
-    [],
+    [resolvePayrollLineMemberId],
   )
 
   useEffect(() => {
+    if (members.length === 0) return undefined
     let cancelled = false
     ;(async () => {
       try {
         const months = await fetchStaffPayrollMonths()
         if (cancelled) return
         const hit = (months || []).find((m) => m.year_month === payrollMonthYm)
-        if (hit) {
+        if (hit?.lines?.length) {
           applyPayrollMonthSnapshot(hit)
-        } else {
+        } else if (!hit) {
           setHoursOverride({})
           setPayrollImporto({})
         }
       } catch {
-        if (!cancelled) {
-          setHoursOverride({})
-          setPayrollImporto({})
-        }
+        /* Non azzerare la tabella se l'API archivio fallisce (es. dopo Carica in tabella). */
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [payrollMonthYm, applyPayrollMonthSnapshot])
+  }, [payrollMonthYm, applyPayrollMonthSnapshot, members])
 
   useEffect(() => {
     if (payrollDaysInfoMemberId == null) return

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import {
   createStaffPayrollMonth,
   deleteStaffPayrollMonth,
+  fetchStaffPayrollMonth,
   fetchStaffPayrollMonths,
   updateStaffPayrollMonth,
 } from '../services/staffService'
@@ -166,14 +167,38 @@ export default function StaffPayrollMonthPanel({
     onNotifySuccess?.('Modifiche annullate.')
   }
 
-  function loadArchiveIntoTable(rec) {
-    if (!rec) return
-    onPayrollMonthYmChange?.(rec.year_month)
-    applySnapshot(rec)
-    setEditingId(rec.id)
-    setBackup(rec)
-    setArchivePickId(String(rec.id))
-    onNotifySuccess?.(`${monthLabelIt(rec.year_month)} caricato nella tabella.`)
+  async function loadArchiveIntoTable(rec) {
+    if (!rec?.id) return
+    setLoading(true)
+    try {
+      const full = await fetchStaffPayrollMonth(rec.id)
+      if (!full?.lines?.length) {
+        onNotifyError?.('Archivio senza righe salvate: usa Salva dopo Calcola.')
+        return
+      }
+      onPayrollMonthYmChange?.(full.year_month)
+      const matched = applySnapshot(full)
+      setEditingId(full.id)
+      setBackup(full)
+      setArchivePickId(String(full.id))
+      if (matched === 0) {
+        onNotifyError?.(
+          'Nessuna riga associata ai dipendenti attuali (nomi cambiati o elenco sostituito). Controlla i nomi in anagrafica.',
+        )
+        return
+      }
+      if (matched < full.lines.length) {
+        onNotifySuccess?.(
+          `${monthLabelIt(full.year_month)} caricato (${matched} di ${full.lines.length} righe: alcuni nomi non sono più in elenco).`,
+        )
+        return
+      }
+      onNotifySuccess?.(`${monthLabelIt(full.year_month)} caricato nella tabella.`)
+    } catch (err) {
+      onNotifyError?.(String(err?.message || 'Caricamento archivio in tabella non riuscito'))
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleDeleteArchive(rec) {
@@ -318,7 +343,7 @@ export default function StaffPayrollMonthPanel({
               const id = e.target.value
               setArchivePickId(id)
               const rec = savedMonths.find((m) => String(m.id) === id)
-              if (rec) loadArchiveIntoTable(rec)
+              if (rec) void loadArchiveIntoTable(rec)
             }}
           >
             <option value="">
@@ -336,7 +361,7 @@ export default function StaffPayrollMonthPanel({
                 type="button"
                 className="btn btn-outline-secondary btn-sm"
                 disabled={disabled || loading}
-                onClick={() => loadArchiveIntoTable(pickedArchive)}
+                onClick={() => void loadArchiveIntoTable(pickedArchive)}
               >
                 Carica in tabella
               </button>
