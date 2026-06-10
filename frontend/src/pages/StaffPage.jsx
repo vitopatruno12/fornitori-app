@@ -57,19 +57,22 @@ function buildDayDisplayRows(dayShifts, rosterMemberIds, members) {
   if (!rosterMemberIds?.length) {
     return (dayShifts || []).map((shift) => ({ kind: 'shift', shift }))
   }
+  const rosterIds = rosterMemberIds.map((id) => Number(id))
+  const rosterIdSet = new Set(rosterIds)
   const shiftsByMember = new Map()
   const otherShifts = []
   for (const s of dayShifts || []) {
-    if (s.staff_member_id && rosterMemberIds.includes(s.staff_member_id)) {
-      if (!shiftsByMember.has(s.staff_member_id)) shiftsByMember.set(s.staff_member_id, s)
+    const sid = Number(s.staff_member_id)
+    if (Number.isFinite(sid) && rosterIdSet.has(sid)) {
+      if (!shiftsByMember.has(sid)) shiftsByMember.set(sid, s)
       else otherShifts.push(s)
     } else {
       otherShifts.push(s)
     }
   }
-  const rows = rosterMemberIds
+  const rows = rosterIds
     .map((id) => {
-      const member = members.find((m) => m.id === id)
+      const member = members.find((m) => Number(m.id) === id)
       if (!member) return null
       return { kind: 'member', member, shift: shiftsByMember.get(id) || null }
     })
@@ -884,13 +887,13 @@ export default function StaffPage() {
     const from = toYMD(startDate)
     const to = toYMD(endDate)
     const sh = await fetchStaffShifts(from, to)
-    setShifts(sh || [])
+    setShifts(Array.isArray(sh) ? sh : [])
   }, [])
 
   const refreshMembers = useCallback(async () => {
     try {
       const mem = await fetchStaffMembers()
-      setMembers(mem || [])
+      setMembers(Array.isArray(mem) ? mem : [])
     } catch (e) {
       setError(e?.message || 'Errore caricamento dipendenti')
     }
@@ -903,7 +906,6 @@ export default function StaffPage() {
   const markPlanningStale = useCallback(() => {
     setShifts([])
     setPlanningLoaded(false)
-    setWeekDayRoster(null)
   }, [])
 
   const reloadPlanning = useCallback(async () => {
@@ -2185,9 +2187,11 @@ export default function StaffPage() {
                 type="button"
                 className={`btn btn-sm ${planView === 'week' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => {
-                  markPlanningStale()
-                  if (planView === 'day') {
-                    setWeekAnchor(startOfWeekMonday(dayFocus))
+                  if (planView !== 'week') {
+                    markPlanningStale()
+                    if (planView === 'day') {
+                      setWeekAnchor(startOfWeekMonday(dayFocus))
+                    }
                   }
                   setPlanView('week')
                 }}
@@ -2456,7 +2460,7 @@ export default function StaffPage() {
 
         {loading && <p className="loading">Caricamento…</p>}
 
-        {!loading && (
+        {(!loading || (planView === 'week' && activeWeekRosterIds)) && (
           <div
             className={
               planView === 'day'
@@ -2507,7 +2511,7 @@ export default function StaffPage() {
                     </button>
                   </div>
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
-                    {dayRows.map((row) => {
+                    {dayRows.map((row, rowIdx) => {
                       if (row.kind === 'member') {
                         const { member, shift } = row
                         const times =
@@ -2540,8 +2544,9 @@ export default function StaffPage() {
                         )
                       }
                       const s = row.shift
+                      if (!s) return null
                       return (
-                        <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
+                        <li key={s.id ?? `shift-${ymd}-${rowIdx}`} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
                           <span>{shiftLine(s)}</span>
                           <span style={{ flexShrink: 0 }}>
                             <button
