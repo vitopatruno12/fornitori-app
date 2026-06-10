@@ -1062,10 +1062,22 @@ export default function StaffPage() {
   }, [success])
 
   useEffect(() => {
-    if (planView === 'day' && editingShiftId == null) {
+    if (editingShiftId != null) return
+    if (planView === 'day') {
       setFormDate(dayStr)
+      return
     }
-  }, [planView, dayStr, editingShiftId])
+    if (planView === 'week') {
+      const today = toYMD(new Date())
+      const weekStart = toYMD(weekAnchor)
+      const weekEnd = toYMD(addDays(weekAnchor, 6))
+      if (today >= weekStart && today <= weekEnd) {
+        setFormDate(today)
+      } else {
+        setFormDate(weekStart)
+      }
+    }
+  }, [planView, dayStr, weekAnchor, editingShiftId])
 
   useEffect(() => {
     if (planView === 'period' && editingShiftId == null) {
@@ -3052,8 +3064,8 @@ export default function StaffPage() {
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
             <ul className="staff-shift-form-hint-list">
               <li>
-                <strong>Singolo giorno</strong> — Seleziona i dipendenti, imposta <strong>Data</strong>, <strong>Tipo</strong> e orari, poi clicca{' '}
-                <strong>Aggiungi</strong>. La voce viene creata solo per la data indicata.
+                <strong>Singolo giorno</strong> — Seleziona i dipendenti, imposta <strong>Tipo</strong> e orari, poi clicca{' '}
+                <strong>Aggiungi</strong>. La data è quella del giorno aperto in pianificazione (<strong>Apri giorno</strong> sulla card).
               </li>
               <li>
                 <strong>Più giorni della settimana</strong> — Seleziona dipendenti e <strong>Giorni settimana</strong> dai menu, imposta tipo e orari, poi clicca{' '}
@@ -3145,10 +3157,6 @@ export default function StaffPage() {
                 </label>
               ))}
             </StaffCheckboxDropdown>
-          </div>
-          <div className="form-group" style={{ flex: '0 1 150px' }}>
-            <label>Data</label>
-            <input type="date" className="form-control" value={formDate} onChange={(e) => setFormDate(e.target.value)} required disabled={shiftBusy} />
           </div>
           <div className="form-group" style={{ flex: '0 1 130px' }}>
             <label>Tipo</label>
