@@ -1556,14 +1556,14 @@ export default function StaffPage() {
 
   const resetForm = useCallback(() => {
     setEditingShiftId(null)
-    setFormMemberIds(members[0] ? new Set([members[0].id]) : new Set())
+    setFormMemberIds(new Set())
     setFormDate(toYMD(new Date()))
     setFormStart('08:00')
     setFormEnd('16:00')
     setFormKind('shift')
     setFormNotes('')
     setError('')
-  }, [members])
+  }, [])
 
   /** Mantieni i dipendenti selezionati nel modulo turni allineati all’elenco reale (evita POST con id eliminato → 400). */
   useEffect(() => {
@@ -1574,8 +1574,8 @@ export default function StaffPage() {
     setFormMemberIds((prev) => {
       const valid = new Set(members.map((m) => m.id))
       const next = new Set([...prev].filter((id) => valid.has(id)))
-      if (next.size > 0) return next.size === prev.size ? prev : next
-      return new Set([members[0].id])
+      if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev
+      return next
     })
   }, [members])
 
@@ -1838,6 +1838,7 @@ export default function StaffPage() {
           ? `Caricato ${memberLabel} in settimana (${weekFrom} → ${weekTo}) per: ${dayLabels}. Creati ${created} turni${skipped ? `, ${skipped} già presenti` : ''}.`
           : `Nessun nuovo turno: i dipendenti selezionati hanno già voci per i giorni scelti (${dayLabels}).`,
       )
+      setFormMemberIds(new Set())
     } catch (err) {
       setError(err?.message || 'Errore caricamento in settimana')
     } finally {
