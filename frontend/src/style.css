@@ -2054,6 +2054,44 @@ select.form-control {
   width: 3.5rem;
 }
 
+.staff-shift-form-hint {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px dashed color-mix(in oklab, var(--border) 55%, #0ea5e9 45%);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg-card) 92%, #0ea5e9 8%);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-muted, #64748b);
+}
+
+.staff-shift-form-hint-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in oklab, #0ea5e9 45%, var(--text));
+}
+
+.staff-shift-form-hint-list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.staff-shift-form-hint-list li {
+  margin-bottom: 0.35rem;
+}
+
+.staff-shift-form-hint-list li:last-child {
+  margin-bottom: 0;
+}
+
+.staff-shift-form-hint strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .staff-shift-actions-col {
   display: flex;
   flex-direction: column;

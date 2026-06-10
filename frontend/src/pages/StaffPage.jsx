@@ -2708,6 +2708,21 @@ export default function StaffPage() {
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           {editingShiftId ? 'Modifica voce' : 'Nuova voce in pianificazione'}
         </h2>
+        {!editingShiftId ? (
+          <div className="staff-shift-form-hint" role="note">
+            <p className="staff-shift-form-hint-title">Come inserire un turno</p>
+            <ul className="staff-shift-form-hint-list">
+              <li>
+                <strong>Singolo giorno</strong> — Seleziona i dipendenti, imposta <strong>Data</strong>, <strong>Tipo</strong> e orari, poi clicca{' '}
+                <strong>Aggiungi</strong>. La voce viene creata solo per la data indicata.
+              </li>
+              <li>
+                <strong>Più giorni della settimana</strong> — Seleziona dipendenti e <strong>Giorni settimana</strong> dai menu, imposta tipo e orari, poi clicca{' '}
+                <strong>Carica in settimana</strong>. Inserisce le voci per ogni dipendente nei giorni scelti della settimana visibile in pianificazione.
+              </li>
+            </ul>
+          </div>
+        ) : null}
         <GeminiVoiceAssistant
           label="Turno a voce (Gemini)"
           hint='Un dipendente: "Marianna martedì 8-16". Tutti insieme (vista Settimana): "tutti i dipendenti da lunedì a venerdì turno 8-16". Salvataggio automatico di tutti i turni.'
