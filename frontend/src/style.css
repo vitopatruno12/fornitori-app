@@ -2054,6 +2054,139 @@ select.form-control {
   width: 3.5rem;
 }
 
+.staff-shift-actions-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-self: flex-end;
+}
+
+.staff-week-load-btn-top {
+  white-space: nowrap;
+  font-weight: 600;
+  box-shadow: 0 2px 8px color-mix(in oklab, #722f37 32%, transparent);
+}
+
+.staff-check-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.staff-check-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: none;
+  min-height: calc(0.5rem * 2 + 1.25rem);
+  padding-right: 0.65rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.staff-check-dropdown-trigger:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+.staff-check-dropdown.is-open .staff-check-dropdown-trigger,
+.staff-check-dropdown-trigger:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.staff-check-dropdown-trigger:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.staff-check-dropdown-trigger-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-check-dropdown-caret {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+  transition: transform 0.15s ease;
+}
+
+.staff-check-dropdown.is-open .staff-check-dropdown-caret {
+  transform: rotate(180deg);
+}
+
+.staff-check-dropdown-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  right: 0;
+  max-height: 11rem;
+  overflow: auto;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 1px);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+}
+
+.staff-shift-select-column {
+  flex: 1 1 10rem;
+  min-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.staff-shift-select-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.staff-shift-members-empty {
+  display: block;
+  padding: 0.25rem 0.15rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+}
+
+.staff-shift-member-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+}
+
+.staff-shift-member-option--all {
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.15rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.staff-shift-member-option input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.staff-shift-members-empty {
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+}
+
 /* Dashboard: skeleton durante caricamento API */
 @keyframes dash-skeleton-shimmer {
   0% {
@@ -2097,6 +2230,7 @@ select.form-control {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
+
 
 /* Personale: modale report PDF */
 .staff-report-modal-backdrop {

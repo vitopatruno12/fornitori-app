@@ -49,6 +49,82 @@ const KIND_LABELS = {
   sick: 'Malattia',
 }
 
+/** Giorni della settimana (lun–dom) rispetto a weekAnchor (lunedì). */
+const WEEK_LOAD_DAY_OPTIONS = [
+  { offset: 0, label: 'Lunedì' },
+  { offset: 1, label: 'Martedì' },
+  { offset: 2, label: 'Mercoledì' },
+  { offset: 3, label: 'Giovedì' },
+  { offset: 4, label: 'Venerdì' },
+  { offset: 5, label: 'Sabato' },
+  { offset: 6, label: 'Domenica' },
+]
+
+function StaffCheckboxDropdown({
+  label,
+  hideLabel,
+  triggerLabel,
+  open,
+  onOpenChange,
+  disabled,
+  showSelectAll,
+  selectAllRef,
+  allSelected,
+  onToggleAll,
+  selectAllDisabled,
+  menuAriaLabel,
+  emptyMessage,
+  children,
+}) {
+  const rootRef = React.useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    function onDocClick(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) onOpenChange(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open, onOpenChange])
+
+  return (
+    <div className={`staff-check-dropdown${open ? ' is-open' : ''}`} ref={rootRef}>
+      {!hideLabel && label ? <span className="staff-shift-select-label">{label}</span> : null}
+      <button
+        type="button"
+        className="form-control staff-check-dropdown-trigger"
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => onOpenChange(!open)}
+      >
+        <span className="staff-check-dropdown-trigger-text">{triggerLabel}</span>
+        <span className="staff-check-dropdown-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <div className="staff-check-dropdown-menu" role="listbox" aria-label={menuAriaLabel} aria-multiselectable="true">
+          {showSelectAll ? (
+            <label className="staff-shift-member-option staff-shift-member-option--all">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                disabled={selectAllDisabled}
+                onChange={onToggleAll}
+              />
+              <span>Tutti</span>
+            </label>
+          ) : null}
+          {emptyMessage ? <span className="staff-shift-members-empty">{emptyMessage}</span> : null}
+          {children}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /** Lunedi come primo giorno della settimana (indice getDay: dom=0 ... sab=6). */
 function startOfWeekMonday(d) {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -563,12 +639,17 @@ export default function StaffPage() {
   const [localeStaffName, setLocaleStaffName] = useState('')
   const [savedLocaleNames, setSavedLocaleNames] = useState([])
 
-  const [formMemberId, setFormMemberId] = useState('')
+  const [formMemberIds, setFormMemberIds] = useState(() => new Set())
+  const formMemberSelectAllRef = React.useRef(null)
   const [formDate, setFormDate] = useState(() => toYMD(new Date()))
   const [formStart, setFormStart] = useState('08:00')
   const [formEnd, setFormEnd] = useState('16:00')
   const [formKind, setFormKind] = useState('shift')
   const [formNotes, setFormNotes] = useState('')
+  const [weekLoadDays, setWeekLoadDays] = useState(() => new Set([0, 1, 2, 3, 4]))
+  const weekLoadDaysSelectAllRef = React.useRef(null)
+  const [membersDropdownOpen, setMembersDropdownOpen] = useState(false)
+  const [weekDaysDropdownOpen, setWeekDaysDropdownOpen] = useState(false)
   const [editingShiftId, setEditingShiftId] = useState(null)
   /** Evita richieste duplicate (doppio clic / Invio mentre parte un’altra azione). */
   const [shiftBusy, setShiftBusy] = useState(false)
@@ -590,6 +671,12 @@ export default function StaffPage() {
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
   const toStr = useMemo(() => toYMD(weekEnd), [weekEnd])
+  const weekLoadTargetAnchor = useMemo(
+    () => (planView === 'week' ? weekAnchor : startOfWeekMonday(formDate ? parseYMD(formDate) : new Date())),
+    [planView, weekAnchor, formDate],
+  )
+  const weekLoadFromStr = useMemo(() => toYMD(weekLoadTargetAnchor), [weekLoadTargetAnchor])
+  const weekLoadToStr = useMemo(() => toYMD(addDays(weekLoadTargetAnchor, 6)), [weekLoadTargetAnchor])
   const dayStr = useMemo(() => toYMD(dayFocus), [dayFocus])
   const periodFromStr = useMemo(() => toYMD(periodFrom), [periodFrom])
   const periodToStr = useMemo(() => toYMD(periodTo), [periodTo])
@@ -1181,6 +1268,88 @@ export default function StaffPage() {
     }
   }
 
+  const allFormMembersSelected = members.length > 0 && members.every((m) => formMemberIds.has(m.id))
+  const someFormMembersSelected = members.some((m) => formMemberIds.has(m.id))
+  const allWeekDaysSelected = WEEK_LOAD_DAY_OPTIONS.every((d) => weekLoadDays.has(d.offset))
+  const someWeekDaysSelected = WEEK_LOAD_DAY_OPTIONS.some((d) => weekLoadDays.has(d.offset))
+
+  const membersDropdownLabel = useMemo(() => {
+    if (members.length === 0) return 'Nessun dipendente'
+    if (formMemberIds.size === 0) return 'Seleziona dipendenti…'
+    if (allFormMembersSelected) return 'Tutti i dipendenti'
+    if (formMemberIds.size === 1) {
+      const m = members.find((x) => formMemberIds.has(x.id))
+      return m?.name || '1 dipendente'
+    }
+    const names = members.filter((m) => formMemberIds.has(m.id)).map((m) => m.name)
+    if (names.length <= 2) return names.join(', ')
+    return `${formMemberIds.size} dipendenti selezionati`
+  }, [members, formMemberIds, allFormMembersSelected])
+
+  const weekDaysDropdownLabel = useMemo(() => {
+    if (weekLoadDays.size === 0) return 'Seleziona giorni…'
+    if (allWeekDaysSelected) return 'Tutti i giorni'
+    const labels = [...weekLoadDays]
+      .sort((a, b) => a - b)
+      .map((off) => WEEK_LOAD_DAY_OPTIONS.find((d) => d.offset === off)?.label)
+      .filter(Boolean)
+    if (labels.length <= 3) return labels.join(', ')
+    return `${labels.length} giorni selezionati`
+  }, [weekLoadDays, allWeekDaysSelected])
+
+  useEffect(() => {
+    setMembersDropdownOpen(false)
+    setWeekDaysDropdownOpen(false)
+  }, [editingShiftId])
+
+  useEffect(() => {
+    const el = formMemberSelectAllRef.current
+    if (el) el.indeterminate = someFormMembersSelected && !allFormMembersSelected
+  }, [someFormMembersSelected, allFormMembersSelected])
+
+  function toggleFormMemberSelection(memberId) {
+    if (editingShiftId) return
+    setFormMemberIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(memberId)) next.delete(memberId)
+      else next.add(memberId)
+      return next
+    })
+  }
+
+  function toggleSelectAllFormMembers() {
+    if (editingShiftId) return
+    if (allFormMembersSelected) {
+      setFormMemberIds(new Set())
+      return
+    }
+    setFormMemberIds(new Set(members.map((m) => m.id)))
+  }
+
+  useEffect(() => {
+    const el = weekLoadDaysSelectAllRef.current
+    if (el) el.indeterminate = someWeekDaysSelected && !allWeekDaysSelected
+  }, [someWeekDaysSelected, allWeekDaysSelected])
+
+  function toggleWeekLoadDay(offset) {
+    if (editingShiftId) return
+    setWeekLoadDays((prev) => {
+      const next = new Set(prev)
+      if (next.has(offset)) next.delete(offset)
+      else next.add(offset)
+      return next
+    })
+  }
+
+  function toggleSelectAllWeekLoadDays() {
+    if (editingShiftId) return
+    if (allWeekDaysSelected) {
+      setWeekLoadDays(new Set())
+      return
+    }
+    setWeekLoadDays(new Set(WEEK_LOAD_DAY_OPTIONS.map((d) => d.offset)))
+  }
+
   async function handleDeleteMember(m) {
     if (!window.confirm(`Rimuovere ${m.name} e tutte le sue voci in pianificazione?`)) return
     try {
@@ -1210,7 +1379,7 @@ export default function StaffPage() {
       const n = r?.deleted ?? 0
       markPlanningStale()
       setEditingShiftId(null)
-      setFormMemberId('')
+      setFormMemberIds(new Set())
       setFormDate(toYMD(new Date()))
       setFormStart('08:00')
       setFormEnd('16:00')
@@ -1322,7 +1491,7 @@ export default function StaffPage() {
       markPlanningStale()
       setMemberInfoId(null)
       setEditingShiftId(null)
-      setFormMemberId('')
+      setFormMemberIds(new Set())
       setFormDate(toYMD(new Date()))
       setFormStart('08:00')
       setFormEnd('16:00')
@@ -1341,7 +1510,7 @@ export default function StaffPage() {
   function startEditShift(s) {
     setError('')
     setEditingShiftId(s.id)
-    setFormMemberId(String(s.staff_member_id))
+    setFormMemberIds(new Set([s.staff_member_id]))
     setFormDate(s.work_date)
     setFormStart(timeInputValue(s.time_start))
     setFormEnd(timeInputValue(s.time_end))
@@ -1351,7 +1520,7 @@ export default function StaffPage() {
 
   const resetForm = useCallback(() => {
     setEditingShiftId(null)
-    setFormMemberId(members[0] ? String(members[0].id) : '')
+    setFormMemberIds(members[0] ? new Set([members[0].id]) : new Set())
     setFormDate(toYMD(new Date()))
     setFormStart('08:00')
     setFormEnd('16:00')
@@ -1360,21 +1529,19 @@ export default function StaffPage() {
     setError('')
   }, [members])
 
-  /** Mantieni il dipendente selezionato nel modulo turni allineato all’elenco reale (evita POST con id eliminato → 400). */
+  /** Mantieni i dipendenti selezionati nel modulo turni allineati all’elenco reale (evita POST con id eliminato → 400). */
   useEffect(() => {
     if (members.length === 0) {
-      if (formMemberId) setFormMemberId('')
+      setFormMemberIds((prev) => (prev.size === 0 ? prev : new Set()))
       return
     }
-    if (!formMemberId) {
-      setFormMemberId(String(members[0].id))
-      return
-    }
-    const id = Number(formMemberId)
-    if (!Number.isFinite(id) || !members.some((m) => m.id === id)) {
-      setFormMemberId(String(members[0].id))
-    }
-  }, [members, formMemberId])
+    setFormMemberIds((prev) => {
+      const valid = new Set(members.map((m) => m.id))
+      const next = new Set([...prev].filter((id) => valid.has(id)))
+      if (next.size > 0) return next.size === prev.size ? prev : next
+      return new Set([members[0].id])
+    })
+  }, [members])
 
   /** Allinea vista planning alla data del turno salvato (evita che sparisca dopo voce/AI se dayFocus o settimana erano altri giorni). */
   function focusPlanningOnWorkDate(ymd) {
@@ -1469,7 +1636,7 @@ export default function StaffPage() {
       }
 
       const first = toSave[0]
-      setFormMemberId(String(first.staffId))
+      setFormMemberIds(new Set(toSave.map((row) => row.staffId)))
       setFormDate(first.workDate)
       setFormKind(first.entryKind)
       setFormStart(first.timeStart)
@@ -1524,20 +1691,7 @@ export default function StaffPage() {
     }
   }
 
-  async function handleSubmitShift(e) {
-    e.preventDefault()
-    if (shiftBusy) return
-    if (!formMemberId) {
-      setError('Seleziona un dipendente')
-      return
-    }
-    const staffId = Number(formMemberId)
-    if (!Number.isFinite(staffId) || !members.some((m) => m.id === staffId)) {
-      setError('Il dipendente selezionato non è più in elenco. Scegli un altro nome dal menu.')
-      await refreshMembers()
-      return
-    }
-    const savedWorkDate = formDate
+  function buildShiftPayloadForMember(staffId) {
     const payload = {
       staff_member_id: staffId,
       work_date: formDate,
@@ -1548,14 +1702,12 @@ export default function StaffPage() {
     }
     if (formKind === 'shift') {
       if (!formStart || !formEnd) {
-        setError('Per il turno servono ora inizio e fine')
-        return
+        return { error: 'Per il turno servono ora inizio e fine' }
       }
     }
     if (formKind === 'permission') {
       if ((formStart && !formEnd) || (!formStart && formEnd)) {
-        setError('Permesso: indicare sia inizio sia fine, oppure lasciare vuoto e usare le note')
-        return
+        return { error: 'Permesso: indicare sia inizio sia fine, oppure lasciare vuoto e usare le note' }
       }
       if (!formStart) {
         payload.time_start = null
@@ -1566,16 +1718,141 @@ export default function StaffPage() {
       payload.time_start = formStart ? `${formStart}:00` : null
       payload.time_end = formEnd ? `${formEnd}:00` : null
     }
+    return { payload }
+  }
+
+  async function handleLoadMemberIntoWeekDays() {
+    if (shiftBusy) return
+    if (editingShiftId) {
+      setError('Termina la modifica in corso prima di caricare in settimana.')
+      return
+    }
+    const staffIds = [...formMemberIds]
+    if (!staffIds.length) {
+      setError('Seleziona almeno un dipendente')
+      return
+    }
+    if (weekLoadDays.size === 0) {
+      setError('Seleziona almeno un giorno della settimana.')
+      return
+    }
+    const invalid = staffIds.filter((id) => !members.some((m) => m.id === id))
+    if (invalid.length) {
+      setError('Uno o più dipendenti selezionati non sono più in elenco.')
+      await refreshMembers()
+      return
+    }
+
+    const anchor = weekLoadTargetAnchor
+    const weekFrom = toYMD(anchor)
+    const weekTo = toYMD(addDays(anchor, 6))
+    const dayLabels = [...weekLoadDays]
+      .sort((a, b) => a - b)
+      .map((off) => WEEK_LOAD_DAY_OPTIONS.find((d) => d.offset === off)?.label)
+      .filter(Boolean)
+      .join(', ')
+
+    setPlanView('week')
+    setWeekAnchor(anchor)
+    setShiftBusy(true)
+    setError('')
+    try {
+      const existing = await fetchStaffShifts(weekFrom, weekTo)
+      const existingList = Array.isArray(existing) ? existing : []
+      let created = 0
+      let skipped = 0
+      const savedDates = []
+
+      for (const staffId of staffIds) {
+        const built = buildShiftPayloadForMember(staffId)
+        if (built.error) {
+          setError(built.error)
+          return
+        }
+        for (const offset of [...weekLoadDays].sort((a, b) => a - b)) {
+          const ymd = toYMD(addDays(anchor, offset))
+          const exists = existingList.some(
+            (s) =>
+              Number(s.staff_member_id) === staffId &&
+              s.work_date === ymd &&
+              (s.entry_kind || 'shift') === formKind,
+          )
+          if (exists) {
+            skipped += 1
+            continue
+          }
+          await createStaffShift({ ...built.payload, work_date: ymd })
+          created += 1
+          savedDates.push(ymd)
+          existingList.push({ staff_member_id: staffId, work_date: ymd, entry_kind: formKind })
+        }
+      }
+
+      setPlanningLoaded(true)
+      if (savedDates.length > 0) {
+        focusPlanningOnWorkDate(savedDates[savedDates.length - 1])
+      }
+      await loadForRange(anchor, addDays(anchor, 6))
+      const memberLabel =
+        staffIds.length === 1
+          ? members.find((m) => m.id === staffIds[0])?.name || 'Dipendente'
+          : `${staffIds.length} dipendenti`
+      setSuccess(
+        created > 0
+          ? `Caricato ${memberLabel} in settimana (${weekFrom} → ${weekTo}) per: ${dayLabels}. Creati ${created} turni${skipped ? `, ${skipped} già presenti` : ''}.`
+          : `Nessun nuovo turno: i dipendenti selezionati hanno già voci per i giorni scelti (${dayLabels}).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Errore caricamento in settimana')
+    } finally {
+      setShiftBusy(false)
+    }
+  }
+
+  async function handleSubmitShift(e) {
+    e.preventDefault()
+    if (shiftBusy) return
+    const staffIds = [...formMemberIds]
+    if (!staffIds.length) {
+      setError('Seleziona almeno un dipendente')
+      return
+    }
+    if (editingShiftId && staffIds.length !== 1) {
+      setError('In modifica puoi selezionare un solo dipendente.')
+      return
+    }
+    const invalid = staffIds.filter((id) => !members.some((m) => m.id === id))
+    if (invalid.length) {
+      setError('Uno o più dipendenti selezionati non sono più in elenco.')
+      await refreshMembers()
+      return
+    }
+    const savedWorkDate = formDate
 
     setShiftBusy(true)
     try {
       setError('')
       if (editingShiftId) {
-        await updateStaffShift(editingShiftId, payload)
+        const staffId = staffIds[0]
+        const built = buildShiftPayloadForMember(staffId)
+        if (built.error) {
+          setError(built.error)
+          return
+        }
+        await updateStaffShift(editingShiftId, { ...built.payload, work_date: formDate })
         setSuccess('Voce aggiornata')
       } else {
-        await createStaffShift(payload)
-        setSuccess('Voce aggiunta')
+        let created = 0
+        for (const staffId of staffIds) {
+          const built = buildShiftPayloadForMember(staffId)
+          if (built.error) {
+            setError(built.error)
+            return
+          }
+          await createStaffShift({ ...built.payload, work_date: formDate })
+          created += 1
+        }
+        setSuccess(created > 1 ? `${created} voci aggiunte` : 'Voce aggiunta')
       }
       focusPlanningOnWorkDate(savedWorkDate)
       resetForm()
@@ -2452,22 +2729,68 @@ export default function StaffPage() {
           style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}
           aria-busy={shiftBusy}
         >
-          <div className="form-group" style={{ flex: '1 1 160px' }}>
-            <label>Dipendente</label>
-            <select
-              className="form-control"
-              value={formMemberId}
-              onChange={(e) => setFormMemberId(e.target.value)}
-              required
-              disabled={shiftBusy}
+          <div className="form-group" style={{ flex: '1 1 170px' }}>
+            <label>Dipendenti</label>
+            <StaffCheckboxDropdown
+              hideLabel
+              triggerLabel={membersDropdownLabel}
+              open={membersDropdownOpen}
+              onOpenChange={(next) => {
+                setMembersDropdownOpen(next)
+                if (next) setWeekDaysDropdownOpen(false)
+              }}
+              disabled={shiftBusy || members.length === 0}
+              showSelectAll={members.length > 0 && !editingShiftId}
+              selectAllRef={formMemberSelectAllRef}
+              allSelected={allFormMembersSelected}
+              onToggleAll={toggleSelectAllFormMembers}
+              selectAllDisabled={shiftBusy}
+              menuAriaLabel="Seleziona dipendenti"
+              emptyMessage={members.length === 0 ? 'Nessun dipendente in elenco' : null}
             >
-              <option value="">—</option>
               {members.map((m) => (
-                <option key={m.id} value={String(m.id)}>
-                  {m.name}
-                </option>
+                <label key={m.id} className="staff-shift-member-option">
+                  <input
+                    type="checkbox"
+                    checked={formMemberIds.has(m.id)}
+                    disabled={shiftBusy || (Boolean(editingShiftId) && !formMemberIds.has(m.id))}
+                    onChange={() => toggleFormMemberSelection(m.id)}
+                  />
+                  <span>{m.name}</span>
+                </label>
               ))}
-            </select>
+            </StaffCheckboxDropdown>
+          </div>
+          <div className="form-group" style={{ flex: '1 1 150px' }}>
+            <label>Giorni settimana</label>
+            <StaffCheckboxDropdown
+              hideLabel
+              triggerLabel={weekDaysDropdownLabel}
+              open={weekDaysDropdownOpen}
+              onOpenChange={(next) => {
+                setWeekDaysDropdownOpen(next)
+                if (next) setMembersDropdownOpen(false)
+              }}
+              disabled={shiftBusy || Boolean(editingShiftId)}
+              showSelectAll={!editingShiftId}
+              selectAllRef={weekLoadDaysSelectAllRef}
+              allSelected={allWeekDaysSelected}
+              onToggleAll={toggleSelectAllWeekLoadDays}
+              selectAllDisabled={shiftBusy}
+              menuAriaLabel="Seleziona giorni della settimana"
+            >
+              {WEEK_LOAD_DAY_OPTIONS.map((d) => (
+                <label key={d.offset} className="staff-shift-member-option">
+                  <input
+                    type="checkbox"
+                    checked={weekLoadDays.has(d.offset)}
+                    disabled={shiftBusy || Boolean(editingShiftId)}
+                    onChange={() => toggleWeekLoadDay(d.offset)}
+                  />
+                  <span>{d.label}</span>
+                </label>
+              ))}
+            </StaffCheckboxDropdown>
           </div>
           <div className="form-group" style={{ flex: '0 1 150px' }}>
             <label>Data</label>
@@ -2516,31 +2839,42 @@ export default function StaffPage() {
               disabled={shiftBusy}
             />
           </div>
-          <div className="btn-group" style={{ marginBottom: '0.35rem' }}>
-            <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
-              {shiftBusy ? 'Attendere…' : editingShiftId ? 'Salva modifiche' : 'Aggiungi'}
+          <div className="staff-shift-actions-col" style={{ marginBottom: '0.35rem' }}>
+            <button
+              type="button"
+              className="btn btn-vino staff-week-load-btn-top"
+              disabled={shiftBusy || Boolean(editingShiftId) || formMemberIds.size === 0 || weekLoadDays.size === 0}
+              onClick={() => void handleLoadMemberIntoWeekDays()}
+              title="Inserisce i dipendenti selezionati nei giorni scelti della settimana visibile (usa tipo, orari e note del modulo)"
+            >
+              Carica in settimana
             </button>
-            {editingShiftId && (
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                disabled={shiftBusy || loading || demoLoading}
-                onClick={() => reloadPlanning()}
-                title="Ricarica i turni dal server per il periodo selezionato (il modulo resta aperto; le modifiche non salvate restano nei campi)"
-              >
-                {loading ? 'Aggiornamento…' : 'Aggiorna planning'}
+            <div className="btn-group">
+              <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
+                {shiftBusy ? 'Attendere…' : editingShiftId ? 'Salva modifiche' : 'Aggiungi'}
               </button>
-            )}
-            {editingShiftId && (
-              <button type="button" className="btn btn-secondary" onClick={() => resetForm()} disabled={shiftBusy}>
-                Annulla
-              </button>
-            )}
-            {editingShiftId && (
-              <button type="button" className="btn btn-outline-danger" onClick={() => handleDeleteShift(editingShiftId)} disabled={shiftBusy}>
-                Elimina
-              </button>
-            )}
+              {editingShiftId && (
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  disabled={shiftBusy || loading || demoLoading}
+                  onClick={() => reloadPlanning()}
+                  title="Ricarica i turni dal server per il periodo selezionato (il modulo resta aperto; le modifiche non salvate restano nei campi)"
+                >
+                  {loading ? 'Aggiornamento…' : 'Aggiorna planning'}
+                </button>
+              )}
+              {editingShiftId && (
+                <button type="button" className="btn btn-secondary" onClick={() => resetForm()} disabled={shiftBusy}>
+                  Annulla
+                </button>
+              )}
+              {editingShiftId && (
+                <button type="button" className="btn btn-outline-danger" onClick={() => handleDeleteShift(editingShiftId)} disabled={shiftBusy}>
+                  Elimina
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </section>
