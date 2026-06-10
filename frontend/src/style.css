@@ -2098,15 +2098,6 @@ select.form-control {
   box-shadow: var(--shadow);
 }
 
-.staff-day-member-row {
-  padding: 0.2rem 0;
-  border-bottom: 1px dashed color-mix(in oklab, var(--border) 80%, transparent);
-}
-
-.staff-day-member-row:last-child {
-  border-bottom: none;
-}
-
 /* Personale: modale report PDF */
 .staff-report-modal-backdrop {
   position: fixed;
