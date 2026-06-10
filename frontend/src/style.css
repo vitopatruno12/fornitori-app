@@ -2098,60 +2098,13 @@ select.form-control {
   box-shadow: var(--shadow);
 }
 
-.staff-week-roster {
-  margin-bottom: 1rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #eff6ff 0%, #fff 100%);
+.staff-day-member-row {
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed color-mix(in oklab, var(--border) 80%, transparent);
 }
 
-.staff-week-roster-title {
-  margin: 0 0 0.35rem;
-  font-size: 1rem;
-  color: #1d4ed8;
-}
-
-.staff-week-roster-hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.86rem;
-  color: #64748b;
-}
-
-.staff-week-roster-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.staff-week-roster-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.staff-week-roster-name {
-  font-weight: 700;
-  min-width: 8rem;
-}
-
-.staff-week-roster-schedule {
-  flex: 1 1 12rem;
-  font-size: 0.88rem;
-  color: var(--text-muted);
-}
-
-.staff-week-roster-edit {
-  margin-left: auto;
-  white-space: nowrap;
+.staff-day-member-row:last-child {
+  border-bottom: none;
 }
 
 /* Personale: modale report PDF */

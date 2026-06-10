@@ -52,23 +52,32 @@ const KIND_LABELS = {
 const DEFAULT_WEEK_SHIFT_START = '08:00'
 const DEFAULT_WEEK_SHIFT_END = '16:00'
 
-function isShiftEntry(s) {
-  return !s?.entry_kind || s.entry_kind === 'shift'
-}
-
-function memberWeekScheduleLabel(shiftEntries, dayCells) {
-  if (!shiftEntries?.length) return 'Nessun turno in settimana'
-  const byDate = new Map(shiftEntries.map((s) => [s.work_date, s]))
-  const parts = []
-  for (const d of dayCells) {
-    const ymd = toYMD(d)
-    const s = byDate.get(ymd)
-    if (s && s.time_start && s.time_end) {
-      const dow = DAY_HEADERS[d.getDay()].slice(0, 3)
-      parts.push(`${dow} ${fmtTime(s.time_start)}–${fmtTime(s.time_end)}`)
+/** Righe da mostrare in un giorno: prima i dipendenti del roster, poi altre voci. */
+function buildDayDisplayRows(dayShifts, rosterMemberIds, members) {
+  if (!rosterMemberIds?.length) {
+    return (dayShifts || []).map((shift) => ({ kind: 'shift', shift }))
+  }
+  const shiftsByMember = new Map()
+  const otherShifts = []
+  for (const s of dayShifts || []) {
+    if (s.staff_member_id && rosterMemberIds.includes(s.staff_member_id)) {
+      if (!shiftsByMember.has(s.staff_member_id)) shiftsByMember.set(s.staff_member_id, s)
+      else otherShifts.push(s)
+    } else {
+      otherShifts.push(s)
     }
   }
-  return parts.length ? parts.join(' · ') : 'Turni senza orario'
+  const rows = rosterMemberIds
+    .map((id) => {
+      const member = members.find((m) => m.id === id)
+      if (!member) return null
+      return { kind: 'member', member, shift: shiftsByMember.get(id) || null }
+    })
+    .filter(Boolean)
+  for (const shift of otherShifts) {
+    rows.push({ kind: 'shift', shift })
+  }
+  return rows
 }
 
 /** Lunedi come primo giorno della settimana (indice getDay: dom=0 ... sab=6). */
@@ -573,6 +582,8 @@ export default function StaffPage() {
   const [editingMemberId, setEditingMemberId] = useState(null)
   const memberFormSectionRef = React.useRef(null)
   const planningSectionRef = React.useRef(null)
+  /** Settimana con nomi dipendenti mostrati nei giorni: { weekStart, memberIds }. */
+  const [weekDayRoster, setWeekDayRoster] = useState(null)
   const [memberInfoId, setMemberInfoId] = useState(null)
   const [memberInfoSaving, setMemberInfoSaving] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
@@ -857,20 +868,17 @@ export default function StaffPage() {
     return m
   }, [shifts])
 
-  const weekMemberRows = useMemo(() => {
-    if (planView !== 'week') return []
-    const from = fromStr
-    const to = toStr
-    return members
-      .filter((m) => m.is_active !== false)
-      .map((m) => {
-        const memberShifts = shifts.filter(
-          (s) => s.staff_member_id === m.id && s.work_date >= from && s.work_date <= to,
-        )
-        const shiftEntries = memberShifts.filter(isShiftEntry)
-        return { member: m, memberShifts, shiftEntries }
-      })
-  }, [planView, members, shifts, fromStr, toStr])
+  const activeWeekRosterIds = useMemo(() => {
+    if (planView !== 'week' || !weekDayRoster) return null
+    if (weekDayRoster.weekStart !== fromStr) return null
+    return weekDayRoster.memberIds
+  }, [planView, weekDayRoster, fromStr])
+
+  useEffect(() => {
+    if (weekDayRoster && weekDayRoster.weekStart !== toYMD(weekAnchor)) {
+      setWeekDayRoster(null)
+    }
+  }, [weekAnchor, weekDayRoster])
 
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
@@ -895,6 +903,7 @@ export default function StaffPage() {
   const markPlanningStale = useCallback(() => {
     setShifts([])
     setPlanningLoaded(false)
+    setWeekDayRoster(null)
   }, [])
 
   const reloadPlanning = useCallback(async () => {
@@ -1387,14 +1396,13 @@ export default function StaffPage() {
     setFormNotes(s.notes || '')
   }
 
-  function openEditMemberHours(member, shiftEntries) {
-    if (shiftEntries.length > 0) {
-      const sorted = [...shiftEntries].sort((a, b) => a.work_date.localeCompare(b.work_date))
-      startEditShift(sorted[0])
+  function openEditMemberHoursForDay(member, shift, ymd) {
+    if (shift) {
+      startEditShift(shift)
     } else {
       setEditingShiftId(null)
       setFormMemberId(String(member.id))
-      setFormDate(toYMD(dayCells[0]))
+      setFormDate(ymd)
       setFormKind('shift')
       setFormStart(DEFAULT_WEEK_SHIFT_START)
       setFormEnd(DEFAULT_WEEK_SHIFT_END)
@@ -1417,37 +1425,11 @@ export default function StaffPage() {
       const weekEnd = addDays(weekAnchor, 6)
       const from = toYMD(weekStart)
       const to = toYMD(weekEnd)
-      const currentShifts = await fetchStaffShifts(from, to)
-      const weekdays = dayCells.slice(0, 5)
-      let created = 0
-      let skipped = 0
-      for (const m of roster) {
-        for (const d of weekdays) {
-          const ymd = toYMD(d)
-          const exists = (currentShifts || []).some(
-            (s) => s.staff_member_id === m.id && s.work_date === ymd && isShiftEntry(s),
-          )
-          if (exists) {
-            skipped += 1
-            continue
-          }
-          await createStaffShift({
-            staff_member_id: m.id,
-            work_date: ymd,
-            time_start: `${DEFAULT_WEEK_SHIFT_START}:00`,
-            time_end: `${DEFAULT_WEEK_SHIFT_END}:00`,
-            entry_kind: 'shift',
-            notes: null,
-          })
-          created += 1
-        }
-      }
+      setWeekDayRoster({ weekStart: from, memberIds: roster.map((m) => m.id) })
       await loadForRange(weekStart, weekEnd)
       setPlanningLoaded(true)
       setSuccess(
-        created > 0
-          ? `Caricati ${roster.length} dipendenti nella settimana ${from} → ${to}: ${created} turni creati (lun–ven ${DEFAULT_WEEK_SHIFT_START}–${DEFAULT_WEEK_SHIFT_END})${skipped ? `, ${skipped} già presenti` : ''}.`
-          : `Tutti i dipendenti sono già in settimana (${skipped} turni esistenti).`,
+        `Caricati ${roster.length} dipendenti nei giorni della settimana (${from} → ${to}). Usa «Orario» su ogni nome per impostare il turno.`,
       )
       window.setTimeout(() => {
         planningSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1864,7 +1846,7 @@ export default function StaffPage() {
             className="btn btn-secondary"
             disabled={members.length === 0 || shiftBusy || loading || demoLoading || reportLoading}
             onClick={() => void handleLoadMembersIntoWeek()}
-            title="Inserisce tutti i dipendenti attivi nella settimana visibile (lun–ven, orario 8:00–16:00) e apre la pianificazione"
+            title="Mostra tutti i dipendenti attivi nei giorni della settimana visibile (lun–dom); poi imposta l’orario con «Orario»"
           >
             Carica in settimana
           </button>
@@ -2474,32 +2456,6 @@ export default function StaffPage() {
 
         {loading && <p className="loading">Caricamento…</p>}
 
-        {planView === 'week' && planningLoaded && weekMemberRows.length > 0 && (
-          <div className="staff-week-roster" aria-label="Dipendenti in settimana">
-            <h3 className="staff-week-roster-title">Settimana per dipendente</h3>
-            <p className="staff-week-roster-hint">
-              Elenco dalla tabella dipendenti (solo nome). Usa <strong>Orario</strong> per modificare il turno del dipendente.
-            </p>
-            <ul className="staff-week-roster-list">
-              {weekMemberRows.map(({ member, shiftEntries }) => (
-                <li key={member.id} className="staff-week-roster-row">
-                  <span className="staff-week-roster-name">{member.name}</span>
-                  <span className="staff-week-roster-schedule">{memberWeekScheduleLabel(shiftEntries, dayCells)}</span>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm staff-week-roster-edit"
-                    disabled={shiftBusy}
-                    onClick={() => openEditMemberHours(member, shiftEntries)}
-                    title="Modifica orario di lavoro"
-                  >
-                    Orario
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {!loading && (
           <div
             className={
@@ -2516,6 +2472,10 @@ export default function StaffPage() {
               const label = DAY_HEADERS[dow]
               const dayNum = d.getDate()
               const list = shiftsByDate.get(ymd) || []
+              const dayRows =
+                planView === 'week' && activeWeekRosterIds
+                  ? buildDayDisplayRows(list, activeWeekRosterIds, members)
+                  : list.map((shift) => ({ kind: 'shift', shift }))
               return (
                 <div key={ymd} className="staff-day-card card" style={{ padding: '0.85rem', margin: 0 }}>
                   <div
@@ -2547,27 +2507,61 @@ export default function StaffPage() {
                     </button>
                   </div>
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
-                    {list.map((s) => (
-                      <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
-                        <span>{shiftLine(s)}</span>
-                        <span style={{ flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '0.15rem 0.4rem' }}
-                            disabled={shiftBusy}
-                            onClick={() => {
-                              startEditShift(s)
-                              window.setTimeout(scrollToShiftForm, 80)
-                            }}
-                            title="Modifica orario di lavoro"
+                    {dayRows.map((row) => {
+                      if (row.kind === 'member') {
+                        const { member, shift } = row
+                        const times =
+                          shift?.time_start && shift?.time_end
+                            ? ` · ${fmtTime(shift.time_start)}–${fmtTime(shift.time_end)}`
+                            : ''
+                        return (
+                          <li
+                            key={`member-${member.id}-${ymd}`}
+                            className="staff-day-member-row"
+                            style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}
                           >
-                            Orario
-                          </button>
-                        </span>
-                      </li>
-                    ))}
-                    {list.length === 0 && <li style={{ color: 'var(--text-muted)' }}>Nessuna voce</li>}
+                            <span>
+                              <strong>{member.name}</strong>
+                              {times || <span style={{ color: 'var(--text-muted)' }}> · orario da impostare</span>}
+                            </span>
+                            <span style={{ flexShrink: 0 }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                style={{ padding: '0.15rem 0.45rem' }}
+                                disabled={shiftBusy}
+                                onClick={() => openEditMemberHoursForDay(member, shift, ymd)}
+                                title="Modifica orario di lavoro"
+                              >
+                                Orario
+                              </button>
+                            </span>
+                          </li>
+                        )
+                      }
+                      const s = row.shift
+                      return (
+                        <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
+                          <span>{shiftLine(s)}</span>
+                          <span style={{ flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem' }}
+                              disabled={shiftBusy}
+                              onClick={() => {
+                                startEditShift(s)
+                                window.setTimeout(scrollToShiftForm, 80)
+                              }}
+                              title="Modifica orario di lavoro"
+                            >
+                              Orario
+                            </button>
+                          </span>
+                        </li>
+                      )
+                    })}
+                    {dayRows.length === 0 && <li style={{ color: 'var(--text-muted)' }}>Nessuna voce</li>}
                   </ul>
                 </div>
               )
