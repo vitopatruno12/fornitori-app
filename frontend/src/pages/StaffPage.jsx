@@ -16,9 +16,15 @@ import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
 import StaffPayrollDaysModal from '../components/StaffPayrollDaysModal.jsx'
 import StaffPayrollMonthPanel from '../components/StaffPayrollMonthPanel.jsx'
+import StaffSectionBackupBar from '../components/StaffSectionBackupBar.jsx'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
 import { suggestStaffShift } from '../services/aiService'
 import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/staffWeeklyReport.js'
+import {
+  formatStaffBackupLabel,
+  getLatestStaffBackup,
+  saveStaffBackup,
+} from '../utils/staffLocalBackup.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -667,6 +673,20 @@ export default function StaffPage() {
   /** Mese solare per stipendi (YYYY-MM) e turni caricati per quel mese. */
   const [payrollMonthYm, setPayrollMonthYm] = useState(currentPayrollYm)
   const [payrollShifts, setPayrollShifts] = useState([])
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupMeta, setBackupMeta] = useState(() => ({
+    members: getLatestStaffBackup('members')?.savedAt ?? null,
+    planning: getLatestStaffBackup('planning')?.savedAt ?? null,
+    payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
+  }))
+
+  const bumpBackupMeta = useCallback(() => {
+    setBackupMeta({
+      members: getLatestStaffBackup('members')?.savedAt ?? null,
+      planning: getLatestStaffBackup('planning')?.savedAt ?? null,
+      payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
+    })
+  }, [])
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -1947,6 +1967,284 @@ export default function StaffPage() {
     }
   }
 
+  function memberToBackupRow(m) {
+    return {
+      name: m.name || '',
+      first_name: m.first_name || null,
+      last_name: m.last_name || null,
+      email: m.email || null,
+      phone: m.phone || null,
+      city: m.city || null,
+      birth_date: m.birth_date || null,
+      sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
+      hourly_rate: m.hourly_rate != null ? Number(m.hourly_rate) : null,
+      is_active: m.is_active !== false,
+    }
+  }
+
+  async function handleBackupMembers() {
+    if (members.length === 0) {
+      setError('Nessun dipendente da salvare nel backup.')
+      return
+    }
+    saveStaffBackup('members', { members: members.map(memberToBackupRow) })
+    bumpBackupMeta()
+    setSuccess(`Backup dipendenti creato (${members.length} voci, solo su questo browser).`)
+  }
+
+  async function handleRestoreMembersBackup() {
+    const latest = getLatestStaffBackup('members')
+    const rows = latest?.payload?.members
+    if (!rows?.length) {
+      setError('Nessun backup dipendenti da ripristinare.')
+      return
+    }
+    const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
+    if (
+      !window.confirm(
+        `Ripristinare ${rows.length} dipendenti dal backup del ${when}?\n\nVengono aggiunti i nomi mancanti; quelli già in elenco non vengono duplicati.`,
+      )
+    ) {
+      return
+    }
+    setBackupBusy(true)
+    setError('')
+    try {
+      let mem = await fetchStaffMembers()
+      const names = new Set(mem.map((m) => String(m.name || '').trim().toLowerCase()).filter(Boolean))
+      let added = 0
+      for (const m of rows) {
+        const name = String(m.name || '').trim()
+        if (!name) continue
+        const key = name.toLowerCase()
+        if (names.has(key)) continue
+        await createStaffMember({
+          name,
+          first_name: m.first_name || null,
+          last_name: m.last_name || null,
+          email: m.email || null,
+          phone: m.phone || null,
+          city: m.city || null,
+          birth_date: m.birth_date || null,
+          sort_order: m.sort_order,
+          hourly_rate: m.hourly_rate,
+          is_active: m.is_active !== false,
+        })
+        names.add(key)
+        added += 1
+      }
+      await refreshMembers()
+      bumpBackupMeta()
+      setSuccess(
+        added > 0
+          ? `Ripristinati ${added} dipendenti dal backup.`
+          : 'Nessun nuovo dipendente: tutti i nomi del backup sono già in elenco.',
+      )
+    } catch (err) {
+      setError(err?.message || 'Ripristino backup dipendenti non riuscito')
+      await refreshMembers()
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleBackupPlanning() {
+    setBackupBusy(true)
+    setError('')
+    try {
+      let list = Array.isArray(shifts) ? shifts : []
+      if (!list.length) {
+        const data = await fetchStaffShifts(rangeFromStr, rangeToStr)
+        list = Array.isArray(data) ? data : []
+      }
+      if (!list.length) {
+        setError(
+          `Nessuna voce di pianificazione nel periodo ${rangeFromStr} → ${rangeToStr}. Carica il piano prima del backup.`,
+        )
+        return
+      }
+      const nameById = Object.fromEntries(members.map((m) => [m.id, m.name]))
+      saveStaffBackup('planning', {
+        rangeFrom: rangeFromStr,
+        rangeTo: rangeToStr,
+        planView,
+        shifts: list.map((s) => ({
+          member_name: nameById[s.staff_member_id] || '',
+          work_date: s.work_date,
+          time_start: s.time_start,
+          time_end: s.time_end,
+          entry_kind: s.entry_kind || 'shift',
+          notes: s.notes || null,
+        })),
+      })
+      bumpBackupMeta()
+      setSuccess(
+        `Backup pianificazione creato (${list.length} voci, ${rangeFromStr} → ${rangeToStr}, solo su questo browser).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Backup pianificazione non riuscito')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleRestorePlanningBackup() {
+    const latest = getLatestStaffBackup('planning')
+    const rows = latest?.payload?.shifts
+    if (!rows?.length) {
+      setError('Nessun backup pianificazione da ripristinare.')
+      return
+    }
+    const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
+    const from = latest.payload.rangeFrom || rangeFromStr
+    const to = latest.payload.rangeTo || rangeToStr
+    if (
+      !window.confirm(
+        `Ripristinare ${rows.length} voci di pianificazione dal backup del ${when}?\n\nPeriodo backup: ${from} → ${to}.\nVengono ricreate solo le voci mancanti (duplicati saltati).`,
+      )
+    ) {
+      return
+    }
+    setBackupBusy(true)
+    setError('')
+    try {
+      const mem = await fetchStaffMembers()
+      const idByName = Object.fromEntries(
+        mem.map((m) => [String(m.name || '').trim().toLowerCase(), m.id]).filter(([k]) => k),
+      )
+      const existing = await fetchStaffShifts(from, to)
+      const existingList = Array.isArray(existing) ? existing : []
+      let created = 0
+      let skipped = 0
+      for (const row of rows) {
+        const nameKey = String(row.member_name || '').trim().toLowerCase()
+        const staffId = idByName[nameKey]
+        if (!staffId) {
+          skipped += 1
+          continue
+        }
+        const kind = row.entry_kind || 'shift'
+        const exists = existingList.some(
+          (s) =>
+            Number(s.staff_member_id) === staffId &&
+            s.work_date === row.work_date &&
+            (s.entry_kind || 'shift') === kind &&
+            String(s.time_start || '') === String(row.time_start || '') &&
+            String(s.time_end || '') === String(row.time_end || ''),
+        )
+        if (exists) {
+          skipped += 1
+          continue
+        }
+        await createStaffShift({
+          staff_member_id: staffId,
+          work_date: row.work_date,
+          time_start: row.time_start,
+          time_end: row.time_end,
+          entry_kind: kind,
+          notes: row.notes,
+        })
+        created += 1
+        existingList.push({
+          staff_member_id: staffId,
+          work_date: row.work_date,
+          entry_kind: kind,
+          time_start: row.time_start,
+          time_end: row.time_end,
+        })
+      }
+      setPlanningLoaded(true)
+      await reloadPlanning()
+      bumpBackupMeta()
+      setSuccess(
+        created > 0
+          ? `Ripristinate ${created} voci di pianificazione${skipped ? ` (${skipped} già presenti o senza dipendente)` : ''}.`
+          : `Nessuna nuova voce: tutte già presenti o dipendenti non trovati (${skipped} saltate).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Ripristino backup pianificazione non riuscito')
+      await reloadPlanning()
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleBackupPayroll() {
+    setBackupBusy(true)
+    setError('')
+    try {
+      const lines = buildPayrollLinesForSave()
+      let archiveMonths = []
+      try {
+        archiveMonths = await fetchStaffPayrollMonths()
+      } catch {
+        archiveMonths = []
+      }
+      saveStaffBackup('payroll', {
+        payrollMonthYm,
+        periodFromStr: payrollFromStr,
+        periodToStr: payrollToStr,
+        hoursOverride: { ...hoursOverride },
+        payrollImporto: { ...payrollImporto },
+        rateDraft: { ...rateDraft },
+        lines,
+        archiveMonths: Array.isArray(archiveMonths) ? archiveMonths : [],
+      })
+      bumpBackupMeta()
+      setSuccess(
+        `Backup ore e costi creato (mese ${payrollMonthYm}${lines.length ? `, ${lines.length} righe calcolate` : ''}, solo su questo browser).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Backup ore e costi non riuscito')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleRestorePayrollBackup() {
+    const latest = getLatestStaffBackup('payroll')
+    if (!latest?.payload) {
+      setError('Nessun backup ore e costi da ripristinare.')
+      return
+    }
+    const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
+    const ym = latest.payload.payrollMonthYm || payrollMonthYm
+    if (
+      !window.confirm(
+        `Ripristinare ore e costi del mese ${ym} dal backup del ${when}?\n\nLa tabella corrente verrà sostituita con i dati salvati.`,
+      )
+    ) {
+      return
+    }
+    setBackupBusy(true)
+    setError('')
+    try {
+      if (latest.payload.payrollMonthYm) setPayrollMonthYm(latest.payload.payrollMonthYm)
+      if (latest.payload.lines?.length) {
+        const matched = applyPayrollMonthSnapshot({ lines: latest.payload.lines })
+        if (matched === 0) {
+          setHoursOverride(latest.payload.hoursOverride || {})
+          setPayrollImporto(latest.payload.payrollImporto || {})
+          if (latest.payload.rateDraft) {
+            setRateDraft((prev) => ({ ...prev, ...latest.payload.rateDraft }))
+          }
+        }
+      } else {
+        setHoursOverride(latest.payload.hoursOverride || {})
+        setPayrollImporto(latest.payload.payrollImporto || {})
+        if (latest.payload.rateDraft) {
+          setRateDraft((prev) => ({ ...prev, ...latest.payload.rateDraft }))
+        }
+      }
+      bumpBackupMeta()
+      setSuccess(`Ore e costi ripristinati dal backup (mese ${ym}).`)
+    } catch (err) {
+      setError(err?.message || 'Ripristino backup ore e costi non riuscito')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
   async function loadDemoExample() {
     if (!window.confirm('Carica l’esempio (mar–apr 2026)? Vengono creati i dipendenti mancanti e le righe turno. Puoi duplicare o modificare dopo.')) return
     setDemoLoading(true)
@@ -2001,7 +2299,7 @@ export default function StaffPage() {
             <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
             oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
             <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
-            parte da solo quando cambi data).
+            parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio locale su questo browser).
           </p>
         </div>
       </header>
@@ -2017,6 +2315,14 @@ export default function StaffPage() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem', maxWidth: 720, lineHeight: 1.45 }}>
           La colonna <strong>Ordine</strong> viene assegnata automaticamente all’aggiunta di ogni dipendente e definisce la sequenza negli elenchi e nel menu a tendina della pianificazione.
         </p>
+        <StaffSectionBackupBar
+          sectionTitle="dipendenti"
+          lastSavedAt={backupMeta.members}
+          onBackup={handleBackupMembers}
+          onRestore={handleRestoreMembersBackup}
+          disabled={shiftBusy || demoLoading || reportLoading}
+          busy={backupBusy}
+        />
         <form onSubmit={handleAddMember} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 140px' }}>
             <label>Nome</label>
@@ -2219,6 +2525,14 @@ export default function StaffPage() {
           <strong> Calcola tutti</strong> o <strong>Calcola</strong> per riga.
           <strong> Salva</strong> / <strong>Ricarica in archivio</strong> memorizzano il mese nel menu Archivio (compatto, senza lista lunga).
         </p>
+        <StaffSectionBackupBar
+          sectionTitle="ore e costi"
+          lastSavedAt={backupMeta.payroll}
+          onBackup={handleBackupPayroll}
+          onRestore={handleRestorePayrollBackup}
+          disabled={shiftBusy || demoLoading || reportLoading}
+          busy={backupBusy}
+        />
         <StaffPayrollMonthPanel
           payrollMonthYm={payrollMonthYm}
           onPayrollMonthYmChange={setPayrollMonthYm}
@@ -2367,10 +2681,18 @@ export default function StaffPage() {
       </section>
 
       <section className="card" style={{ order: 3, marginBottom: 0 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem' }}>
-          <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
-            Pianificazione turni
-          </h2>
+        <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
+          Pianificazione turni
+        </h2>
+        <StaffSectionBackupBar
+          sectionTitle="pianificazione"
+          lastSavedAt={backupMeta.planning}
+          onBackup={handleBackupPlanning}
+          onRestore={handleRestorePlanningBackup}
+          disabled={shiftBusy || demoLoading || reportLoading || loading}
+          busy={backupBusy}
+        />
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
             <div className="btn-group" role="group" aria-label="Vista calendario">
               <button
