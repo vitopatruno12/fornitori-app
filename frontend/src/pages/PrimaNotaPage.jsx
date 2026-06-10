@@ -5,6 +5,14 @@ import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services
 import { fetchCustomers } from '../services/customersService'
 import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
 import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
+import StaffSectionBackupBar from '../components/StaffSectionBackupBar.jsx'
+import {
+  formatPrimaNotaBackupLabel,
+  getLatestPrimaNotaBackup,
+  movementBackupKey,
+  savePrimaNotaBackup,
+} from '../utils/primaNotaLocalBackup.js'
+import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
 import { getOperatorPrimaNotaPublicUrl } from '../utils/operatorMode.ts'
 import {
   DEFAULT_PRIMA_NOTA_ACTIVITY,
@@ -91,6 +99,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [movementKind, setMovementKind] = useState('all')
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
   const dashboardPreFiltersRef = useRef(null)
+  const [backupMeta, setBackupMeta] = useState(() => getLatestPrimaNotaBackup()?.savedAt ?? null)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
 
   useEffect(() => {
     loadSuppliers()
@@ -591,6 +602,188 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     e.preventDefault()
     const url = getExportUrl(exportDateFrom || undefined, exportDateTo || undefined, activeActivity)
     window.open(url, '_blank')
+  }
+
+  function normalizedMovementPeriod() {
+    let from = movementPeriodFrom
+    let to = movementPeriodTo
+    if (from && to && from > to) {
+      const swap = from
+      from = to
+      to = swap
+    }
+    return { from, to }
+  }
+
+  function bumpBackupMeta() {
+    setBackupMeta(getLatestPrimaNotaBackup()?.savedAt ?? null)
+  }
+
+  function serializeEntryForBackup(entry) {
+    return {
+      entry_date: entry.entry_date,
+      type: entry.type,
+      amount: Number(entry.amount),
+      description: entry.description || '',
+      note: entry.note || null,
+      conto: entry.conto || null,
+      riferimento_documento: entry.riferimento_documento || null,
+      supplier_id: entry.supplier_id ?? null,
+      invoice_id: entry.invoice_id ?? null,
+      delivery_id: entry.delivery_id ?? null,
+      customer_id: entry.customer_id ?? null,
+      account_id: entry.account_id ?? null,
+      payment_method_id: entry.payment_method_id ?? null,
+      category_id: entry.category_id ?? null,
+      activity: entry.activity || activeActivity,
+    }
+  }
+
+  async function handleBackupMovements() {
+    setBackupBusy(true)
+    setError('')
+    try {
+      const { from, to } = normalizedMovementPeriod()
+      let list = Array.isArray(entries) ? entries : []
+      if (!list.length) {
+        list = await fetchEntries({
+          date_from: from || undefined,
+          date_to: to || undefined,
+          activity: activeActivity,
+        })
+        list = Array.isArray(list) ? list : []
+      }
+      if (!list.length) {
+        setError(
+          `Nessun movimento nel periodo ${from ? formatDate(from) : '—'} → ${to ? formatDate(to) : '—'}. Carica l'elenco prima del backup.`,
+        )
+        return
+      }
+      savePrimaNotaBackup({
+        activity: activeActivity,
+        activityLabel: activeActivityLabel,
+        periodFrom: from || null,
+        periodTo: to || null,
+        openingCashInput,
+        entries: list.map(serializeEntryForBackup),
+      })
+      bumpBackupMeta()
+      setSuccess(
+        `Backup movimenti creato (${list.length} voci, ${activeActivityLabel}, solo su questo browser).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Backup movimenti non riuscito')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleRestoreMovementsBackup() {
+    const latest = getLatestPrimaNotaBackup()
+    const rows = latest?.payload?.entries
+    if (!rows?.length) {
+      setError('Nessun backup movimenti da ripristinare.')
+      return
+    }
+    const when = formatPrimaNotaBackupLabel(latest.savedAt) || 'backup'
+    const from = latest.payload.periodFrom || movementPeriodFrom
+    const to = latest.payload.periodTo || movementPeriodTo
+    const label = latest.payload.activityLabel || activeActivityLabel
+    if (
+      !window.confirm(
+        `Ripristinare ${rows.length} movimenti dal backup del ${when}?\n\nLocale backup: ${label}\nPeriodo: ${formatDate(from)} → ${formatDate(to)}.\nVengono ricreati solo i movimenti mancanti (duplicati saltati).`,
+      )
+    ) {
+      return
+    }
+    setBackupBusy(true)
+    setError('')
+    try {
+      const activity = latest.payload.activity || activeActivity
+      const existing = await fetchEntries({
+        date_from: from || undefined,
+        date_to: to || undefined,
+        activity,
+      })
+      const existingList = Array.isArray(existing) ? existing : []
+      const existingKeys = new Set(existingList.map((e) => movementBackupKey(e)))
+      let created = 0
+      let skipped = 0
+      for (const row of rows) {
+        const key = movementBackupKey(row)
+        if (existingKeys.has(key)) {
+          skipped += 1
+          continue
+        }
+        const entryDate = String(row.entry_date || '').slice(0, 10)
+        if (!entryDate) {
+          skipped += 1
+          continue
+        }
+        await createEntry({
+          entry_date: row.entry_date?.includes('T') ? row.entry_date : `${entryDate}T12:00:00`,
+          type: row.type,
+          amount: Number(row.amount),
+          description: String(row.description || '').trim() || 'Movimento ripristinato',
+          note: row.note,
+          conto: row.conto,
+          riferimento_documento: row.riferimento_documento,
+          supplier_id: row.supplier_id,
+          invoice_id: row.invoice_id,
+          delivery_id: row.delivery_id,
+          customer_id: row.customer_id,
+          account_id: row.account_id,
+          payment_method_id: row.payment_method_id,
+          category_id: row.category_id,
+          activity,
+        })
+        created += 1
+        existingKeys.add(key)
+      }
+      if (latest.payload.openingCashInput != null && latest.payload.openingCashInput !== '') {
+        setOpeningCashInput(String(latest.payload.openingCashInput))
+      }
+      await loadEntries()
+      await loadSummary()
+      bumpBackupMeta()
+      setSuccess(
+        created > 0
+          ? `Ripristinati ${created} movimenti${skipped ? ` (${skipped} già presenti)` : ''}.`
+          : `Nessun nuovo movimento: tutti già presenti (${skipped} saltati).`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Ripristino backup movimenti non riuscito')
+      await loadEntries()
+      await loadSummary()
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  function handlePrintMovementsPdf() {
+    if (!filteredMovementRows.length) {
+      setError('Nessun movimento da stampare nel periodo/filtri correnti.')
+      return
+    }
+    setPdfBusy(true)
+    setError('')
+    try {
+      const blob = generatePrimaNotaMovementsPdf({
+        activityLabel: activeActivityLabel,
+        periodLabel: movementsSectionHeading.replace(/^Movimenti /, ''),
+        rows: filteredMovementRows,
+        totals: movementPeriodTotals,
+      })
+      const { from, to } = normalizedMovementPeriod()
+      const safeLocale = String(activeActivity || 'locale').replace(/[^\w.-]+/g, '_')
+      const range = from && to ? `${from}_${to}` : selectedDate
+      downloadPrimaNotaMovementsPdf(blob, `prima-nota-movimenti-${safeLocale}-${range}.pdf`)
+      setSuccess('PDF movimenti generato')
+    } catch (err) {
+      setError(err?.message || 'Errore nella generazione del PDF')
+    } finally {
+      setPdfBusy(false)
+    }
   }
 
   function formatDate(value) {
@@ -1189,9 +1382,38 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>{movementsSectionHeading}</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
-          Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
-        </p>
+        <StaffSectionBackupBar
+          sectionTitle="movimenti"
+          lastSavedAt={backupMeta}
+          formatBackupLabel={formatPrimaNotaBackupLabel}
+          onBackup={handleBackupMovements}
+          onRestore={handleRestoreMovementsBackup}
+          disabled={loading || saving || backupBusy || pdfBusy || deletingDay || deletingRange}
+          busy={backupBusy}
+        />
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.5rem',
+            marginBottom: '0.75rem',
+          }}
+        >
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0, flex: '1 1 200px' }}>
+            Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={loading || pdfBusy || filteredMovementRows.length === 0}
+            onClick={handlePrintMovementsPdf}
+            title="Scarica PDF dell'elenco movimenti visibile (periodo e filtri correnti)"
+          >
+            {pdfBusy ? 'Generazione…' : 'Stampa PDF'}
+          </button>
+        </div>
         {focusEntryMessage && (
           <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
         )}

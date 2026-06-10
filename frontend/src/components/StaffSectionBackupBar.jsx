@@ -11,8 +11,9 @@ export default function StaffSectionBackupBar({
   onRestore,
   disabled = false,
   busy = false,
+  formatBackupLabel = formatStaffBackupLabel,
 }) {
-  const when = formatStaffBackupLabel(lastSavedAt)
+  const when = formatBackupLabel(lastSavedAt)
 
   return (
     <div className="staff-section-backup-bar" role="group" aria-label={`Backup ${sectionTitle}`}>
