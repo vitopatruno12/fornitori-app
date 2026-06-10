@@ -1860,13 +1860,14 @@ export default function StaffPage() {
 
   async function handleSubmitShift(e) {
     e.preventDefault()
+    if (!editingShiftId) return
     if (shiftBusy) return
     const staffIds = [...formMemberIds]
     if (!staffIds.length) {
       setError('Seleziona almeno un dipendente')
       return
     }
-    if (editingShiftId && staffIds.length !== 1) {
+    if (staffIds.length !== 1) {
       setError('In modifica puoi selezionare un solo dipendente.')
       return
     }
@@ -1881,28 +1882,14 @@ export default function StaffPage() {
     setShiftBusy(true)
     try {
       setError('')
-      if (editingShiftId) {
-        const staffId = staffIds[0]
-        const built = buildShiftPayloadForMember(staffId)
-        if (built.error) {
-          setError(built.error)
-          return
-        }
-        await updateStaffShift(editingShiftId, { ...built.payload, work_date: formDate })
-        setSuccess('Voce aggiornata')
-      } else {
-        let created = 0
-        for (const staffId of staffIds) {
-          const built = buildShiftPayloadForMember(staffId)
-          if (built.error) {
-            setError(built.error)
-            return
-          }
-          await createStaffShift({ ...built.payload, work_date: formDate })
-          created += 1
-        }
-        setSuccess(created > 1 ? `${created} voci aggiunte` : 'Voce aggiunta')
+      const staffId = staffIds[0]
+      const built = buildShiftPayloadForMember(staffId)
+      if (built.error) {
+        setError(built.error)
+        return
       }
+      await updateStaffShift(editingShiftId, { ...built.payload, work_date: formDate })
+      setSuccess('Voce aggiornata')
       focusPlanningOnWorkDate(savedWorkDate)
       resetForm()
       await reloadPlanningForWorkDate(savedWorkDate)
@@ -3062,16 +3049,10 @@ export default function StaffPage() {
         {!editingShiftId ? (
           <div className="staff-shift-form-hint" role="note">
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
-            <ul className="staff-shift-form-hint-list">
-              <li>
-                <strong>Singolo giorno</strong> — Seleziona i dipendenti, imposta <strong>Tipo</strong> e orari, poi clicca{' '}
-                <strong>Aggiungi</strong>. La data è quella del giorno aperto in pianificazione (<strong>Apri giorno</strong> sulla card).
-              </li>
-              <li>
-                <strong>Più giorni della settimana</strong> — Seleziona dipendenti e <strong>Giorni settimana</strong> dai menu, imposta tipo e orari, poi clicca{' '}
-                <strong>Carica in settimana</strong>. Inserisce le voci per ogni dipendente nei giorni scelti della settimana visibile in pianificazione.
-              </li>
-            </ul>
+            <p className="staff-shift-form-hint-list" style={{ margin: 0 }}>
+              Seleziona <strong>Dipendenti</strong> e <strong>Giorni settimana</strong>, imposta <strong>Tipo</strong> e orari, poi clicca{' '}
+              <strong>Carica</strong>. Inserisce le voci per ogni dipendente nei giorni scelti della settimana visibile in pianificazione.
+            </p>
           </div>
         ) : null}
         <GeminiVoiceAssistant
@@ -3202,20 +3183,21 @@ export default function StaffPage() {
             />
           </div>
           <div className="staff-shift-actions-col" style={{ marginBottom: '0.35rem' }}>
-            <button
-              type="button"
-              className="btn btn-vino staff-week-load-btn-top"
-              disabled={shiftBusy || Boolean(editingShiftId) || formMemberIds.size === 0 || weekLoadDays.size === 0}
-              onClick={() => void handleLoadMemberIntoWeekDays()}
-              title="Inserisce i dipendenti selezionati nei giorni scelti della settimana visibile (usa tipo, orari e note del modulo)"
-            >
-              Carica in settimana
-            </button>
-            <div className="btn-group">
-              <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
-                {shiftBusy ? 'Attendere…' : editingShiftId ? 'Salva modifiche' : 'Aggiungi'}
+            {!editingShiftId ? (
+              <button
+                type="button"
+                className="btn btn-vino staff-week-load-btn-top"
+                disabled={shiftBusy || formMemberIds.size === 0 || weekLoadDays.size === 0}
+                onClick={() => void handleLoadMemberIntoWeekDays()}
+                title="Inserisce i dipendenti selezionati nei giorni scelti della settimana visibile (usa tipo, orari e note del modulo)"
+              >
+                Carica
               </button>
-              {editingShiftId && (
+            ) : (
+              <div className="btn-group">
+                <button type="submit" className="btn btn-primary" disabled={shiftBusy}>
+                  {shiftBusy ? 'Attendere…' : 'Salva modifiche'}
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
@@ -3225,18 +3207,14 @@ export default function StaffPage() {
                 >
                   {loading ? 'Aggiornamento…' : 'Aggiorna planning'}
                 </button>
-              )}
-              {editingShiftId && (
                 <button type="button" className="btn btn-secondary" onClick={() => resetForm()} disabled={shiftBusy}>
                   Annulla
                 </button>
-              )}
-              {editingShiftId && (
                 <button type="button" className="btn btn-outline-danger" onClick={() => handleDeleteShift(editingShiftId)} disabled={shiftBusy}>
                   Elimina
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </form>
       </section>
