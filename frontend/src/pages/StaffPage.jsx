@@ -673,6 +673,7 @@ export default function StaffPage() {
   /** Mese solare per stipendi (YYYY-MM) e turni caricati per quel mese. */
   const [payrollMonthYm, setPayrollMonthYm] = useState(currentPayrollYm)
   const [payrollShifts, setPayrollShifts] = useState([])
+  const [payrollShiftsRefreshing, setPayrollShiftsRefreshing] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMeta, setBackupMeta] = useState(() => ({
     members: getLatestStaffBackup('members')?.savedAt ?? null,
@@ -793,6 +794,37 @@ export default function StaffPage() {
     }
     setPayrollImporto(next)
   }, [payrollRows, rateDraft])
+
+  const refreshPayrollHoursFromShifts = useCallback(async () => {
+    setPayrollShiftsRefreshing(true)
+    setError('')
+    try {
+      const data = await fetchStaffShifts(payrollFromStr, payrollToStr)
+      const shifts = Array.isArray(data) ? data : []
+      setPayrollShifts(shifts)
+      const oreMap = new Map()
+      for (const row of aggregateWeeklyStaffStats(members, shifts, payrollFromStr, payrollToStr)) {
+        oreMap.set(row.memberId, row.oreTurno)
+      }
+      setHoursOverride({})
+      setPayrollImporto((prev) => {
+        if (!Object.keys(prev).length) return prev
+        const next = { ...prev }
+        for (const m of members) {
+          if (prev[m.id] === undefined) continue
+          const ore = oreMap.get(m.id) ?? 0
+          const rate = parseDecimalInput(rateDraft[m.id] ?? m.hourly_rate)
+          next[m.id] = ore * rate
+        }
+        return next
+      })
+      setSuccess('Ore lavorate aggiornate dai turni del mese.')
+    } catch {
+      setError('Aggiornamento ore dai turni non riuscito')
+    } finally {
+      setPayrollShiftsRefreshing(false)
+    }
+  }, [members, payrollFromStr, payrollToStr, rateDraft])
 
   const buildPayrollLinesForSave = useCallback(() => {
     const lines = []
@@ -2522,6 +2554,7 @@ export default function StaffPage() {
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
           Le ore si calcolano dai turni del <strong>mese selezionato</strong> (puoi modificarle).
+          Dopo nuovi turni in pianificazione usa <strong>Aggiorna ore</strong>.
           <strong> Calcola tutti</strong> o <strong>Calcola</strong> per riga.
           <strong> Salva</strong> / <strong>Ricarica in archivio</strong> memorizzano il mese nel menu Archivio (compatto, senza lista lunga).
         </p>
@@ -2544,7 +2577,16 @@ export default function StaffPage() {
           onNotifySuccess={setSuccess}
           disabled={shiftBusy}
         />
-        <div style={{ marginBottom: '0.65rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.65rem' }}>
+          <button
+            type="button"
+            className="btn btn-vino btn-sm"
+            onClick={() => void refreshPayrollHoursFromShifts()}
+            disabled={members.length === 0 || payrollShiftsRefreshing || shiftBusy}
+            title="Ricarica i turni del mese da pianificazione e aggiorna le ore in tabella"
+          >
+            {payrollShiftsRefreshing ? 'Aggiornamento…' : 'Aggiorna ore'}
+          </button>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
