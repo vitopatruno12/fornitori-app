@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: [
         'pwa-icon.svg',
         'atlas-logo.svg',

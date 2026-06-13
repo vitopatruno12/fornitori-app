@@ -18,8 +18,9 @@ import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, sugge
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
 import PwaInstallPrompt from './components/PwaInstallPrompt.jsx'
+import AtlasUpdateButton from './components/AtlasUpdateButton.jsx'
 import { OfflineProvider, useOffline } from './offline/OfflineContext.jsx'
-import { registerSW } from 'virtual:pwa-register'
+import { PwaUpdateProvider } from './pwa/PwaUpdateContext.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
 import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
@@ -37,15 +38,6 @@ type AiHistoryItem = {
   lines: string[]
   actions: string[]
   at: number
-}
-
-function PwaServiceWorker() {
-  React.useEffect(() => {
-    registerSW({
-      immediate: true,
-    })
-  }, [])
-  return null
 }
 
 function App() {
@@ -599,6 +591,7 @@ function App() {
             <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
             <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
             <div className="app-nav-right">
+              <AtlasUpdateButton navStyle />
               <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
             </div>
           </div>
@@ -724,15 +717,16 @@ function App() {
 function RootRouter() {
   return (
     <OfflineProvider>
-      <BrowserRouter>
-        <PwaServiceWorker />
-        <Routes>
-          <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
-          <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
-          <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
-          <Route path="/*" element={<App />} />
-        </Routes>
-      </BrowserRouter>
+      <PwaUpdateProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
+            <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
+            <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
+            <Route path="/*" element={<App />} />
+          </Routes>
+        </BrowserRouter>
+      </PwaUpdateProvider>
     </OfflineProvider>
   )
 }

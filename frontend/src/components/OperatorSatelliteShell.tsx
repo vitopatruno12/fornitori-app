@@ -2,6 +2,7 @@ import React from 'react'
 import { validateAtlasLogin } from '../utils/atlasAuth'
 import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
+import AtlasUpdateButton from './AtlasUpdateButton.jsx'
 
 export type OperatorNavItem = {
   id: string
@@ -133,9 +134,12 @@ export default function OperatorSatelliteShell({
           <strong>{headerTitle}</strong>
           <span>{headerSubtitle}</span>
         </div>
-        <button type="button" className="btn btn-secondary btn-sm operator-order-logout" onClick={handleLogout}>
-          Esci
-        </button>
+        <div className="operator-order-header-actions">
+          <AtlasUpdateButton />
+          <button type="button" className="btn btn-secondary btn-sm operator-order-logout" onClick={handleLogout}>
+            Esci
+          </button>
+        </div>
       </header>
       {nav && nav.length > 0 ? (
         <nav className="operator-satellite-nav" aria-label="Sezioni operatore">
