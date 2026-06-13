@@ -25,6 +25,7 @@ import {
   getLatestStaffBackup,
   saveStaffBackup,
 } from '../utils/staffLocalBackup.js'
+import { readStaffLocaleStore, writeStaffLocaleStore } from '../utils/staffLocaleStore.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -511,7 +512,6 @@ const MAX_PLANNING_PERIOD_DAYS = 93
 const MAX_GEMINI_SHIFTS_BATCH = 80
 /** Limite prudente per `https://wa.me/?text=…` (query troppo lunghe = link rotto o bloccato dal browser). */
 const WA_ME_URL_MAX_LEN = 7200
-const STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY = 'staffMembersByLocale'
 
 async function copyTextToClipboard(text) {
   try {
@@ -1558,30 +1558,30 @@ export default function StaffPage() {
     return String(value || '').trim()
   }
 
-  function readStaffLocaleStore() {
+  const refreshSavedLocaleNames = useCallback(async () => {
     try {
-      const raw = window.localStorage.getItem(STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY)
-      if (!raw) return {}
-      const parsed = JSON.parse(raw)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-      return parsed
+      const store = await readStaffLocaleStore()
+      const names = Object.keys(store).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+      setSavedLocaleNames(names)
     } catch {
-      return {}
+      setSavedLocaleNames([])
     }
-  }
-
-  function writeStaffLocaleStore(store) {
-    window.localStorage.setItem(STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY, JSON.stringify(store))
-  }
-
-  const refreshSavedLocaleNames = useCallback(() => {
-    const store = readStaffLocaleStore()
-    const names = Object.keys(store).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
-    setSavedLocaleNames(names)
   }, [])
 
   useEffect(() => {
-    refreshSavedLocaleNames()
+    void refreshSavedLocaleNames()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshSavedLocaleNames()
+    }
+    const onPageShow = () => void refreshSavedLocaleNames()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('focus', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('focus', onPageShow)
+    }
   }, [refreshSavedLocaleNames])
 
   async function handleSaveMembersByLocale() {
@@ -1603,13 +1603,13 @@ export default function StaffPage() {
         sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
         is_active: Boolean(m.is_active),
       }))
-      const store = readStaffLocaleStore()
+      const store = await readStaffLocaleStore()
       store[localeName] = {
         saved_at: new Date().toISOString(),
         members: snapshot,
       }
-      writeStaffLocaleStore(store)
-      refreshSavedLocaleNames()
+      await writeStaffLocaleStore(store)
+      await refreshSavedLocaleNames()
       setSuccess(`Lista dipendenti salvata per locale "${localeName}" (${snapshot.length} elementi)`)
     } catch {
       setError('Errore nel salvataggio locale dei dipendenti')
@@ -1622,7 +1622,7 @@ export default function StaffPage() {
       setError('Inserisci il nome del locale prima di caricare i dipendenti')
       return
     }
-    const store = readStaffLocaleStore()
+    const store = await readStaffLocaleStore()
     const pack = store[localeName]
     if (!pack || !Array.isArray(pack.members)) {
       setError(`Nessuna lista salvata trovata per il locale "${localeName}"`)
