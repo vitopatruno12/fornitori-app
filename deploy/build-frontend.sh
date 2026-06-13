@@ -30,6 +30,12 @@ if [[ ! -f "$DIST_DIR/index.html" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$DIST_DIR/sw.js" || ! -f "$DIST_DIR/manifest.webmanifest" ]]; then
+  echo "ATTENZIONE: PWA non generata (mancano sw.js o manifest.webmanifest)"
+else
+  echo "==> PWA OK: sw.js e manifest.webmanifest presenti"
+fi
+
 echo "==> Build OK: $DIST_DIR"
 ls -la "$DIST_DIR/index.html"
 

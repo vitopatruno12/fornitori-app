@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
+import { VitePWA } from 'vite-plugin-pwa'
 
 /** Dev: il browser usa solo /api e /ai (HTTPS in produzione); proxy interno verso i backend locali. */
 export default defineConfig(({ mode }) => {
@@ -28,6 +29,62 @@ export default defineConfig(({ mode }) => {
         )
       },
     },
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: [
+        'pwa-icon.svg',
+        'atlas-logo.svg',
+        'atlas-login-bg.png',
+        'atlas-api-fetch-fix.js',
+        'favicon.svg',
+      ],
+      manifest: {
+        name: 'ATLAS — Gestionale',
+        short_name: 'ATLAS',
+        description: 'Gestionale fornitori, ordini, Prima Nota e Personale. Funziona anche offline dopo l\'installazione.',
+        theme_color: '#0f4c5c',
+        background_color: '#0f172a',
+        display: 'standalone',
+        orientation: 'any',
+        scope: '/',
+        start_url: '/',
+        lang: 'it',
+        icons: [
+          {
+            src: 'pwa-icon.svg',
+            sizes: '192x192',
+            type: 'image/svg+xml',
+            purpose: 'any',
+          },
+          {
+            src: 'pwa-icon.svg',
+            sizes: '512x512',
+            type: 'image/svg+xml',
+            purpose: 'any',
+          },
+          {
+            src: 'pwa-icon.svg',
+            sizes: '512x512',
+            type: 'image/svg+xml',
+            purpose: 'maskable',
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,webmanifest}'],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api/, /^\/ai/, /^\/uploads/],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api') || url.pathname.startsWith('/ai'),
+            handler: 'NetworkOnly',
+          },
+        ],
+      },
+      devOptions: {
+        enabled: false,
+      },
+    }),
   ],
   server: {
     proxy: {

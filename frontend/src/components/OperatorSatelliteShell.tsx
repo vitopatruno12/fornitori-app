@@ -1,6 +1,7 @@
 import React from 'react'
 import { validateAtlasLogin } from '../utils/atlasAuth'
 import OfflineBanner from './OfflineBanner.jsx'
+import PwaInstallPrompt from './PwaInstallPrompt.jsx'
 
 export type OperatorNavItem = {
   id: string
@@ -125,6 +126,7 @@ export default function OperatorSatelliteShell({
   return (
     <div className="app-wrap operator-order-wrap">
       <OfflineBanner />
+      <PwaInstallPrompt />
       <header className="operator-order-header" aria-label="Intestazione operatore">
         <img src="/atlas-logo.svg" alt="ATLAS" className="operator-order-logo" />
         <div className="operator-order-header-text">

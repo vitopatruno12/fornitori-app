@@ -17,7 +17,9 @@ import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
+import PwaInstallPrompt from './components/PwaInstallPrompt.jsx'
 import { OfflineProvider, useOffline } from './offline/OfflineContext.jsx'
+import { registerSW } from 'virtual:pwa-register'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
 import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
@@ -35,6 +37,15 @@ type AiHistoryItem = {
   lines: string[]
   actions: string[]
   at: number
+}
+
+function PwaServiceWorker() {
+  React.useEffect(() => {
+    registerSW({
+      immediate: true,
+    })
+  }, [])
+  return null
 }
 
 function App() {
@@ -556,6 +567,7 @@ function App() {
   return (
     <div className="app-wrap">
       <OfflineBanner />
+      <PwaInstallPrompt />
       <nav className="app-nav" aria-label="Navigazione principale">
         <div className="app-nav-inner">
           <div className="app-nav-brand">
@@ -713,6 +725,7 @@ function RootRouter() {
   return (
     <OfflineProvider>
       <BrowserRouter>
+        <PwaServiceWorker />
         <Routes>
           <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
           <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />

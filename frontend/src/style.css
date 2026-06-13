@@ -248,6 +248,39 @@ a:hover {
   cursor: not-allowed;
 }
 
+.atlas-pwa-install {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0.55rem 0.85rem;
+  background: linear-gradient(90deg, #0f4c5c 0%, #115e59 100%);
+  color: #ecfdf5;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  font-size: 0.86rem;
+}
+
+.atlas-pwa-install-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 220px;
+}
+
+.atlas-pwa-install-text strong {
+  font-weight: 700;
+}
+
+.atlas-pwa-install-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 @media (max-width: 1439px) {
   .app-version-strip {
     max-width: 1200px;
