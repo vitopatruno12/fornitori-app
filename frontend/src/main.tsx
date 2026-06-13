@@ -156,7 +156,7 @@ function App() {
   }, [navOpen])
 
   React.useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)')
+    const mq = window.matchMedia('(min-width: 1025px)')
     const onChange = () => {
       if (mq.matches) setNavOpen(false)
     }
