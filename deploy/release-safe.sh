@@ -2,8 +2,8 @@
 #
 # release-safe.sh — Deploy sicuro ATLAS (frontend + opzionale restart API).
 #
-# GARANTISCE: il database PostgreSQL NON viene cancellato né sovrascritto.
-# Aggiorna solo il codice (git pull + build frontend). Opzionale backup automatico.
+# GARANTISCE: database PostgreSQL e file caricati NON vengono cancellati.
+# Prima del deploy: backup completo (DB + uploads + .env).
 #
 # Uso sul server (es. www.atlass.it):
 #   cd /var/www/app-fornitori/fornitori-app
@@ -36,24 +36,31 @@ fi
 
 echo "================================================================"
 echo "  DEPLOY SICURO ATLAS"
-echo "  I dati nel database PostgreSQL (turni, dipendenti, fornitori,"
-echo "  Prima Nota, ordini, fatture...) RESTANO INTATTI."
-echo "  Vengono aggiornati solo i file dell'applicazione."
+echo "  Backup automatico completo prima del deploy:"
+echo "    • Database PostgreSQL (turni, dipendenti, fornitori, Prima Nota…)"
+echo "    • File caricati (PDF, allegati, XML SDI…)"
+echo "    • Configurazione server (.env)"
+echo "  Il deploy aggiorna solo il codice; i dati sul server restano intatti."
 echo "================================================================"
 echo "  APP_DIR: $APP_DIR"
 echo "================================================================"
 
-if [[ "$SKIP_BACKUP" != "1" ]] && [[ -f "$APP_DIR/deploy/backup-db.sh" ]]; then
+if [[ "$SKIP_BACKUP" != "1" ]] && [[ -f "$APP_DIR/deploy/backup-atlas.sh" ]]; then
+  log "Backup completo applicazione prima del deploy"
+  APP_DIR="$APP_DIR" BACKUP_DIR="$APP_DIR/backups" bash "$APP_DIR/deploy/backup-atlas.sh" || {
+    warn "ATTENZIONE: backup completo non riuscito. Deploy continua (i dati non vengono cancellati)."
+  }
+elif [[ "$SKIP_BACKUP" != "1" ]] && [[ -f "$APP_DIR/deploy/backup-db.sh" ]]; then
   if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
-    log "Backup automatico database prima del deploy"
+    log "Backup database (backup-atlas.sh assente, uso solo DB)"
     BACKUP_DIR="$APP_DIR/backups" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/backup-db.sh" || {
-      warn "ATTENZIONE: backup non riuscito. Deploy continua (il DB non viene modificato)."
+      warn "ATTENZIONE: backup DB non riuscito. Deploy continua."
     }
   else
-    warn "PostgreSQL non attivo: salto backup (il deploy non tocca comunque il database)."
+    warn "PostgreSQL non attivo: salto backup."
   fi
 else
-  warn "Backup saltato (SKIP_BACKUP=1 o script backup assente)."
+  warn "Backup saltato (SKIP_BACKUP=1 o script assente)."
 fi
 
 log "Aggiornamento codice (git pull origin $BRANCH)"
@@ -77,8 +84,8 @@ fi
 
 echo ""
 echo "================================================================"
-echo "  Deploy completato. Database PostgreSQL invariato."
-echo "  Backup in: $APP_DIR/backups/"
+echo "  Deploy completato. Dati server invariati."
+echo "  Backup completi in: $APP_DIR/backups/atlas_YYYYMMDD_HHMMSS.tar.gz"
 echo ""
 echo "  NON usare restore-db.sh per aggiornare: cancella tutti i dati!"
 echo "  Utenti: pulsante «Aggiornamento» nell'app per la nuova versione."
