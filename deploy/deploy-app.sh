@@ -196,6 +196,13 @@ systemctl daemon-reload
 systemctl enable fornitori-api
 free_api_port
 
+if [[ -f "$APP_DIR/deploy/backup-db.sh" ]] && systemctl is-active --quiet postgresql 2>/dev/null; then
+    log "Backup automatico database prima del restart API (i dati restano intatti)"
+    BACKUP_DIR="$APP_DIR/backups" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/backup-db.sh" || {
+        log "Backup fallito — deploy continua (git pull e restart non cancellano il DB)"
+    }
+fi
+
 if systemctl is-active --quiet fornitori-api; then
     log "Restart fornitori-api"
     systemctl restart fornitori-api

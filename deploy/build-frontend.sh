@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Build frontend produzione (HTTPS /api) — da eseguire sul server DOPO git pull.
+# NON tocca PostgreSQL: turni, fornitori, Prima Nota e ordini restano nel database.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/fornitori-app}"
+if [[ ! -d "$APP_DIR/.git" && -d /var/www/app-fornitori/fornitori-app/.git ]]; then
+  APP_DIR="/var/www/app-fornitori/fornitori-app"
+fi
 DIST_DIR="$APP_DIR/frontend/dist"
 
 if [[ ! -d "$APP_DIR/.git" ]]; then
@@ -13,6 +17,7 @@ fi
 GIT_HEAD="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
 GIT_SUBJECT="$(git -C "$APP_DIR" log -1 --format='%s' 2>/dev/null || echo '?')"
 echo "==> Repo: $APP_DIR @ $GIT_HEAD — $GIT_SUBJECT"
+echo "==> Sicurezza dati: aggiornamento SOLO frontend statico; PostgreSQL non viene modificato."
 
 cd "$APP_DIR/frontend"
 

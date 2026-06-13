@@ -14,7 +14,7 @@
 set -euo pipefail
 
 DB_NAME="${DB_NAME:-fornitori_db}"
-BACKUP_DIR="${BACKUP_DIR:-/opt/fornitori-app/backups}"
+BACKUP_DIR="${BACKUP_DIR:-${APP_DIR:-/opt/fornitori-app}/backups}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUT="$BACKUP_DIR/fornitori_${TIMESTAMP}.sql.gz"
