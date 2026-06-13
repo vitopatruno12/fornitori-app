@@ -1,7 +1,9 @@
 import { apiFetch, apiUrl } from './api'
+import { assertOnlineForUpload } from '../offline/offlineGuards'
 
 /** POST multipart (senza Content-Type JSON). */
 export async function uploadSupportTechnicianInvoice(formData) {
+  assertOnlineForUpload()
   const response = await fetch(apiUrl('/support-technicians/invoice-files'), {
     method: 'POST',
     body: formData,

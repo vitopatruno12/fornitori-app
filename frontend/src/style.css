@@ -209,6 +209,45 @@ a:hover {
   opacity: 0.95;
 }
 
+.atlas-offline-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0.5rem 0.85rem;
+  background: linear-gradient(90deg, #7f1d1d 0%, #991b1b 100%);
+  color: #fff;
+  font-size: 0.86rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.atlas-offline-banner--sync {
+  background: linear-gradient(90deg, #0f4c5c 0%, #0d9488 100%);
+}
+
+.atlas-offline-banner strong {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.atlas-offline-banner-note {
+  font-size: 0.8rem;
+  opacity: 0.92;
+}
+
+.atlas-offline-banner .btn-outline-light {
+  border-color: rgba(255, 255, 255, 0.75);
+  color: #fff;
+}
+
+.ai-global-fab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 1439px) {
   .app-version-strip {
     max-width: 1200px;

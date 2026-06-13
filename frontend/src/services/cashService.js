@@ -45,37 +45,19 @@ export async function updateEntry(id, data) {
 
 
 export async function deleteEntry(id) {
-  const response = await fetch(apiUrl(`/cash/entries/${id}`), {
-    method: 'DELETE',
-  })
-  if (!response.ok) {
-    throw new Error('Errore nell\'eliminazione movimento')
-  }
+  await apiFetch(`/cash/entries/${id}`, { method: 'DELETE' })
 }
 
 export async function deleteEntriesForDay(dateStr, activity) {
   const params = new URLSearchParams({ date_str: dateStr })
   appendActivity(params, activity)
-  const response = await fetch(
-    apiUrl(`/cash/entries/day?${params.toString()}`),
-    { method: 'DELETE' },
-  )
-  if (!response.ok) {
-    throw new Error('Errore nell\'eliminazione movimenti del giorno')
-  }
+  await apiFetch(`/cash/entries/day?${params.toString()}`, { method: 'DELETE' })
 }
-
 
 export async function deleteEntriesForRange(dateFrom, dateTo, activity) {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
   appendActivity(params, activity)
-  const response = await fetch(
-    apiUrl(`/cash/entries/range?${params.toString()}`),
-    { method: 'DELETE' },
-  )
-  if (!response.ok) {
-    throw new Error('Errore nell\'eliminazione movimenti dell\'intervallo')
-  }
+  await apiFetch(`/cash/entries/range?${params.toString()}`, { method: 'DELETE' })
 }
 
 

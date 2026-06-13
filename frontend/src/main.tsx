@@ -16,6 +16,8 @@ import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
+import OfflineBanner from './components/OfflineBanner.jsx'
+import { OfflineProvider, useOffline } from './offline/OfflineContext.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
 import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
@@ -36,6 +38,7 @@ type AiHistoryItem = {
 }
 
 function App() {
+  const { online } = useOffline()
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
     try {
       return sessionStorage.getItem('atlasAuth') === '1'
@@ -174,6 +177,11 @@ function App() {
   async function runAi(promptOverride?: string) {
     const prompt = (promptOverride ?? aiInput).trim()
     if (!prompt) return
+    if (!online) {
+      setAiTitle('Assistente operativo')
+      setAiLines(['Gemini e AI vocale sono in pausa finché non torna la connessione internet.'])
+      return
+    }
     try {
       setAiLoading(true)
       if (promptOverride != null) setAiInput(prompt)
@@ -547,6 +555,7 @@ function App() {
 
   return (
     <div className="app-wrap">
+      <OfflineBanner />
       <nav className="app-nav" aria-label="Navigazione principale">
         <div className="app-nav-inner">
           <div className="app-nav-brand">
@@ -608,7 +617,13 @@ function App() {
         </Routes>
       </main>
 
-      <button type="button" className="ai-global-fab" onClick={() => setAiOpen(true)} title="Apri assistente operativo AI">
+      <button
+        type="button"
+        className="ai-global-fab"
+        onClick={() => setAiOpen(true)}
+        disabled={!online}
+        title={online ? 'Apri assistente operativo AI' : 'Gemini e AI vocale in pausa (offline)'}
+      >
         AI Assistente
       </button>
       {aiOpen && (
@@ -696,14 +711,16 @@ function App() {
 
 function RootRouter() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
-        <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
-        <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
-        <Route path="/*" element={<App />} />
-      </Routes>
-    </BrowserRouter>
+    <OfflineProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
+          <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
+          <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
+          <Route path="/*" element={<App />} />
+        </Routes>
+      </BrowserRouter>
+    </OfflineProvider>
   )
 }
 

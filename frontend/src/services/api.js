@@ -1,51 +1,13 @@
-import {
-  ensureApiRequestUrl,
-  ensureLocalDevHttp,
-  normalizeApiBase,
-  secureAbsoluteUrl,
-} from '../utils/urlSecurity'
+import { API_BASE_URL, apiUrl } from './apiBase'
+import { getCachedResponse, isCacheableGetPath, setCachedResponse } from '../offline/offlineCache'
+import { isOnline } from '../offline/offlineStatus'
+import { queueMutationAndRespond } from '../offline/offlineSync'
+import { formatApiError, looksLikeHtml, parseApiJson } from '../offline/offlineApiHelpers'
 
-/** Base URL API (env VITE_API_BASE_URL; in produzione preferire /api su HTTPS). */
-export const API_BASE_URL = normalizeApiBase(import.meta.env.VITE_API_BASE_URL)
-
-export function apiUrl(path) {
-  const p = String(path || '')
-  const q = p.startsWith('/') ? p : `/${p}`
-  const base = API_BASE_URL
-  let url
-  if (base.startsWith('/')) {
-    url = `${base}${q}`
-  } else {
-    url = ensureLocalDevHttp(secureAbsoluteUrl(`${base}${q}`))
-  }
-  return ensureApiRequestUrl(url)
-}
+export { API_BASE_URL, apiUrl } from './apiBase'
 
 /** Estrae messaggio leggibile da risposte FastAPI (detail string o elenco errori validazione). */
-function formatApiError(status, text) {
-  const raw = (text || '').trim()
-  try {
-    const j = JSON.parse(raw)
-    if (typeof j.detail === 'string') return `${status}: ${j.detail}`
-    if (Array.isArray(j.detail)) {
-      const parts = j.detail.map((d) => {
-        if (typeof d === 'string') return d
-        if (d?.msg) return d.msg
-        return JSON.stringify(d)
-      })
-      return `${status}: ${parts.join(' — ')}`
-    }
-    if (j.detail != null) return `${status}: ${JSON.stringify(j.detail)}`
-  } catch {
-    /* non JSON */
-  }
-  return raw ? `API error ${status}: ${raw}` : `API error ${status}`
-}
-
-function looksLikeHtml(text) {
-  const t = String(text || '').trim().slice(0, 200).toLowerCase()
-  return t.startsWith('<!doctype') || t.startsWith('<html') || (t.startsWith('<') && t.includes('<head'))
-}
+export { formatApiError } from '../offline/offlineApiHelpers'
 
 /** Garantisce un array (evita .map is not a function se l’API risponde male). */
 export function asArray(value, label = 'risposta') {
@@ -58,6 +20,19 @@ export function asArray(value, label = 'risposta') {
 }
 
 export async function apiFetch(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase()
+
+  if (!isOnline()) {
+    if (method === 'GET') {
+      const cached = await getCachedResponse(path)
+      if (cached != null) return cached
+      throw new Error(
+        'Sei offline: dati non in cache. Apri la sezione con internet almeno una volta, poi potrai consultarli offline.',
+      )
+    }
+    return queueMutationAndRespond(path, options)
+  }
+
   const response = await fetch(apiUrl(path), {
     headers: {
       'Content-Type': 'application/json',
@@ -85,18 +60,15 @@ export async function apiFetch(path, options = {}) {
     )
   }
 
-  const trimmed = text.trim()
-  if (!trimmed) {
-    return null
-  }
+  const data = parseApiJson(text, path, contentType)
 
-  if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+  if (method === 'GET' && isCacheableGetPath(path)) {
     try {
-      return JSON.parse(trimmed)
+      await setCachedResponse(path, data)
     } catch {
-      throw new Error(`Risposta non è JSON valido (${path})`)
+      // quota IndexedDB
     }
   }
 
-  return text
+  return data
 }

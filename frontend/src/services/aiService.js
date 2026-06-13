@@ -1,7 +1,9 @@
 import { apiFetch, apiUrl } from './api'
+import { assertOnlineForAi } from '../offline/offlineGuards'
 
 /** Tutte le chiamate AI passano da FastAPI (/api/ai → Ollama). */
 async function aiFetch(path, options = {}) {
+  assertOnlineForAi()
   const p = path.startsWith('/') ? path : `/${path}`
   const url = apiUrl(p)
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }

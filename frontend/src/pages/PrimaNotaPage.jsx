@@ -109,6 +109,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }, [])
 
   useEffect(() => {
+    const onDataSynced = () => {
+      void loadEntries()
+      void loadSummary()
+    }
+    window.addEventListener('atlas-refresh-data', onDataSynced)
+    return () => window.removeEventListener('atlas-refresh-data', onDataSynced)
+  })
+
+  useEffect(() => {
     const onApply = (ev) => {
       const s = ev?.detail || {}
       if (s.description) setFormDescription(String(s.description))

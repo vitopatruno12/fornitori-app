@@ -356,6 +356,12 @@ export default function NewOrderPage({ operatorMode = false }) {
   }, [supplierId, historyMonth, historyStatus])
 
   useEffect(() => {
+    const onDataSynced = () => void refreshRecentOrders()
+    window.addEventListener('atlas-refresh-data', onDataSynced)
+    return () => window.removeEventListener('atlas-refresh-data', onDataSynced)
+  }, [supplierId, historyMonth, historyStatus])
+
+  useEffect(() => {
     setCopyFromOrderId('')
   }, [supplierId])
 

@@ -1045,6 +1045,21 @@ export default function StaffPage() {
     }
   }, [planView, weekAnchor, dayFocus, periodFrom, periodTo, loadForRange])
 
+  useEffect(() => {
+    const onDataSynced = async () => {
+      try {
+        const data = await fetchStaffShifts(payrollFromStr, payrollToStr)
+        setPayrollShifts(Array.isArray(data) ? data : [])
+      } catch {
+        setPayrollShifts([])
+      }
+      await reloadPlanning()
+      await refreshMembers()
+    }
+    window.addEventListener('atlas-refresh-data', onDataSynced)
+    return () => window.removeEventListener('atlas-refresh-data', onDataSynced)
+  }, [payrollFromStr, payrollToStr, reloadPlanning, refreshMembers])
+
   /** Ricarica i turni includendo sempre `ymd` (stessa logica di reloadPlanning ma range calcolato sulla data salvata, evita closure stale dopo setState). */
   async function reloadPlanningForWorkDate(ymd) {
     if (!ymd || typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {

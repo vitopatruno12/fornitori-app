@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useOffline } from '../offline/OfflineContext'
+import { OFFLINE_AI_MSG } from '../offline/offlineGuards'
 
 const SpeechRecognition =
   typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)
@@ -25,6 +27,9 @@ export default function GeminiVoiceAssistant({
   /** true = svuota il campo dopo Compila (successo o errore) */
   clearAfterCompile = true,
 }) {
+  const { online } = useOffline()
+  const offlinePaused = !online
+  const blocked = disabled || offlinePaused
   const [listening, setListening] = useState(false)
   const [sttError, setSttError] = useState('')
   const recRef = useRef(null)
@@ -86,7 +91,7 @@ export default function GeminiVoiceAssistant({
       setSttError('Microfono non supportato in questo browser (usa Chrome o Edge).')
       return
     }
-    if (listening || compiling || disabled) return
+    if (listening || compiling || blocked) return
     setSttError('')
     let rec
     try {
@@ -164,13 +169,18 @@ export default function GeminiVoiceAssistant({
           {hint}
         </p>
       ) : null}
+      {offlinePaused ? (
+        <p className="alert alert-warning" style={{ margin: '0 0 0.65rem', padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}>
+          {OFFLINE_AI_MSG}
+        </p>
+      ) : null}
       <textarea
         className="form-control"
         rows={2}
         value={text}
         onChange={(e) => onTextChange?.(e.target.value)}
         placeholder='Es. "Bar Roma P.IVA 12345678901 email info@bar.it tel 0801234567" oppure "10 arance 5 kg pasta ordine a Rossi"'
-        disabled={disabled || compiling}
+        disabled={blocked || compiling}
         style={{ marginBottom: '0.5rem', maxWidth: '100%' }}
       />
       <div className="btn-group" style={{ flexWrap: 'wrap' }}>
@@ -179,7 +189,7 @@ export default function GeminiVoiceAssistant({
             type="button"
             className={`btn ${listening ? 'btn-outline-danger' : 'btn-primary'}`}
             onClick={listening ? stopListening : startListening}
-            disabled={disabled || compiling}
+            disabled={blocked || compiling}
           >
             {listening ? '⏹ Ferma e compila' : '🎤 Parla'}
           </button>
@@ -188,7 +198,7 @@ export default function GeminiVoiceAssistant({
           type="button"
           className="btn btn-secondary"
           onClick={handleCompileClick}
-          disabled={disabled || compiling || listening}
+          disabled={blocked || compiling || listening}
         >
           {compiling ? 'Compilazione…' : compileLabel}
         </button>
@@ -196,7 +206,7 @@ export default function GeminiVoiceAssistant({
           type="button"
           className="btn btn-outline-secondary"
           onClick={handleClearClick}
-          disabled={disabled || compiling || listening || !String(text || '').trim()}
+          disabled={blocked || compiling || listening || !String(text || '').trim()}
           title="Svuota il testo del comando"
         >
           {clearLabel}
