@@ -59,17 +59,28 @@ export async function mergeOptimisticIntoCachedList(path, optimisticItem) {
 /** Aggiorna liste in cache che contengono lo stesso path base (es. /cash/entries?...). */
 export async function patchCachedListsForCreate(path, optimisticItem) {
   const base = String(path || '').split('?')[0]
+  let item = optimisticItem
+  if (base === '/staff/shifts' && item && !item.staff_member_name) {
+    const members = await getCachedResponse('/staff/members')
+    if (Array.isArray(members)) {
+      const hit = members.find((m) => Number(m.id) === Number(item.staff_member_id))
+      if (hit?.name) item = { ...item, staff_member_name: hit.name }
+    }
+  }
+  if (item?.work_date && typeof item.work_date === 'string') {
+    item = { ...item, work_date: item.work_date.slice(0, 10) }
+  }
   const all = await dbGetAll(CACHE_STORE)
   for (const row of all) {
     const key = String(row.key || '')
     if (!key.startsWith(base)) continue
     const data = row.data
     if (!Array.isArray(data)) continue
-    const exists = data.some((x) => x.id === optimisticItem.id)
+    const exists = data.some((x) => x.id === item.id)
     if (exists) continue
     await dbPut(CACHE_STORE, {
       key,
-      data: [...data, optimisticItem],
+      data: [...data, item],
       updatedAt: Date.now(),
     })
   }

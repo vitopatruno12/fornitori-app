@@ -89,8 +89,8 @@ function StaffCheckboxDropdown({
     function onDocClick(e) {
       if (rootRef.current && !rootRef.current.contains(e.target)) onOpenChange(false)
     }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    document.addEventListener('pointerdown', onDocClick)
+    return () => document.removeEventListener('pointerdown', onDocClick)
   }, [open, onOpenChange])
 
   return (
@@ -179,6 +179,54 @@ function fmtTime(t) {
   const [h, min] = s.split(':')
   if (h == null) return ''
   return `${parseInt(h, 10)}:${(min || '00').padStart(2, '0')}`
+}
+
+function shiftWorkDateKey(value) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.slice(0, 10)
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return toYMD(value)
+  return String(value).slice(0, 10)
+}
+
+function normalizeShiftRows(rows, membersList) {
+  const list = Array.isArray(rows) ? rows : []
+  const nameById = Object.fromEntries(
+    (membersList || []).map((m) => [Number(m.id), m.name || '']).filter(([id]) => Number.isFinite(id)),
+  )
+  return list.map((s) => {
+    const sid = Number(s.staff_member_id)
+    return {
+      ...s,
+      work_date: shiftWorkDateKey(s.work_date),
+      staff_member_id: sid,
+      staff_member_name: s.staff_member_name || nameById[sid] || '',
+    }
+  })
+}
+
+function shiftEntryMatches(s, staffId, ymd, kind, timeStart, timeEnd) {
+  if (Number(s.staff_member_id) !== Number(staffId)) return false
+  if (shiftWorkDateKey(s.work_date) !== shiftWorkDateKey(ymd)) return false
+  const entryKind = kind || 'shift'
+  if ((s.entry_kind || 'shift') !== entryKind) return false
+  if (entryKind === 'shift' || entryKind === 'permission') {
+    return fmtTime(s.time_start) === fmtTime(timeStart) && fmtTime(s.time_end) === fmtTime(timeEnd)
+  }
+  return true
+}
+
+function planningRangeFromBackup(fromStr, toStr, planView) {
+  const fromD = parseYMD(fromStr)
+  const toD = parseYMD(toStr)
+  const view = planView || 'week'
+  if (view === 'day') {
+    return { view, start: fromD, end: fromD, dayFocus: fromD }
+  }
+  if (view === 'period') {
+    return { view, start: fromD, end: toD, periodFrom: fromD, periodTo: toD }
+  }
+  const anchor = startOfWeekMonday(fromD)
+  return { view: 'week', start: anchor, end: addDays(anchor, 6), weekAnchor: anchor }
 }
 
 function timeInputValue(t) {
@@ -979,7 +1027,8 @@ export default function StaffPage() {
   const shiftsByDate = useMemo(() => {
     const m = new Map()
     for (const s of shifts) {
-      const key = s.work_date
+      const key = shiftWorkDateKey(s.work_date)
+      if (!key) continue
       if (!m.has(key)) m.set(key, [])
       m.get(key).push(s)
     }
@@ -993,8 +1042,8 @@ export default function StaffPage() {
     const from = toYMD(startDate)
     const to = toYMD(endDate)
     const sh = await fetchStaffShifts(from, to)
-    setShifts(sh || [])
-  }, [])
+    setShifts(normalizeShiftRows(sh, members))
+  }, [members])
 
   const refreshMembers = useCallback(async () => {
     try {
@@ -1012,6 +1061,20 @@ export default function StaffPage() {
   const markPlanningStale = useCallback(() => {
     setShifts([])
     setPlanningLoaded(false)
+  }, [])
+
+  const applyPlanningViewFromRange = useCallback((range) => {
+    setPlanView(range.view)
+    if (range.view === 'day') {
+      setDayFocus(range.dayFocus)
+      return
+    }
+    if (range.view === 'period') {
+      setPeriodFrom(range.periodFrom)
+      setPeriodTo(range.periodTo)
+      return
+    }
+    setWeekAnchor(range.weekAnchor)
   }, [])
 
   const reloadPlanning = useCallback(async () => {
@@ -1853,7 +1916,7 @@ export default function StaffPage() {
     setError('')
     try {
       const existing = await fetchStaffShifts(weekFrom, weekTo)
-      const existingList = Array.isArray(existing) ? existing : []
+      const existingList = normalizeShiftRows(existing, members)
       let created = 0
       let skipped = 0
       const savedDates = []
@@ -1866,20 +1929,25 @@ export default function StaffPage() {
         }
         for (const offset of [...weekLoadDays].sort((a, b) => a - b)) {
           const ymd = toYMD(addDays(anchor, offset))
-          const exists = existingList.some(
-            (s) =>
-              Number(s.staff_member_id) === staffId &&
-              s.work_date === ymd &&
-              (s.entry_kind || 'shift') === formKind,
+          const exists = existingList.some((s) =>
+            shiftEntryMatches(s, staffId, ymd, formKind, built.payload.time_start, built.payload.time_end),
           )
           if (exists) {
             skipped += 1
             continue
           }
-          await createStaffShift({ ...built.payload, work_date: ymd })
+          const createdRow = await createStaffShift({ ...built.payload, work_date: ymd })
           created += 1
           savedDates.push(ymd)
-          existingList.push({ staff_member_id: staffId, work_date: ymd, entry_kind: formKind })
+          existingList.push(
+            normalizeShiftRows([createdRow], members)[0] || {
+              staff_member_id: staffId,
+              work_date: ymd,
+              entry_kind: formKind,
+              time_start: built.payload.time_start,
+              time_end: built.payload.time_end,
+            },
+          )
         }
       }
 
@@ -2154,36 +2222,34 @@ export default function StaffPage() {
     }
     setBackupBusy(true)
     setError('')
+    const backupRange = planningRangeFromBackup(from, to, latest.payload.planView)
     try {
       const mem = await fetchStaffMembers()
       const idByName = Object.fromEntries(
         mem.map((m) => [String(m.name || '').trim().toLowerCase(), m.id]).filter(([k]) => k),
       )
       const existing = await fetchStaffShifts(from, to)
-      const existingList = Array.isArray(existing) ? existing : []
+      const existingList = normalizeShiftRows(existing, mem)
       let created = 0
       let skipped = 0
+      let missingMembers = 0
       for (const row of rows) {
         const nameKey = String(row.member_name || '').trim().toLowerCase()
         const staffId = idByName[nameKey]
         if (!staffId) {
           skipped += 1
+          missingMembers += 1
           continue
         }
         const kind = row.entry_kind || 'shift'
-        const exists = existingList.some(
-          (s) =>
-            Number(s.staff_member_id) === staffId &&
-            s.work_date === row.work_date &&
-            (s.entry_kind || 'shift') === kind &&
-            String(s.time_start || '') === String(row.time_start || '') &&
-            String(s.time_end || '') === String(row.time_end || ''),
+        const exists = existingList.some((s) =>
+          shiftEntryMatches(s, staffId, row.work_date, kind, row.time_start, row.time_end),
         )
         if (exists) {
           skipped += 1
           continue
         }
-        await createStaffShift({
+        const createdRow = await createStaffShift({
           staff_member_id: staffId,
           work_date: row.work_date,
           time_start: row.time_start,
@@ -2192,25 +2258,30 @@ export default function StaffPage() {
           notes: row.notes,
         })
         created += 1
-        existingList.push({
-          staff_member_id: staffId,
-          work_date: row.work_date,
-          entry_kind: kind,
-          time_start: row.time_start,
-          time_end: row.time_end,
-        })
+        existingList.push(
+          normalizeShiftRows([createdRow], mem)[0] || {
+            staff_member_id: staffId,
+            work_date: row.work_date,
+            entry_kind: kind,
+            time_start: row.time_start,
+            time_end: row.time_end,
+          },
+        )
       }
+      applyPlanningViewFromRange(backupRange)
       setPlanningLoaded(true)
-      await reloadPlanning()
+      await loadForRange(backupRange.start, backupRange.end)
       bumpBackupMeta()
+      const missingNote = missingMembers > 0 ? ` ${missingMembers} senza dipendente corrispondente.` : ''
       setSuccess(
         created > 0
-          ? `Ripristinate ${created} voci di pianificazione${skipped ? ` (${skipped} già presenti o senza dipendente)` : ''}.`
-          : `Nessuna nuova voce: tutte già presenti o dipendenti non trovati (${skipped} saltate).`,
+          ? `Ripristinate ${created} voci di pianificazione (${from} → ${to})${skipped ? `; ${skipped} saltate` : ''}.${missingNote}`
+          : `Nessuna nuova voce: ${skipped} già presenti o non ripristinabili.${missingNote} Periodo backup mostrato in griglia.`,
       )
     } catch (err) {
       setError(err?.message || 'Ripristino backup pianificazione non riuscito')
-      await reloadPlanning()
+      applyPlanningViewFromRange(backupRange)
+      await loadForRange(backupRange.start, backupRange.end)
     } finally {
       setBackupBusy(false)
     }
@@ -2746,7 +2817,7 @@ export default function StaffPage() {
           lastSavedAt={backupMeta.planning}
           onBackup={handleBackupPlanning}
           onRestore={handleRestorePlanningBackup}
-          disabled={shiftBusy || demoLoading || reportLoading || loading}
+          disabled={shiftBusy || demoLoading || reportLoading || backupBusy}
           busy={backupBusy}
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
