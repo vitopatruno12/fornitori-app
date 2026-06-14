@@ -34,6 +34,19 @@ export function getLatestStaffBackup(kind) {
   return list[0] ?? null
 }
 
+/** @returns {{ savedAt: string, payload: object }[]} */
+export function listStaffBackups(kind) {
+  return readList(kind)
+}
+
+/** @returns {{ savedAt: string, payload: object } | null} */
+export function getStaffBackupEntry(kind, index) {
+  const list = readList(kind)
+  const i = Number(index)
+  if (!Number.isFinite(i) || i < 0 || i >= list.length) return null
+  return list[i] ?? null
+}
+
 export function saveStaffBackup(kind, payload) {
   const list = readList(kind)
   const entry = { savedAt: new Date().toISOString(), payload }

@@ -30,6 +30,8 @@ import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/s
 import {
   formatStaffBackupLabel,
   getLatestStaffBackup,
+  listStaffBackups,
+  getStaffBackupEntry,
   getMembersLocaleBackupSavedAt,
   getMembersLocaleBackup,
   getPlanningWeekBackup,
@@ -250,6 +252,12 @@ function monthBoundsFromYm(ym) {
   const from = new Date(y, m - 1, 1)
   const to = new Date(y, m, 0)
   return { fromStr: toYMD(from), toStr: toYMD(to) }
+}
+
+function formatMonthYmIt(ym) {
+  const [y, m] = String(ym || '').split('-').map(Number)
+  if (!y || !m) return String(ym || 'Backup')
+  return new Date(y, m - 1, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
 }
 
 function parseYMD(s) {
@@ -825,6 +833,8 @@ export default function StaffPage() {
   const [payrollMonthYm, setPayrollMonthYm] = useState(currentPayrollYm)
   const [payrollShifts, setPayrollShifts] = useState([])
   const [payrollShiftsRefreshing, setPayrollShiftsRefreshing] = useState(false)
+  const [payrollBackupKey, setPayrollBackupKey] = useState(currentPayrollYm)
+  const [payrollBackupOptions, setPayrollBackupOptions] = useState([])
   const [backupBusy, setBackupBusy] = useState(false)
   const [planningBackupSlot, setPlanningBackupSlot] = useState(0)
   const [membersBackupLocale, setMembersBackupLocale] = useState('')
@@ -837,6 +847,64 @@ export default function StaffPage() {
     ),
     payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
   }))
+
+  const refreshPayrollBackupOptions = useCallback(async () => {
+    const options = []
+    try {
+      const summaries = await fetchStaffBackups('payroll')
+      for (const row of summaries) {
+        const ym = String(row?.backup_key || '').trim()
+        if (!ym) continue
+        const when = formatStaffBackupLabel(row.saved_at)
+        options.push({
+          value: ym,
+          label: `${formatMonthYmIt(ym)} — server${when ? ` (${when})` : ''}`,
+          savedAt: row.saved_at,
+          ym,
+          source: 'server',
+        })
+      }
+    } catch {
+      // server assente
+    }
+    const localList = listStaffBackups('payroll')
+    localList.forEach((entry, index) => {
+      const ym = String(entry?.payload?.payrollMonthYm || '').trim() || '—'
+      const when = formatStaffBackupLabel(entry.savedAt)
+      const hasServer = options.some((o) => o.value === ym && o.source === 'server')
+      const suffix = hasServer ? ' — copia browser' : ' — solo browser'
+      options.push({
+        value: `local:${index}`,
+        label: `${formatMonthYmIt(ym)}${suffix}${when ? ` (${when})` : ''}`,
+        savedAt: entry.savedAt,
+        ym,
+        source: 'local',
+      })
+    })
+    options.sort((a, b) => {
+      const ta = Date.parse(a.savedAt || '') || 0
+      const tb = Date.parse(b.savedAt || '') || 0
+      return tb - ta
+    })
+    setPayrollBackupOptions(options)
+    return options
+  }, [])
+
+  const payrollBackupSavedAt = useMemo(() => {
+    const hit = payrollBackupOptions.find((o) => o.value === payrollBackupKey)
+    return hit?.savedAt ?? null
+  }, [payrollBackupOptions, payrollBackupKey])
+
+  useEffect(() => {
+    void refreshPayrollBackupOptions()
+  }, [refreshPayrollBackupOptions])
+
+  useEffect(() => {
+    if (!payrollBackupOptions.length) return
+    if (payrollBackupOptions.some((o) => o.value === payrollBackupKey)) return
+    const serverHit = payrollBackupOptions.find((o) => o.value === payrollMonthYm)
+    setPayrollBackupKey(serverHit?.value ?? payrollBackupOptions[0].value)
+  }, [payrollBackupOptions, payrollBackupKey, payrollMonthYm])
 
   const currentPlanningMonthYm = useCallback(() => {
     return `${weekAnchor.getFullYear()}-${String(weekAnchor.getMonth() + 1).padStart(2, '0')}`
@@ -1923,17 +1991,35 @@ export default function StaffPage() {
     return null
   }
 
-  async function resolvePayrollBackup(monthYm = payrollMonthYm) {
-    if (monthYm) {
-      try {
-        const remote = await fetchStaffBackupDetail('payroll', monthYm)
-        if (remote?.payload) {
-          return { savedAt: remote.saved_at, payload: remote.payload }
-        }
-      } catch {
-        // fallback locale
+  async function resolvePayrollBackupByKey(key = payrollBackupKey) {
+    const k = String(key || '').trim()
+    if (!k) return null
+    if (k.startsWith('local:')) {
+      const idx = Number(k.slice(6))
+      const entry = getStaffBackupEntry('payroll', idx)
+      if (entry?.payload) {
+        return { savedAt: entry.savedAt, payload: entry.payload }
       }
+      return null
     }
+    try {
+      const remote = await fetchStaffBackupDetail('payroll', k)
+      if (remote?.payload) {
+        return { savedAt: remote.saved_at, payload: remote.payload }
+      }
+    } catch {
+      // fallback locale
+    }
+    const localHit = listStaffBackups('payroll').find((e) => e?.payload?.payrollMonthYm === k)
+    if (localHit?.payload) {
+      return { savedAt: localHit.savedAt, payload: localHit.payload }
+    }
+    return null
+  }
+
+  async function resolvePayrollBackup(monthYm = payrollMonthYm) {
+    const server = await resolvePayrollBackupByKey(monthYm)
+    if (server?.payload) return server
     return getLatestStaffBackup('payroll')
   }
 
@@ -2059,6 +2145,7 @@ export default function StaffPage() {
     const onServerDataRefresh = () => {
       void refreshSavedLocaleNames()
       void refreshBackupMeta()
+      void refreshPayrollBackupOptions()
     }
     window.addEventListener('atlas-refresh-data', onServerDataRefresh)
     window.addEventListener('atlas-offline-sync-complete', onServerDataRefresh)
@@ -2066,7 +2153,7 @@ export default function StaffPage() {
       window.removeEventListener('atlas-refresh-data', onServerDataRefresh)
       window.removeEventListener('atlas-offline-sync-complete', onServerDataRefresh)
     }
-  }, [refreshSavedLocaleNames, refreshBackupMeta])
+  }, [refreshSavedLocaleNames, refreshBackupMeta, refreshPayrollBackupOptions])
 
   async function handleSaveMembersByLocale() {
     const localeName = normalizeLocaleName(localeStaffName)
@@ -2986,11 +3073,15 @@ export default function StaffPage() {
       saveStaffBackup('payroll', payload)
       try {
         await upsertStaffBackup('payroll', payrollMonthYm, payload)
+        await refreshPayrollBackupOptions()
+        setPayrollBackupKey(payrollMonthYm)
         await refreshBackupMeta()
         setSuccess(
           `Backup ore e costi creato (mese ${payrollMonthYm}${lines.length ? `, ${lines.length} righe calcolate` : ''}, condiviso sul server).`,
         )
       } catch {
+        await refreshPayrollBackupOptions()
+        setPayrollBackupKey(`local:0`)
         await refreshBackupMeta()
         setSuccess(
           `Backup ore e costi salvato solo su questo browser (mese ${payrollMonthYm}, server non raggiungibile).`,
@@ -3004,16 +3095,18 @@ export default function StaffPage() {
   }
 
   async function handleRestorePayrollBackup() {
-    const latest = await resolvePayrollBackup(payrollMonthYm)
+    const latest = await resolvePayrollBackupByKey(payrollBackupKey)
     if (!latest?.payload) {
-      setError('Nessun backup ore e costi da ripristinare.')
+      setError('Nessun backup ore e costi da ripristinare per la selezione corrente.')
       return
     }
     const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
     const ym = latest.payload.payrollMonthYm || payrollMonthYm
+    const selectedLabel =
+      payrollBackupOptions.find((o) => o.value === payrollBackupKey)?.label || formatMonthYmIt(ym)
     if (
       !window.confirm(
-        `Ripristinare ore e costi del mese ${ym} dal backup del ${when}?\n\nLa tabella corrente verrà sostituita con i dati salvati.`,
+        `Ripristinare ore e costi dal backup selezionato?\n\n${selectedLabel}\nMese: ${ym}\nSalvato: ${when}\n\nLa tabella corrente verrà sostituita con i dati salvati.`,
       )
     ) {
       return
@@ -3038,6 +3131,7 @@ export default function StaffPage() {
           setRateDraft((prev) => ({ ...prev, ...latest.payload.rateDraft }))
         }
       }
+      await refreshPayrollBackupOptions()
       await refreshBackupMeta()
       setSuccess(`Ore e costi ripristinati dal backup (mese ${ym}).`)
     } catch (err) {
@@ -3045,6 +3139,10 @@ export default function StaffPage() {
     } finally {
       setBackupBusy(false)
     }
+  }
+
+  function handlePayrollBackupSelectChange(value) {
+    setPayrollBackupKey(String(value || ''))
   }
 
   async function loadDemoExample() {
@@ -3354,14 +3452,21 @@ export default function StaffPage() {
           Dopo nuovi turni in pianificazione usa <strong>Aggiorna ore</strong>.
           <strong> Calcola tutti</strong> o <strong>Calcola</strong> per riga.
           <strong> Salva</strong> / <strong>Ricarica in archivio</strong> memorizzano il mese nel menu Archivio (compatto, senza lista lunga).
+          Nel menu <strong>Backup</strong> scegli quale snapshot ripristinare (server o copia browser).
         </p>
         <StaffSectionBackupBar
           sectionTitle="ore e costi"
-          lastSavedAt={backupMeta.payroll}
+          lastSavedAt={payrollBackupSavedAt}
           onBackup={handleBackupPayroll}
           onRestore={handleRestorePayrollBackup}
           disabled={shiftBusy || demoLoading || reportLoading}
           busy={backupBusy}
+          slotLabel="Backup"
+          emptySlotMessage="Nessun backup ore e costi salvato"
+          slotOptions={payrollBackupOptions.map((o) => ({ value: o.value, label: o.label }))}
+          slotValue={payrollBackupKey}
+          onSlotChange={handlePayrollBackupSelectChange}
+          allowRestoreWithoutMeta={payrollBackupOptions.length > 0}
         />
         <StaffPayrollMonthPanel
           payrollMonthYm={payrollMonthYm}
