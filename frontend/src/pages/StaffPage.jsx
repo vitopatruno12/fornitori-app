@@ -67,6 +67,18 @@ const WEEK_LOAD_DAY_OPTIONS = [
   { offset: 6, label: 'Domenica' },
 ]
 
+/** Offset 0–6 (lun–dom) del giorno rispetto al lunedì della sua settimana. */
+function weekDayOffsetFromDate(d) {
+  const monday = startOfWeekMonday(d)
+  const picked = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diff = Math.round((picked.getTime() - monday.getTime()) / 86400000)
+  return Math.max(0, Math.min(6, diff))
+}
+
+function weekLoadDaysForSingleDate(d) {
+  return new Set([weekDayOffsetFromDate(d)])
+}
+
 function StaffCheckboxDropdown({
   label,
   hideLabel,
@@ -1190,6 +1202,16 @@ export default function StaffPage() {
   }, [planView, dayStr, weekAnchor, editingShiftId])
 
   useEffect(() => {
+    if (editingShiftId != null) return
+    if (planView !== 'day') return
+    const offset = weekDayOffsetFromDate(dayFocus)
+    setWeekLoadDays((prev) => {
+      if (prev.size === 1 && prev.has(offset)) return prev
+      return new Set([offset])
+    })
+  }, [planView, dayFocus, editingShiftId])
+
+  useEffect(() => {
     if (planView === 'period' && editingShiftId == null) {
       setFormDate(periodLoStr)
     }
@@ -1214,6 +1236,7 @@ export default function StaffPage() {
     setDayFocus(picked)
     setEditingShiftId(null)
     setFormDate(toYMD(picked))
+    setWeekLoadDays(weekLoadDaysForSingleDate(picked))
     setFormKind('shift')
     setFormStart('08:00')
     setFormEnd('16:00')
