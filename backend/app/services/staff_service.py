@@ -430,6 +430,18 @@ def upsert_locale_pack(
     return locale_pack_to_read(row)
 
 
+def delete_locale_pack(db: Session, locale_name: str) -> bool:
+    key = _normalize_locale_name(locale_name)
+    if not key:
+        raise ValueError("Nome locale non valido")
+    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+
+
 def _normalize_backup_section(section: str) -> str:
     sec = (section or "").strip().lower()
     if sec not in ("planning", "payroll"):

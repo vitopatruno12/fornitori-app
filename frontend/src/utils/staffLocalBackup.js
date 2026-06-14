@@ -152,6 +152,16 @@ export function getMembersLocaleBackupSavedAt(localeName) {
   return getMembersLocaleBackup(localeName)?.savedAt ?? null
 }
 
+export function deleteMembersLocaleBackup(localeName) {
+  const key = normalizeMembersLocaleKey(localeName)
+  if (!key) return false
+  const map = readMembersByLocaleMap()
+  if (!(key in map)) return false
+  delete map[key]
+  writeMembersByLocaleMap(map)
+  return true
+}
+
 /** Chiave server per backup pianificazione: mese + slot settimana (0–3). */
 export function planningBackupServerKey(monthYm, slotIndex) {
   const ym = String(monthYm || '').trim()

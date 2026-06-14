@@ -171,6 +171,17 @@ def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session 
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.delete("/locale-packs", status_code=status.HTTP_204_NO_CONTENT)
+def delete_locale_pack(name: str = Query(..., min_length=1, max_length=255), db: Session = Depends(get_db)):
+    try:
+        ok = staff_service.delete_locale_pack(db, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locale non trovato")
+    return None
+
+
 @router.get("/backups", response_model=List[staff_schema.StaffBackupSummary])
 def list_backups(section: str = Query(..., min_length=1, max_length=32), db: Session = Depends(get_db)):
     try:

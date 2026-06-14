@@ -80,6 +80,11 @@ export function upsertStaffLocalePack(localeName, members) {
   })
 }
 
+export function deleteStaffLocalePack(localeName) {
+  const q = new URLSearchParams({ name: String(localeName || '').trim() })
+  return apiFetch(`/staff/locale-packs?${q}`, { method: 'DELETE' })
+}
+
 export function fetchStaffBackups(section) {
   const q = new URLSearchParams({ section: String(section || '').trim() })
   return apiFetch(`/staff/backups?${q}`)

@@ -16,6 +16,7 @@ import {
   upsertStaffLocalePack,
   fetchStaffBackupDetail,
   upsertStaffBackup,
+  deleteStaffLocalePack,
 } from '../services/staffService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
@@ -33,12 +34,13 @@ import {
   getPlanningWeekBackup,
   getPlanningWeekBackupSavedAt,
   listMembersLocaleBackupNames,
+  deleteMembersLocaleBackup,
   saveMembersLocaleBackup,
   savePlanningWeekBackup,
   saveStaffBackup,
   planningBackupServerKey,
 } from '../utils/staffLocalBackup.js'
-import { readStaffLocaleStore, writeStaffLocaleStore } from '../utils/staffLocaleStore.js'
+import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { loadPrimaNotaLocales } from '../constants/primaNotaLocales.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
@@ -771,6 +773,7 @@ export default function StaffPage() {
   const [reportLoading, setReportLoading] = useState(false)
   const [localeStaffName, setLocaleStaffName] = useState('')
   const [savedLocaleNames, setSavedLocaleNames] = useState([])
+  const [userDeletableLocaleNames, setUserDeletableLocaleNames] = useState([])
 
   const [formMemberIds, setFormMemberIds] = useState(() => new Set())
   const formMemberSelectAllRef = React.useRef(null)
@@ -1819,6 +1822,7 @@ export default function StaffPage() {
     try {
       const store = await readStaffLocaleStore()
       const names = new Set(Object.keys(store))
+      const userNames = new Set(Object.keys(store))
       const meta = {}
       try {
         const summaries = await fetchStaffLocalePacks()
@@ -1826,20 +1830,31 @@ export default function StaffPage() {
           const n = normalizeLocaleName(row?.locale_name)
           if (n) {
             names.add(n)
+            userNames.add(n)
             if (row.saved_at) meta[n] = row.saved_at
           }
         }
       } catch {
         // offline o API non disponibile: restano i nomi locali
       }
+      for (const backupName of listMembersLocaleBackupNames()) {
+        const n = normalizeLocaleName(backupName)
+        if (n) {
+          names.add(n)
+          userNames.add(n)
+        }
+      }
       setLocalePackSavedAtByName(meta)
       for (const loc of loadPrimaNotaLocales()) {
         const label = normalizeLocaleName(loc?.label)
         if (label) names.add(label)
       }
-      setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
+      const sortIt = (a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })
+      setSavedLocaleNames([...names].sort(sortIt))
+      setUserDeletableLocaleNames([...userNames].sort(sortIt))
     } catch {
       setSavedLocaleNames([])
+      setUserDeletableLocaleNames([])
     }
   }, [])
 
@@ -1887,6 +1902,49 @@ export default function StaffPage() {
       )
     } catch {
       setError('Errore nel salvataggio locale dei dipendenti')
+    }
+  }
+
+  async function handleDeleteLocaleName() {
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Inserisci o seleziona il locale da eliminare.')
+      return
+    }
+    if (!userDeletableLocaleNames.includes(localeName)) {
+      setError(`"${localeName}" non può essere eliminato da qui (locale di sistema o non ancora salvato).`)
+      return
+    }
+    if (
+      !window.confirm(
+        `Eliminare il locale "${localeName}" dall'elenco?\n\nVengono rimossi il nome salvato e l'eventuale backup dipendenti associato. L'elenco dipendenti attuale in tabella non viene modificato.`,
+      )
+    ) {
+      return
+    }
+    setError('')
+    try {
+      try {
+        await deleteStaffLocalePack(localeName)
+      } catch {
+        // ok se presente solo in locale
+      }
+      await removeStaffLocaleFromStore(localeName)
+      deleteMembersLocaleBackup(localeName)
+      setLocalePackSavedAtByName((prev) => {
+        const next = { ...prev }
+        delete next[localeName]
+        return next
+      })
+      if (normalizeLocaleName(membersBackupLocale) === localeName) {
+        setMembersBackupLocale('')
+      }
+      setLocaleStaffName('')
+      await refreshSavedLocaleNames()
+      await refreshBackupMeta()
+      setSuccess(`Locale "${localeName}" eliminato.`)
+    } catch (err) {
+      setError(err?.message || 'Eliminazione locale non riuscita')
     }
   }
 
@@ -2864,9 +2922,6 @@ export default function StaffPage() {
                 </option>
               ))}
             </select>
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              Elenco condiviso sul server: visibile da qualsiasi PC dopo «Salva dipendenti».
-            </p>
           </div>
           <button
             type="button"
@@ -2885,6 +2940,21 @@ export default function StaffPage() {
             title="Carica la lista dipendenti salvata per questo locale e sostituisce l'elenco attuale"
           >
             Carica dipendenti
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            onClick={() => void handleDeleteLocaleName()}
+            disabled={
+              shiftBusy ||
+              loading ||
+              demoLoading ||
+              reportLoading ||
+              !userDeletableLocaleNames.includes(normalizeLocaleName(localeStaffName))
+            }
+            title="Rimuove il locale selezionato dall'elenco salvato (anche sul server)"
+          >
+            Elimina locale
           </button>
         </div>
         <div className="table-wrap">

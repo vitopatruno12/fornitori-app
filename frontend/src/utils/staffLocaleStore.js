@@ -63,6 +63,17 @@ export async function readStaffLocaleStore() {
   return merged
 }
 
+/** Rimuove un locale dall'archivio locale (browser / PWA). */
+export async function removeStaffLocaleFromStore(localeName) {
+  const name = String(localeName || '').trim()
+  if (!name) return false
+  const store = await readStaffLocaleStore()
+  if (!(name in store)) return false
+  delete store[name]
+  await writeStaffLocaleStore(store)
+  return true
+}
+
 /** Salva su localStorage e IndexedDB per compatibilità browser + app installata. */
 export async function writeStaffLocaleStore(store) {
   const data = parseStore(store)
