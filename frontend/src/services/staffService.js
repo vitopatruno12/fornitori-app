@@ -26,7 +26,7 @@ export function deleteAllStaffMembers() {
 
 export function fetchStaffShifts(from, to) {
   const q = new URLSearchParams({ from, to })
-  return apiFetch(`/staff/shifts?${q}`)
+  return apiFetch(`/staff/shifts?${q}`, SYNC_FETCH)
 }
 
 export function createStaffShift(data) {

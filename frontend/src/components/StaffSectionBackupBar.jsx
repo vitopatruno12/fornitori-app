@@ -17,10 +17,12 @@ export default function StaffSectionBackupBar({
   slotLabel = 'Settimana',
   emptySlotMessage = 'Nessun backup per questa selezione',
   onSlotChange,
+  allowRestoreWithoutMeta = false,
 }) {
   const when = formatBackupLabel(lastSavedAt)
   const hasSlots = Boolean(slotOptions?.length)
   const selectValue = slotValue == null || slotValue === '' ? '' : String(slotValue)
+  const restoreDisabled = disabled || busy || (!when && !allowRestoreWithoutMeta)
 
   return (
     <div
@@ -77,7 +79,7 @@ export default function StaffSectionBackupBar({
         <button
           type="button"
           className="btn btn-outline-primary btn-sm"
-          disabled={disabled || busy || !when}
+          disabled={restoreDisabled}
           onClick={() => void onRestore?.()}
           title={
             hasSlots

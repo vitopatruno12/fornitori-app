@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   payroll: 'atlas_staff_backup_payroll_v1',
 }
 
-const PLANNING_SLOTS_KEY = 'atlas_staff_backup_planning_slots_v1'
+const PLANNING_SLOTS_KEY = 'atlas_staff_backup_planning_slots_v2'
+const PLANNING_SLOTS_LEGACY_KEY = 'atlas_staff_backup_planning_slots_v1'
 const MEMBERS_BY_LOCALE_KEY = 'atlas_staff_backup_members_by_locale_v1'
 
 const MAX_SNAPSHOTS = 5
@@ -55,9 +56,48 @@ export function formatStaffBackupLabel(savedAt) {
   })
 }
 
-function readPlanningWeekSlots() {
+function monthYmFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return ''
+  const direct = String(payload.monthYm || '').trim()
+  if (direct) return direct
+  const from = String(payload.rangeFrom || '').trim()
+  if (from.length >= 7) return from.slice(0, 7)
+  return ''
+}
+
+function readPlanningBackupMap() {
   try {
     const raw = window.localStorage.getItem(PLANNING_SLOTS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const legacy = readPlanningWeekSlotsLegacy()
+  const map = {}
+  for (let i = 0; i < legacy.length; i += 1) {
+    const entry = legacy[i]
+    if (!entry?.payload) continue
+    const ym = monthYmFromPayload(entry.payload)
+    if (!ym) continue
+    map[planningBackupServerKey(ym, i)] = entry
+  }
+  if (Object.keys(map).length) writePlanningBackupMap(map)
+  return map
+}
+
+function writePlanningBackupMap(map) {
+  window.localStorage.setItem(PLANNING_SLOTS_KEY, JSON.stringify(map))
+}
+
+function readPlanningWeekSlotsLegacy() {
+  try {
+    const raw = window.localStorage.getItem(PLANNING_SLOTS_LEGACY_KEY)
     if (!raw) return Array(PLANNING_WEEK_SLOT_COUNT).fill(null)
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return Array(PLANNING_WEEK_SLOT_COUNT).fill(null)
@@ -71,33 +111,34 @@ function readPlanningWeekSlots() {
   }
 }
 
-function writePlanningWeekSlots(slots) {
-  window.localStorage.setItem(
-    PLANNING_SLOTS_KEY,
-    JSON.stringify(slots.slice(0, PLANNING_WEEK_SLOT_COUNT)),
-  )
-}
-
 /** @returns {{ savedAt: string, payload: object } | null} */
-export function getPlanningWeekBackup(slotIndex) {
+export function getPlanningWeekBackup(monthYm, slotIndex) {
+  const ym = String(monthYm || '').trim()
   const i = Number(slotIndex)
-  if (!Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
-  const slots = readPlanningWeekSlots()
-  return slots[i] ?? null
+  if (!ym || !Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
+  const map = readPlanningBackupMap()
+  const key = planningBackupServerKey(ym, i)
+  if (key && map[key]) return map[key]
+
+  const suffix = `:${i}`
+  const matches = Object.entries(map).filter(([k, v]) => k.endsWith(suffix) && v?.payload)
+  if (matches.length === 1) return matches[0][1]
+  return null
 }
 
-export function savePlanningWeekBackup(slotIndex, payload) {
+export function savePlanningWeekBackup(monthYm, slotIndex, payload) {
+  const ym = String(monthYm || monthYmFromPayload(payload) || '').trim()
   const i = Number(slotIndex)
-  if (!Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
-  const slots = readPlanningWeekSlots()
-  const entry = { savedAt: new Date().toISOString(), payload }
-  slots[i] = entry
-  writePlanningWeekSlots(slots)
+  if (!ym || !Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
+  const map = readPlanningBackupMap()
+  const entry = { savedAt: new Date().toISOString(), payload: { ...payload, monthYm: ym } }
+  map[planningBackupServerKey(ym, i)] = entry
+  writePlanningBackupMap(map)
   return entry
 }
 
-export function getPlanningWeekBackupSavedAt(slotIndex) {
-  return getPlanningWeekBackup(slotIndex)?.savedAt ?? null
+export function getPlanningWeekBackupSavedAt(monthYm, slotIndex) {
+  return getPlanningWeekBackup(monthYm, slotIndex)?.savedAt ?? null
 }
 
 function normalizeMembersLocaleKey(name) {

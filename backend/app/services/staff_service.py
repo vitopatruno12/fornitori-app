@@ -355,6 +355,33 @@ def _normalize_locale_name(name: str) -> str:
     return (name or "").strip()
 
 
+def _locale_name_key(name: str) -> str:
+    return _normalize_locale_name(name).casefold()
+
+
+def _members_fingerprint(members: List[staff_schema.StaffLocaleMemberSnapshot]) -> str:
+    keys: List[str] = []
+    for m in members:
+        label = (m.name or "").strip().casefold()
+        if not label:
+            parts = [(m.first_name or "").strip().casefold(), (m.last_name or "").strip().casefold()]
+            label = " ".join(p for p in parts if p).strip()
+        if label:
+            keys.append(label)
+    return "\n".join(sorted(keys))
+
+
+def _find_locale_pack_by_key(db: Session, locale_name: str) -> Optional[StaffLocalePack]:
+    key = _locale_name_key(locale_name)
+    if not key:
+        return None
+    rows = db.query(StaffLocalePack).all()
+    for row in rows:
+        if _locale_name_key(row.locale_name) == key:
+            return row
+    return None
+
+
 def _locale_members_to_json(members: List[staff_schema.StaffLocaleMemberSnapshot]) -> str:
     return json.dumps([m.model_dump(mode="json") for m in members], ensure_ascii=False)
 
@@ -403,10 +430,7 @@ def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
 
 
 def get_locale_pack(db: Session, locale_name: str) -> Optional[staff_schema.StaffLocalePackRead]:
-    key = _normalize_locale_name(locale_name)
-    if not key:
-        return None
-    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    row = _find_locale_pack_by_key(db, locale_name)
     if not row:
         return None
     return locale_pack_to_read(row)
@@ -418,10 +442,29 @@ def upsert_locale_pack(
     key = _normalize_locale_name(payload.locale_name)
     if not key:
         raise ValueError("Nome locale non valido")
-    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    if not payload.members:
+        raise ValueError("Aggiungi almeno un dipendente prima di salvare il locale.")
+
+    new_fp = _members_fingerprint(payload.members)
+    rows = db.query(StaffLocalePack).all()
+    target = None
+    for row in rows:
+        row_key = _locale_name_key(row.locale_name)
+        if row_key == _locale_name_key(key):
+            target = row
+            continue
+        if new_fp:
+            existing_fp = _members_fingerprint(_locale_members_from_json(row.members_json))
+            if existing_fp == new_fp:
+                raise ValueError(
+                    f'Questa lista dipendenti è già salvata come "{row.locale_name}". '
+                    f'Usa quel nome oppure modifica l\'elenco prima di associarlo a "{key}".'
+                )
+
     members_json = _locale_members_to_json(payload.members)
-    if row:
-        row.members_json = members_json
+    if target:
+        target.members_json = members_json
+        row = target
     else:
         row = StaffLocalePack(locale_name=key, members_json=members_json)
         db.add(row)
@@ -434,7 +477,7 @@ def delete_locale_pack(db: Session, locale_name: str) -> bool:
     key = _normalize_locale_name(locale_name)
     if not key:
         raise ValueError("Nome locale non valido")
-    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    row = _find_locale_pack_by_key(db, locale_name)
     if not row:
         return False
     db.delete(row)
