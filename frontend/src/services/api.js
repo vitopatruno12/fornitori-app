@@ -34,6 +34,7 @@ export async function apiFetch(path, options = {}) {
   }
 
   const response = await fetch(apiUrl(path), {
+    cache: options.cache,
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),

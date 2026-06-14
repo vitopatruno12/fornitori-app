@@ -41,6 +41,7 @@ import {
   planningBackupServerKey,
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
+import { isOnline } from '../offline/offlineStatus'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -751,6 +752,7 @@ export default function StaffPage() {
   const [periodTo, setPeriodTo] = useState(() => addDays(startOfWeekMonday(new Date()), 6))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [localeSyncWarning, setLocaleSyncWarning] = useState('')
   const [success, setSuccess] = useState('')
   const [newMemberFirstName, setNewMemberFirstName] = useState('')
   const [newMemberLastName, setNewMemberLastName] = useState('')
@@ -1792,25 +1794,27 @@ export default function StaffPage() {
   }
 
   async function resolveLocalePack(localeName) {
+    const key = normalizeLocaleName(localeName)
+    if (!key) return null
     try {
-      const remote = await fetchStaffLocalePack(localeName)
-      if (remote?.members?.length) {
+      const remote = await fetchStaffLocalePack(key)
+      if (remote && Array.isArray(remote.members)) {
         const pack = {
           saved_at: remote.saved_at || new Date().toISOString(),
           members: remote.members,
         }
         const store = await readStaffLocaleStore()
-        store[localeName] = pack
+        store[key] = pack
         await writeStaffLocaleStore(store)
-        return pack
+        if (remote.members.length > 0) return pack
       }
     } catch {
       // server assente o locale non trovato
     }
     const store = await readStaffLocaleStore()
-    const local = store[localeName]
+    const local = store[key]
     if (local?.members?.length) return local
-    const backup = getMembersLocaleBackup(localeName)
+    const backup = getMembersLocaleBackup(key)
     if (backup?.payload?.members?.length) {
       return { saved_at: backup.savedAt, members: backup.payload.members }
     }
@@ -1819,6 +1823,7 @@ export default function StaffPage() {
 
   const refreshSavedLocaleNames = useCallback(async () => {
     try {
+      setLocaleSyncWarning('')
       const store = await readStaffLocaleStore()
       const names = new Set()
       const userNames = new Set()
@@ -1826,16 +1831,36 @@ export default function StaffPage() {
       const meta = {}
       try {
         const summaries = await fetchStaffLocalePacks()
-        for (const row of Array.isArray(summaries) ? summaries : []) {
-          const n = normalizeLocaleName(row?.locale_name)
-          if (!n) continue
-          serverNames.add(n)
-          userNames.add(n)
-          names.add(n)
-          if (row.saved_at) meta[n] = row.saved_at
+        await Promise.all(
+          summaries.map(async (row) => {
+            const n = normalizeLocaleName(row?.locale_name)
+            if (!n) return
+            serverNames.add(n)
+            userNames.add(n)
+            names.add(n)
+            if (row.saved_at) meta[n] = row.saved_at
+            try {
+              const remote = await fetchStaffLocalePack(n)
+              if (remote && Array.isArray(remote.members)) {
+                store[n] = {
+                  saved_at: remote.saved_at || row.saved_at || new Date().toISOString(),
+                  members: remote.members,
+                }
+                if (remote.saved_at) meta[n] = remote.saved_at
+              }
+            } catch {
+              // dettaglio locale non disponibile: resta il nome in elenco
+            }
+          }),
+        )
+        await writeStaffLocaleStore(store)
+      } catch (err) {
+        if (isOnline()) {
+          setLocaleSyncWarning(
+            err?.message ||
+              'Elenco locali e backup non sincronizzati dal server. Verifica connessione e deploy con RESTART_API=1.',
+          )
         }
-      } catch {
-        // offline o API non disponibile: restano i nomi locali
       }
       for (const [rawKey, pack] of Object.entries(store)) {
         const n = normalizeLocaleName(rawKey)
@@ -1877,6 +1902,19 @@ export default function StaffPage() {
       window.removeEventListener('focus', onPageShow)
     }
   }, [refreshSavedLocaleNames])
+
+  useEffect(() => {
+    const onServerDataRefresh = () => {
+      void refreshSavedLocaleNames()
+      void refreshBackupMeta()
+    }
+    window.addEventListener('atlas-refresh-data', onServerDataRefresh)
+    window.addEventListener('atlas-offline-sync-complete', onServerDataRefresh)
+    return () => {
+      window.removeEventListener('atlas-refresh-data', onServerDataRefresh)
+      window.removeEventListener('atlas-offline-sync-complete', onServerDataRefresh)
+    }
+  }, [refreshSavedLocaleNames, refreshBackupMeta])
 
   async function handleSaveMembersByLocale() {
     const localeName = normalizeLocaleName(localeStaffName)
@@ -2438,15 +2476,18 @@ export default function StaffPage() {
         ...prev,
         [localeName]: saved?.saved_at || new Date().toISOString(),
       }))
+      await refreshSavedLocaleNames()
       await refreshBackupMeta(planningBackupSlot, localeName)
       setSuccess(
         `Backup dipendenti creato per "${localeName}" (${members.length} voci, condiviso sul server).`,
       )
     } catch (err) {
-      setSuccess(
-        `Backup dipendenti salvato solo su questo browser per "${localeName}" (server non raggiungibile).`,
+      setError(
+        err?.message ||
+          `Backup salvato solo su questo browser per "${localeName}" (server non raggiungibile).`,
       )
       setMembersBackupLocale(localeName)
+      await refreshSavedLocaleNames()
       await refreshBackupMeta(planningBackupSlot, localeName)
     } finally {
       setBackupBusy(false)
@@ -2822,6 +2863,7 @@ export default function StaffPage() {
       </header>
 
       {error && <div className="alert alert-danger">{error}</div>}
+      {localeSyncWarning && <div className="alert alert-warning">{localeSyncWarning}</div>}
       {success && <div className="alert alert-info">{success}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

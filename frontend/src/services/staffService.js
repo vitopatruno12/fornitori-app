@@ -1,4 +1,7 @@
-import { apiFetch } from './api'
+import { apiFetch, asArray } from './api'
+
+/** Fetch senza cache browser: dati condivisi tra PC. */
+const SYNC_FETCH = { cache: 'no-store' }
 
 export function fetchStaffMembers() {
   return apiFetch('/staff/members')
@@ -64,30 +67,38 @@ export function deleteStaffPayrollMonth(id) {
   return apiFetch(`/staff/payroll-months/${id}`, { method: 'DELETE' })
 }
 
-export function fetchStaffLocalePacks() {
-  return apiFetch('/staff/locale-packs')
+export async function fetchStaffLocalePacks() {
+  const data = await apiFetch('/staff/locale-packs', SYNC_FETCH)
+  return asArray(data, 'staff/locale-packs')
 }
 
 export function fetchStaffLocalePack(localeName) {
   const q = new URLSearchParams({ name: String(localeName || '').trim() })
-  return apiFetch(`/staff/locale-packs/detail?${q}`)
+  return apiFetch(`/staff/locale-packs/detail?${q}`, SYNC_FETCH)
 }
 
 export function upsertStaffLocalePack(localeName, members) {
   return apiFetch('/staff/locale-packs', {
+    ...SYNC_FETCH,
     method: 'PUT',
     body: JSON.stringify({ locale_name: String(localeName || '').trim(), members }),
+  }).then((result) => {
+    if (result?.__offline) {
+      throw new Error('Sei offline: i dati verranno inviati al server quando torna la connessione.')
+    }
+    return result
   })
 }
 
 export function deleteStaffLocalePack(localeName) {
   const q = new URLSearchParams({ name: String(localeName || '').trim() })
-  return apiFetch(`/staff/locale-packs?${q}`, { method: 'DELETE' })
+  return apiFetch(`/staff/locale-packs?${q}`, { ...SYNC_FETCH, method: 'DELETE' })
 }
 
-export function fetchStaffBackups(section) {
+export async function fetchStaffBackups(section) {
   const q = new URLSearchParams({ section: String(section || '').trim() })
-  return apiFetch(`/staff/backups?${q}`)
+  const data = await apiFetch(`/staff/backups?${q}`, SYNC_FETCH)
+  return asArray(data, 'staff/backups')
 }
 
 export function fetchStaffBackupDetail(section, key) {
@@ -95,16 +106,22 @@ export function fetchStaffBackupDetail(section, key) {
     section: String(section || '').trim(),
     key: String(key || '').trim(),
   })
-  return apiFetch(`/staff/backups/detail?${q}`)
+  return apiFetch(`/staff/backups/detail?${q}`, SYNC_FETCH)
 }
 
 export function upsertStaffBackup(section, key, payload) {
   return apiFetch('/staff/backups', {
+    ...SYNC_FETCH,
     method: 'PUT',
     body: JSON.stringify({
       section: String(section || '').trim(),
       backup_key: String(key || '').trim(),
       payload,
     }),
+  }).then((result) => {
+    if (result?.__offline) {
+      throw new Error('Sei offline: il backup verrà inviato al server quando torna la connessione.')
+    }
+    return result
   })
 }
