@@ -5,6 +5,8 @@ from typing import List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..models.staff_backup import StaffBackup
+from ..models.staff_locale_pack import StaffLocalePack
 from ..models.staff_member import StaffMember
 from ..models.staff_payroll_month import StaffPayrollMonth
 from ..models.staff_shift_entry import StaffShiftEntry
@@ -347,3 +349,165 @@ def delete_payroll_month(db: Session, month_id: int) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+def _normalize_locale_name(name: str) -> str:
+    return (name or "").strip()
+
+
+def _locale_members_to_json(members: List[staff_schema.StaffLocaleMemberSnapshot]) -> str:
+    return json.dumps([m.model_dump(mode="json") for m in members], ensure_ascii=False)
+
+
+def _locale_members_from_json(raw: str) -> List[staff_schema.StaffLocaleMemberSnapshot]:
+    try:
+        data = json.loads(raw or "[]")
+        if not isinstance(data, list):
+            return []
+        out: List[staff_schema.StaffLocaleMemberSnapshot] = []
+        for item in data:
+            if isinstance(item, dict) and item.get("name"):
+                out.append(staff_schema.StaffLocaleMemberSnapshot.model_validate(item))
+        return out
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
+def locale_pack_to_summary(row: StaffLocalePack) -> staff_schema.StaffLocalePackSummary:
+    members = _locale_members_from_json(row.members_json)
+    saved_at = row.updated_at.isoformat() if row.updated_at else None
+    return staff_schema.StaffLocalePackSummary(
+        locale_name=row.locale_name,
+        saved_at=saved_at,
+        member_count=len(members),
+    )
+
+
+def locale_pack_to_read(row: StaffLocalePack) -> staff_schema.StaffLocalePackRead:
+    members = _locale_members_from_json(row.members_json)
+    saved_at = row.updated_at.isoformat() if row.updated_at else None
+    return staff_schema.StaffLocalePackRead(
+        locale_name=row.locale_name,
+        saved_at=saved_at,
+        members=members,
+    )
+
+
+def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
+    rows = (
+        db.query(StaffLocalePack)
+        .order_by(StaffLocalePack.locale_name.asc())
+        .all()
+    )
+    return [locale_pack_to_summary(r) for r in rows]
+
+
+def get_locale_pack(db: Session, locale_name: str) -> Optional[staff_schema.StaffLocalePackRead]:
+    key = _normalize_locale_name(locale_name)
+    if not key:
+        return None
+    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    if not row:
+        return None
+    return locale_pack_to_read(row)
+
+
+def upsert_locale_pack(
+    db: Session, payload: staff_schema.StaffLocalePackUpsert
+) -> staff_schema.StaffLocalePackRead:
+    key = _normalize_locale_name(payload.locale_name)
+    if not key:
+        raise ValueError("Nome locale non valido")
+    row = db.query(StaffLocalePack).filter(StaffLocalePack.locale_name == key).first()
+    members_json = _locale_members_to_json(payload.members)
+    if row:
+        row.members_json = members_json
+    else:
+        row = StaffLocalePack(locale_name=key, members_json=members_json)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return locale_pack_to_read(row)
+
+
+def _normalize_backup_section(section: str) -> str:
+    sec = (section or "").strip().lower()
+    if sec not in ("planning", "payroll"):
+        raise ValueError("Sezione backup non valida")
+    return sec
+
+
+def _backup_key(section: str, backup_key: str) -> tuple[str, str]:
+    sec = _normalize_backup_section(section)
+    key = (backup_key or "").strip()
+    if not key:
+        raise ValueError("Chiave backup non valida")
+    return sec, key
+
+
+def backup_to_read(row: StaffBackup) -> staff_schema.StaffBackupRead:
+    try:
+        payload = json.loads(row.payload_json or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except json.JSONDecodeError:
+        payload = {}
+    saved_at = row.updated_at.isoformat() if row.updated_at else None
+    return staff_schema.StaffBackupRead(
+        section=row.section,
+        backup_key=row.backup_key,
+        saved_at=saved_at,
+        payload=payload,
+    )
+
+
+def list_backups(db: Session, section: str) -> List[staff_schema.StaffBackupSummary]:
+    sec = _normalize_backup_section(section)
+    rows = (
+        db.query(StaffBackup)
+        .filter(StaffBackup.section == sec)
+        .order_by(StaffBackup.backup_key.asc())
+        .all()
+    )
+    out: List[staff_schema.StaffBackupSummary] = []
+    for row in rows:
+        saved_at = row.updated_at.isoformat() if row.updated_at else None
+        out.append(
+            staff_schema.StaffBackupSummary(
+                section=row.section,
+                backup_key=row.backup_key,
+                saved_at=saved_at,
+            )
+        )
+    return out
+
+
+def get_backup(db: Session, section: str, backup_key: str) -> Optional[staff_schema.StaffBackupRead]:
+    sec, key = _backup_key(section, backup_key)
+    row = (
+        db.query(StaffBackup)
+        .filter(StaffBackup.section == sec, StaffBackup.backup_key == key)
+        .first()
+    )
+    if not row:
+        return None
+    return backup_to_read(row)
+
+
+def upsert_backup(db: Session, payload: staff_schema.StaffBackupUpsert) -> staff_schema.StaffBackupRead:
+    sec, key = _backup_key(payload.section, payload.backup_key)
+    body = payload.payload if isinstance(payload.payload, dict) else {}
+    row = (
+        db.query(StaffBackup)
+        .filter(StaffBackup.section == sec, StaffBackup.backup_key == key)
+        .first()
+    )
+    payload_json = json.dumps(body, ensure_ascii=False)
+    if row:
+        row.payload_json = payload_json
+    else:
+        row = StaffBackup(section=sec, backup_key=key, payload_json=payload_json)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return backup_to_read(row)

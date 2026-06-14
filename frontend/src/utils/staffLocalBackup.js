@@ -151,3 +151,11 @@ export function saveMembersLocaleBackup(localeName, payload) {
 export function getMembersLocaleBackupSavedAt(localeName) {
   return getMembersLocaleBackup(localeName)?.savedAt ?? null
 }
+
+/** Chiave server per backup pianificazione: mese + slot settimana (0–3). */
+export function planningBackupServerKey(monthYm, slotIndex) {
+  const ym = String(monthYm || '').trim()
+  const slot = Number(slotIndex)
+  if (!ym || !Number.isFinite(slot)) return ''
+  return `${ym}:${slot}`
+}

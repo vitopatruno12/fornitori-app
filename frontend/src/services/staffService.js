@@ -63,3 +63,43 @@ export function updateStaffPayrollMonth(id, data) {
 export function deleteStaffPayrollMonth(id) {
   return apiFetch(`/staff/payroll-months/${id}`, { method: 'DELETE' })
 }
+
+export function fetchStaffLocalePacks() {
+  return apiFetch('/staff/locale-packs')
+}
+
+export function fetchStaffLocalePack(localeName) {
+  const q = new URLSearchParams({ name: String(localeName || '').trim() })
+  return apiFetch(`/staff/locale-packs/detail?${q}`)
+}
+
+export function upsertStaffLocalePack(localeName, members) {
+  return apiFetch('/staff/locale-packs', {
+    method: 'PUT',
+    body: JSON.stringify({ locale_name: String(localeName || '').trim(), members }),
+  })
+}
+
+export function fetchStaffBackups(section) {
+  const q = new URLSearchParams({ section: String(section || '').trim() })
+  return apiFetch(`/staff/backups?${q}`)
+}
+
+export function fetchStaffBackupDetail(section, key) {
+  const q = new URLSearchParams({
+    section: String(section || '').trim(),
+    key: String(key || '').trim(),
+  })
+  return apiFetch(`/staff/backups/detail?${q}`)
+}
+
+export function upsertStaffBackup(section, key, payload) {
+  return apiFetch('/staff/backups', {
+    method: 'PUT',
+    body: JSON.stringify({
+      section: String(section || '').trim(),
+      backup_key: String(key || '').trim(),
+      payload,
+    }),
+  })
+}

@@ -2,7 +2,7 @@ import React from 'react'
 import { formatStaffBackupLabel } from '../utils/staffLocalBackup'
 
 /**
- * Backup locale (browser) per una sezione Personale: crea snapshot e ripristino.
+ * Backup condiviso (server) per una sezione Personale: crea snapshot e ripristino.
  */
 export default function StaffSectionBackupBar({
   sectionTitle,
@@ -70,7 +70,7 @@ export default function StaffSectionBackupBar({
           className="btn btn-outline-secondary btn-sm"
           disabled={disabled || busy}
           onClick={() => void onBackup?.()}
-          title={`Salva uno snapshot locale di ${sectionTitle} (solo su questo browser)`}
+          title={`Salva uno snapshot di ${sectionTitle} sul server (recuperabile da altri PC e browser)`}
         >
           {busy ? '…' : 'Crea backup'}
         </button>

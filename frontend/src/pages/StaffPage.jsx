@@ -11,6 +11,11 @@ import {
   deleteStaffShift,
   deleteStaffShiftsBulk,
   fetchStaffPayrollMonths,
+  fetchStaffLocalePacks,
+  fetchStaffLocalePack,
+  upsertStaffLocalePack,
+  fetchStaffBackupDetail,
+  upsertStaffBackup,
 } from '../services/staffService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
@@ -23,16 +28,18 @@ import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/s
 import {
   formatStaffBackupLabel,
   getLatestStaffBackup,
-  getMembersLocaleBackup,
   getMembersLocaleBackupSavedAt,
+  getMembersLocaleBackup,
   getPlanningWeekBackup,
   getPlanningWeekBackupSavedAt,
   listMembersLocaleBackupNames,
   saveMembersLocaleBackup,
   savePlanningWeekBackup,
   saveStaffBackup,
+  planningBackupServerKey,
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore } from '../utils/staffLocaleStore.js'
+import { loadPrimaNotaLocales } from '../constants/primaNotaLocales.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -797,22 +804,65 @@ export default function StaffPage() {
   const [backupBusy, setBackupBusy] = useState(false)
   const [planningBackupSlot, setPlanningBackupSlot] = useState(0)
   const [membersBackupLocale, setMembersBackupLocale] = useState('')
+  const [localePackSavedAtByName, setLocalePackSavedAtByName] = useState({})
   const [backupMeta, setBackupMeta] = useState(() => ({
     members: null,
     planning: getPlanningWeekBackupSavedAt(0),
     payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
   }))
 
-  const bumpBackupMeta = useCallback(
-    (planningSlot = planningBackupSlot, membersLocale = membersBackupLocale) => {
+  const currentPlanningMonthYm = useCallback(() => {
+    return `${weekAnchor.getFullYear()}-${String(weekAnchor.getMonth() + 1).padStart(2, '0')}`
+  }, [weekAnchor])
+
+  const refreshBackupMeta = useCallback(
+    async (
+      planningSlot = planningBackupSlot,
+      membersLocale = membersBackupLocale,
+      payrollYm = payrollMonthYm,
+    ) => {
       const loc = normalizeLocaleName(membersLocale)
+      let membersAt = null
+      if (loc) {
+        try {
+          const pack = await fetchStaffLocalePack(loc)
+          membersAt = pack?.saved_at || null
+        } catch {
+          membersAt = localePackSavedAtByName[loc] || getMembersLocaleBackupSavedAt(loc)
+        }
+      }
+      const planKey = planningBackupServerKey(currentPlanningMonthYm(), planningSlot)
+      let planningAt = null
+      if (planKey) {
+        try {
+          const plan = await fetchStaffBackupDetail('planning', planKey)
+          planningAt = plan?.saved_at || null
+        } catch {
+          planningAt = getPlanningWeekBackupSavedAt(planningSlot)
+        }
+      }
+      let payrollAt = null
+      if (payrollYm) {
+        try {
+          const pay = await fetchStaffBackupDetail('payroll', payrollYm)
+          payrollAt = pay?.saved_at || null
+        } catch {
+          payrollAt = getLatestStaffBackup('payroll')?.savedAt ?? null
+        }
+      }
       setBackupMeta({
-        members: loc ? getMembersLocaleBackupSavedAt(loc) : null,
-        planning: getPlanningWeekBackupSavedAt(planningSlot),
-        payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
+        members: membersAt,
+        planning: planningAt,
+        payroll: payrollAt,
       })
     },
-    [planningBackupSlot, membersBackupLocale],
+    [
+      planningBackupSlot,
+      membersBackupLocale,
+      payrollMonthYm,
+      localePackSavedAtByName,
+      currentPlanningMonthYm,
+    ],
   )
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
@@ -836,14 +886,14 @@ export default function StaffPage() {
       return [{ value: '', label: 'Inserisci un locale sotto' }]
     }
     return sorted.map((name) => {
-      const savedAt = getMembersLocaleBackupSavedAt(name)
+      const savedAt = localePackSavedAtByName[name] || getMembersLocaleBackupSavedAt(name)
       const when = savedAt ? formatStaffBackupLabel(savedAt) : null
       return {
         value: name,
         label: when ? `${name} (backup ${when})` : name,
       }
     })
-  }, [savedLocaleNames, localeStaffName, backupMeta.members])
+  }, [savedLocaleNames, localeStaffName, localePackSavedAtByName, backupMeta.members])
   const weekLoadTargetAnchor = useMemo(
     () => (planView === 'week' ? weekAnchor : startOfWeekMonday(formDate ? parseYMD(formDate) : new Date())),
     [planView, weekAnchor, formDate],
@@ -876,6 +926,10 @@ export default function StaffPage() {
       cancelled = true
     }
   }, [payrollFromStr, payrollToStr])
+
+  useEffect(() => {
+    void refreshBackupMeta()
+  }, [refreshBackupMeta])
 
   const oreTurnoByMemberId = useMemo(() => {
     const map = new Map()
@@ -1166,10 +1220,6 @@ export default function StaffPage() {
     const n = normalizeLocaleName(localeStaffName)
     if (!n) return
     setMembersBackupLocale(n)
-    setBackupMeta((m) => ({
-      ...m,
-      members: getMembersLocaleBackupSavedAt(n),
-    }))
   }, [localeStaffName])
 
   useEffect(() => {
@@ -1177,19 +1227,11 @@ export default function StaffPage() {
     const first = membersBackupLocaleOptions.find((o) => o.value)?.value
     if (!first) return
     setMembersBackupLocale(String(first))
-    setBackupMeta((m) => ({
-      ...m,
-      members: getMembersLocaleBackupSavedAt(String(first)),
-    }))
   }, [membersBackupLocale, membersBackupLocaleOptions])
 
   useEffect(() => {
     const idx = findPlanningBackupSlotForAnchor(weekAnchor, planningMonthWeekSlots(weekAnchor))
     setPlanningBackupSlot(idx)
-    setBackupMeta((m) => ({
-      ...m,
-      planning: getPlanningWeekBackupSavedAt(idx),
-    }))
   }, [weekAnchor])
 
   const markPlanningStale = useCallback(() => {
@@ -1703,11 +1745,99 @@ export default function StaffPage() {
     return String(value || '').trim()
   }
 
+  function memberSnapshotFromRow(m) {
+    return {
+      name: m.name || '',
+      first_name: m.first_name || null,
+      last_name: m.last_name || null,
+      email: m.email || null,
+      phone: m.phone || null,
+      city: m.city || null,
+      birth_date: m.birth_date || null,
+      sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
+      hourly_rate: m.hourly_rate != null ? Number(m.hourly_rate) : null,
+      is_active: Boolean(m.is_active),
+    }
+  }
+
+  async function resolvePlanningBackup(slotIndex, monthYm = currentPlanningMonthYm()) {
+    const key = planningBackupServerKey(monthYm, slotIndex)
+    if (key) {
+      try {
+        const remote = await fetchStaffBackupDetail('planning', key)
+        if (remote?.payload?.shifts?.length) {
+          return { savedAt: remote.saved_at, payload: remote.payload }
+        }
+      } catch {
+        // fallback locale
+      }
+    }
+    return getPlanningWeekBackup(slotIndex)
+  }
+
+  async function resolvePayrollBackup(monthYm = payrollMonthYm) {
+    if (monthYm) {
+      try {
+        const remote = await fetchStaffBackupDetail('payroll', monthYm)
+        if (remote?.payload) {
+          return { savedAt: remote.saved_at, payload: remote.payload }
+        }
+      } catch {
+        // fallback locale
+      }
+    }
+    return getLatestStaffBackup('payroll')
+  }
+
+  async function resolveLocalePack(localeName) {
+    try {
+      const remote = await fetchStaffLocalePack(localeName)
+      if (remote?.members?.length) {
+        const pack = {
+          saved_at: remote.saved_at || new Date().toISOString(),
+          members: remote.members,
+        }
+        const store = await readStaffLocaleStore()
+        store[localeName] = pack
+        await writeStaffLocaleStore(store)
+        return pack
+      }
+    } catch {
+      // server assente o locale non trovato
+    }
+    const store = await readStaffLocaleStore()
+    const local = store[localeName]
+    if (local?.members?.length) return local
+    const backup = getMembersLocaleBackup(localeName)
+    if (backup?.payload?.members?.length) {
+      return { saved_at: backup.savedAt, members: backup.payload.members }
+    }
+    return null
+  }
+
   const refreshSavedLocaleNames = useCallback(async () => {
     try {
       const store = await readStaffLocaleStore()
-      const names = Object.keys(store).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
-      setSavedLocaleNames(names)
+      const names = new Set(Object.keys(store))
+      const meta = {}
+      try {
+        const summaries = await fetchStaffLocalePacks()
+        for (const row of Array.isArray(summaries) ? summaries : []) {
+          const n = normalizeLocaleName(row?.locale_name)
+          if (n) {
+            names.add(n)
+            if (row.saved_at) meta[n] = row.saved_at
+          }
+        }
+      } catch {
+        // offline o API non disponibile: restano i nomi locali
+      }
+      setLocalePackSavedAtByName(meta)
+      for (const loc of loadPrimaNotaLocales()) {
+        const label = normalizeLocaleName(loc?.label)
+        if (label) names.add(label)
+      }
+      setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
     } catch {
       setSavedLocaleNames([])
     }
@@ -1737,25 +1867,24 @@ export default function StaffPage() {
     }
     try {
       setError('')
-      const snapshot = members.map((m) => ({
-        name: m.name || '',
-        first_name: m.first_name || null,
-        last_name: m.last_name || null,
-        email: m.email || null,
-        phone: m.phone || null,
-        city: m.city || null,
-        birth_date: m.birth_date || null,
-        sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
-        is_active: Boolean(m.is_active),
-      }))
+      const snapshot = members.map(memberSnapshotFromRow)
       const store = await readStaffLocaleStore()
       store[localeName] = {
         saved_at: new Date().toISOString(),
         members: snapshot,
       }
       await writeStaffLocaleStore(store)
+      try {
+        await upsertStaffLocalePack(localeName, snapshot)
+      } catch {
+        setError('Salvato solo su questo browser: il server non ha ricevuto il locale (riprova con connessione attiva).')
+        await refreshSavedLocaleNames()
+        return
+      }
       await refreshSavedLocaleNames()
-      setSuccess(`Lista dipendenti salvata per locale "${localeName}" (${snapshot.length} elementi)`)
+      setSuccess(
+        `Lista dipendenti salvata per "${localeName}" (${snapshot.length} elementi, visibile su tutti i PC collegati al server).`,
+      )
     } catch {
       setError('Errore nel salvataggio locale dei dipendenti')
     }
@@ -1767,10 +1896,9 @@ export default function StaffPage() {
       setError('Inserisci il nome del locale prima di caricare i dipendenti')
       return
     }
-    const store = await readStaffLocaleStore()
-    const pack = store[localeName]
-    if (!pack || !Array.isArray(pack.members)) {
-      setError(`Nessuna lista salvata trovata per il locale "${localeName}"`)
+    const pack = await resolveLocalePack(localeName)
+    if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
+      setError(`Nessuna lista salvata trovata per il locale "${localeName}" (né su questo browser né sul server).`)
       return
     }
     if (!window.confirm(`Caricare i dipendenti salvati per "${localeName}"?\n\nL'elenco attuale verrà sostituito.`)) return
@@ -2227,21 +2355,6 @@ export default function StaffPage() {
     }
   }
 
-  function memberToBackupRow(m) {
-    return {
-      name: m.name || '',
-      first_name: m.first_name || null,
-      last_name: m.last_name || null,
-      email: m.email || null,
-      phone: m.phone || null,
-      city: m.city || null,
-      birth_date: m.birth_date || null,
-      sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
-      hourly_rate: m.hourly_rate != null ? Number(m.hourly_rate) : null,
-      is_active: m.is_active !== false,
-    }
-  }
-
   async function handleBackupMembers() {
     if (members.length === 0) {
       setError('Nessun dipendente da salvare nel backup.')
@@ -2252,12 +2365,30 @@ export default function StaffPage() {
       setError('Seleziona o inserisci il nome locale per il backup dipendenti.')
       return
     }
-    saveMembersLocaleBackup(localeName, { members: members.map(memberToBackupRow) })
-    setMembersBackupLocale(localeName)
-    bumpBackupMeta(planningBackupSlot, localeName)
-    setSuccess(
-      `Backup dipendenti creato per "${localeName}" (${members.length} voci, solo su questo browser).`,
-    )
+    setBackupBusy(true)
+    setError('')
+    try {
+      const snapshot = members.map(memberSnapshotFromRow)
+      saveMembersLocaleBackup(localeName, { members: snapshot })
+      const saved = await upsertStaffLocalePack(localeName, snapshot)
+      setMembersBackupLocale(localeName)
+      setLocalePackSavedAtByName((prev) => ({
+        ...prev,
+        [localeName]: saved?.saved_at || new Date().toISOString(),
+      }))
+      await refreshBackupMeta(planningBackupSlot, localeName)
+      setSuccess(
+        `Backup dipendenti creato per "${localeName}" (${members.length} voci, condiviso sul server).`,
+      )
+    } catch (err) {
+      setSuccess(
+        `Backup dipendenti salvato solo su questo browser per "${localeName}" (server non raggiungibile).`,
+      )
+      setMembersBackupLocale(localeName)
+      await refreshBackupMeta(planningBackupSlot, localeName)
+    } finally {
+      setBackupBusy(false)
+    }
   }
 
   async function handleRestoreMembersBackup() {
@@ -2266,13 +2397,13 @@ export default function StaffPage() {
       setError('Seleziona il locale di cui ripristinare il backup dipendenti.')
       return
     }
-    const latest = getMembersLocaleBackup(localeName)
-    const rows = latest?.payload?.members
+    const pack = await resolveLocalePack(localeName)
+    const rows = pack?.members
     if (!rows?.length) {
       setError(`Nessun backup dipendenti per il locale "${localeName}".`)
       return
     }
-    const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
+    const when = formatStaffBackupLabel(pack.saved_at) || 'backup'
     if (
       !window.confirm(
         `Ripristinare ${rows.length} dipendenti per "${localeName}" dal backup del ${when}?\n\nVengono aggiunti i nomi mancanti; quelli già in elenco non vengono duplicati.`,
@@ -2307,7 +2438,7 @@ export default function StaffPage() {
         added += 1
       }
       await refreshMembers()
-      bumpBackupMeta(planningBackupSlot, localeName)
+      await refreshBackupMeta(planningBackupSlot, localeName)
       setSuccess(
         added > 0
           ? `Ripristinati ${added} dipendenti dal backup di "${localeName}".`
@@ -2326,10 +2457,7 @@ export default function StaffPage() {
     if (!name) return
     setMembersBackupLocale(name)
     setLocaleStaffName(name)
-    setBackupMeta((m) => ({
-      ...m,
-      members: getMembersLocaleBackupSavedAt(name),
-    }))
+    void refreshBackupMeta(planningBackupSlot, name)
   }
 
   function handlePlanningBackupSlotChange(slotIndex) {
@@ -2339,10 +2467,7 @@ export default function StaffPage() {
     const w = weeks[idx]
     if (!w) return
     setPlanningBackupSlot(idx)
-    setBackupMeta((m) => ({
-      ...m,
-      planning: getPlanningWeekBackupSavedAt(idx),
-    }))
+    void refreshBackupMeta(idx, membersBackupLocale)
     markPlanningStale()
     setPlanView('week')
     setWeekAnchor(new Date(w.anchor.getFullYear(), w.anchor.getMonth(), w.anchor.getDate()))
@@ -2365,13 +2490,14 @@ export default function StaffPage() {
       }
       const nameById = Object.fromEntries(members.map((m) => [m.id, m.name]))
       const slotLabel = PLANNING_BACKUP_SLOT_LABELS[planningBackupSlot] || 'settimana'
-      savePlanningWeekBackup(planningBackupSlot, {
+      const monthYm = currentPlanningMonthYm()
+      const payload = {
         rangeFrom: rangeFromStr,
         rangeTo: rangeToStr,
         planView,
         weekSlot: planningBackupSlot,
         weekSlotLabel: slotLabel,
-        monthYm: `${weekAnchor.getFullYear()}-${String(weekAnchor.getMonth() + 1).padStart(2, '0')}`,
+        monthYm,
         shifts: list.map((s) => ({
           member_name: nameById[s.staff_member_id] || '',
           work_date: s.work_date,
@@ -2380,11 +2506,21 @@ export default function StaffPage() {
           entry_kind: s.entry_kind || 'shift',
           notes: s.notes || null,
         })),
-      })
-      bumpBackupMeta(planningBackupSlot)
-      setSuccess(
-        `Backup ${slotLabel} creato (${list.length} voci, ${rangeFromStr} → ${rangeToStr}, solo su questo browser).`,
-      )
+      }
+      savePlanningWeekBackup(planningBackupSlot, payload)
+      const planKey = planningBackupServerKey(monthYm, planningBackupSlot)
+      try {
+        await upsertStaffBackup('planning', planKey, payload)
+        await refreshBackupMeta(planningBackupSlot)
+        setSuccess(
+          `Backup ${slotLabel} creato (${list.length} voci, ${rangeFromStr} → ${rangeToStr}, condiviso sul server).`,
+        )
+      } catch {
+        await refreshBackupMeta(planningBackupSlot)
+        setSuccess(
+          `Backup ${slotLabel} salvato solo su questo browser (${list.length} voci, server non raggiungibile).`,
+        )
+      }
     } catch (err) {
       setError(err?.message || 'Backup pianificazione non riuscito')
     } finally {
@@ -2393,7 +2529,7 @@ export default function StaffPage() {
   }
 
   async function handleRestorePlanningBackup() {
-    const latest = getPlanningWeekBackup(planningBackupSlot)
+    const latest = await resolvePlanningBackup(planningBackupSlot)
     const rows = latest?.payload?.shifts
     if (!rows?.length) {
       setError(
@@ -2463,7 +2599,7 @@ export default function StaffPage() {
       applyPlanningViewFromRange(backupRange)
       setPlanningLoaded(true)
       await loadForRange(backupRange.start, backupRange.end)
-      bumpBackupMeta(planningBackupSlot)
+      await refreshBackupMeta(planningBackupSlot)
       const missingNote = missingMembers > 0 ? ` ${missingMembers} senza dipendente corrispondente.` : ''
       setSuccess(
         created > 0
@@ -2490,7 +2626,7 @@ export default function StaffPage() {
       } catch {
         archiveMonths = []
       }
-      saveStaffBackup('payroll', {
+      const payload = {
         payrollMonthYm,
         periodFromStr: payrollFromStr,
         periodToStr: payrollToStr,
@@ -2499,11 +2635,20 @@ export default function StaffPage() {
         rateDraft: { ...rateDraft },
         lines,
         archiveMonths: Array.isArray(archiveMonths) ? archiveMonths : [],
-      })
-      bumpBackupMeta()
-      setSuccess(
-        `Backup ore e costi creato (mese ${payrollMonthYm}${lines.length ? `, ${lines.length} righe calcolate` : ''}, solo su questo browser).`,
-      )
+      }
+      saveStaffBackup('payroll', payload)
+      try {
+        await upsertStaffBackup('payroll', payrollMonthYm, payload)
+        await refreshBackupMeta()
+        setSuccess(
+          `Backup ore e costi creato (mese ${payrollMonthYm}${lines.length ? `, ${lines.length} righe calcolate` : ''}, condiviso sul server).`,
+        )
+      } catch {
+        await refreshBackupMeta()
+        setSuccess(
+          `Backup ore e costi salvato solo su questo browser (mese ${payrollMonthYm}, server non raggiungibile).`,
+        )
+      }
     } catch (err) {
       setError(err?.message || 'Backup ore e costi non riuscito')
     } finally {
@@ -2512,7 +2657,7 @@ export default function StaffPage() {
   }
 
   async function handleRestorePayrollBackup() {
-    const latest = getLatestStaffBackup('payroll')
+    const latest = await resolvePayrollBackup(payrollMonthYm)
     if (!latest?.payload) {
       setError('Nessun backup ore e costi da ripristinare.')
       return
@@ -2546,7 +2691,7 @@ export default function StaffPage() {
           setRateDraft((prev) => ({ ...prev, ...latest.payload.rateDraft }))
         }
       }
-      bumpBackupMeta()
+      await refreshBackupMeta()
       setSuccess(`Ore e costi ripristinati dal backup (mese ${ym}).`)
     } catch (err) {
       setError(err?.message || 'Ripristino backup ore e costi non riuscito')
@@ -2609,7 +2754,7 @@ export default function StaffPage() {
             <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
             oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
             <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
-            parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio locale su questo browser).
+            parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio sul server, recuperabile da altri PC e browser).
           </p>
         </div>
       </header>
@@ -2719,6 +2864,9 @@ export default function StaffPage() {
                 </option>
               ))}
             </select>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Elenco condiviso sul server: visibile da qualsiasi PC dopo «Salva dipendenti».
+            </p>
           </div>
           <button
             type="button"

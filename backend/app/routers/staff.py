@@ -148,3 +148,52 @@ def delete_payroll_month(month_id: int, db: Session = Depends(get_db)):
     ok = staff_service.delete_payroll_month(db, month_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese non trovato")
+
+
+@router.get("/locale-packs", response_model=List[staff_schema.StaffLocalePackSummary])
+def list_locale_packs(db: Session = Depends(get_db)):
+    return staff_service.list_locale_packs(db)
+
+
+@router.get("/locale-packs/detail", response_model=staff_schema.StaffLocalePackRead)
+def get_locale_pack(name: str = Query(..., min_length=1, max_length=255), db: Session = Depends(get_db)):
+    row = staff_service.get_locale_pack(db, name)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locale non trovato")
+    return row
+
+
+@router.put("/locale-packs", response_model=staff_schema.StaffLocalePackRead)
+def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session = Depends(get_db)):
+    try:
+        return staff_service.upsert_locale_pack(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/backups", response_model=List[staff_schema.StaffBackupSummary])
+def list_backups(section: str = Query(..., min_length=1, max_length=32), db: Session = Depends(get_db)):
+    try:
+        return staff_service.list_backups(db, section)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/backups/detail", response_model=staff_schema.StaffBackupRead)
+def get_backup(
+    section: str = Query(..., min_length=1, max_length=32),
+    key: str = Query(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+):
+    row = staff_service.get_backup(db, section, key)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup non trovato")
+    return row
+
+
+@router.put("/backups", response_model=staff_schema.StaffBackupRead)
+def upsert_backup(payload: staff_schema.StaffBackupUpsert, db: Session = Depends(get_db)):
+    try:
+        return staff_service.upsert_backup(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

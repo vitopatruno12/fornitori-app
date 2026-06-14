@@ -178,3 +178,52 @@ class StaffPayrollMonthRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class StaffLocaleMemberSnapshot(BaseModel):
+    name: str = Field(..., max_length=255)
+    first_name: Optional[str] = Field(None, max_length=120)
+    last_name: Optional[str] = Field(None, max_length=120)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=64)
+    city: Optional[str] = Field(None, max_length=128)
+    birth_date: Optional[date] = None
+    sort_order: int = 0
+    hourly_rate: Optional[float] = Field(None, ge=0)
+    is_active: bool = True
+
+
+class StaffLocalePackSummary(BaseModel):
+    locale_name: str
+    saved_at: Optional[str] = None
+    member_count: int = 0
+
+
+class StaffLocalePackRead(BaseModel):
+    locale_name: str
+    saved_at: Optional[str] = None
+    members: List[StaffLocaleMemberSnapshot]
+
+
+class StaffLocalePackUpsert(BaseModel):
+    locale_name: str = Field(..., min_length=1, max_length=255)
+    members: List[StaffLocaleMemberSnapshot]
+
+
+class StaffBackupSummary(BaseModel):
+    section: str
+    backup_key: str
+    saved_at: Optional[str] = None
+
+
+class StaffBackupRead(BaseModel):
+    section: str
+    backup_key: str
+    saved_at: Optional[str] = None
+    payload: dict
+
+
+class StaffBackupUpsert(BaseModel):
+    section: str = Field(..., pattern=r"^(planning|payroll)$")
+    backup_key: str = Field(..., min_length=1, max_length=255)
+    payload: dict

@@ -47,6 +47,8 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_locales_column()
         _ensure_staff_member_hourly_rate_column()
         _ensure_staff_payroll_months_table()
+        _ensure_staff_locale_packs_table()
+        _ensure_staff_backups_table()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -409,6 +411,79 @@ def _ensure_staff_payroll_months_table() -> None:
     except Exception as e:
         logger.warning(
             "Impossibile verificare/creare staff_payroll_months: %s",
+            e,
+        )
+
+
+def _ensure_staff_locale_packs_table() -> None:
+    """Liste dipendenti per locale (condivise tra PC/browser)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS staff_locale_packs (
+                      id SERIAL PRIMARY KEY,
+                      locale_name VARCHAR(255) NOT NULL,
+                      members_json TEXT NOT NULL DEFAULT '[]',
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_staff_locale_packs_name UNIQUE (locale_name)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_staff_locale_packs_name
+                    ON staff_locale_packs (locale_name)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare staff_locale_packs: %s",
+            e,
+        )
+
+
+def _ensure_staff_backups_table() -> None:
+    """Backup pianificazione e ore/costi (condivisi tra PC/browser)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS staff_backups (
+                      id SERIAL PRIMARY KEY,
+                      section VARCHAR(32) NOT NULL,
+                      backup_key VARCHAR(255) NOT NULL,
+                      payload_json TEXT NOT NULL DEFAULT '{}',
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_staff_backups_section_key UNIQUE (section, backup_key)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_staff_backups_section
+                    ON staff_backups (section)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_staff_backups_key
+                    ON staff_backups (backup_key)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare staff_backups: %s",
             e,
         )
 
