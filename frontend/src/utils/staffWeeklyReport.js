@@ -149,6 +149,7 @@ function formatMatrixCellHours(h) {
 
 export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYmd) {
   const byId = new Map()
+  const nameToMemberId = new Map()
   for (const m of members) {
     byId.set(m.id, {
       memberId: m.id,
@@ -159,22 +160,23 @@ export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYm
       nAssenze: 0,
       nMalattia: 0,
     })
+    const nameKey = String(m.name || '').trim().toLocaleLowerCase('it')
+    if (nameKey) nameToMemberId.set(nameKey, m.id)
   }
+
+  function resolveShiftMemberId(shift) {
+    const direct = Number(shift.staff_member_id)
+    if (byId.has(direct)) return direct
+    const nameKey = String(shift.staff_member_name || '').trim().toLocaleLowerCase('it')
+    if (nameKey && nameToMemberId.has(nameKey)) return nameToMemberId.get(nameKey)
+    return null
+  }
+
   for (const s of shifts) {
     if (s.work_date < dateFromYmd || s.work_date > dateToYmd) continue
-    let row = byId.get(s.staff_member_id)
-    if (!row) {
-      row = {
-        memberId: s.staff_member_id,
-        name: s.staff_member_name || `ID ${s.staff_member_id}`,
-        oreTurno: 0,
-        orePermesso: 0,
-        nPermessi: 0,
-        nAssenze: 0,
-        nMalattia: 0,
-      }
-      byId.set(s.staff_member_id, row)
-    }
+    const memberId = resolveShiftMemberId(s)
+    if (memberId == null || !byId.has(memberId)) continue
+    const row = byId.get(memberId)
     const h = hoursBetween(s.time_start, s.time_end)
     switch (s.entry_kind) {
       case 'shift':
@@ -204,11 +206,17 @@ export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYm
  * @param {string} dateFromYmd
  * @param {string} dateToYmd
  */
-export function aggregateMemberWorkedDays(memberId, shifts, dateFromYmd, dateToYmd) {
+export function aggregateMemberWorkedDays(memberId, shifts, dateFromYmd, dateToYmd, memberName = '') {
   const byDate = new Map()
   const id = Number(memberId)
+  const nameKey = String(memberName || '').trim().toLocaleLowerCase('it')
+  const matches = (s) => {
+    if (Number(s.staff_member_id) === id) return true
+    if (!nameKey) return false
+    return String(s.staff_member_name || '').trim().toLocaleLowerCase('it') === nameKey
+  }
   for (const s of shifts || []) {
-    if (!s || Number(s.staff_member_id) !== id) continue
+    if (!s || !matches(s)) continue
     if (s.work_date < dateFromYmd || s.work_date > dateToYmd) continue
     if (s.entry_kind !== 'shift') continue
     const h = hoursBetween(s.time_start, s.time_end)

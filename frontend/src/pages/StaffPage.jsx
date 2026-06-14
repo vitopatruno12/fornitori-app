@@ -1028,6 +1028,48 @@ export default function StaffPage() {
     setPayrollImporto(next)
   }, [payrollRows, rateDraft])
 
+  const applyPayrollFromShifts = useCallback(
+    async (memList) => {
+      let list = Array.isArray(memList) ? memList : null
+      if (!list) {
+        const data = await fetchStaffMembers()
+        list = Array.isArray(data) ? data : []
+        setMembers(list)
+      }
+      if (!list.length) {
+        setHoursOverride({})
+        setPayrollImporto({})
+        setPayrollShifts([])
+        return
+      }
+      const data = await fetchStaffShifts(payrollFromStr, payrollToStr)
+      const shifts = Array.isArray(data) ? data : []
+      setPayrollShifts(shifts)
+      setHoursOverride({})
+      const oreMap = new Map()
+      for (const row of aggregateWeeklyStaffStats(list, shifts, payrollFromStr, payrollToStr)) {
+        if (list.some((m) => m.id === row.memberId)) {
+          oreMap.set(row.memberId, row.oreTurno)
+        }
+      }
+      setRateDraft((prev) => {
+        const next = { ...prev }
+        for (const m of list) {
+          next[m.id] = m.hourly_rate != null ? String(m.hourly_rate) : ''
+        }
+        return next
+      })
+      const nextImporto = {}
+      for (const m of list) {
+        const ore = oreMap.get(m.id) ?? 0
+        const rate = parseDecimalInput(m.hourly_rate)
+        nextImporto[m.id] = ore * rate
+      }
+      setPayrollImporto(nextImporto)
+    },
+    [payrollFromStr, payrollToStr],
+  )
+
   const refreshPayrollHoursFromShifts = useCallback(async () => {
     setPayrollShiftsRefreshing(true)
     setError('')
@@ -1118,7 +1160,11 @@ export default function StaffPage() {
   )
 
   useEffect(() => {
-    if (members.length === 0) return undefined
+    if (members.length === 0) {
+      setHoursOverride({})
+      setPayrollImporto({})
+      return undefined
+    }
     let cancelled = false
     ;(async () => {
       try {
@@ -1138,7 +1184,7 @@ export default function StaffPage() {
     return () => {
       cancelled = true
     }
-  }, [payrollMonthYm, applyPayrollMonthSnapshot, members])
+  }, [payrollMonthYm, applyPayrollMonthSnapshot])
 
   useEffect(() => {
     if (payrollDaysInfoMemberId == null) return
@@ -1156,6 +1202,7 @@ export default function StaffPage() {
       payrollShifts,
       payrollFromStr,
       payrollToStr,
+      member.name,
     )
     return {
       member,
@@ -1321,10 +1368,11 @@ export default function StaffPage() {
       }
       await reloadPlanning()
       await refreshMembers()
+      await applyPayrollFromShifts()
     }
     window.addEventListener('atlas-refresh-data', onDataSynced)
     return () => window.removeEventListener('atlas-refresh-data', onDataSynced)
-  }, [payrollFromStr, payrollToStr, reloadPlanning, refreshMembers])
+  }, [payrollFromStr, payrollToStr, reloadPlanning, refreshMembers, applyPayrollFromShifts])
 
   /** Ricarica i turni includendo sempre `ymd` (stessa logica di reloadPlanning ma range calcolato sulla data salvata, evita closure stale dopo setState). */
   async function reloadPlanningForWorkDate(ymd) {
@@ -1758,6 +1806,9 @@ export default function StaffPage() {
       setFormKind('shift')
       setFormNotes('')
       await refreshMembers()
+      setHoursOverride({})
+      setPayrollImporto({})
+      setPayrollShifts([])
       setSuccess(
         n > 0
           ? `Eliminati ${n} dipendenti e tutta la pianificazione associata.`
@@ -2103,6 +2154,56 @@ export default function StaffPage() {
     }
   }
 
+  async function syncMembersFromLocalePack(packMembers) {
+    const existing = await fetchStaffMembers()
+    const existingList = Array.isArray(existing) ? existing : []
+    const packRows = Array.isArray(packMembers) ? packMembers : []
+    const packByKey = new Map()
+    for (const pm of packRows) {
+      const key = String(pm.name || '').trim().toLocaleLowerCase('it')
+      if (!key) continue
+      packByKey.set(key, pm)
+    }
+    const keptIds = new Set()
+
+    for (const [, pm] of packByKey) {
+      const key = String(pm.name || '').trim().toLocaleLowerCase('it')
+      const hit = existingList.find(
+        (m) => String(m.name || '').trim().toLocaleLowerCase('it') === key,
+      )
+      const body = {
+        name: String(pm.name || '').trim() || 'Dipendente',
+        first_name: pm.first_name || null,
+        last_name: pm.last_name || null,
+        email: pm.email || null,
+        phone: pm.phone || null,
+        city: pm.city || null,
+        birth_date: pm.birth_date || null,
+        is_active: pm.is_active !== false,
+        hourly_rate: pm.hourly_rate != null ? Number(pm.hourly_rate) : null,
+        sort_order: Number.isFinite(Number(pm.sort_order)) ? Number(pm.sort_order) : 0,
+      }
+      if (hit) {
+        await updateStaffMember(hit.id, body)
+        keptIds.add(hit.id)
+      } else {
+        const created = await createStaffMember(body)
+        if (created?.id != null) keptIds.add(created.id)
+      }
+    }
+
+    for (const m of existingList) {
+      if (!keptIds.has(m.id)) {
+        await deleteStaffMember(m.id)
+      }
+    }
+
+    const mem = await fetchStaffMembers()
+    const list = Array.isArray(mem) ? mem : []
+    setMembers(list)
+    return list
+  }
+
   async function handleLoadMembersByLocale() {
     const localeName = normalizeLocaleName(localeStaffName)
     if (!localeName) {
@@ -2114,24 +2215,18 @@ export default function StaffPage() {
       setError(`Nessuna lista salvata trovata per il locale "${localeName}" (né su questo browser né sul server).`)
       return
     }
-    if (!window.confirm(`Caricare i dipendenti salvati per "${localeName}"?\n\nL'elenco attuale verrà sostituito.`)) return
+    if (
+      !window.confirm(
+        `Caricare i dipendenti salvati per "${localeName}"?\n\nL'elenco viene allineato al backup (stessi nomi aggiornati, altri rimossi). I turni già pianificati restano collegati ai dipendenti con lo stesso nome.`,
+      )
+    ) {
+      return
+    }
 
     try {
       setError('')
       setShiftBusy(true)
-      await deleteAllStaffMembers()
-      for (const m of pack.members) {
-        await createStaffMember({
-          name: String(m.name || '').trim() || 'Dipendente',
-          first_name: m.first_name || null,
-          last_name: m.last_name || null,
-          email: m.email || null,
-          phone: m.phone || null,
-          city: m.city || null,
-          birth_date: m.birth_date || null,
-          is_active: m.is_active !== false,
-        })
-      }
+      const mem = await syncMembersFromLocalePack(pack.members)
       markPlanningStale()
       setMemberInfoId(null)
       setEditingShiftId(null)
@@ -2141,8 +2236,10 @@ export default function StaffPage() {
       setFormEnd('16:00')
       setFormKind('shift')
       setFormNotes('')
-      await refreshMembers()
-      setSuccess(`Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi)`)
+      await applyPayrollFromShifts(mem)
+      setSuccess(
+        `Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi). Ore e costi aggiornati dai turni del mese.`,
+      )
     } catch (err) {
       setError(err?.message || 'Errore nel caricamento dipendenti per locale')
       await refreshMembers()
@@ -2665,6 +2762,7 @@ export default function StaffPage() {
         added += 1
       }
       await refreshMembers()
+      await applyPayrollFromShifts()
       await refreshBackupMeta(planningBackupSlot, localeName)
       setSuccess(
         added > 0
@@ -2839,6 +2937,7 @@ export default function StaffPage() {
       await loadForRange(backupRange.start, backupRange.end)
       setLoading(false)
       await refreshBackupMeta(planningBackupSlot)
+      await applyPayrollFromShifts(mem)
       const missingNote =
         missingMembers > 0
           ? ` ${missingMembers} voci senza dipendente corrispondente (ricrea il backup dopo aver caricato i dipendenti).`
@@ -3251,6 +3350,7 @@ export default function StaffPage() {
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
           Le ore si calcolano dai turni del <strong>mese selezionato</strong> (puoi modificarle).
+          Caricando l&apos;elenco dipendenti, ore e costi si aggiornano automaticamente dai turni pianificati.
           Dopo nuovi turni in pianificazione usa <strong>Aggiorna ore</strong>.
           <strong> Calcola tutti</strong> o <strong>Calcola</strong> per riga.
           <strong> Salva</strong> / <strong>Ricarica in archivio</strong> memorizzano il mese nel menu Archivio (compatto, senza lista lunga).
