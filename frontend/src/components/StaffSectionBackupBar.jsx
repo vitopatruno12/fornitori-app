@@ -13,15 +13,18 @@ export default function StaffSectionBackupBar({
   busy = false,
   formatBackupLabel = formatStaffBackupLabel,
   slotOptions = null,
-  slotValue = 0,
+  slotValue = '',
+  slotLabel = 'Settimana',
+  emptySlotMessage = 'Nessun backup per questa selezione',
   onSlotChange,
 }) {
   const when = formatBackupLabel(lastSavedAt)
   const hasSlots = Boolean(slotOptions?.length)
+  const selectValue = slotValue == null || slotValue === '' ? '' : String(slotValue)
 
   return (
     <div
-      className={`staff-section-backup-bar${hasSlots ? ' staff-section-backup-bar--planning' : ''}`}
+      className={`staff-section-backup-bar${hasSlots ? ' staff-section-backup-bar--slotted' : ''}`}
       role="group"
       aria-label={`Backup ${sectionTitle}`}
     >
@@ -30,17 +33,17 @@ export default function StaffSectionBackupBar({
 
         {hasSlots ? (
           <label className="staff-section-backup-slot">
-            <span className="staff-section-backup-slot-label">Settimana</span>
+            <span className="staff-section-backup-slot-label">{slotLabel}</span>
             <span className="staff-section-backup-slot-field">
               <select
                 className="form-control staff-section-backup-slot-select"
-                value={slotValue}
+                value={selectValue}
                 disabled={disabled || busy}
-                onChange={(e) => onSlotChange?.(Number(e.target.value))}
-                aria-label="Seleziona settimana e slot backup"
+                onChange={(e) => onSlotChange?.(e.target.value)}
+                aria-label={`Seleziona ${slotLabel.toLowerCase()} per il backup`}
               >
                 {slotOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
+                  <option key={String(opt.value)} value={String(opt.value)}>
                     {opt.label}
                   </option>
                 ))}
@@ -56,7 +59,7 @@ export default function StaffSectionBackupBar({
               <strong className="staff-section-backup-meta-when">{when}</strong>
             </>
           ) : (
-            'Nessun backup per questa settimana'
+            emptySlotMessage
           )}
         </span>
       </div>
@@ -78,7 +81,7 @@ export default function StaffSectionBackupBar({
           onClick={() => void onRestore?.()}
           title={
             hasSlots
-              ? `Ripristina il backup della settimana selezionata (${sectionTitle})`
+              ? `Ripristina il backup selezionato (${sectionTitle})`
               : `Ripristina l'ultimo backup di ${sectionTitle}`
           }
         >

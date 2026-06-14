@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
 }
 
 const PLANNING_SLOTS_KEY = 'atlas_staff_backup_planning_slots_v1'
+const MEMBERS_BY_LOCALE_KEY = 'atlas_staff_backup_members_by_locale_v1'
 
 const MAX_SNAPSHOTS = 5
 
@@ -97,4 +98,56 @@ export function savePlanningWeekBackup(slotIndex, payload) {
 
 export function getPlanningWeekBackupSavedAt(slotIndex) {
   return getPlanningWeekBackup(slotIndex)?.savedAt ?? null
+}
+
+function normalizeMembersLocaleKey(name) {
+  return String(name || '').trim()
+}
+
+function readMembersByLocaleMap() {
+  try {
+    const raw = window.localStorage.getItem(MEMBERS_BY_LOCALE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeMembersByLocaleMap(map) {
+  window.localStorage.setItem(MEMBERS_BY_LOCALE_KEY, JSON.stringify(map))
+}
+
+/** @returns {string[]} nomi locali con almeno un backup dipendenti salvato */
+export function listMembersLocaleBackupNames() {
+  const map = readMembersByLocaleMap()
+  return Object.keys(map)
+    .filter((k) => map[k]?.payload?.members?.length)
+    .sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+}
+
+/** @returns {{ savedAt: string, payload: object } | null} */
+export function getMembersLocaleBackup(localeName) {
+  const key = normalizeMembersLocaleKey(localeName)
+  if (!key) return null
+  const map = readMembersByLocaleMap()
+  return map[key] ?? null
+}
+
+export function saveMembersLocaleBackup(localeName, payload) {
+  const key = normalizeMembersLocaleKey(localeName)
+  if (!key) return null
+  const map = readMembersByLocaleMap()
+  const entry = {
+    savedAt: new Date().toISOString(),
+    payload: { ...payload, localeName: key },
+  }
+  map[key] = entry
+  writeMembersByLocaleMap(map)
+  return entry
+}
+
+export function getMembersLocaleBackupSavedAt(localeName) {
+  return getMembersLocaleBackup(localeName)?.savedAt ?? null
 }

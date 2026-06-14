@@ -23,8 +23,12 @@ import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/s
 import {
   formatStaffBackupLabel,
   getLatestStaffBackup,
+  getMembersLocaleBackup,
+  getMembersLocaleBackupSavedAt,
   getPlanningWeekBackup,
   getPlanningWeekBackupSavedAt,
+  listMembersLocaleBackupNames,
+  saveMembersLocaleBackup,
   savePlanningWeekBackup,
   saveStaffBackup,
 } from '../utils/staffLocalBackup.js'
@@ -792,19 +796,24 @@ export default function StaffPage() {
   const [payrollShiftsRefreshing, setPayrollShiftsRefreshing] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [planningBackupSlot, setPlanningBackupSlot] = useState(0)
+  const [membersBackupLocale, setMembersBackupLocale] = useState('')
   const [backupMeta, setBackupMeta] = useState(() => ({
-    members: getLatestStaffBackup('members')?.savedAt ?? null,
+    members: null,
     planning: getPlanningWeekBackupSavedAt(0),
     payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
   }))
 
-  const bumpBackupMeta = useCallback((planningSlot = planningBackupSlot) => {
-    setBackupMeta({
-      members: getLatestStaffBackup('members')?.savedAt ?? null,
-      planning: getPlanningWeekBackupSavedAt(planningSlot),
-      payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
-    })
-  }, [planningBackupSlot])
+  const bumpBackupMeta = useCallback(
+    (planningSlot = planningBackupSlot, membersLocale = membersBackupLocale) => {
+      const loc = normalizeLocaleName(membersLocale)
+      setBackupMeta({
+        members: loc ? getMembersLocaleBackupSavedAt(loc) : null,
+        planning: getPlanningWeekBackupSavedAt(planningSlot),
+        payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
+      })
+    },
+    [planningBackupSlot, membersBackupLocale],
+  )
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
@@ -818,6 +827,23 @@ export default function StaffPage() {
       })),
     [planningMonthWeeks],
   )
+  const membersBackupLocaleOptions = useMemo(() => {
+    const names = new Set([...savedLocaleNames, ...listMembersLocaleBackupNames()])
+    const current = normalizeLocaleName(localeStaffName)
+    if (current) names.add(current)
+    const sorted = [...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+    if (sorted.length === 0) {
+      return [{ value: '', label: 'Inserisci un locale sotto' }]
+    }
+    return sorted.map((name) => {
+      const savedAt = getMembersLocaleBackupSavedAt(name)
+      const when = savedAt ? formatStaffBackupLabel(savedAt) : null
+      return {
+        value: name,
+        label: when ? `${name} (backup ${when})` : name,
+      }
+    })
+  }, [savedLocaleNames, localeStaffName, backupMeta.members])
   const weekLoadTargetAnchor = useMemo(
     () => (planView === 'week' ? weekAnchor : startOfWeekMonday(formDate ? parseYMD(formDate) : new Date())),
     [planView, weekAnchor, formDate],
@@ -1135,6 +1161,27 @@ export default function StaffPage() {
   useEffect(() => {
     refreshMembers()
   }, [refreshMembers])
+
+  useEffect(() => {
+    const n = normalizeLocaleName(localeStaffName)
+    if (!n) return
+    setMembersBackupLocale(n)
+    setBackupMeta((m) => ({
+      ...m,
+      members: getMembersLocaleBackupSavedAt(n),
+    }))
+  }, [localeStaffName])
+
+  useEffect(() => {
+    if (membersBackupLocale) return
+    const first = membersBackupLocaleOptions.find((o) => o.value)?.value
+    if (!first) return
+    setMembersBackupLocale(String(first))
+    setBackupMeta((m) => ({
+      ...m,
+      members: getMembersLocaleBackupSavedAt(String(first)),
+    }))
+  }, [membersBackupLocale, membersBackupLocaleOptions])
 
   useEffect(() => {
     const idx = findPlanningBackupSlotForAnchor(weekAnchor, planningMonthWeekSlots(weekAnchor))
@@ -2200,22 +2247,35 @@ export default function StaffPage() {
       setError('Nessun dipendente da salvare nel backup.')
       return
     }
-    saveStaffBackup('members', { members: members.map(memberToBackupRow) })
-    bumpBackupMeta()
-    setSuccess(`Backup dipendenti creato (${members.length} voci, solo su questo browser).`)
+    const localeName = normalizeLocaleName(membersBackupLocale || localeStaffName)
+    if (!localeName) {
+      setError('Seleziona o inserisci il nome locale per il backup dipendenti.')
+      return
+    }
+    saveMembersLocaleBackup(localeName, { members: members.map(memberToBackupRow) })
+    setMembersBackupLocale(localeName)
+    bumpBackupMeta(planningBackupSlot, localeName)
+    setSuccess(
+      `Backup dipendenti creato per "${localeName}" (${members.length} voci, solo su questo browser).`,
+    )
   }
 
   async function handleRestoreMembersBackup() {
-    const latest = getLatestStaffBackup('members')
+    const localeName = normalizeLocaleName(membersBackupLocale)
+    if (!localeName) {
+      setError('Seleziona il locale di cui ripristinare il backup dipendenti.')
+      return
+    }
+    const latest = getMembersLocaleBackup(localeName)
     const rows = latest?.payload?.members
     if (!rows?.length) {
-      setError('Nessun backup dipendenti da ripristinare.')
+      setError(`Nessun backup dipendenti per il locale "${localeName}".`)
       return
     }
     const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
     if (
       !window.confirm(
-        `Ripristinare ${rows.length} dipendenti dal backup del ${when}?\n\nVengono aggiunti i nomi mancanti; quelli già in elenco non vengono duplicati.`,
+        `Ripristinare ${rows.length} dipendenti per "${localeName}" dal backup del ${when}?\n\nVengono aggiunti i nomi mancanti; quelli già in elenco non vengono duplicati.`,
       )
     ) {
       return
@@ -2247,11 +2307,11 @@ export default function StaffPage() {
         added += 1
       }
       await refreshMembers()
-      bumpBackupMeta()
+      bumpBackupMeta(planningBackupSlot, localeName)
       setSuccess(
         added > 0
-          ? `Ripristinati ${added} dipendenti dal backup.`
-          : 'Nessun nuovo dipendente: tutti i nomi del backup sono già in elenco.',
+          ? `Ripristinati ${added} dipendenti dal backup di "${localeName}".`
+          : `Nessun nuovo dipendente per "${localeName}": tutti i nomi del backup sono già in elenco.`,
       )
     } catch (err) {
       setError(err?.message || 'Ripristino backup dipendenti non riuscito')
@@ -2261,14 +2321,27 @@ export default function StaffPage() {
     }
   }
 
-  function handlePlanningBackupSlotChange(slotIndex) {
-    const weeks = planningMonthWeekSlots(weekAnchor)
-    const w = weeks[slotIndex]
-    if (!w) return
-    setPlanningBackupSlot(slotIndex)
+  function handleMembersBackupLocaleChange(value) {
+    const name = normalizeLocaleName(value)
+    if (!name) return
+    setMembersBackupLocale(name)
+    setLocaleStaffName(name)
     setBackupMeta((m) => ({
       ...m,
-      planning: getPlanningWeekBackupSavedAt(slotIndex),
+      members: getMembersLocaleBackupSavedAt(name),
+    }))
+  }
+
+  function handlePlanningBackupSlotChange(slotIndex) {
+    const idx = Number(slotIndex)
+    if (!Number.isFinite(idx)) return
+    const weeks = planningMonthWeekSlots(weekAnchor)
+    const w = weeks[idx]
+    if (!w) return
+    setPlanningBackupSlot(idx)
+    setBackupMeta((m) => ({
+      ...m,
+      planning: getPlanningWeekBackupSavedAt(idx),
     }))
     markPlanningStale()
     setPlanView('week')
@@ -2557,8 +2630,13 @@ export default function StaffPage() {
           lastSavedAt={backupMeta.members}
           onBackup={handleBackupMembers}
           onRestore={handleRestoreMembersBackup}
-          disabled={shiftBusy || demoLoading || reportLoading}
+          disabled={shiftBusy || demoLoading || reportLoading || backupBusy}
           busy={backupBusy}
+          slotLabel="Locale"
+          emptySlotMessage="Nessun backup per questo locale"
+          slotOptions={membersBackupLocaleOptions}
+          slotValue={membersBackupLocale}
+          onSlotChange={handleMembersBackupLocaleChange}
         />
         <form onSubmit={handleAddMember} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 140px' }}>
@@ -2938,6 +3016,8 @@ export default function StaffPage() {
           onRestore={handleRestorePlanningBackup}
           disabled={shiftBusy || demoLoading || reportLoading || backupBusy}
           busy={backupBusy}
+          slotLabel="Settimana"
+          emptySlotMessage="Nessun backup per questa settimana"
           slotOptions={planningBackupSlotOptions}
           slotValue={planningBackupSlot}
           onSlotChange={handlePlanningBackupSlotChange}

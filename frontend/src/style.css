@@ -2291,7 +2291,7 @@ select.form-control {
   font-size: 0.84rem;
 }
 
-.staff-section-backup-bar--planning {
+.staff-section-backup-bar--slotted {
   flex-direction: column;
   align-items: stretch;
 }
@@ -2305,7 +2305,7 @@ select.form-control {
   min-width: 0;
 }
 
-.staff-section-backup-bar--planning .staff-section-backup-bar-main {
+.staff-section-backup-bar--slotted .staff-section-backup-bar-main {
   width: 100%;
 }
 
@@ -2317,7 +2317,7 @@ select.form-control {
   flex-shrink: 0;
 }
 
-.staff-section-backup-bar--planning .staff-section-backup-actions {
+.staff-section-backup-bar--slotted .staff-section-backup-actions {
   width: 100%;
   justify-content: flex-end;
 }
@@ -2357,7 +2357,7 @@ select.form-control {
   max-width: 100%;
 }
 
-.staff-section-backup-bar--planning .staff-section-backup-slot {
+.staff-section-backup-bar--slotted .staff-section-backup-slot {
   flex: 1 1 100%;
   width: 100%;
 }
@@ -2401,12 +2401,12 @@ select.form-control {
 }
 
 @media (max-width: 1400px) {
-  .staff-section-backup-bar:not(.staff-section-backup-bar--planning) {
+  .staff-section-backup-bar:not(.staff-section-backup-bar--slotted) {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .staff-section-backup-bar:not(.staff-section-backup-bar--planning) .staff-section-backup-actions {
+  .staff-section-backup-bar:not(.staff-section-backup-bar--slotted) .staff-section-backup-actions {
     width: 100%;
     justify-content: flex-end;
   }
