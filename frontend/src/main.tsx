@@ -148,7 +148,7 @@ function App() {
   }, [navOpen])
 
   React.useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1401px)')
+    const mq = window.matchMedia('(min-width: 1200px)')
     const onChange = () => {
       if (mq.matches) setNavOpen(false)
     }
@@ -580,16 +580,46 @@ function App() {
             </Link>
           </div>
           <div id="app-nav-menu" className={`app-nav-links${navOpen ? ' is-open' : ''}`}>
-            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Home</NavLink>
-            <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fornitori</NavLink>
-            <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuovo ordine</NavLink>
-            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuova consegna</NavLink>
-            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
-            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fatture fornitori</NavLink>
-            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Prima Nota Cassa</NavLink>
-            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Personale</NavLink>
-            <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
-            <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Home">
+              <span className="app-nav-label">Home</span>
+              <span className="app-nav-label app-nav-label--compact">Home</span>
+            </NavLink>
+            <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Fornitori">
+              <span className="app-nav-label">Fornitori</span>
+              <span className="app-nav-label app-nav-label--compact">Fornitori</span>
+            </NavLink>
+            <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Nuovo ordine">
+              <span className="app-nav-label">Nuovo ordine</span>
+              <span className="app-nav-label app-nav-label--compact">Ordine</span>
+            </NavLink>
+            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Nuova consegna">
+              <span className="app-nav-label">Nuova consegna</span>
+              <span className="app-nav-label app-nav-label--compact">Consegna</span>
+            </NavLink>
+            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Storico consegne">
+              <span className="app-nav-label">Storico consegne</span>
+              <span className="app-nav-label app-nav-label--compact">Storico</span>
+            </NavLink>
+            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Fatture fornitori">
+              <span className="app-nav-label">Fatture fornitori</span>
+              <span className="app-nav-label app-nav-label--compact">Fatture</span>
+            </NavLink>
+            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Prima Nota Cassa">
+              <span className="app-nav-label">Prima Nota Cassa</span>
+              <span className="app-nav-label app-nav-label--compact">Cassa</span>
+            </NavLink>
+            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Personale">
+              <span className="app-nav-label">Personale</span>
+              <span className="app-nav-label app-nav-label--compact">Personale</span>
+            </NavLink>
+            <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Assistenza tecnici">
+              <span className="app-nav-label">Assistenza tecnici</span>
+              <span className="app-nav-label app-nav-label--compact">Assistenza</span>
+            </NavLink>
+            <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="VNE">
+              <span className="app-nav-label">VNE</span>
+              <span className="app-nav-label app-nav-label--compact">VNE</span>
+            </NavLink>
           </div>
           <div className="app-nav-actions">
             <AtlasUpdateButton navStyle />

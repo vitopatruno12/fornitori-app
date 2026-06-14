@@ -1,6 +1,6 @@
 /* === Tema stile contabilità / gestionale === */
 :root {
-  --atlas-bp-tablet: 1400px;
+  --atlas-bp-tablet: 1200px;
   --atlas-bp-phone: 767px;
   --primary: #1e3a5f;
   --primary-hover: #2c5282;
@@ -168,6 +168,10 @@ a:hover {
   font-weight: 500;
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
+}
+
+.app-nav-label--compact {
+  display: none;
 }
 
 .app-nav-links a:hover {
@@ -493,7 +497,57 @@ a:hover {
   display: none;
 }
 
-@media (max-width: 1400px) {
+/* Laptop 1366px: voci in riga con etichette compatte, senza scroll orizzontale */
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .app-nav-inner {
+    max-width: 100%;
+    padding: 0 0.55rem;
+    gap: 0.25rem;
+  }
+
+  .app-nav-brand {
+    flex-shrink: 0;
+    margin-right: 0.15rem;
+  }
+
+  .atlas-nav-logo {
+    height: 30px;
+    max-width: min(22vw, 150px);
+  }
+
+  .app-nav-links {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 0.15rem;
+    gap: 0.05rem;
+    justify-content: flex-start;
+  }
+
+  .app-nav-links a {
+    padding: 0.3rem 0.34rem;
+    font-size: 0.73rem;
+  }
+
+  .app-nav-label:not(.app-nav-label--compact) {
+    display: none;
+  }
+
+  .app-nav-label--compact {
+    display: inline;
+  }
+
+  .app-nav-actions {
+    gap: 0.28rem;
+  }
+
+  .app-nav-actions .atlas-update-btn--nav,
+  .app-nav-actions .app-nav-logout {
+    padding: 0.3rem 0.4rem;
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-width: 1199px) {
   .app-nav-inner {
     max-width: 100%;
     padding: 0 1rem;
@@ -563,6 +617,14 @@ a:hover {
     font-size: 0.9rem;
   }
 
+  .app-nav-label--compact {
+    display: none;
+  }
+
+  .app-nav-label:not(.app-nav-label--compact) {
+    display: inline;
+  }
+
   .app-nav-logout {
     width: auto;
     text-align: left;
@@ -617,7 +679,8 @@ a:hover {
  * - Desktop grande (>=1440px): max-width 1440px
  * - Desktop / laptop (1200-1439px): max-width 1200px
  * - Tablet landscape (992-1199px): max-width 960px
- * - Laptop 1366px e tablet (<=1400px): menu hamburger, full width
+ * - Laptop 1366px (1200-1439px): navbar compatta in riga, etichette brevi
+ * - Tablet e smartphone (<=1199px): menu hamburger, full width
  * - Smartphone (<=767px): padding ridotto, touch target più ampi
  */
 .app-main {
