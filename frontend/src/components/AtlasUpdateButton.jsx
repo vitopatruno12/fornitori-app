@@ -4,16 +4,20 @@ import { usePwaUpdate } from '../pwa/PwaUpdateContext.jsx'
 /**
  * Controlla e installa aggiornamenti PWA. Badge rosso quando una nuova versione è pronta.
  */
-export default function AtlasUpdateButton({ className = '', navStyle = false, iconOnly = false }) {
+export default function AtlasUpdateButton({ className = '', navStyle = false, iconOnly = false, onDone }) {
   const { updateReady, checking, applying, checkForUpdate, applyUpdate } = usePwaUpdate()
 
   async function handleClick() {
     if (applying || checking) return
-    if (updateReady) {
-      applyUpdate()
-      return
+    try {
+      if (updateReady) {
+        applyUpdate()
+      } else {
+        await checkForUpdate()
+      }
+    } finally {
+      onDone?.()
     }
-    await checkForUpdate()
   }
 
   const label = applying

@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { validateAtlasLogin } from './utils/atlasAuth'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -163,6 +164,19 @@ function App() {
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
+
+  React.useEffect(() => {
+    if (!navActionsOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      const root = document.getElementById('app-nav-actions-root')
+      const menu = document.getElementById('app-nav-actions-dropdown')
+      const target = e.target as Node
+      if (root?.contains(target) || menu?.contains(target)) return
+      setNavActionsOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [navActionsOpen])
 
   React.useEffect(() => {
     if (navOpen) document.body.style.overflow = 'hidden'
@@ -601,7 +615,7 @@ function App() {
             <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
           </div>
           <div className="app-nav-actions">
-            <div className="app-nav-actions-menu">
+            <div className="app-nav-actions-menu" id="app-nav-actions-root">
               <button
                 type="button"
                 className={`app-nav-actions-toggle${navActionsOpen ? ' is-open' : ''}`}
@@ -614,15 +628,6 @@ function App() {
                 <span className="app-nav-toggle-bar" aria-hidden />
                 <span className="app-nav-toggle-bar" aria-hidden />
               </button>
-              <div
-                id="app-nav-actions-dropdown"
-                className={`app-nav-actions-dropdown${navActionsOpen ? ' is-open' : ''}`}
-              >
-                <AtlasUpdateButton navStyle />
-                <button type="button" className="app-nav-logout" onClick={handleLogout}>
-                  Logout
-                </button>
-              </div>
             </div>
             <div className="app-nav-actions-inline">
               <AtlasUpdateButton navStyle />
@@ -632,15 +637,20 @@ function App() {
             </div>
           </div>
         </div>
-        {navActionsOpen && (
-          <button
-            type="button"
-            className="app-nav-actions-backdrop"
-            aria-label="Chiudi menu"
-            tabIndex={-1}
-            onClick={() => setNavActionsOpen(false)}
-          />
-        )}
+        {navActionsOpen &&
+          createPortal(
+            <div
+              id="app-nav-actions-dropdown"
+              className="app-nav-actions-dropdown app-nav-actions-dropdown--fixed is-open"
+              role="menu"
+            >
+              <AtlasUpdateButton navStyle onDone={() => setNavActionsOpen(false)} />
+              <button type="button" className="app-nav-logout" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>,
+            document.body,
+          )}
         {navOpen && (
           <div
             className="app-nav-backdrop"
