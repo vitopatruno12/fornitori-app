@@ -637,6 +637,7 @@ function App() {
             type="button"
             className="app-nav-actions-backdrop"
             aria-label="Chiudi menu"
+            tabIndex={-1}
             onClick={() => setNavActionsOpen(false)}
           />
         )}

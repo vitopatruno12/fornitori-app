@@ -284,6 +284,8 @@ a:hover {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .app-nav-actions-backdrop {
@@ -606,6 +608,10 @@ a:hover {
     font-size: 0.74rem;
   }
 
+  .app-nav-actions {
+    z-index: 117;
+  }
+
   .app-nav-actions-menu {
     display: block;
   }
@@ -614,11 +620,15 @@ a:hover {
     display: none;
   }
 
+  .app-nav-actions-dropdown {
+    z-index: 118;
+  }
+
   .app-nav-actions-backdrop {
     display: block;
     position: fixed;
     inset: 56px 0 0 0;
-    z-index: 114;
+    z-index: 115;
     background: transparent;
     border: none;
     padding: 0;
