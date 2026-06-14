@@ -23,6 +23,9 @@ import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/s
 import {
   formatStaffBackupLabel,
   getLatestStaffBackup,
+  getPlanningWeekBackup,
+  getPlanningWeekBackupSavedAt,
+  savePlanningWeekBackup,
   saveStaffBackup,
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore } from '../utils/staffLocaleStore.js'
@@ -77,6 +80,59 @@ function weekDayOffsetFromDate(d) {
 
 function weekLoadDaysForSingleDate(d) {
   return new Set([weekDayOffsetFromDate(d)])
+}
+
+const PLANNING_BACKUP_SLOT_LABELS = ['1ª settimana', '2ª settimana', '3ª settimana', '4ª settimana']
+
+function formatShortItDate(ymd) {
+  const d = parseYMD(ymd)
+  if (Number.isNaN(d.getTime())) return ymd
+  return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
+}
+
+/** Le 4 settimane (lun–dom) del mese di riferimento per i backup pianificazione. */
+function planningMonthWeekSlots(referenceDate) {
+  const ref = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate())
+  const y = ref.getFullYear()
+  const m = ref.getMonth()
+  const lastDay = new Date(y, m + 1, 0)
+  let mon = startOfWeekMonday(new Date(y, m, 1))
+  const weeks = []
+  const seen = new Set()
+
+  while (weeks.length < PLANNING_BACKUP_SLOT_LABELS.length) {
+    const fromStr = toYMD(mon)
+    if (!seen.has(fromStr)) {
+      weeks.push({
+        slotIndex: weeks.length,
+        anchor: new Date(mon.getFullYear(), mon.getMonth(), mon.getDate()),
+        fromStr,
+        toStr: toYMD(addDays(mon, 6)),
+      })
+      seen.add(fromStr)
+    }
+    mon = addDays(mon, 7)
+    if (mon > addDays(lastDay, 7) && weeks.length > 0) break
+  }
+
+  while (weeks.length < PLANNING_BACKUP_SLOT_LABELS.length) {
+    const prev = weeks[weeks.length - 1]
+    const next = addDays(prev.anchor, 7)
+    weeks.push({
+      slotIndex: weeks.length,
+      anchor: new Date(next.getFullYear(), next.getMonth(), next.getDate()),
+      fromStr: toYMD(next),
+      toStr: toYMD(addDays(next, 6)),
+    })
+  }
+
+  return weeks
+}
+
+function findPlanningBackupSlotForAnchor(anchor, weeks) {
+  const a = toYMD(startOfWeekMonday(anchor))
+  const idx = weeks.findIndex((w) => w.fromStr === a)
+  return idx >= 0 ? idx : 0
 }
 
 function StaffCheckboxDropdown({
@@ -735,23 +791,33 @@ export default function StaffPage() {
   const [payrollShifts, setPayrollShifts] = useState([])
   const [payrollShiftsRefreshing, setPayrollShiftsRefreshing] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
+  const [planningBackupSlot, setPlanningBackupSlot] = useState(0)
   const [backupMeta, setBackupMeta] = useState(() => ({
     members: getLatestStaffBackup('members')?.savedAt ?? null,
-    planning: getLatestStaffBackup('planning')?.savedAt ?? null,
+    planning: getPlanningWeekBackupSavedAt(0),
     payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
   }))
 
-  const bumpBackupMeta = useCallback(() => {
+  const bumpBackupMeta = useCallback((planningSlot = planningBackupSlot) => {
     setBackupMeta({
       members: getLatestStaffBackup('members')?.savedAt ?? null,
-      planning: getLatestStaffBackup('planning')?.savedAt ?? null,
+      planning: getPlanningWeekBackupSavedAt(planningSlot),
       payroll: getLatestStaffBackup('payroll')?.savedAt ?? null,
     })
-  }, [])
+  }, [planningBackupSlot])
 
   const weekEnd = useMemo(() => addDays(weekAnchor, 6), [weekAnchor])
   const fromStr = useMemo(() => toYMD(weekAnchor), [weekAnchor])
   const toStr = useMemo(() => toYMD(weekEnd), [weekEnd])
+  const planningMonthWeeks = useMemo(() => planningMonthWeekSlots(weekAnchor), [weekAnchor])
+  const planningBackupSlotOptions = useMemo(
+    () =>
+      planningMonthWeeks.map((w) => ({
+        value: w.slotIndex,
+        label: `${PLANNING_BACKUP_SLOT_LABELS[w.slotIndex]} (${formatShortItDate(w.fromStr)} – ${formatShortItDate(w.toStr)})`,
+      })),
+    [planningMonthWeeks],
+  )
   const weekLoadTargetAnchor = useMemo(
     () => (planView === 'week' ? weekAnchor : startOfWeekMonday(formDate ? parseYMD(formDate) : new Date())),
     [planView, weekAnchor, formDate],
@@ -1069,6 +1135,15 @@ export default function StaffPage() {
   useEffect(() => {
     refreshMembers()
   }, [refreshMembers])
+
+  useEffect(() => {
+    const idx = findPlanningBackupSlotForAnchor(weekAnchor, planningMonthWeekSlots(weekAnchor))
+    setPlanningBackupSlot(idx)
+    setBackupMeta((m) => ({
+      ...m,
+      planning: getPlanningWeekBackupSavedAt(idx),
+    }))
+  }, [weekAnchor])
 
   const markPlanningStale = useCallback(() => {
     setShifts([])
@@ -2186,6 +2261,20 @@ export default function StaffPage() {
     }
   }
 
+  function handlePlanningBackupSlotChange(slotIndex) {
+    const weeks = planningMonthWeekSlots(weekAnchor)
+    const w = weeks[slotIndex]
+    if (!w) return
+    setPlanningBackupSlot(slotIndex)
+    setBackupMeta((m) => ({
+      ...m,
+      planning: getPlanningWeekBackupSavedAt(slotIndex),
+    }))
+    markPlanningStale()
+    setPlanView('week')
+    setWeekAnchor(new Date(w.anchor.getFullYear(), w.anchor.getMonth(), w.anchor.getDate()))
+  }
+
   async function handleBackupPlanning() {
     setBackupBusy(true)
     setError('')
@@ -2202,10 +2291,14 @@ export default function StaffPage() {
         return
       }
       const nameById = Object.fromEntries(members.map((m) => [m.id, m.name]))
-      saveStaffBackup('planning', {
+      const slotLabel = PLANNING_BACKUP_SLOT_LABELS[planningBackupSlot] || 'settimana'
+      savePlanningWeekBackup(planningBackupSlot, {
         rangeFrom: rangeFromStr,
         rangeTo: rangeToStr,
         planView,
+        weekSlot: planningBackupSlot,
+        weekSlotLabel: slotLabel,
+        monthYm: `${weekAnchor.getFullYear()}-${String(weekAnchor.getMonth() + 1).padStart(2, '0')}`,
         shifts: list.map((s) => ({
           member_name: nameById[s.staff_member_id] || '',
           work_date: s.work_date,
@@ -2215,9 +2308,9 @@ export default function StaffPage() {
           notes: s.notes || null,
         })),
       })
-      bumpBackupMeta()
+      bumpBackupMeta(planningBackupSlot)
       setSuccess(
-        `Backup pianificazione creato (${list.length} voci, ${rangeFromStr} → ${rangeToStr}, solo su questo browser).`,
+        `Backup ${slotLabel} creato (${list.length} voci, ${rangeFromStr} → ${rangeToStr}, solo su questo browser).`,
       )
     } catch (err) {
       setError(err?.message || 'Backup pianificazione non riuscito')
@@ -2227,18 +2320,21 @@ export default function StaffPage() {
   }
 
   async function handleRestorePlanningBackup() {
-    const latest = getLatestStaffBackup('planning')
+    const latest = getPlanningWeekBackup(planningBackupSlot)
     const rows = latest?.payload?.shifts
     if (!rows?.length) {
-      setError('Nessun backup pianificazione da ripristinare.')
+      setError(
+        `Nessun backup per ${PLANNING_BACKUP_SLOT_LABELS[planningBackupSlot] || 'questa settimana'}. Crea prima un backup.`,
+      )
       return
     }
     const when = formatStaffBackupLabel(latest.savedAt) || 'backup'
+    const slotLabel = latest.payload.weekSlotLabel || PLANNING_BACKUP_SLOT_LABELS[planningBackupSlot] || 'settimana'
     const from = latest.payload.rangeFrom || rangeFromStr
     const to = latest.payload.rangeTo || rangeToStr
     if (
       !window.confirm(
-        `Ripristinare ${rows.length} voci di pianificazione dal backup del ${when}?\n\nPeriodo backup: ${from} → ${to}.\nVengono ricreate solo le voci mancanti (duplicati saltati).`,
+        `Ripristinare ${rows.length} voci di pianificazione (${slotLabel}) dal backup del ${when}?\n\nPeriodo backup: ${from} → ${to}.\nVengono ricreate solo le voci mancanti (duplicati saltati).`,
       )
     ) {
       return
@@ -2294,11 +2390,11 @@ export default function StaffPage() {
       applyPlanningViewFromRange(backupRange)
       setPlanningLoaded(true)
       await loadForRange(backupRange.start, backupRange.end)
-      bumpBackupMeta()
+      bumpBackupMeta(planningBackupSlot)
       const missingNote = missingMembers > 0 ? ` ${missingMembers} senza dipendente corrispondente.` : ''
       setSuccess(
         created > 0
-          ? `Ripristinate ${created} voci di pianificazione (${from} → ${to})${skipped ? `; ${skipped} saltate` : ''}.${missingNote}`
+          ? `Ripristinate ${created} voci (${slotLabel}, ${from} → ${to})${skipped ? `; ${skipped} saltate` : ''}.${missingNote}`
           : `Nessuna nuova voce: ${skipped} già presenti o non ripristinabili.${missingNote} Periodo backup mostrato in griglia.`,
       )
     } catch (err) {
@@ -2842,6 +2938,9 @@ export default function StaffPage() {
           onRestore={handleRestorePlanningBackup}
           disabled={shiftBusy || demoLoading || reportLoading || backupBusy}
           busy={backupBusy}
+          slotOptions={planningBackupSlotOptions}
+          slotValue={planningBackupSlot}
+          onSlotChange={handlePlanningBackupSlotChange}
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>

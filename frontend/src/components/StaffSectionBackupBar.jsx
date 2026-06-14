@@ -12,14 +12,35 @@ export default function StaffSectionBackupBar({
   disabled = false,
   busy = false,
   formatBackupLabel = formatStaffBackupLabel,
+  slotOptions = null,
+  slotValue = 0,
+  onSlotChange,
 }) {
   const when = formatBackupLabel(lastSavedAt)
 
   return (
     <div className="staff-section-backup-bar" role="group" aria-label={`Backup ${sectionTitle}`}>
       <span className="staff-section-backup-title">Backup {sectionTitle}</span>
+      {slotOptions?.length ? (
+        <label className="staff-section-backup-slot">
+          <span className="staff-section-backup-slot-label">Settimana</span>
+          <select
+            className="form-control staff-section-backup-slot-select"
+            value={slotValue}
+            disabled={disabled || busy}
+            onChange={(e) => onSlotChange?.(Number(e.target.value))}
+            aria-label="Seleziona settimana e slot backup"
+          >
+            {slotOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <span className="staff-section-backup-meta">
-        {when ? <>Ultimo: <strong>{when}</strong></> : 'Nessun backup salvato'}
+        {when ? <>Backup: <strong>{when}</strong></> : 'Nessun backup per questa settimana'}
       </span>
       <button
         type="button"
@@ -35,7 +56,11 @@ export default function StaffSectionBackupBar({
         className="btn btn-outline-primary btn-sm"
         disabled={disabled || busy || !when}
         onClick={() => void onRestore?.()}
-        title={`Ripristina l'ultimo backup di ${sectionTitle}`}
+        title={
+          slotOptions?.length
+            ? `Ripristina il backup della settimana selezionata (${sectionTitle})`
+            : `Ripristina l'ultimo backup di ${sectionTitle}`
+        }
       >
         Ripristina
       </button>
