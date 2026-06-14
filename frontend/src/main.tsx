@@ -58,6 +58,7 @@ function App() {
   const navigate = useNavigate()
   const page = pathnameToPage(location.pathname)
   const [navOpen, setNavOpen] = React.useState(false)
+  const [navActionsOpen, setNavActionsOpen] = React.useState(false)
   const [aiOpen, setAiOpen] = React.useState(false)
   const [aiInput, setAiInput] = React.useState('')
   const [aiLoading, setAiLoading] = React.useState(false)
@@ -79,6 +80,7 @@ function App() {
 
   React.useEffect(() => {
     setNavOpen(false)
+    setNavActionsOpen(false)
   }, [location.pathname])
 
   React.useEffect(() => {
@@ -139,18 +141,24 @@ function App() {
   }, [navigate])
 
   React.useEffect(() => {
-    if (!navOpen) return
+    if (!navOpen && !navActionsOpen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setNavOpen(false)
+      if (e.key === 'Escape') {
+        setNavOpen(false)
+        setNavActionsOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [navOpen])
+  }, [navOpen, navActionsOpen])
 
   React.useEffect(() => {
     const mq = window.matchMedia('(min-width: 1200px)')
     const onChange = () => {
-      if (mq.matches) setNavOpen(false)
+      if (mq.matches) {
+        setNavOpen(false)
+        setNavActionsOpen(false)
+      }
     }
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
@@ -494,6 +502,7 @@ function App() {
   function handleLogout() {
     setAiOpen(false)
     setNavOpen(false)
+    setNavActionsOpen(false)
     setIsAuthenticated(false)
     setLoginPassword('')
     navigate('/')
@@ -580,52 +589,57 @@ function App() {
             </Link>
           </div>
           <div id="app-nav-menu" className={`app-nav-links${navOpen ? ' is-open' : ''}`}>
-            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Home">
-              <span className="app-nav-label">Home</span>
-              <span className="app-nav-label app-nav-label--compact">Home</span>
-            </NavLink>
-            <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Fornitori">
-              <span className="app-nav-label">Fornitori</span>
-              <span className="app-nav-label app-nav-label--compact">Fornitori</span>
-            </NavLink>
-            <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Nuovo ordine">
-              <span className="app-nav-label">Nuovo ordine</span>
-              <span className="app-nav-label app-nav-label--compact">Ordine</span>
-            </NavLink>
-            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Nuova consegna">
-              <span className="app-nav-label">Nuova consegna</span>
-              <span className="app-nav-label app-nav-label--compact">Consegna</span>
-            </NavLink>
-            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Storico consegne">
-              <span className="app-nav-label">Storico consegne</span>
-              <span className="app-nav-label app-nav-label--compact">Storico</span>
-            </NavLink>
-            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Fatture fornitori">
-              <span className="app-nav-label">Fatture fornitori</span>
-              <span className="app-nav-label app-nav-label--compact">Fatture</span>
-            </NavLink>
-            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Prima Nota Cassa">
-              <span className="app-nav-label">Prima Nota Cassa</span>
-              <span className="app-nav-label app-nav-label--compact">Cassa</span>
-            </NavLink>
-            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Personale">
-              <span className="app-nav-label">Personale</span>
-              <span className="app-nav-label app-nav-label--compact">Personale</span>
-            </NavLink>
-            <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="Assistenza tecnici">
-              <span className="app-nav-label">Assistenza tecnici</span>
-              <span className="app-nav-label app-nav-label--compact">Assistenza</span>
-            </NavLink>
-            <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)} title="VNE">
-              <span className="app-nav-label">VNE</span>
-              <span className="app-nav-label app-nav-label--compact">VNE</span>
-            </NavLink>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Home</NavLink>
+            <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fornitori</NavLink>
+            <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuovo ordine</NavLink>
+            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuova consegna</NavLink>
+            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
+            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fatture fornitori</NavLink>
+            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Prima Nota Cassa</NavLink>
+            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Personale</NavLink>
+            <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
+            <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
           </div>
           <div className="app-nav-actions">
-            <AtlasUpdateButton navStyle />
-            <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
+            <div className="app-nav-actions-menu">
+              <button
+                type="button"
+                className={`app-nav-actions-toggle${navActionsOpen ? ' is-open' : ''}`}
+                aria-expanded={navActionsOpen}
+                aria-controls="app-nav-actions-dropdown"
+                aria-label="Menu account e aggiornamento"
+                onClick={() => setNavActionsOpen((o) => !o)}
+              >
+                <span className="app-nav-toggle-bar" aria-hidden />
+                <span className="app-nav-toggle-bar" aria-hidden />
+                <span className="app-nav-toggle-bar" aria-hidden />
+              </button>
+              <div
+                id="app-nav-actions-dropdown"
+                className={`app-nav-actions-dropdown${navActionsOpen ? ' is-open' : ''}`}
+              >
+                <AtlasUpdateButton navStyle />
+                <button type="button" className="app-nav-logout" onClick={handleLogout}>
+                  Logout
+                </button>
+              </div>
+            </div>
+            <div className="app-nav-actions-inline">
+              <AtlasUpdateButton navStyle />
+              <button type="button" className="app-nav-logout" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>
           </div>
         </div>
+        {navActionsOpen && (
+          <button
+            type="button"
+            className="app-nav-actions-backdrop"
+            aria-label="Chiudi menu"
+            onClick={() => setNavActionsOpen(false)}
+          />
+        )}
         {navOpen && (
           <div
             className="app-nav-backdrop"

@@ -1822,28 +1822,28 @@ export default function StaffPage() {
       const store = await readStaffLocaleStore()
       const names = new Set()
       const userNames = new Set()
+      const serverNames = new Set()
       const meta = {}
-      for (const [rawKey, pack] of Object.entries(store)) {
-        const n = normalizeLocaleName(rawKey)
-        if (!n) continue
-        userNames.add(n)
-        if (Array.isArray(pack?.members) && pack.members.length > 0) {
-          names.add(n)
-        }
-      }
       try {
         const summaries = await fetchStaffLocalePacks()
         for (const row of Array.isArray(summaries) ? summaries : []) {
           const n = normalizeLocaleName(row?.locale_name)
           if (!n) continue
+          serverNames.add(n)
           userNames.add(n)
-          if ((row.member_count || 0) > 0) {
-            names.add(n)
-          }
+          names.add(n)
           if (row.saved_at) meta[n] = row.saved_at
         }
       } catch {
         // offline o API non disponibile: restano i nomi locali
+      }
+      for (const [rawKey, pack] of Object.entries(store)) {
+        const n = normalizeLocaleName(rawKey)
+        if (!n) continue
+        userNames.add(n)
+        if (!serverNames.has(n) && Array.isArray(pack?.members) && pack.members.length > 0) {
+          names.add(n)
+        }
       }
       for (const backupName of listMembersLocaleBackupNames()) {
         const n = normalizeLocaleName(backupName)
