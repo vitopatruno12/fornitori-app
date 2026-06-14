@@ -19,7 +19,9 @@ export default function OfflineBanner() {
             Puoi continuare a lavorare: ordini, Prima Nota e Personale vengono salvati sul dispositivo.
             {queueCount > 0 ? ` ${queueCount} in attesa di sync.` : ''}
           </span>
-          <span className="atlas-offline-banner-note">Gemini, AI vocale e upload file sono in pausa.</span>
+          <span className="atlas-offline-banner-note">
+            Panoramica mostra l&apos;ultimo snapshot salvato su questo dispositivo. Gemini, AI vocale e upload file sono in pausa.
+          </span>
         </>
       ) : syncing || queueCount > 0 ? (
         <>

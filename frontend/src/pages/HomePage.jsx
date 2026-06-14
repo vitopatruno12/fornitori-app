@@ -1,6 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchDashboardSummary } from '../services/dashboardService'
 import { useAppNavigate } from '../hooks/useAppNavigate'
+import { useOffline } from '../offline/OfflineContext'
+import { getCachedResponseWithMeta } from '../offline/offlineCache'
+
+const DASHBOARD_CACHE_PATH = '/dashboard/summary'
+
+function formatCachedAt(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('it-IT', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 function eur(n) {
   if (n == null || n === '') return '—'
@@ -135,21 +152,43 @@ function Last6MonthsTrend({ rows, onOpenInvoices }) {
 
 export default function HomePage() {
   const onNavigate = useAppNavigate()
+  const { online } = useOffline()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [cachedAt, setCachedAt] = useState(null)
   const [windowMonths, setWindowMonths] = useState('6')
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setLoading(true)
+      setError('')
       try {
-        setLoading(true)
-        setError('')
         const res = await fetchDashboardSummary()
-        if (!cancelled) setData(res)
-      } catch (e) {
-        if (!cancelled) setError('Impossibile caricare la dashboard. Verifica che il server sia attivo.')
+        if (cancelled) return
+        setData(res)
+        if (!online) {
+          const meta = await getCachedResponseWithMeta(DASHBOARD_CACHE_PATH)
+          setCachedAt(meta?.updatedAt ?? null)
+        } else {
+          setCachedAt(null)
+        }
+      } catch {
+        if (cancelled) return
+        const meta = await getCachedResponseWithMeta(DASHBOARD_CACHE_PATH)
+        if (meta?.data) {
+          setData(meta.data)
+          setCachedAt(meta.updatedAt ?? null)
+        } else {
+          setData(null)
+          setCachedAt(null)
+          setError(
+            online
+              ? 'Impossibile caricare la Panoramica. Verifica che il server sia attivo.'
+              : 'Nessuna Panoramica salvata su questo dispositivo. Apri questa pagina almeno una volta con connessione internet.',
+          )
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -157,7 +196,7 @@ export default function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [online])
 
   const monthlyRows = useMemo(() => {
     const all = data?.flussi_mensili || []
@@ -207,6 +246,33 @@ export default function HomePage() {
 
       {loading && <DashboardSkeleton />}
       {error && <div className="alert alert-danger">{error}</div>}
+      {!loading && data && cachedAt && (
+        <div className="alert alert-warning dashboard-offline-cache-note" role="status">
+          {online ? (
+            <>
+              Panoramica non aggiornata dal server: mostro l&apos;ultima versione salvata su questo dispositivo
+              {formatCachedAt(cachedAt) ? (
+                <>
+                  {' '}
+                  (<strong>{formatCachedAt(cachedAt)}</strong>)
+                </>
+              ) : null}
+              .
+            </>
+          ) : (
+            <>
+              Modalità offline: dati Panoramica salvati
+              {formatCachedAt(cachedAt) ? (
+                <>
+                  {' '}
+                  il <strong>{formatCachedAt(cachedAt)}</strong>
+                </>
+              ) : null}
+              . I numeri non includono le modifiche fatte dopo quel momento.
+            </>
+          )}
+        </div>
+      )}
 
       {data && !loading && (
         <>

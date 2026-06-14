@@ -3,6 +3,7 @@ import { dbDelete, dbGet, dbGetAll, dbPut, CACHE_STORE } from './offlineDb'
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 const CACHEABLE_PREFIXES = [
+  '/dashboard/summary',
   '/cash/entries',
   '/cash/summary',
   '/cash/link-options',
@@ -37,6 +38,17 @@ export async function getCachedResponse(path) {
     return null
   }
   return row.data ?? null
+}
+
+/** Come getCachedResponse, con timestamp ultimo salvataggio (per avvisi offline). */
+export async function getCachedResponseWithMeta(path) {
+  const row = await dbGet(CACHE_STORE, cacheKey(path))
+  if (!row) return null
+  if (Date.now() - Number(row.updatedAt || 0) > CACHE_TTL_MS) {
+    await dbDelete(CACHE_STORE, cacheKey(path))
+    return null
+  }
+  return { data: row.data ?? null, updatedAt: row.updatedAt ?? null }
 }
 
 export async function setCachedResponse(path, data) {
