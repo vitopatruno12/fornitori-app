@@ -41,7 +41,6 @@ import {
   planningBackupServerKey,
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
-import { loadPrimaNotaLocales } from '../constants/primaNotaLocales.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -1821,18 +1820,27 @@ export default function StaffPage() {
   const refreshSavedLocaleNames = useCallback(async () => {
     try {
       const store = await readStaffLocaleStore()
-      const names = new Set(Object.keys(store))
-      const userNames = new Set(Object.keys(store))
+      const names = new Set()
+      const userNames = new Set()
       const meta = {}
+      for (const [rawKey, pack] of Object.entries(store)) {
+        const n = normalizeLocaleName(rawKey)
+        if (!n) continue
+        userNames.add(n)
+        if (Array.isArray(pack?.members) && pack.members.length > 0) {
+          names.add(n)
+        }
+      }
       try {
         const summaries = await fetchStaffLocalePacks()
         for (const row of Array.isArray(summaries) ? summaries : []) {
           const n = normalizeLocaleName(row?.locale_name)
-          if (n) {
+          if (!n) continue
+          userNames.add(n)
+          if ((row.member_count || 0) > 0) {
             names.add(n)
-            userNames.add(n)
-            if (row.saved_at) meta[n] = row.saved_at
           }
+          if (row.saved_at) meta[n] = row.saved_at
         }
       } catch {
         // offline o API non disponibile: restano i nomi locali
@@ -1845,10 +1853,6 @@ export default function StaffPage() {
         }
       }
       setLocalePackSavedAtByName(meta)
-      for (const loc of loadPrimaNotaLocales()) {
-        const label = normalizeLocaleName(loc?.label)
-        if (label) names.add(label)
-      }
       const sortIt = (a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })
       setSavedLocaleNames([...names].sort(sortIt))
       setUserDeletableLocaleNames([...userNames].sort(sortIt))
