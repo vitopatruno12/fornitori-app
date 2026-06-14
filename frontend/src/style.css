@@ -174,13 +174,23 @@ a:hover {
   border-color: rgba(254, 202, 202, 0.7);
 }
 
+.app-nav-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  z-index: 113;
+}
+
+/* compat: vecchio nome */
 .app-nav-right {
   margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.45rem;
-  min-width: 240px;
   flex-shrink: 0;
 }
 
@@ -535,13 +545,20 @@ a:hover {
     margin-left: 0;
   }
 
-  .app-nav-right {
-    width: 100%;
-    min-width: 0;
-    margin-top: 0.35rem;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 0.45rem;
+  .app-nav-actions {
+    margin-left: auto;
+    flex-shrink: 0;
+    gap: 0.35rem;
+  }
+
+  .app-nav-actions .atlas-update-btn--nav {
+    padding: 0.38rem 0.5rem;
+    font-size: 0.76rem;
+  }
+
+  .app-nav-actions .app-nav-logout {
+    padding: 0.38rem 0.5rem;
+    font-size: 0.76rem;
   }
 
   .app-nav-backdrop {

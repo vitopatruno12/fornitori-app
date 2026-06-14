@@ -590,10 +590,10 @@ function App() {
             <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Personale</NavLink>
             <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
             <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
-            <div className="app-nav-right">
-              <AtlasUpdateButton navStyle />
-              <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
-            </div>
+          </div>
+          <div className="app-nav-actions">
+            <AtlasUpdateButton navStyle />
+            <button type="button" className="app-nav-logout" onClick={handleLogout}>Logout</button>
           </div>
         </div>
         {navOpen && (
