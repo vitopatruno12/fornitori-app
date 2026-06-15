@@ -21,6 +21,29 @@ VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STAT
 
 
 @dataclass
+class _VneHttpSession:
+    opener: urllib.request.OpenerDirector
+    cj: CookieJar
+    deadline: float
+    logged_in: bool = False
+
+    @classmethod
+    def create(cls, max_seconds: Optional[float] = None) -> "_VneHttpSession":
+        opener, cj = _build_opener()
+        return cls(
+            opener=opener,
+            cj=cj,
+            deadline=time.monotonic() + (max_seconds or VNE_STATUS_MAX_TOTAL_SEC),
+        )
+
+    def login(self, origin: Optional[str] = None) -> None:
+        if self.logged_in:
+            return
+        _ensure_vne_login(self.opener, self.cj, deadline=self.deadline, origin=origin)
+        self.logged_in = True
+
+
+@dataclass
 class VneModelConfig:
     id: str
     label: str
@@ -506,14 +529,18 @@ def _ensure_vne_login(
         )
 
 
-def _fetch_model_status(model: VneModelConfig) -> str:
+def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
     if not model.status_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
     _ensure_vne_credentials()
 
-    opener, cj = _build_opener()
     started = time.monotonic()
-    request_deadline = started + VNE_STATUS_MAX_TOTAL_SEC
+    if http_session is not None:
+        opener, cj = http_session.opener, http_session.cj
+        request_deadline = http_session.deadline
+    else:
+        opener, cj = _build_opener()
+        request_deadline = started + VNE_STATUS_MAX_TOTAL_SEC
     origin = _origin_from_url(model.status_url)
 
     def _raise_timeout() -> None:
@@ -531,7 +558,10 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     except Exception:
         pass
 
-    _ensure_vne_login(opener, cj, deadline=request_deadline, origin=origin)
+    if http_session is not None:
+        http_session.login(origin=origin)
+    else:
+        _ensure_vne_login(opener, cj, deadline=request_deadline, origin=origin)
     _warm_machine_session(opener, model, deadline=request_deadline)
     try:
         html_text = _open_bytes_with_retries(opener, _build_req(model.status_url, model.referer_url), deadline=request_deadline).decode("utf-8", errors="ignore")
@@ -735,6 +765,12 @@ def list_models():
 def get_vne_health():
     credentials_ok = _credentials_configured()
     models_out: List[VneHealthModelOut] = []
+    configured_models = [m for m in _models() if m.status_url]
+    session: Optional[_VneHttpSession] = None
+    if credentials_ok and configured_models:
+        session = _VneHttpSession.create(
+            max_seconds=VNE_STATUS_MAX_TOTAL_SEC * max(1, len(configured_models)),
+        )
     for model in _models():
         is_configured = bool(model.status_url)
         if not is_configured:
@@ -760,7 +796,7 @@ def get_vne_health():
             )
             continue
         try:
-            html = _fetch_model_status(model)
+            html = _fetch_model_status(model, http_session=session)
             blocked = "impossibile accedere alla macchina" in html.lower()
             models_out.append(
                 VneHealthModelOut(
