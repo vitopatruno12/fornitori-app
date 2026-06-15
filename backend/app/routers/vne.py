@@ -240,7 +240,7 @@ def _models() -> List[VneModelConfig]:
     m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/sel_chiusure")
     m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/chiusure/")
     m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/33/220/supervlt/contabilita")
-    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/33/220/supervlt/")
+    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/33/220/supervlt/?param=NO")
     return [
         VneModelConfig(
             id="model-1",
@@ -678,6 +678,34 @@ def _probe_model_status(model: VneModelConfig, http_session: _VneHttpSession) ->
         pass
     _navigate_machine_tunnel(http_session.opener, model, origin, deadline=model_deadline)
     return _read_status_html(http_session.opener, model, deadline=model_deadline)
+
+
+def _referer_for_model_page(model: VneModelConfig) -> str:
+    for u in _machine_tunnel_urls(model):
+        if "param=NO" in u:
+            return u
+    return model.referer_url or ""
+
+
+def _fetch_authenticated_model_page(
+    model: VneModelConfig,
+    url: str,
+    *,
+    referer: Optional[str] = None,
+    data: Optional[bytes] = None,
+    force_fresh: bool = False,
+) -> str:
+    """Login + tunnel macchina (sessionvneremote) poi GET pagina VNE."""
+    _ensure_vne_credentials()
+    opener, cj = _build_opener()
+    origin = _origin_from_url(model.status_url or url)
+    deadline = time.monotonic() + VNE_STATUS_MAX_TOTAL_SEC
+    if force_fresh:
+        opener, cj = _build_opener()
+    _maybe_login_vne(opener, cj, deadline=deadline, origin=origin)
+    _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
+    ref = referer or _referer_for_model_page(model)
+    return _fetch_html(opener, url, referer=ref, data=data, deadline=deadline)
 
 
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
@@ -1237,12 +1265,23 @@ def get_model_contabilita(model_id: str):
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca contabilita URL")
     _ensure_vne_credentials()
 
-    opener, cj = _build_opener()
-    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
+    referer = _referer_for_model_page(model)
     try:
-        page_html = _fetch_html(opener, model.contabilita_url, referer=model.referer_url)
+        page_html = _fetch_authenticated_model_page(model, model.contabilita_url, referer=referer)
+        if _is_machine_blocked(page_html):
+            page_html = _fetch_authenticated_model_page(
+                model, model.contabilita_url, referer=referer, force_fresh=True
+            )
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout lettura contabilita VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura contabilita VNE: {e}")
+
+    if _is_machine_blocked(page_html):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Contabilita VNE non disponibile per {model.label}: macchina non accessibile sul portale remoto",
+        )
 
     title = _extract_text(r"<h2 class=\"title\">([^<]+)</h2>", page_html) or "Contabilita"
     updated = _extract_text(r"Sistema di controllo remoto<br/>\s*([^<]+)\s*</td>", page_html)
