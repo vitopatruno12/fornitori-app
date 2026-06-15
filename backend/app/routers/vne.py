@@ -13,11 +13,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/vne", tags=["vne"])
-VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "12"))
+VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "20"))
 VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
 VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
-VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "18"))
-VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", "10"))
+VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "60"))
+VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "60")))
 
 
 @dataclass
@@ -390,16 +390,14 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[f
     Login best-effort su VNE Remote.
     Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
     """
-    login_page_url = _env_url("VNE_LOGIN_URL", "http://www.vneremote.com/accounts/login/?next=/vne/")
-    login_post_url = _env_url("VNE_LOGIN_POST_URL", "http://www.vneremote.com/login/")
-    landing_url = _env_url("VNE_LANDING_URL", "http://www.vneremote.com/vne/")
+    login_page_url = _env_url("VNE_LOGIN_URL", "http://vneremote.com/accounts/login/?next=/vne/")
+    login_post_url = _env_url("VNE_LOGIN_POST_URL", "http://vneremote.com/login/")
+    landing_url = _env_url("VNE_LANDING_URL", "http://vneremote.com/vne/")
     username = _env("VNE_USERNAME")
     password = _env("VNE_PASSWORD")
     if not username or not password:
         return
 
-    # Alcune installazioni VNE rispondono su host diversi (www vs non-www) con cookie dominio diverso.
-    # Proviamo entrambe le varianti per stabilizzare la sessione backend.
     page_candidates = [login_page_url]
     if "://www.vneremote.com/" in login_page_url:
         page_candidates.append(login_page_url.replace("://www.vneremote.com/", "://vneremote.com/"))
@@ -445,14 +443,29 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     _ensure_vne_credentials()
 
     opener, _ = _build_opener()
-    request_deadline = time.monotonic() + VNE_REQUEST_MAX_SEC
     started = time.monotonic()
-    _maybe_login_vne(opener, deadline=request_deadline)
+    request_deadline = started + VNE_STATUS_MAX_TOTAL_SEC
+
+    def _raise_timeout() -> None:
+        raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
+
+    # Molti endpoint stato rispondono già in HTTP senza sessione: evita login lento prima della lettura.
     req = _build_req(model.status_url, model.referer_url)
+    html_text = ""
     try:
         html_text = _open_bytes_with_retries(opener, req, deadline=request_deadline).decode("utf-8", errors="ignore")
+        if "impossibile accedere alla macchina" not in html_text.lower():
+            return html_text
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
+        _raise_timeout()
+    except Exception:
+        pass
+
+    _maybe_login_vne(opener, deadline=request_deadline)
+    try:
+        html_text = _open_bytes_with_retries(opener, _build_req(model.status_url, model.referer_url), deadline=request_deadline).decode("utf-8", errors="ignore")
+    except TimeoutError:
+        _raise_timeout()
     except Exception as e:
         url_hint = model.status_url or ""
         raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE ({url_hint}): {e}")
@@ -495,7 +508,7 @@ def _fetch_model_status(model: VneModelConfig) -> str:
             if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
                 break
             if _remaining_seconds(request_deadline) <= 0:
-                raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
+                _raise_timeout()
             try:
                 _fetch_html(opener, ref, referer=ref, deadline=request_deadline)
             except Exception:
@@ -504,7 +517,7 @@ def _fetch_model_status(model: VneModelConfig) -> str:
                 if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
                     break
                 if _remaining_seconds(request_deadline) <= 0:
-                    raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
+                    _raise_timeout()
                 try:
                     retry_html = _open_bytes_with_retries(opener, _build_req(su, ref), deadline=request_deadline).decode("utf-8", errors="ignore")
                     if "impossibile accedere alla macchina" not in retry_html.lower():
