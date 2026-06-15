@@ -1,5 +1,6 @@
 import os
 import re
+import ssl
 import urllib.parse
 import urllib.request
 import html
@@ -155,36 +156,59 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _env_url(name: str, default: str = "") -> str:
-    """Legge URL da env; forza https se nel .env è rimasto http://."""
+    """Legge URL da env. VNE Remote dal server Atlas risponde in HTTP (non HTTPS)."""
     raw = _env(name, default)
-    if raw.lower().startswith("http://"):
-        return "https://" + raw[7:]
+    if not raw:
+        return raw
+    if raw.startswith("//"):
+        return f"http:{raw}"
     return raw
+
+
+def _resolve_vne_url(base_origin: str, target: str) -> str:
+    """URL assoluto in env oppure path relativo rispetto all'origine login."""
+    t = (target or "").strip()
+    if not t:
+        return t
+    if re.match(r"^https?://", t, flags=re.IGNORECASE):
+        return t
+    return urllib.parse.urljoin(base_origin.rstrip("/") + "/", t.lstrip("/"))
+
+
+def _https_to_http_url(url: str) -> Optional[str]:
+    if (url or "").lower().startswith("https://"):
+        return "http://" + url[8:]
+    return None
+
+
+def _is_ssl_protocol_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "unsupported protocol" in msg or "wrong version number" in msg or "ssl" in msg and "protocol" in msg
 
 
 def _models() -> List[VneModelConfig]:
     """Tre slot modelli VNE (1 configurato, 2-3 pronti)."""
-    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "https://vneremote.com/27/77/supervlt/stato")
-    m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "https://vneremote.com/27/77/supervlt/sel_operazioni")
-    m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "https://vneremote.com/27/77/supervlt/operazioni/")
-    m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "https://vneremote.com/27/77/supervlt/sel_chiusure")
-    m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "https://vneremote.com/27/77/supervlt/chiusure/")
-    m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "https://vneremote.com/27/77/supervlt/contabilita")
-    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "https://vneremote.com/27/77/supervlt/")
-    m2 = _env_url("VNE_MODEL_2_STATUS_URL", "https://vneremote.com/17/161/supervlt/stato")
-    m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "https://vneremote.com/17/161/supervlt/sel_operazioni")
-    m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "https://vneremote.com/17/161/supervlt/operazioni/")
-    m2_sel_chiusure = _env_url("VNE_MODEL_2_SEL_CHIUSURE_URL", "https://vneremote.com/17/161/supervlt/sel_chiusure")
-    m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "https://vneremote.com/17/161/supervlt/chiusure/")
-    m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "https://vneremote.com/17/161/supervlt/contabilita")
-    m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "https://vneremote.com/17/161/supervlt/?param=NO")
-    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "https://vneremote.com/24/135/supervlt/stato")
-    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "https://vneremote.com/24/135/supervlt/sel_operazioni")
-    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "https://vneremote.com/24/135/supervlt/operazioni/")
-    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "https://vneremote.com/24/135/supervlt/sel_chiusure")
-    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "https://vneremote.com/24/135/supervlt/chiusure/")
-    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "https://vneremote.com/24/135/supervlt/contabilita")
-    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "https://vneremote.com/24/135/supervlt/?param=NO")
+    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "http://vneremote.com/27/77/supervlt/stato")
+    m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "http://vneremote.com/27/77/supervlt/sel_operazioni")
+    m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "http://vneremote.com/27/77/supervlt/operazioni/")
+    m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/sel_chiusure")
+    m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/chiusure/")
+    m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "http://vneremote.com/27/77/supervlt/contabilita")
+    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/27/77/supervlt/")
+    m2 = _env_url("VNE_MODEL_2_STATUS_URL", "http://vneremote.com/17/161/supervlt/stato")
+    m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/sel_operazioni")
+    m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/operazioni/")
+    m2_sel_chiusure = _env_url("VNE_MODEL_2_SEL_CHIUSURE_URL", "http://vneremote.com/17/161/supervlt/sel_chiusure")
+    m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "http://vneremote.com/17/161/supervlt/chiusure/")
+    m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "http://vneremote.com/17/161/supervlt/contabilita")
+    m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "http://vneremote.com/17/161/supervlt/?param=NO")
+    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/24/135/supervlt/stato")
+    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/sel_operazioni")
+    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/operazioni/")
+    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/sel_chiusure")
+    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/chiusure/")
+    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/24/135/supervlt/contabilita")
+    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/24/135/supervlt/?param=NO")
     return [
         VneModelConfig(
             id="model-1",
@@ -333,7 +357,13 @@ def _extract_first_number(html_text: str, patterns: List[str]) -> Optional[float
 
 def _build_opener() -> tuple[urllib.request.OpenerDirector, CookieJar]:
     cj = CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    ctx = ssl.create_default_context()
+    try:
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    except AttributeError:
+        pass
+    https_handler = urllib.request.HTTPSHandler(context=ctx)
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj), https_handler)
     return opener, cj
 
 
@@ -360,9 +390,9 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[f
     Login best-effort su VNE Remote.
     Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
     """
-    login_page_url = _env_url("VNE_LOGIN_URL", "https://www.vneremote.com/accounts/login/?next=/vne/")
-    login_post_url = _env_url("VNE_LOGIN_POST_URL", "https://www.vneremote.com/login/")
-    landing_url = _env_url("VNE_LANDING_URL", "https://www.vneremote.com/vne/")
+    login_page_url = _env_url("VNE_LOGIN_URL", "http://www.vneremote.com/accounts/login/?next=/vne/")
+    login_post_url = _env_url("VNE_LOGIN_POST_URL", "http://www.vneremote.com/login/")
+    landing_url = _env_url("VNE_LANDING_URL", "http://www.vneremote.com/vne/")
     username = _env("VNE_USERNAME")
     password = _env("VNE_PASSWORD")
     if not username or not password:
@@ -391,8 +421,8 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[f
             body = urllib.parse.urlencode(post_data).encode("utf-8")
             parsed_page = urllib.parse.urlparse(page_url)
             base_origin = f"{parsed_page.scheme}://{parsed_page.netloc}"
-            post_url = urllib.parse.urljoin(base_origin + "/", login_post_url)
-            landing = urllib.parse.urljoin(base_origin + "/", landing_url)
+            post_url = _resolve_vne_url(base_origin, login_post_url)
+            landing = _resolve_vne_url(base_origin, landing_url)
             headers = {
                 "User-Agent": "Mozilla/5.0",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -424,7 +454,8 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE: {e}")
+        url_hint = model.status_url or ""
+        raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE ({url_hint}): {e}")
 
     # Alcune macchine richiedono un "passaggio" sulla pagina base del modello
     # per agganciare correttamente la sessione prima della lettura stato.
@@ -521,6 +552,25 @@ def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.
                 sleep_for = min(sleep_for, max(0.0, remaining))
             if sleep_for > 0:
                 time.sleep(sleep_for)
+
+    # Alcuni endpoint VNE rispondono in HTTP chiaro: retry solo per GET (no credenziali nel body).
+    if last_exc and _is_ssl_protocol_error(last_exc) and req.data is None and req.full_url:
+        fallback = _https_to_http_url(req.full_url)
+        if fallback:
+            try:
+                _ensure_not_timed_out(deadline)
+                remaining = _remaining_seconds(deadline)
+                timeout = VNE_HTTP_TIMEOUT_SEC if remaining is None else max(0.5, min(VNE_HTTP_TIMEOUT_SEC, remaining))
+                fb_req = urllib.request.Request(
+                    fallback,
+                    headers=dict(req.header_items()),
+                    method=req.get_method(),
+                )
+                with opener.open(fb_req, timeout=timeout) as resp:
+                    return resp.read()
+            except Exception as e:
+                last_exc = e
+
     if last_exc:
         raise last_exc
     raise RuntimeError("Errore HTTP VNE sconosciuto")
