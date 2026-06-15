@@ -234,13 +234,13 @@ def _models() -> List[VneModelConfig]:
     m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "http://vneremote.com/17/161/supervlt/chiusure/")
     m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "http://vneremote.com/17/161/supervlt/contabilita")
     m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "http://vneremote.com/17/161/supervlt/?param=NO")
-    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/24/135/supervlt/stato")
-    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/sel_operazioni")
-    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "http://vneremote.com/24/135/supervlt/operazioni/")
-    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/sel_chiusure")
-    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/24/135/supervlt/chiusure/")
-    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/24/135/supervlt/contabilita")
-    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/24/135/supervlt/?param=NO")
+    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/33/220/supervlt/stato")
+    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "http://vneremote.com/33/220/supervlt/sel_operazioni")
+    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "http://vneremote.com/33/220/supervlt/operazioni/")
+    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/sel_chiusure")
+    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/chiusure/")
+    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/33/220/supervlt/contabilita")
+    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/33/220/supervlt/")
     return [
         VneModelConfig(
             id="model-1",
