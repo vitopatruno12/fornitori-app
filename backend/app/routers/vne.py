@@ -16,8 +16,11 @@ router = APIRouter(prefix="/vne", tags=["vne"])
 VNE_HTTP_TIMEOUT_SEC = float(os.getenv("VNE_HTTP_TIMEOUT_SEC", "20"))
 VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
 VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
-VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "60"))
-VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "60")))
+VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "40"))
+VNE_STATUS_RETRY_MAX_SEC = float(os.getenv("VNE_STATUS_RETRY_MAX_SEC", "12"))
+VNE_HEALTH_MAX_TOTAL_SEC = float(os.getenv("VNE_HEALTH_MAX_TOTAL_SEC", "22"))
+VNE_STATUS_REFERER_RETRY_MAX = int(os.getenv("VNE_STATUS_REFERER_RETRY_MAX", "3"))
+VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "40")))
 
 
 @dataclass
@@ -529,6 +532,28 @@ def _ensure_vne_login(
         )
 
 
+def _probe_model_status(model: VneModelConfig, http_session: _VneHttpSession) -> str:
+    """Lettura rapida stato per healthcheck: login condiviso, niente loop referer."""
+    origin = _origin_from_url(model.status_url)
+    try:
+        html_text = _open_bytes_with_retries(
+            http_session.opener,
+            _build_req(model.status_url, model.referer_url),
+            deadline=http_session.deadline,
+        ).decode("utf-8", errors="ignore")
+        if "impossibile accedere alla macchina" not in html_text.lower():
+            return html_text
+    except Exception:
+        pass
+    http_session.login(origin=origin)
+    _warm_machine_session(http_session.opener, model, deadline=http_session.deadline)
+    return _open_bytes_with_retries(
+        http_session.opener,
+        _build_req(model.status_url, model.referer_url),
+        deadline=http_session.deadline,
+    ).decode("utf-8", errors="ignore")
+
+
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
     if not model.status_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
@@ -574,6 +599,7 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
     # Alcune macchine richiedono un "passaggio" sulla pagina base del modello
     # per agganciare correttamente la sessione prima della lettura stato.
     if "impossibile accedere alla macchina" in html_text.lower():
+        retry_started = time.monotonic()
         # Costruisci candidate URL stato: host varianti + trailing slash on/off.
         status_candidates: List[str] = []
         for su in _host_variants(model.status_url):
@@ -585,7 +611,7 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
         referer_candidates: List[str] = []
         for ru in _host_variants(model.referer_url):
             referer_candidates.append(ru)
-        for su in status_candidates:
+        for su in status_candidates[:2]:
             base_dir = su.rsplit("/", 1)[0] + "/"
             referer_candidates.append(base_dir)
             referer_candidates.append(base_dir + "?param=NO")
@@ -597,6 +623,7 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
             if u and u not in seen_status:
                 seen_status.add(u)
                 uniq_status.append(u)
+        uniq_status = uniq_status[:3]
 
         seen_ref: set[str] = set()
         uniq_ref: List[str] = []
@@ -604,8 +631,11 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
             if u and u not in seen_ref:
                 seen_ref.add(u)
                 uniq_ref.append(u)
+        uniq_ref = uniq_ref[: max(1, VNE_STATUS_REFERER_RETRY_MAX)]
 
         for ref in uniq_ref:
+            if (time.monotonic() - retry_started) > VNE_STATUS_RETRY_MAX_SEC:
+                break
             if (time.monotonic() - started) > VNE_STATUS_MAX_TOTAL_SEC:
                 break
             if _remaining_seconds(request_deadline) <= 0:
@@ -768,9 +798,7 @@ def get_vne_health():
     configured_models = [m for m in _models() if m.status_url]
     session: Optional[_VneHttpSession] = None
     if credentials_ok and configured_models:
-        session = _VneHttpSession.create(
-            max_seconds=VNE_STATUS_MAX_TOTAL_SEC * max(1, len(configured_models)),
-        )
+        session = _VneHttpSession.create(max_seconds=VNE_HEALTH_MAX_TOTAL_SEC)
     for model in _models():
         is_configured = bool(model.status_url)
         if not is_configured:
@@ -796,7 +824,7 @@ def get_vne_health():
             )
             continue
         try:
-            html = _fetch_model_status(model, http_session=session)
+            html = _probe_model_status(model, session) if session else _fetch_model_status(model)
             blocked = "impossibile accedere alla macchina" in html.lower()
             models_out.append(
                 VneHealthModelOut(

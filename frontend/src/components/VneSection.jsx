@@ -85,24 +85,25 @@ export default function VneSection({ embedded = false }) {
         if (Array.isArray(data) && data.length > 0 && !data.some((m) => m.id === selectedId)) {
           setSelectedId(data[0].id)
         }
-        try {
-          const health = await fetchVneHealth()
-          if (!mounted) return
-          if (!health?.credentials_configured) {
-            setHealthWarning(health?.credentials_message || 'Credenziali VNE mancanti')
-          } else {
-            setHealthWarning('')
-          }
-        } catch {
-          if (!mounted) return
-          setHealthWarning('')
-        }
       } catch (e) {
         if (!mounted) return
         setError(e?.message || 'Errore caricamento modelli VNE')
       } finally {
         if (mounted) setLoadingModels(false)
       }
+      fetchVneHealth()
+        .then((health) => {
+          if (!mounted) return
+          if (!health?.credentials_configured) {
+            setHealthWarning(health?.credentials_message || 'Credenziali VNE mancanti')
+          } else {
+            setHealthWarning('')
+          }
+        })
+        .catch(() => {
+          if (!mounted) return
+          setHealthWarning('')
+        })
     })()
     return () => {
       mounted = false
@@ -131,7 +132,12 @@ export default function VneSection({ embedded = false }) {
     } catch (e) {
       setStatus(null)
       setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
-      setError(e?.message || 'Errore lettura stato VNE')
+      const msg = String(e?.message || '')
+      if (msg.includes('504')) {
+        setError('VNE: timeout lettura stato (richiesta troppo lenta). Riprova tra qualche secondo.')
+      } else {
+        setError(msg || 'Errore lettura stato VNE')
+      }
     } finally {
       setLoadingStatus(false)
     }
