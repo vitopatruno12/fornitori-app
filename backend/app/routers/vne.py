@@ -226,7 +226,7 @@ def _models() -> List[VneModelConfig]:
     m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/sel_chiusure")
     m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "http://vneremote.com/27/77/supervlt/chiusure/")
     m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "http://vneremote.com/27/77/supervlt/contabilita")
-    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/27/77/supervlt/")
+    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/27/77/supervlt/?param=NO")
     m2 = _env_url("VNE_MODEL_2_STATUS_URL", "http://vneremote.com/17/161/supervlt/stato")
     m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/sel_operazioni")
     m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "http://vneremote.com/17/161/supervlt/operazioni/")
@@ -412,6 +412,35 @@ def _has_vne_session(cj: CookieJar) -> bool:
     return any(c.name == "sessionid" for c in cj)
 
 
+def _has_vne_machine_tunnel(cj: CookieJar) -> bool:
+    """Cookie impostato dal portale quando si apre la macchina (vedi sessionvneremote)."""
+    return any(c.name == "sessionvneremote" for c in cj)
+
+
+def _machine_tunnel_urls(model: VneModelConfig) -> List[str]:
+    """URL da visitare per agganciare il tunnel; ?param=NO per primo (come nel browser)."""
+    raw: List[str] = []
+    for ru in _host_variants(model.referer_url):
+        if not ru:
+            continue
+        base = ru.split("?")[0].rstrip("/") + "/"
+        raw.append(base + "?param=NO")
+        raw.append(ru)
+        raw.append(base)
+    if model.status_url:
+        base_dir = model.status_url.rsplit("/", 1)[0] + "/"
+        for su in _host_variants(base_dir):
+            raw.append(su + "?param=NO")
+            raw.append(su)
+    seen: set[str] = set()
+    out: List[str] = []
+    for u in raw:
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def _is_machine_blocked(html: str) -> bool:
     low = (html or "").lower()
     return "impossibile accedere alla macchina" in low or "imposible acceder a la maquina" in low
@@ -453,6 +482,13 @@ def _vne_post_login(
     return _has_vne_session(cj)
 
 
+def _cookie_jar_from_opener(opener: urllib.request.OpenerDirector) -> Optional[CookieJar]:
+    for handler in opener.handlers:
+        if isinstance(handler, urllib.request.HTTPCookieProcessor):
+            return handler.cookiejar
+    return None
+
+
 def _navigate_machine_tunnel(
     opener: urllib.request.OpenerDirector,
     model: VneModelConfig,
@@ -465,30 +501,21 @@ def _navigate_machine_tunnel(
         _fetch_html(opener, landing_url, referer=landing_url, deadline=deadline)
     except Exception:
         pass
-    _warm_machine_session(opener, model, deadline=deadline)
+    _warm_machine_session(opener, model, deadline=deadline, cj=_cookie_jar_from_opener(opener))
 
 
 def _warm_machine_session(
     opener: urllib.request.OpenerDirector,
     model: VneModelConfig,
     deadline: Optional[float] = None,
+    cj: Optional[CookieJar] = None,
 ) -> None:
-    """Visita pagine base del modello per agganciare la sessione VNE alla macchina."""
-    candidates: List[str] = []
-    for ru in _host_variants(model.referer_url):
-        candidates.append(ru)
-    if model.status_url:
-        base_dir = model.status_url.rsplit("/", 1)[0] + "/"
-        for su in _host_variants(base_dir):
-            candidates.append(su)
-            candidates.append(su + "?param=NO")
-    seen: set[str] = set()
-    for url in candidates:
-        if not url or url in seen:
-            continue
-        seen.add(url)
+    """Visita pagine base del modello; serve sessionvneremote (referer ?param=NO)."""
+    for url in _machine_tunnel_urls(model):
         try:
             _fetch_html(opener, url, referer=url, deadline=deadline)
+            if cj is not None and _has_vne_machine_tunnel(cj):
+                return
         except Exception:
             continue
 
