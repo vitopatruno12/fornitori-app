@@ -18,7 +18,8 @@ VNE_HTTP_RETRIES = int(os.getenv("VNE_HTTP_RETRIES", "2"))
 VNE_HTTP_RETRY_DELAY_SEC = float(os.getenv("VNE_HTTP_RETRY_DELAY_SEC", "0.35"))
 VNE_STATUS_MAX_TOTAL_SEC = float(os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "40"))
 VNE_STATUS_RETRY_MAX_SEC = float(os.getenv("VNE_STATUS_RETRY_MAX_SEC", "12"))
-VNE_HEALTH_MAX_TOTAL_SEC = float(os.getenv("VNE_HEALTH_MAX_TOTAL_SEC", "22"))
+VNE_HEALTH_MAX_TOTAL_SEC = float(os.getenv("VNE_HEALTH_MAX_TOTAL_SEC", "75"))
+VNE_HEALTH_PER_MODEL_SEC = float(os.getenv("VNE_HEALTH_PER_MODEL_SEC", "18"))
 VNE_STATUS_REFERER_RETRY_MAX = int(os.getenv("VNE_STATUS_REFERER_RETRY_MAX", "3"))
 VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "40")))
 
@@ -633,30 +634,23 @@ def _authenticated_status_html(
 
 
 def _probe_model_status(model: VneModelConfig, http_session: _VneHttpSession) -> str:
-    """Lettura rapida stato per healthcheck: login condiviso, niente loop referer."""
+    """Lettura rapida stato per healthcheck: login condiviso, budget per modello."""
+    origin = _origin_from_url(model.status_url)
+    model_deadline = min(
+        http_session.deadline,
+        time.monotonic() + max(5.0, VNE_HEALTH_PER_MODEL_SEC),
+    )
+    http_session.login(origin=origin)
     try:
-        html_text = _read_status_html(http_session.opener, model, deadline=http_session.deadline)
+        html_text = _read_status_html(http_session.opener, model, deadline=model_deadline)
         if not _is_machine_blocked(html_text):
             return html_text
+    except TimeoutError:
+        raise
     except Exception:
         pass
-    html_text = _authenticated_status_html(
-        model,
-        http_session.opener,
-        http_session.cj,
-        http_session.deadline,
-        http_session=http_session,
-    )
-    if _is_machine_blocked(html_text):
-        html_text = _authenticated_status_html(
-            model,
-            http_session.opener,
-            http_session.cj,
-            http_session.deadline,
-            force_fresh_login=True,
-            http_session=http_session,
-        )
-    return html_text
+    _navigate_machine_tunnel(http_session.opener, model, origin, deadline=model_deadline)
+    return _read_status_html(http_session.opener, model, deadline=model_deadline)
 
 
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
@@ -914,7 +908,11 @@ def get_vne_health():
     configured_models = [m for m in _models() if m.status_url]
     session: Optional[_VneHttpSession] = None
     if credentials_ok and configured_models:
-        session = _VneHttpSession.create(max_seconds=VNE_HEALTH_MAX_TOTAL_SEC)
+        health_budget = max(
+            VNE_HEALTH_MAX_TOTAL_SEC,
+            VNE_HEALTH_PER_MODEL_SEC * len(configured_models) + 20.0,
+        )
+        session = _VneHttpSession.create(max_seconds=health_budget)
     for model in _models():
         is_configured = bool(model.status_url)
         if not is_configured:
@@ -949,6 +947,16 @@ def get_vne_health():
                     configured=True,
                     reachable=not blocked,
                     detail="OK" if not blocked else "Portale VNE raggiungibile ma macchina non accessibile",
+                )
+            )
+        except TimeoutError:
+            models_out.append(
+                VneHealthModelOut(
+                    model_id=model.id,
+                    model_label=model.label,
+                    configured=True,
+                    reachable=False,
+                    detail="Timeout healthcheck VNE (portale lento o macchina non risponde)",
                 )
             )
         except HTTPException as exc:
