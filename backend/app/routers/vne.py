@@ -39,14 +39,16 @@ class _VneHttpSession:
             deadline=time.monotonic() + (max_seconds or VNE_STATUS_MAX_TOTAL_SEC),
         )
 
-    def login(self, origin: Optional[str] = None, *, force: bool = False) -> None:
+    def login(self, origin: Optional[str] = None, *, force: bool = False) -> bool:
         if force:
             self.opener, self.cj = _build_opener()
             self.logged_in = False
         if self.logged_in:
-            return
-        _ensure_vne_login(self.opener, self.cj, deadline=self.deadline, origin=origin)
-        self.logged_in = True
+            return True
+        if _maybe_login_vne(self.opener, self.cj, deadline=self.deadline, origin=origin):
+            self.logged_in = True
+            return True
+        return False
 
 
 @dataclass
@@ -416,7 +418,38 @@ def _is_machine_blocked(html: str) -> bool:
 
 def _looks_like_login_page(html: str) -> bool:
     low = (html or "").lower()
-    return 'name="username"' in low or "placeholder=\"username\"" in low or "placeholder='username'" in low
+    has_user = 'name="username"' in low or "name='username'" in low
+    has_pass = 'type="password"' in low or "type='password'" in low
+    return has_user and has_pass
+
+
+def _vne_post_login(
+    opener: urllib.request.OpenerDirector,
+    cj: CookieJar,
+    page_url: str,
+    post_url: str,
+    post_data: Dict[str, str],
+    deadline: Optional[float] = None,
+) -> bool:
+    """POST login; True se compare sessionid (anche se redirect landing fallisce)."""
+    page_origin = f"{urllib.parse.urlparse(page_url).scheme}://{urllib.parse.urlparse(page_url).netloc}"
+    body = urllib.parse.urlencode(post_data).encode("utf-8")
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": page_url,
+        "Origin": page_origin,
+    }
+    try:
+        _open_bytes_with_retries(
+            opener,
+            urllib.request.Request(post_url, data=body, headers=headers),
+            deadline=deadline,
+        )
+    except Exception:
+        if not _has_vne_session(cj):
+            return False
+    return _has_vne_session(cj)
 
 
 def _navigate_machine_tunnel(
@@ -495,11 +528,22 @@ def _maybe_login_vne(
     if not username or not password:
         return False
 
-    page_candidates = [login_page_url]
+    page_candidates: List[str] = []
+    if "://vneremote.com/" in login_page_url and "://www." not in login_page_url:
+        page_candidates.append(login_page_url.replace("://vneremote.com/", "://www.vneremote.com/"))
+    page_candidates.append(login_page_url)
     if "://www.vneremote.com/" in login_page_url:
         page_candidates.append(login_page_url.replace("://www.vneremote.com/", "://vneremote.com/"))
-    elif "://vneremote.com/" in login_page_url:
+    elif "://vneremote.com/" in login_page_url and login_page_url not in page_candidates:
         page_candidates.append(login_page_url.replace("://vneremote.com/", "://www.vneremote.com/"))
+    # dedup
+    seen_pages: set[str] = set()
+    uniq_pages: List[str] = []
+    for u in page_candidates:
+        if u and u not in seen_pages:
+            seen_pages.add(u)
+            uniq_pages.append(u)
+    page_candidates = uniq_pages
 
     for page_url in page_candidates:
         _ensure_not_timed_out(deadline)
@@ -516,26 +560,25 @@ def _maybe_login_vne(
             }
             if csrf:
                 post_data["csrfmiddlewaretoken"] = csrf
-            body = urllib.parse.urlencode(post_data).encode("utf-8")
             page_origin = f"{parsed_page.scheme}://{parsed_page.netloc}"
-            post_url = _resolve_vne_url(page_origin, login_post_url)
+            post_targets: List[str] = []
+            for target in (_resolve_vne_url(page_origin, login_post_url), page_url):
+                if target and target not in post_targets:
+                    post_targets.append(target)
             landing = _resolve_vne_url(page_origin, landing_url)
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": page_url,
-                "Origin": page_origin,
-            }
-            _open_bytes_with_retries(
-                opener,
-                urllib.request.Request(post_url, data=body, headers=headers),
-                deadline=deadline,
-            )
-            if not _has_vne_session(cj):
+            logged = False
+            for post_url in post_targets:
+                if _vne_post_login(opener, cj, page_url, post_url, post_data, deadline=deadline):
+                    logged = True
+                    break
+            if not logged:
                 continue
-            landing_html = _fetch_html(opener, landing, referer=page_url, deadline=deadline)
-            if _looks_like_login_page(landing_html):
-                continue
+            try:
+                landing_html = _fetch_html(opener, landing, referer=page_url, deadline=deadline)
+                if _looks_like_login_page(landing_html):
+                    continue
+            except Exception:
+                pass
             return True
         except Exception:
             continue
@@ -584,7 +627,7 @@ def _authenticated_status_html(
     else:
         if force_fresh_login:
             opener, cj = _build_opener()
-        _ensure_vne_login(opener, cj, deadline=deadline, origin=origin)
+        _maybe_login_vne(opener, cj, deadline=deadline, origin=origin)
     _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
     return _read_status_html(opener, model, deadline=deadline)
 
@@ -713,18 +756,21 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
 
     if _is_machine_blocked(html_text):
         # Sul portale VNE il tunnel macchina scade: logout+login lo ripristina.
-        fresh_opener, fresh_cj = _build_opener()
-        if http_session is not None:
-            http_session.opener, http_session.cj = fresh_opener, fresh_cj
-            http_session.logged_in = False
-        html_text = _authenticated_status_html(
-            model,
-            fresh_opener,
-            fresh_cj,
-            request_deadline,
-            force_fresh_login=True,
-            http_session=http_session,
-        )
+        try:
+            fresh_opener, fresh_cj = _build_opener()
+            if http_session is not None:
+                http_session.opener, http_session.cj = fresh_opener, fresh_cj
+                http_session.logged_in = False
+            html_text = _authenticated_status_html(
+                model,
+                fresh_opener,
+                fresh_cj,
+                request_deadline,
+                force_fresh_login=True,
+                http_session=http_session,
+            )
+        except HTTPException:
+            pass
 
     return html_text
 
