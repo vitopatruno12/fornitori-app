@@ -39,7 +39,10 @@ class _VneHttpSession:
             deadline=time.monotonic() + (max_seconds or VNE_STATUS_MAX_TOTAL_SEC),
         )
 
-    def login(self, origin: Optional[str] = None) -> None:
+    def login(self, origin: Optional[str] = None, *, force: bool = False) -> None:
+        if force:
+            self.opener, self.cj = _build_opener()
+            self.logged_in = False
         if self.logged_in:
             return
         _ensure_vne_login(self.opener, self.cj, deadline=self.deadline, origin=origin)
@@ -406,9 +409,29 @@ def _has_vne_session(cj: CookieJar) -> bool:
     return any(c.name == "sessionid" for c in cj)
 
 
+def _is_machine_blocked(html: str) -> bool:
+    low = (html or "").lower()
+    return "impossibile accedere alla macchina" in low or "imposible acceder a la maquina" in low
+
+
 def _looks_like_login_page(html: str) -> bool:
     low = (html or "").lower()
     return 'name="username"' in low or "placeholder=\"username\"" in low or "placeholder='username'" in low
+
+
+def _navigate_machine_tunnel(
+    opener: urllib.request.OpenerDirector,
+    model: VneModelConfig,
+    origin: str,
+    deadline: Optional[float] = None,
+) -> None:
+    """Simula login → /vne/ → selezione macchina come sul portale remoto."""
+    landing_url = _env_url("VNE_LANDING_URL", f"{origin.rstrip('/')}/vne/")
+    try:
+        _fetch_html(opener, landing_url, referer=landing_url, deadline=deadline)
+    except Exception:
+        pass
+    _warm_machine_session(opener, model, deadline=deadline)
 
 
 def _warm_machine_session(
@@ -532,26 +555,65 @@ def _ensure_vne_login(
         )
 
 
+def _read_status_html(
+    opener: urllib.request.OpenerDirector,
+    model: VneModelConfig,
+    deadline: Optional[float] = None,
+) -> str:
+    return _open_bytes_with_retries(
+        opener,
+        _build_req(model.status_url or "", model.referer_url),
+        deadline=deadline,
+    ).decode("utf-8", errors="ignore")
+
+
+def _authenticated_status_html(
+    model: VneModelConfig,
+    opener: urllib.request.OpenerDirector,
+    cj: CookieJar,
+    deadline: float,
+    *,
+    force_fresh_login: bool = False,
+    http_session: Optional[_VneHttpSession] = None,
+) -> str:
+    """Login VNE + navigazione portale + lettura stato."""
+    origin = _origin_from_url(model.status_url)
+    if http_session is not None:
+        http_session.login(origin=origin, force=force_fresh_login)
+        opener = http_session.opener
+    else:
+        if force_fresh_login:
+            opener, cj = _build_opener()
+        _ensure_vne_login(opener, cj, deadline=deadline, origin=origin)
+    _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
+    return _read_status_html(opener, model, deadline=deadline)
+
+
 def _probe_model_status(model: VneModelConfig, http_session: _VneHttpSession) -> str:
     """Lettura rapida stato per healthcheck: login condiviso, niente loop referer."""
-    origin = _origin_from_url(model.status_url)
     try:
-        html_text = _open_bytes_with_retries(
-            http_session.opener,
-            _build_req(model.status_url, model.referer_url),
-            deadline=http_session.deadline,
-        ).decode("utf-8", errors="ignore")
-        if "impossibile accedere alla macchina" not in html_text.lower():
+        html_text = _read_status_html(http_session.opener, model, deadline=http_session.deadline)
+        if not _is_machine_blocked(html_text):
             return html_text
     except Exception:
         pass
-    http_session.login(origin=origin)
-    _warm_machine_session(http_session.opener, model, deadline=http_session.deadline)
-    return _open_bytes_with_retries(
+    html_text = _authenticated_status_html(
+        model,
         http_session.opener,
-        _build_req(model.status_url, model.referer_url),
-        deadline=http_session.deadline,
-    ).decode("utf-8", errors="ignore")
+        http_session.cj,
+        http_session.deadline,
+        http_session=http_session,
+    )
+    if _is_machine_blocked(html_text):
+        html_text = _authenticated_status_html(
+            model,
+            http_session.opener,
+            http_session.cj,
+            http_session.deadline,
+            force_fresh_login=True,
+            http_session=http_session,
+        )
+    return html_text
 
 
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
@@ -566,39 +628,32 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
     else:
         opener, cj = _build_opener()
         request_deadline = started + VNE_STATUS_MAX_TOTAL_SEC
-    origin = _origin_from_url(model.status_url)
 
     def _raise_timeout() -> None:
         raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
 
     # Molti endpoint stato rispondono già in HTTP senza sessione: evita login lento prima della lettura.
-    req = _build_req(model.status_url, model.referer_url)
     html_text = ""
     try:
-        html_text = _open_bytes_with_retries(opener, req, deadline=request_deadline).decode("utf-8", errors="ignore")
-        if "impossibile accedere alla macchina" not in html_text.lower():
+        html_text = _read_status_html(opener, model, deadline=request_deadline)
+        if not _is_machine_blocked(html_text):
             return html_text
     except TimeoutError:
         _raise_timeout()
     except Exception:
         pass
 
-    if http_session is not None:
-        http_session.login(origin=origin)
-    else:
-        _ensure_vne_login(opener, cj, deadline=request_deadline, origin=origin)
-    _warm_machine_session(opener, model, deadline=request_deadline)
-    try:
-        html_text = _open_bytes_with_retries(opener, _build_req(model.status_url, model.referer_url), deadline=request_deadline).decode("utf-8", errors="ignore")
-    except TimeoutError:
-        _raise_timeout()
-    except Exception as e:
-        url_hint = model.status_url or ""
-        raise HTTPException(status_code=502, detail=f"Errore lettura stato VNE ({url_hint}): {e}")
+    html_text = _authenticated_status_html(
+        model,
+        opener,
+        cj,
+        request_deadline,
+        http_session=http_session,
+    )
 
     # Alcune macchine richiedono un "passaggio" sulla pagina base del modello
     # per agganciare correttamente la sessione prima della lettura stato.
-    if "impossibile accedere alla macchina" in html_text.lower():
+    if _is_machine_blocked(html_text):
         retry_started = time.monotonic()
         # Costruisci candidate URL stato: host varianti + trailing slash on/off.
         status_candidates: List[str] = []
@@ -651,10 +706,25 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
                     _raise_timeout()
                 try:
                     retry_html = _open_bytes_with_retries(opener, _build_req(su, ref), deadline=request_deadline).decode("utf-8", errors="ignore")
-                    if "impossibile accedere alla macchina" not in retry_html.lower():
+                    if not _is_machine_blocked(retry_html):
                         return retry_html
                 except Exception:
                     continue
+
+    if _is_machine_blocked(html_text):
+        # Sul portale VNE il tunnel macchina scade: logout+login lo ripristina.
+        fresh_opener, fresh_cj = _build_opener()
+        if http_session is not None:
+            http_session.opener, http_session.cj = fresh_opener, fresh_cj
+            http_session.logged_in = False
+        html_text = _authenticated_status_html(
+            model,
+            fresh_opener,
+            fresh_cj,
+            request_deadline,
+            force_fresh_login=True,
+            http_session=http_session,
+        )
 
     return html_text
 
@@ -825,7 +895,7 @@ def get_vne_health():
             continue
         try:
             html = _probe_model_status(model, session) if session else _fetch_model_status(model)
-            blocked = "impossibile accedere alla macchina" in html.lower()
+            blocked = _is_machine_blocked(html)
             models_out.append(
                 VneHealthModelOut(
                     model_id=model.id,
