@@ -77,6 +77,32 @@ class VneModelOut(BaseModel):
     configured: bool
 
 
+class VneDenominationItem(BaseModel):
+    taglio_eur: str
+    quantita: int
+
+
+class VneAccettatoreStatus(BaseModel):
+    presente: Optional[str] = None
+    errore: Optional[str] = None
+    firmware: Optional[str] = None
+
+
+class VneHopperUnit(BaseModel):
+    hopper: str
+    presente: str
+    errore: str
+    vuoto: str
+    pieno: str
+
+
+class VneHopperStatus(BaseModel):
+    smart_hopper_1_eur: Optional[str] = None
+    firmware: Optional[str] = None
+    monete: List[VneDenominationItem] = []
+    units: List[VneHopperUnit] = []
+
+
 class VneStatusOut(BaseModel):
     model_id: str
     model_label: str
@@ -87,8 +113,11 @@ class VneStatusOut(BaseModel):
     totale_eur: Optional[float] = None
     contenuto_stacker_eur: Optional[float] = None
     totale_cassa_eur: Optional[float] = None
+    accettatore: VneAccettatoreStatus = VneAccettatoreStatus()
     cassette: List[Dict[str, str]]
-    hopper: Dict[str, str]
+    stacker_banconote: List[VneDenominationItem] = []
+    hopper: VneHopperStatus = VneHopperStatus()
+    monete_dettaglio: List[VneDenominationItem] = []
     updated_at_text: Optional[str] = None
     raw_excerpt: str
 
@@ -343,40 +372,156 @@ def _extract_text(pattern: str, html: str) -> Optional[str]:
     return re.sub(r"\s+", " ", m.group(1)).strip()
 
 
-def _parse_cassette(html: str) -> List[Dict[str, str]]:
-    out: List[Dict[str, str]] = []
-    # Parse robusto: cerca righe tabellari con 5 colonne class="tab"
+def _html_to_plain_text(raw: str) -> str:
+    x = raw or ""
+    x = re.sub(r"(?i)&nbsp;|&#160;", " ", x)
+    x = re.sub(r"(?i)<br\s*/?>", "\n", x)
+    x = re.sub(r"(?i)</br>", "\n", x)
+    x = re.sub(r"<[^>]+>", " ", x)
+    x = html.unescape(x)
+    return x
+
+
+def _extract_status_section(html_text: str, section_name: str) -> str:
+    rx = re.compile(
+        rf'<tr>\s*<td\s+class=["\']titolo["\']\s+colspan\s*=\s*["\']?2["\']?\s*>\s*{re.escape(section_name)}\s*</td>\s*</tr>'
+        rf"(.*?)(?:<tr>\s*<td\s+class=[\"']titolo[\"']|<tr>\s*<td\s+class=[\"']footer[\"'])",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    m = rx.search(html_text)
+    return m.group(1) if m else ""
+
+
+def _parse_label_value(block: str, label: str) -> Optional[str]:
+    m = re.search(
+        rf"{re.escape(label)}:\s*(.*?)(?:</br>|</td>|<br\s*/?>|\n|$)",
+        block,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    val = _strip_html_block(m.group(1)).strip()
+    return val or None
+
+
+def _parse_denomination_items(block: str, unit_word: str) -> List[VneDenominationItem]:
+    out: List[VneDenominationItem] = []
+    seen: set[tuple[str, int]] = set()
+    rx = re.compile(
+        rf"(\d+(?:[.,]\d+)?)\s*(?:&euro;|€)\s*:\s*(\d+)\s*{unit_word}\b",
+        flags=re.IGNORECASE,
+    )
+    for src in (block, _html_to_plain_text(block)):
+        if not src:
+            continue
+        for m in rx.finditer(src):
+            taglio = (m.group(1) or "").replace(",", ".").strip()
+            try:
+                qty = int(m.group(2))
+            except (TypeError, ValueError):
+                continue
+            key = (taglio, qty)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(VneDenominationItem(taglio_eur=taglio, quantita=qty))
+        if out:
+            break
+    return out
+
+
+def _parse_tab_rows(block: str, first_col_keyword: str, min_cols: int) -> List[List[str]]:
+    rows_out: List[List[str]] = []
     row_rx = re.compile(r"<tr>(.*?)</tr>", flags=re.IGNORECASE | re.DOTALL)
     td_rx = re.compile(r'<td\s+class=["\']tab["\']>\s*(.*?)\s*</td>', flags=re.IGNORECASE | re.DOTALL)
-    for row in row_rx.finditer(html):
-        cols = td_rx.findall(row.group(1))
-        if len(cols) < 5:
+    row_num_rx = re.compile(rf"{re.escape(first_col_keyword)}\s+(\d+)", flags=re.IGNORECASE)
+    for row in row_rx.finditer(block):
+        cols = [_strip_html_block(c) for c in td_rx.findall(row.group(1))]
+        if len(cols) < min_cols:
             continue
-        first = _strip_html_block(cols[0]).lower()
-        if "cassetta" not in first:
+        if not row_num_rx.search(cols[0]):
             continue
-        num = re.search(r"cassetta\s+(\d+)", first, flags=re.IGNORECASE)
+        rows_out.append(cols)
+    return rows_out
+
+
+def _parse_cassette(html: str) -> List[Dict[str, str]]:
+    block = _extract_status_section(html, "Stato accettatore JCM") or html
+    out: List[Dict[str, str]] = []
+    for cols in _parse_tab_rows(block, "cassetta", 5):
+        num = re.search(r"cassetta\s+(\d+)", cols[0], flags=re.IGNORECASE)
         out.append(
             {
                 "cassetta": (num.group(1) if num else "").strip(),
-                "presente": _strip_html_block(cols[1]),
-                "taglio_eur": _strip_html_block(cols[2]),
-                "banconote": _strip_html_block(cols[3]),
-                "totale_eur": _strip_html_block(cols[4]),
+                "presente": cols[1],
+                "taglio_eur": cols[2],
+                "banconote": cols[3],
+                "totale_eur": cols[4],
             }
         )
     return out
 
 
-def _parse_hopper(html: str) -> Dict[str, str]:
-    amt = _extract_text(r"Smart\s+Hopper\s+1:\s*([0-9.,]+)\s*&euro;", html)
-    if not amt:
-        amt = _extract_text(r"Smart\s+Hopper\s+1:\s*([0-9.,]+)\s*€", html)
-    fw = _extract_text(r"Firmware version:\s*([^<]+)</td>", html)
-    return {
-        "smart_hopper_1_eur": amt or "",
-        "firmware": fw or "",
-    }
+def _parse_accettatore(html: str) -> VneAccettatoreStatus:
+    block = _extract_status_section(html, "Stato accettatore JCM")
+    if not block:
+        return VneAccettatoreStatus()
+    fw = _extract_text(r"Firmware version:\s*([^<\n]+)", block)
+    return VneAccettatoreStatus(
+        presente=_parse_label_value(block, "Presente"),
+        errore=_parse_label_value(block, "Errore"),
+        firmware=fw,
+    )
+
+
+def _parse_stacker_banconote(html: str) -> List[VneDenominationItem]:
+    block = _extract_status_section(html, "Stato accettatore JCM")
+    if not block:
+        block = html
+    return _parse_denomination_items(block, "banconote")
+
+
+def _parse_hopper_monete(html: str, block: str) -> List[VneDenominationItem]:
+    items = _parse_denomination_items(block, "monete")
+    if items:
+        return items
+    smart = re.search(
+        r"Smart\s+Hopper\s+1\s*:.*?(?:Firmware version:|$)",
+        block,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if smart:
+        items = _parse_denomination_items(smart.group(0), "monete")
+        if items:
+            return items
+    return _parse_denomination_items(html, "monete")
+
+
+def _parse_hopper(html: str) -> VneHopperStatus:
+    block = _extract_status_section(html, "Stato Hopper")
+    if not block:
+        block = html
+    amt = _extract_text(r"Smart\s+Hopper\s+1:\s*([0-9.,]+)\s*(?:&euro;|€)", block)
+    fw = _extract_text(r"Firmware version:\s*([^<\n]+)", block)
+    units: List[VneHopperUnit] = []
+    for cols in _parse_tab_rows(block, "hopper", 5):
+        num = re.search(r"hopper\s+(\d+)", cols[0], flags=re.IGNORECASE)
+        units.append(
+            VneHopperUnit(
+                hopper=(num.group(1) if num else cols[0]).strip(),
+                presente=cols[1],
+                errore=cols[2],
+                vuoto=cols[3],
+                pieno=cols[4],
+            )
+        )
+    monete = _parse_hopper_monete(html, block)
+    return VneHopperStatus(
+        smart_hopper_1_eur=amt,
+        firmware=fw,
+        monete=monete,
+        units=units,
+    )
 
 
 def _extract_first_number(html_text: str, patterns: List[str]) -> Optional[float]:
@@ -1071,7 +1216,17 @@ def get_model_status(model_id: str):
     model = next((m for m in _models() if m.id == model_id), None)
     if not model:
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
-    html = _fetch_model_status(model)
+    if not model.status_url:
+        raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
+    html = ""
+    try:
+        session = _VneModelSession.open(model)
+        html = session.fetch(model.status_url, referer=_base_supervlt_referer(model))
+    except Exception:
+        html = ""
+    if not html or _is_machine_blocked(html):
+        html = _fetch_model_status(model)
+    hopper = _parse_hopper(html)
     title = _extract_text(r"<h2 class=\"title\">([^<]+)</h2>", html) or "Stato"
     banconote = _extract_first_number(
         html,
@@ -1121,8 +1276,11 @@ def get_model_status(model_id: str):
         totale_eur=totale,
         contenuto_stacker_eur=stacker,
         totale_cassa_eur=totale_cassa,
+        accettatore=_parse_accettatore(html),
         cassette=_parse_cassette(html),
-        hopper=_parse_hopper(html),
+        stacker_banconote=_parse_stacker_banconote(html),
+        hopper=hopper,
+        monete_dettaglio=hopper.monete,
         updated_at_text=updated,
         raw_excerpt=excerpt[:1800],
     )

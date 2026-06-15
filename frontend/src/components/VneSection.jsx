@@ -15,6 +15,16 @@ function eur(v) {
   return Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function statusMoneteDettaglio(status) {
+  if (Array.isArray(status?.monete_dettaglio) && status.monete_dettaglio.length > 0) {
+    return status.monete_dettaglio
+  }
+  if (Array.isArray(status?.hopper?.monete) && status.hopper.monete.length > 0) {
+    return status.hopper.monete
+  }
+  return []
+}
+
 function localInputToVneDate(value) {
   const v = String(value || '').trim()
   if (!v) return null
@@ -150,9 +160,15 @@ export default function VneSection({ embedded = false }) {
       data?.monete_eur != null ||
       data?.contenuto_stacker_eur != null ||
       data?.totale_cassa_eur != null ||
+      data?.accettatore?.presente ||
+      data?.accettatore?.firmware ||
       (Array.isArray(data?.cassette) && data.cassette.length > 0) ||
+      (Array.isArray(data?.stacker_banconote) && data.stacker_banconote.length > 0) ||
+      (Array.isArray(data?.monete_dettaglio) && data.monete_dettaglio.length > 0) ||
       data?.hopper?.smart_hopper_1_eur ||
-      data?.hopper?.firmware,
+      data?.hopper?.firmware ||
+      (Array.isArray(data?.hopper?.monete) && data.hopper.monete.length > 0) ||
+      (Array.isArray(data?.hopper?.units) && data.hopper.units.length > 0),
     )
   }
 
@@ -507,15 +523,113 @@ export default function VneSection({ embedded = false }) {
           {!status && !loadingStatus && <p className="empty-state">Nessun dato disponibile.</p>}
           {loadingStatus && <p className="loading">Lettura stato da VNE…</p>}
 
-          {status && (
+          {status && (() => {
+            const moneteDettaglio = statusMoneteDettaglio(status)
+            return (
             <table className="vne-contabilita-table vne-status-table">
               <tbody>
                 <tr>
                   <td className="vne-contabilita-title" colSpan={2}>{status.title || 'Stato'}</td>
                 </tr>
+
                 <tr>
-                  <td className="vne-contabilita-col">Totale</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_eur)} €</td>
+                  <td className="vne-contabilita-title" colSpan={2}>Stato accettatore JCM</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Presente</td>
+                  <td className="vne-contabilita-col">{status.accettatore?.presente || '—'}</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Errore</td>
+                  <td className="vne-contabilita-col">{status.accettatore?.errore || '—'}</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Firmware</td>
+                  <td className="vne-contabilita-col">{status.accettatore?.firmware || '—'}</td>
+                </tr>
+
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Cassette</td>
+                </tr>
+                {status.cassette?.length ? status.cassette.map((c, idx) => (
+                  <tr key={`${c.cassetta}-${idx}`}>
+                    <td className="vne-contabilita-col">
+                      Cassetta {c.cassetta} — presente {c.presente}, taglio {c.taglio_eur} €
+                    </td>
+                    <td className="vne-contabilita-col vne-contabilita-amount">
+                      {c.banconote} banconote — {c.totale_eur} €
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="vne-contabilita-col" colSpan={2}>Nessuna cassetta rilevata.</td>
+                  </tr>
+                )}
+
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Contenuto stacker</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Totale stacker</td>
+                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.contenuto_stacker_eur)} €</td>
+                </tr>
+                {status.stacker_banconote?.length ? status.stacker_banconote.map((b, idx) => (
+                  <tr key={`stacker-${b.taglio_eur}-${idx}`}>
+                    <td className="vne-contabilita-col">{b.taglio_eur} €</td>
+                    <td className="vne-contabilita-col vne-contabilita-amount">{b.quantita} banconote</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="vne-contabilita-col" colSpan={2}>Nessun dettaglio stacker.</td>
+                  </tr>
+                )}
+
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Stato Hopper</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Smart Hopper 1</td>
+                  <td className="vne-contabilita-col vne-contabilita-amount">{status.hopper?.smart_hopper_1_eur || '—'} €</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-col">Firmware hopper</td>
+                  <td className="vne-contabilita-col">{status.hopper?.firmware || '—'}</td>
+                </tr>
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Quantità monete</td>
+                </tr>
+                {moneteDettaglio.length ? moneteDettaglio.map((m, idx) => (
+                  <tr key={`moneta-${m.taglio_eur}-${idx}`}>
+                    <td className="vne-contabilita-col">{m.taglio_eur} €</td>
+                    <td className="vne-contabilita-col vne-contabilita-amount">{m.quantita} monete</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="vne-contabilita-col" colSpan={2}>Nessun dettaglio monete (riavvia backend dopo deploy).</td>
+                  </tr>
+                )}
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Hopper</td>
+                </tr>
+                {status.hopper?.units?.length ? status.hopper.units.map((u, idx) => (
+                  <tr key={`hopper-${u.hopper}-${idx}`}>
+                    <td className="vne-contabilita-col">Hopper {u.hopper}</td>
+                    <td className="vne-contabilita-col">
+                      Presente {u.presente} — Errore {u.errore} — Vuoto {u.vuoto} — Pieno {u.pieno}
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td className="vne-contabilita-col" colSpan={2}>Nessun hopper rilevato.</td>
+                  </tr>
+                )}
+                <tr>
+                  <td className="vne-contabilita-col">Totale cassa</td>
+                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_cassa_eur)} €</td>
+                </tr>
+
+                <tr>
+                  <td className="vne-contabilita-title" colSpan={2}>Riepilogo</td>
                 </tr>
                 <tr>
                   <td className="vne-contabilita-col">Banconote</td>
@@ -526,40 +640,8 @@ export default function VneSection({ embedded = false }) {
                   <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.monete_eur)} €</td>
                 </tr>
                 <tr>
-                  <td className="vne-contabilita-col">Contenuto stacker</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.contenuto_stacker_eur)} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Totale cassa</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_cassa_eur)} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Cassette</td>
-                </tr>
-                {status.cassette?.length ? status.cassette.map((c, idx) => (
-                  <tr key={`${c.cassetta}-${idx}`}>
-                    <td className="vne-contabilita-col">
-                      Cassetta {c.cassetta} ({c.presente}) - Taglio {c.taglio_eur} €
-                    </td>
-                    <td className="vne-contabilita-col vne-contabilita-amount">
-                      {c.banconote} banconote - {c.totale_eur} €
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td className="vne-contabilita-col" colSpan={2}>Nessuna cassetta rilevata nel parsing.</td>
-                  </tr>
-                )}
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Smart Hopper</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Smart Hopper 1</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{status.hopper?.smart_hopper_1_eur || '—'} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Firmware</td>
-                  <td className="vne-contabilita-col">{status.hopper?.firmware || '—'}</td>
+                  <td className="vne-contabilita-col">Totale</td>
+                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_eur)} €</td>
                 </tr>
                 <tr>
                   <td className="vne-contabilita-footer" colSpan={2}>
@@ -570,7 +652,8 @@ export default function VneSection({ embedded = false }) {
                 </tr>
               </tbody>
             </table>
-          )}
+            )
+          })()}
         </div>
       </section>
       )}
