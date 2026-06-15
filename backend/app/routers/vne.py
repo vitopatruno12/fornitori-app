@@ -367,6 +367,49 @@ def _build_opener() -> tuple[urllib.request.OpenerDirector, CookieJar]:
     return opener, cj
 
 
+def _origin_from_url(url: Optional[str], default: str = "http://vneremote.com") -> str:
+    if not url:
+        return default
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return default
+
+
+def _has_vne_session(cj: CookieJar) -> bool:
+    return any(c.name == "sessionid" for c in cj)
+
+
+def _looks_like_login_page(html: str) -> bool:
+    low = (html or "").lower()
+    return 'name="username"' in low or "placeholder=\"username\"" in low or "placeholder='username'" in low
+
+
+def _warm_machine_session(
+    opener: urllib.request.OpenerDirector,
+    model: VneModelConfig,
+    deadline: Optional[float] = None,
+) -> None:
+    """Visita pagine base del modello per agganciare la sessione VNE alla macchina."""
+    candidates: List[str] = []
+    for ru in _host_variants(model.referer_url):
+        candidates.append(ru)
+    if model.status_url:
+        base_dir = model.status_url.rsplit("/", 1)[0] + "/"
+        for su in _host_variants(base_dir):
+            candidates.append(su)
+            candidates.append(su + "?param=NO")
+    seen: set[str] = set()
+    for url in candidates:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            _fetch_html(opener, url, referer=url, deadline=deadline)
+        except Exception:
+            continue
+
+
 def _host_variants(url: Optional[str]) -> List[str]:
     if not url:
         return []
@@ -385,18 +428,23 @@ def _host_variants(url: Optional[str]) -> List[str]:
     return uniq
 
 
-def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[float] = None) -> None:
+def _maybe_login_vne(
+    opener: urllib.request.OpenerDirector,
+    cj: CookieJar,
+    deadline: Optional[float] = None,
+    origin: Optional[str] = None,
+) -> bool:
     """
-    Login best-effort su VNE Remote.
-    Se non riesce, continua comunque: alcuni endpoint stato possono essere già esposti.
+    Login su VNE Remote. Ritorna True solo se la sessione Django (sessionid) è attiva.
     """
-    login_page_url = _env_url("VNE_LOGIN_URL", "http://vneremote.com/accounts/login/?next=/vne/")
-    login_post_url = _env_url("VNE_LOGIN_POST_URL", "http://vneremote.com/login/")
-    landing_url = _env_url("VNE_LANDING_URL", "http://vneremote.com/vne/")
+    base_origin = origin or "http://vneremote.com"
+    login_page_url = _env_url("VNE_LOGIN_URL", f"{base_origin}/accounts/login/?next=/vne/")
+    login_post_url = _env_url("VNE_LOGIN_POST_URL", f"{base_origin}/login/")
+    landing_url = _env_url("VNE_LANDING_URL", f"{base_origin}/vne/")
     username = _env("VNE_USERNAME")
     password = _env("VNE_PASSWORD")
     if not username or not password:
-        return
+        return False
 
     page_candidates = [login_page_url]
     if "://www.vneremote.com/" in login_page_url:
@@ -410,31 +458,52 @@ def _maybe_login_vne(opener: urllib.request.OpenerDirector, deadline: Optional[f
             req = urllib.request.Request(page_url, headers={"User-Agent": "Mozilla/5.0"})
             html = _open_bytes_with_retries(opener, req, deadline=deadline).decode("utf-8", errors="ignore")
             csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", html) or ""
+            parsed_page = urllib.parse.urlparse(page_url)
+            next_param = urllib.parse.parse_qs(parsed_page.query).get("next", ["/vne/"])[0]
             post_data = {
                 "username": username,
                 "password": password,
+                "next": next_param,
             }
             if csrf:
                 post_data["csrfmiddlewaretoken"] = csrf
             body = urllib.parse.urlencode(post_data).encode("utf-8")
-            parsed_page = urllib.parse.urlparse(page_url)
-            base_origin = f"{parsed_page.scheme}://{parsed_page.netloc}"
-            post_url = _resolve_vne_url(base_origin, login_post_url)
-            landing = _resolve_vne_url(base_origin, landing_url)
+            page_origin = f"{parsed_page.scheme}://{parsed_page.netloc}"
+            post_url = _resolve_vne_url(page_origin, login_post_url)
+            landing = _resolve_vne_url(page_origin, landing_url)
             headers = {
                 "User-Agent": "Mozilla/5.0",
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Referer": page_url,
-                "Origin": base_origin,
+                "Origin": page_origin,
             }
-            _open_bytes_with_retries(opener, urllib.request.Request(post_url, data=body, headers=headers), deadline=deadline)
-            # Stabilizza la sessione richiedendo la landing /vne/.
-            _fetch_html(opener, landing, referer=page_url, deadline=deadline)
-            return
+            _open_bytes_with_retries(
+                opener,
+                urllib.request.Request(post_url, data=body, headers=headers),
+                deadline=deadline,
+            )
+            if not _has_vne_session(cj):
+                continue
+            landing_html = _fetch_html(opener, landing, referer=page_url, deadline=deadline)
+            if _looks_like_login_page(landing_html):
+                continue
+            return True
         except Exception:
             continue
-    # Non bloccare l'API: verrà tentata comunque la lettura stato.
-    return
+    return False
+
+
+def _ensure_vne_login(
+    opener: urllib.request.OpenerDirector,
+    cj: CookieJar,
+    deadline: Optional[float] = None,
+    origin: Optional[str] = None,
+) -> None:
+    if not _maybe_login_vne(opener, cj, deadline=deadline, origin=origin):
+        raise HTTPException(
+            status_code=503,
+            detail="Login VNE fallito: verifica VNE_USERNAME e VNE_PASSWORD nel backend .env",
+        )
 
 
 def _fetch_model_status(model: VneModelConfig) -> str:
@@ -442,9 +511,10 @@ def _fetch_model_status(model: VneModelConfig) -> str:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
     _ensure_vne_credentials()
 
-    opener, _ = _build_opener()
+    opener, cj = _build_opener()
     started = time.monotonic()
     request_deadline = started + VNE_STATUS_MAX_TOTAL_SEC
+    origin = _origin_from_url(model.status_url)
 
     def _raise_timeout() -> None:
         raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
@@ -461,7 +531,8 @@ def _fetch_model_status(model: VneModelConfig) -> str:
     except Exception:
         pass
 
-    _maybe_login_vne(opener, deadline=request_deadline)
+    _ensure_vne_login(opener, cj, deadline=request_deadline, origin=origin)
+    _warm_machine_session(opener, model, deadline=request_deadline)
     try:
         html_text = _open_bytes_with_retries(opener, _build_req(model.status_url, model.referer_url), deadline=request_deadline).decode("utf-8", errors="ignore")
     except TimeoutError:
@@ -798,8 +869,8 @@ def get_model_operation_filters(model_id: str):
     if not model.sel_operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_operazioni URL")
     _ensure_vne_credentials()
-    opener, _ = _build_opener()
-    _maybe_login_vne(opener)
+    opener, cj = _build_opener()
+    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
         html = _fetch_html(opener, model.sel_operazioni_url, referer=model.sel_operazioni_url or model.referer_url)
     except Exception as e:
@@ -826,8 +897,8 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL operazioni")
     _ensure_vne_credentials()
 
-    opener, _ = _build_opener()
-    _maybe_login_vne(opener)
+    opener, cj = _build_opener()
+    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
         filter_html = _fetch_html(opener, model.sel_operazioni_url, referer=model.referer_url)
     except Exception as e:
@@ -880,8 +951,8 @@ def get_model_cash_closing_filters(model_id: str):
     if not model.sel_chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_chiusure URL")
     _ensure_vne_credentials()
-    opener, _ = _build_opener()
-    _maybe_login_vne(opener)
+    opener, cj = _build_opener()
+    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
         html = _fetch_html(opener, model.sel_chiusure_url, referer=model.sel_chiusure_url or model.referer_url)
     except Exception as e:
@@ -951,8 +1022,8 @@ def get_model_contabilita(model_id: str):
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca contabilita URL")
     _ensure_vne_credentials()
 
-    opener, _ = _build_opener()
-    _maybe_login_vne(opener)
+    opener, cj = _build_opener()
+    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
         page_html = _fetch_html(opener, model.contabilita_url, referer=model.referer_url)
     except Exception as e:
@@ -989,8 +1060,8 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
     if not model.sel_chiusure_url or not model.chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL chiusure")
     _ensure_vne_credentials()
-    opener, _ = _build_opener()
-    _maybe_login_vne(opener)
+    opener, cj = _build_opener()
+    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
         filter_html = _fetch_html(opener, model.sel_chiusure_url, referer=model.sel_chiusure_url or model.referer_url)
     except Exception as e:
