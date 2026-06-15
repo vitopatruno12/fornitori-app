@@ -687,6 +687,36 @@ def _referer_for_model_page(model: VneModelConfig) -> str:
     return model.referer_url or ""
 
 
+def _base_supervlt_referer(model: VneModelConfig) -> str:
+    """Referer menu macchina (es. .../supervlt/) usato da sel_operazioni e sel_chiusure."""
+    if model.status_url:
+        return model.status_url.rsplit("/", 1)[0] + "/"
+    return _referer_for_model_page(model)
+
+
+@dataclass
+class _VneModelSession:
+    opener: urllib.request.OpenerDirector
+    cj: CookieJar
+    deadline: float
+    model: VneModelConfig
+    origin: str
+
+    @classmethod
+    def open(cls, model: VneModelConfig) -> "_VneModelSession":
+        _ensure_vne_credentials()
+        opener, cj = _build_opener()
+        origin = _origin_from_url(model.status_url)
+        deadline = time.monotonic() + VNE_STATUS_MAX_TOTAL_SEC
+        _maybe_login_vne(opener, cj, deadline=deadline, origin=origin)
+        _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
+        return cls(opener=opener, cj=cj, deadline=deadline, model=model, origin=origin)
+
+    def fetch(self, url: str, *, referer: Optional[str] = None, data: Optional[bytes] = None) -> str:
+        ref = referer or _referer_for_model_page(self.model)
+        return _fetch_html(self.opener, url, referer=ref, data=data, deadline=self.deadline)
+
+
 def _fetch_authenticated_model_page(
     model: VneModelConfig,
     url: str,
@@ -695,17 +725,11 @@ def _fetch_authenticated_model_page(
     data: Optional[bytes] = None,
     force_fresh: bool = False,
 ) -> str:
-    """Login + tunnel macchina (sessionvneremote) poi GET pagina VNE."""
-    _ensure_vne_credentials()
-    opener, cj = _build_opener()
-    origin = _origin_from_url(model.status_url or url)
-    deadline = time.monotonic() + VNE_STATUS_MAX_TOTAL_SEC
+    """Login + tunnel macchina (sessionvneremote) poi GET/POST pagina VNE."""
+    session = _VneModelSession.open(model)
     if force_fresh:
-        opener, cj = _build_opener()
-    _maybe_login_vne(opener, cj, deadline=deadline, origin=origin)
-    _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
-    ref = referer or _referer_for_model_page(model)
-    return _fetch_html(opener, url, referer=ref, data=data, deadline=deadline)
+        session = _VneModelSession.open(model)
+    return session.fetch(url, referer=referer, data=data)
 
 
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
@@ -1112,10 +1136,11 @@ def get_model_operation_filters(model_id: str):
     if not model.sel_operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_operazioni URL")
     _ensure_vne_credentials()
-    opener, cj = _build_opener()
-    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
-        html = _fetch_html(opener, model.sel_operazioni_url, referer=model.sel_operazioni_url or model.referer_url)
+        session = _VneModelSession.open(model)
+        html = session.fetch(model.sel_operazioni_url, referer=_base_supervlt_referer(model))
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout lettura filtri operazioni VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura filtro operazioni VNE: {e}")
 
@@ -1139,11 +1164,12 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
     if not model.sel_operazioni_url or not model.operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL operazioni")
     _ensure_vne_credentials()
-
-    opener, cj = _build_opener()
-    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
+    base_ref = _base_supervlt_referer(model)
     try:
-        filter_html = _fetch_html(opener, model.sel_operazioni_url, referer=model.referer_url)
+        session = _VneModelSession.open(model)
+        filter_html = session.fetch(model.sel_operazioni_url, referer=base_ref)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout query operazioni VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura pagina filtri VNE: {e}")
 
@@ -1168,9 +1194,25 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
 
     body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
     try:
-        html = _fetch_html(opener, model.operazioni_url, referer=model.sel_operazioni_url, data=body)
+        html = session.fetch(model.operazioni_url, referer=model.sel_operazioni_url, data=body)
+        if _is_machine_blocked(html):
+            session = _VneModelSession.open(model)
+            filter_html = session.fetch(model.sel_operazioni_url, referer=base_ref)
+            csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", filter_html) or ""
+            if csrf:
+                form_data = [("csrfmiddlewaretoken", csrf)] + [p for p in form_data if p[0] != "csrfmiddlewaretoken"]
+                body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
+            html = session.fetch(model.operazioni_url, referer=model.sel_operazioni_url, data=body)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout query operazioni VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore query operazioni VNE: {e}")
+
+    if _is_machine_blocked(html):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Operazioni VNE non disponibili per {model.label}: macchina non accessibile sul portale remoto",
+        )
 
     rows = _parse_operations_rows(html)
     next_path = _extract_text(r'<a class="mainLink"\s+href="([^"]+)">\s*Next\s*</a>', html)
@@ -1194,10 +1236,11 @@ def get_model_cash_closing_filters(model_id: str):
     if not model.sel_chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_chiusure URL")
     _ensure_vne_credentials()
-    opener, cj = _build_opener()
-    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
     try:
-        html = _fetch_html(opener, model.sel_chiusure_url, referer=model.sel_chiusure_url or model.referer_url)
+        session = _VneModelSession.open(model)
+        html = session.fetch(model.sel_chiusure_url, referer=_base_supervlt_referer(model))
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout lettura filtri chiusure VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura filtro chiusure VNE: {e}")
     operators = _extract_values_by_name(html, "operators")
@@ -1314,10 +1357,12 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
     if not model.sel_chiusure_url or not model.chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL chiusure")
     _ensure_vne_credentials()
-    opener, cj = _build_opener()
-    _ensure_vne_login(opener, cj, origin=_origin_from_url(model.sel_operazioni_url or model.status_url))
+    base_ref = _base_supervlt_referer(model)
     try:
-        filter_html = _fetch_html(opener, model.sel_chiusure_url, referer=model.sel_chiusure_url or model.referer_url)
+        session = _VneModelSession.open(model)
+        filter_html = session.fetch(model.sel_chiusure_url, referer=base_ref)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout query chiusure VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore lettura pagina filtri chiusure VNE: {e}")
     csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", filter_html) or ""
@@ -1336,9 +1381,24 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
             form_data.append(("operators", op))
     body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
     try:
-        html = _fetch_html(opener, model.chiusure_url, referer=model.sel_chiusure_url, data=body)
+        html = session.fetch(model.chiusure_url, referer=model.sel_chiusure_url, data=body)
+        if _is_machine_blocked(html):
+            session = _VneModelSession.open(model)
+            filter_html = session.fetch(model.sel_chiusure_url, referer=base_ref)
+            csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", filter_html) or ""
+            if csrf:
+                form_data = [("csrfmiddlewaretoken", csrf)] + [p for p in form_data if p[0] != "csrfmiddlewaretoken"]
+                body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
+            html = session.fetch(model.chiusure_url, referer=model.sel_chiusure_url, data=body)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout query chiusure VNE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Errore query chiusure VNE: {e}")
+    if _is_machine_blocked(html):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Chiusure VNE non disponibili per {model.label}: macchina non accessibile sul portale remoto",
+        )
     rows = _parse_cash_closing_rows(html)
     next_path = _extract_text(r'<a class="mainLink"\s+href="([^"]+)">\s*Next\s*</a>', html)
     next_url = urllib.parse.urljoin(model.chiusure_url, next_path) if next_path else None
