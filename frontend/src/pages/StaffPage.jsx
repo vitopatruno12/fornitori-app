@@ -46,6 +46,7 @@ import {
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import { isOnline } from '../offline/offlineStatus'
+import { patchCachedListsForDelete } from '../offline/offlineCache'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -1855,17 +1856,27 @@ export default function StaffPage() {
       setError('')
       if (editingMemberId === m.id) resetMemberForm()
       if (memberInfoId === m.id) setMemberInfoId(null)
-      const res = await deleteStaffMember(m.id)
-      const queuedOffline = Boolean(res?.__offline)
-      setMembers((prev) => prev.filter((row) => row.id !== m.id))
-      setShifts((prev) => prev.filter((row) => row.staff_member_id !== m.id))
+      let res = null
+      let queuedOffline = false
+      try {
+        res = await deleteStaffMember(m.id)
+        queuedOffline = isQueuedOfflineResponse(res)
+      } catch (err) {
+        if (!isOnline()) {
+          queuedOffline = true
+          await patchCachedListsForDelete(`/staff/members/${m.id}`)
+        } else throw err
+      }
+      setMembers((prev) => prev.filter((row) => !memberIdsEqual(row.id, m.id)))
+      setShifts((prev) => prev.filter((row) => !memberIdsEqual(row.staff_member_id, m.id)))
+      setPayrollShifts((prev) => prev.filter((row) => !memberIdsEqual(row.staff_member_id, m.id)))
       setFormMemberIds((prev) => {
         if (!prev.has(m.id)) return prev
         const next = new Set(prev)
         next.delete(m.id)
         return next
       })
-      if (queuedOffline || isOfflineQueuedMessage(res?.message)) {
+      if (queuedOffline) {
         setSuccess(`Dipendente rimosso in locale: sincronizzazione automatica alla prossima connessione.`)
       } else {
         setSuccess('Dipendente rimosso')
@@ -1896,8 +1907,17 @@ export default function StaffPage() {
       setMemberInfoId(null)
       resetMemberForm()
       const deletedCountBeforeSync = members.length
-      const r = await deleteAllStaffMembers()
-      const queuedOffline = Boolean(r?.__offline)
+      let r = null
+      let queuedOffline = false
+      try {
+        r = await deleteAllStaffMembers()
+        queuedOffline = isQueuedOfflineResponse(r)
+      } catch (err) {
+        if (!isOnline()) {
+          queuedOffline = true
+          await patchCachedListsForDelete('/staff/members/bulk')
+        } else throw err
+      }
       const n = queuedOffline ? deletedCountBeforeSync : r?.deleted ?? 0
       markPlanningStale()
       setEditingShiftId(null)
@@ -1909,6 +1929,7 @@ export default function StaffPage() {
       setFormNotes('')
       setMembers([])
       setShifts([])
+      setPayrollShifts([])
       if (!queuedOffline) {
         try {
           await refreshMembers()
@@ -1918,7 +1939,6 @@ export default function StaffPage() {
       }
       setHoursOverride({})
       setPayrollImporto({})
-      setPayrollShifts([])
       setSuccess(
         queuedOffline
           ? `Eliminati ${n} dipendenti in locale: sincronizzazione automatica alla prossima connessione.`
@@ -1951,6 +1971,27 @@ export default function StaffPage() {
   function isOfflineQueuedMessage(message) {
     const msg = String(message || '')
     return msg.includes('Sei offline') || msg.includes('quando torna la connessione')
+  }
+
+  function isQueuedOfflineResponse(res) {
+    return Boolean(res?.__offline) || isOfflineQueuedMessage(res?.message)
+  }
+
+  function memberIdsEqual(a, b) {
+    return Number(a) === Number(b)
+  }
+
+  function filterShiftsOutsideRange(rows, fromStr, toStr) {
+    const from = String(fromStr || '').slice(0, 10)
+    const to = String(toStr || '').slice(0, 10)
+    return (Array.isArray(rows) ? rows : []).filter((row) => {
+      const wd = shiftWorkDateKey(row.work_date)
+      return wd < from || wd > to
+    })
+  }
+
+  function removeShiftFromLists(rows, shiftId) {
+    return (Array.isArray(rows) ? rows : []).filter((row) => !memberIdsEqual(row.id, shiftId))
   }
 
   function isUserDeletableLocaleName(localeName) {
@@ -2814,16 +2855,38 @@ export default function StaffPage() {
     if (!window.confirm('Eliminare questa voce?')) return
     setShiftBusy(true)
     try {
-      await deleteStaffShift(id)
-      setSuccess('Voce eliminata')
+      setError('')
+      let res = null
+      let queuedOffline = false
+      try {
+        res = await deleteStaffShift(id)
+        queuedOffline = isQueuedOfflineResponse(res)
+      } catch (err) {
+        if (!isOnline()) {
+          queuedOffline = true
+          await patchCachedListsForDelete(`/staff/shifts/${id}`)
+        } else throw err
+      }
+      if (queuedOffline) {
+        setShifts((prev) => removeShiftFromLists(prev, id))
+        setPayrollShifts((prev) => removeShiftFromLists(prev, id))
+        setSuccess('Voce rimossa in locale: sincronizzazione automatica alla prossima connessione.')
+      } else {
+        setSuccess('Voce eliminata')
+        await reloadPlanning()
+      }
       if (editingShiftId === id) resetForm()
-      await reloadPlanning()
     } catch (err) {
       const msg = String(err?.message || '')
       if (msg.includes('404') || msg.includes('Voce non trovata') || msg.includes('Not Found')) {
         if (editingShiftId === id) resetForm()
         setError('Voce già assente sul server. Elenco aggiornato.')
-        await reloadPlanning()
+        if (!isOnline()) {
+          setShifts((prev) => removeShiftFromLists(prev, id))
+          setPayrollShifts((prev) => removeShiftFromLists(prev, id))
+        } else {
+          await reloadPlanning()
+        }
       } else {
         setError(msg || 'Errore eliminazione')
       }
@@ -2850,11 +2913,37 @@ export default function StaffPage() {
     setShiftBusy(true)
     setError('')
     try {
-      const r = await deleteStaffShiftsBulk(rangeFromStr, rangeToStr)
-      const n = r?.deleted ?? 0
-      setSuccess(n > 0 ? `Eliminate ${n} voci di planning.` : 'Nessuna voce da eliminare in questo periodo.')
+      let r = null
+      let queuedOffline = false
+      try {
+        r = await deleteStaffShiftsBulk(rangeFromStr, rangeToStr)
+        queuedOffline = isQueuedOfflineResponse(r)
+      } catch (err) {
+        if (!isOnline()) {
+          queuedOffline = true
+          const q = new URLSearchParams({ from: rangeFromStr, to: rangeToStr })
+          await patchCachedListsForDelete(`/staff/shifts/bulk?${q}`)
+        } else throw err
+      }
+      const removedCount = queuedOffline
+        ? shifts.filter((row) => {
+            const wd = shiftWorkDateKey(row.work_date)
+            return wd >= rangeFromStr && wd <= rangeToStr
+          }).length
+        : r?.deleted ?? 0
+      if (queuedOffline) {
+        setShifts((prev) => filterShiftsOutsideRange(prev, rangeFromStr, rangeToStr))
+        setPayrollShifts((prev) => filterShiftsOutsideRange(prev, rangeFromStr, rangeToStr))
+        setSuccess(
+          removedCount > 0
+            ? `Eliminate ${removedCount} voci di planning in locale: sincronizzazione automatica alla prossima connessione.`
+            : 'Nessuna voce da eliminare in questo periodo.',
+        )
+      } else {
+        setSuccess(removedCount > 0 ? `Eliminate ${removedCount} voci di planning.` : 'Nessuna voce da eliminare in questo periodo.')
+        await reloadPlanning()
+      }
       resetForm()
-      await reloadPlanning()
     } catch (err) {
       setError(err?.message || 'Errore eliminazione planning')
     } finally {

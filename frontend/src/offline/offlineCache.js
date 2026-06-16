@@ -164,12 +164,18 @@ export async function patchCachedListsForDelete(path) {
   const id = Number(idMatch[1])
 
   if (base.startsWith('/staff/members')) {
+    const cachedMembers = await getCachedResponse('/staff/members')
+    const memberList = Array.isArray(cachedMembers) ? cachedMembers : []
+    await setCachedResponse(
+      '/staff/members',
+      memberList.filter((x) => Number(x.id) !== id),
+    )
     for (const row of all) {
       const key = String(row.key || '')
-      if (key !== '/staff/members') continue
+      if (!key.startsWith('/staff/shifts')) continue
       const data = row.data
       if (!Array.isArray(data)) continue
-      const next = data.filter((x) => Number(x.id) !== id)
+      const next = data.filter((x) => Number(x.staff_member_id) !== id)
       if (next.length !== data.length) {
         await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
       }
