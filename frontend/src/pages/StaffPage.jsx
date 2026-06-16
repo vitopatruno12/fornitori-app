@@ -2420,9 +2420,16 @@ export default function StaffPage() {
       setFormEnd('16:00')
       setFormKind('shift')
       setFormNotes('')
-      await applyPayrollFromShifts(mem)
+      let payrollUpdated = true
+      try {
+        await applyPayrollFromShifts(mem)
+      } catch {
+        payrollUpdated = false
+      }
       setSuccess(
-        `Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi). Ore e costi aggiornati dai turni del mese.`,
+        payrollUpdated
+          ? `Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi). Ore e costi aggiornati dai turni del mese.`
+          : `Lista dipendenti caricata per locale "${localeName}" (${pack.members.length} elementi). Offline: ore e costi restano invariati finché non ricarichi i turni.`,
       )
     } catch (err) {
       setError(err?.message || 'Errore nel caricamento dipendenti per locale')

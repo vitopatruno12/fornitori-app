@@ -83,7 +83,7 @@ function parseMutationBody(bodyText) {
 /** Rimuove o aggiorna voci nelle liste GET in cache dopo mutazioni offline. */
 export async function patchCachedListsForUpdate(path, bodyText) {
   const base = String(path || '').split('?')[0]
-  const idMatch = String(path || '').match(/\/(\d+)(?:\?|$)/)
+  const idMatch = String(path || '').match(/\/(-?\d+)(?:\?|$)/)
   if (!idMatch) return
   const id = Number(idMatch[1])
   const body = parseMutationBody(bodyText)
@@ -158,7 +158,7 @@ export async function patchCachedListsForDelete(path) {
     return
   }
 
-  const idMatch = String(path || '').match(/\/(\d+)(?:\?|$)/)
+  const idMatch = String(path || '').match(/\/(-?\d+)(?:\?|$)/)
   if (!idMatch) return
   const id = Number(idMatch[1])
 
