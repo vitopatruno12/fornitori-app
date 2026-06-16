@@ -9,6 +9,8 @@ const CACHEABLE_PREFIXES = [
   '/cash/link-options',
   '/staff/members',
   '/staff/shifts',
+  '/staff/locale-packs',
+  '/staff/backups',
   '/staff/payroll-months',
   '/supplier-orders',
   '/suppliers',
@@ -69,6 +71,125 @@ export async function mergeOptimisticIntoCachedList(path, optimisticItem) {
 }
 
 /** Aggiorna liste in cache che contengono lo stesso path base (es. /cash/entries?...). */
+function parseMutationBody(bodyText) {
+  if (!bodyText) return {}
+  try {
+    return JSON.parse(bodyText)
+  } catch {
+    return {}
+  }
+}
+
+/** Rimuove o aggiorna voci nelle liste GET in cache dopo mutazioni offline. */
+export async function patchCachedListsForUpdate(path, bodyText) {
+  const base = String(path || '').split('?')[0]
+  const idMatch = String(path || '').match(/\/(\d+)(?:\?|$)/)
+  if (!idMatch) return
+  const id = Number(idMatch[1])
+  const body = parseMutationBody(bodyText)
+  const all = await dbGetAll(CACHE_STORE)
+
+  if (base.startsWith('/staff/members')) {
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (key !== '/staff/members') continue
+      const data = row.data
+      if (!Array.isArray(data)) continue
+      const idx = data.findIndex((x) => Number(x.id) === id)
+      if (idx < 0) continue
+      const next = [...data]
+      next[idx] = { ...next[idx], ...body, id }
+      await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
+    }
+    return
+  }
+
+  if (base.startsWith('/staff/shifts')) {
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (!key.startsWith('/staff/shifts')) continue
+      const data = row.data
+      if (!Array.isArray(data)) continue
+      const idx = data.findIndex((x) => Number(x.id) === id)
+      if (idx < 0) continue
+      const updated = { ...data[idx], ...body, id }
+      if (updated.work_date && typeof updated.work_date === 'string') {
+        updated.work_date = updated.work_date.slice(0, 10)
+      }
+      const next = [...data]
+      next[idx] = updated
+      await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
+    }
+  }
+}
+
+export async function patchCachedListsForDelete(path) {
+  const base = String(path || '').split('?')[0]
+  const all = await dbGetAll(CACHE_STORE)
+
+  if (base === '/staff/shifts/bulk') {
+    const query = String(path || '').split('?')[1] || ''
+    const q = new URLSearchParams(query)
+    const from = q.get('from')
+    const to = q.get('to')
+    if (!from || !to) return
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (!key.startsWith('/staff/shifts')) continue
+      const data = row.data
+      if (!Array.isArray(data)) continue
+      const next = data.filter((s) => {
+        const wd = String(s.work_date || '').slice(0, 10)
+        return wd < from || wd > to
+      })
+      if (next.length !== data.length) {
+        await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
+      }
+    }
+    return
+  }
+
+  if (base === '/staff/members/bulk') {
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (key !== '/staff/members') continue
+      await dbPut(CACHE_STORE, { key: row.key, data: [], updatedAt: Date.now() })
+    }
+    return
+  }
+
+  const idMatch = String(path || '').match(/\/(\d+)(?:\?|$)/)
+  if (!idMatch) return
+  const id = Number(idMatch[1])
+
+  if (base.startsWith('/staff/members')) {
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (key !== '/staff/members') continue
+      const data = row.data
+      if (!Array.isArray(data)) continue
+      const next = data.filter((x) => Number(x.id) !== id)
+      if (next.length !== data.length) {
+        await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
+      }
+    }
+    return
+  }
+
+  if (base.startsWith('/staff/shifts')) {
+    for (const row of all) {
+      const key = String(row.key || '')
+      if (!key.startsWith('/staff/shifts')) continue
+      const data = row.data
+      if (!Array.isArray(data)) continue
+      const next = data.filter((x) => Number(x.id) !== id)
+      if (next.length !== data.length) {
+        await dbPut(CACHE_STORE, { key: row.key, data: next, updatedAt: Date.now() })
+      }
+    }
+  }
+}
+
 export async function patchCachedListsForCreate(path, optimisticItem) {
   const base = String(path || '').split('?')[0]
   let item = optimisticItem

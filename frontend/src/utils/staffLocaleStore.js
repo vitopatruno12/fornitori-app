@@ -3,6 +3,12 @@ import { dbGet, dbPut, CACHE_STORE } from '../offline/offlineDb'
 export const STAFF_MEMBERS_BY_LOCALE_STORAGE_KEY = 'staffMembersByLocale'
 const IDB_CACHE_KEY = 'local:staffMembersByLocale'
 
+function localeKey(value) {
+  return String(value || '')
+    .trim()
+    .toLocaleLowerCase('it')
+}
+
 function emptyStore() {
   return {}
 }
@@ -41,6 +47,15 @@ function mergeLocaleStores(...stores) {
   return out
 }
 
+function findStoreKeyByLocaleName(store, localeName) {
+  const target = localeKey(localeName)
+  if (!target) return ''
+  for (const key of Object.keys(store || {})) {
+    if (localeKey(key) === target) return key
+  }
+  return ''
+}
+
 async function readIndexedDbStore() {
   try {
     const row = await dbGet(CACHE_STORE, IDB_CACHE_KEY)
@@ -68,8 +83,9 @@ export async function removeStaffLocaleFromStore(localeName) {
   const name = String(localeName || '').trim()
   if (!name) return false
   const store = await readStaffLocaleStore()
-  if (!(name in store)) return false
-  delete store[name]
+  const matchedKey = findStoreKeyByLocaleName(store, name)
+  if (!matchedKey) return false
+  delete store[matchedKey]
   await writeStaffLocaleStore(store)
   return true
 }

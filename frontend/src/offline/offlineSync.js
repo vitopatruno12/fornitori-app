@@ -1,6 +1,10 @@
 import { apiUrl } from '../services/apiBase'
 import { formatApiError, looksLikeHtml, parseApiJson } from './offlineApiHelpers'
-import { patchCachedListsForCreate } from './offlineCache'
+import {
+  patchCachedListsForCreate,
+  patchCachedListsForDelete,
+  patchCachedListsForUpdate,
+} from './offlineCache'
 import {
   enqueueOfflineMutation,
   getPendingQueueItems,
@@ -152,6 +156,10 @@ export async function queueMutationAndRespond(path, options = {}) {
   const optimistic = buildOptimisticResponse(path, method, body, item.id)
   if (method === 'POST' && optimistic?.id != null) {
     await patchCachedListsForCreate(path, optimistic)
+  } else if (method === 'PUT' || method === 'PATCH') {
+    await patchCachedListsForUpdate(path, body)
+  } else if (method === 'DELETE') {
+    await patchCachedListsForDelete(path)
   }
   window.dispatchEvent(
     new CustomEvent('atlas-offline-queued', { detail: { path, method, label: item.label, queueId: item.id } }),

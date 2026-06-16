@@ -973,9 +973,20 @@ export default function StaffPage() {
     [planningMonthWeeks],
   )
   const membersBackupLocaleOptions = useMemo(() => {
-    const names = new Set([...savedLocaleNames, ...listMembersLocaleBackupNames()])
+    const names = new Set()
+    const seenKeys = new Set()
+    for (const rawName of [...savedLocaleNames, ...listMembersLocaleBackupNames()]) {
+      const n = normalizeLocaleName(rawName)
+      const k = n.toLocaleLowerCase('it')
+      if (!n || seenKeys.has(k)) continue
+      seenKeys.add(k)
+      names.add(n)
+    }
     const current = normalizeLocaleName(localeStaffName)
-    if (current) names.add(current)
+    if (current) {
+      const k = current.toLocaleLowerCase('it')
+      if (!seenKeys.has(k)) names.add(current)
+    }
     const sorted = [...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
     if (sorted.length === 0) {
       return [{ value: '', label: 'Inserisci un locale sotto' }]
@@ -1891,6 +1902,24 @@ export default function StaffPage() {
     return String(value || '').trim()
   }
 
+  function localeNameCompareKey(value) {
+    return normalizeLocaleName(value).toLocaleLowerCase('it')
+  }
+
+  function findLocaleStoreKey(store, localeName) {
+    const target = localeNameCompareKey(localeName)
+    if (!target) return ''
+    for (const rawKey of Object.keys(store || {})) {
+      if (localeNameCompareKey(rawKey) === target) return rawKey
+    }
+    return ''
+  }
+
+  function isOfflineQueuedMessage(message) {
+    const msg = String(message || '')
+    return msg.includes('Sei offline') || msg.includes('quando torna la connessione')
+  }
+
   function isUserDeletableLocaleName(localeName) {
     const target = normalizeLocaleName(localeName).toLocaleLowerCase('it')
     if (!target) return false
@@ -2040,6 +2069,8 @@ export default function StaffPage() {
           members: remote.members,
         }
         const store = await readStaffLocaleStore()
+        const previousKey = findLocaleStoreKey(store, key)
+        if (previousKey && previousKey !== key) delete store[previousKey]
         store[key] = pack
         await writeStaffLocaleStore(store)
         if (remote.members.length > 0) return pack
@@ -2048,7 +2079,8 @@ export default function StaffPage() {
       // server assente o locale non trovato
     }
     const store = await readStaffLocaleStore()
-    const local = store[key]
+    const matchedStoreKey = findLocaleStoreKey(store, key)
+    const local = matchedStoreKey ? store[matchedStoreKey] : null
     if (local?.members?.length) return local
     const backup = getMembersLocaleBackup(key)
     if (backup?.payload?.members?.length) {
@@ -2102,6 +2134,7 @@ export default function StaffPage() {
         const n = normalizeLocaleName(rawKey)
         if (!n) continue
         userNames.add(n)
+        if (!meta[n] && pack?.saved_at) meta[n] = pack.saved_at
         if (!serverNames.has(n) && Array.isArray(pack?.members) && pack.members.length > 0) {
           names.add(n)
         }
@@ -2111,6 +2144,10 @@ export default function StaffPage() {
         if (n) {
           names.add(n)
           userNames.add(n)
+          if (!meta[n]) {
+            const savedAt = getMembersLocaleBackupSavedAt(n)
+            if (savedAt) meta[n] = savedAt
+          }
         }
       }
       setLocalePackSavedAtByName(meta)
@@ -2125,9 +2162,8 @@ export default function StaffPage() {
       }
       setSavedLocaleNames(deduped.sort(sortIt))
       setUserDeletableLocaleNames([...userNames].sort(sortIt))
-    } catch {
-      setSavedLocaleNames([])
-      setUserDeletableLocaleNames([])
+    } catch (err) {
+      console.warn('refreshSavedLocaleNames:', err)
     }
   }, [])
 
@@ -2177,20 +2213,31 @@ export default function StaffPage() {
       }
       const saveName = check.canonicalName
       const store = await readStaffLocaleStore()
+      const previousKey = findLocaleStoreKey(store, localeName)
       store[saveName] = {
         saved_at: new Date().toISOString(),
         members: snapshot,
       }
+      if (previousKey && previousKey !== saveName) {
+        delete store[previousKey]
+      }
       if (saveName !== localeName) {
-        delete store[localeName]
         setLocaleStaffName(saveName)
       }
       await writeStaffLocaleStore(store)
+      saveMembersLocaleBackup(saveName, { members: snapshot })
       try {
         await upsertStaffLocalePack(saveName, snapshot)
       } catch (err) {
-        setError(err?.message || 'Salvato solo su questo browser: il server non ha ricevuto il locale (riprova con connessione attiva).')
+        const msg = err?.message || ''
         await refreshSavedLocaleNames()
+        if (isOfflineQueuedMessage(msg)) {
+          setSuccess(
+            `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi, solo su questo browser — verrà sincronizzata quando torna la connessione).`,
+          )
+        } else {
+          setError(msg || 'Salvato solo su questo browser: il server non ha ricevuto il locale (riprova con connessione attiva).')
+        }
         return
       }
       await refreshSavedLocaleNames()
@@ -2813,10 +2860,14 @@ export default function StaffPage() {
           : `Backup dipendenti creato per "${saveName}" (${members.length} voci, condiviso sul server).`,
       )
     } catch (err) {
-      setError(
-        err?.message ||
-          `Backup salvato solo su questo browser per "${localeName}" (server non raggiungibile).`,
-      )
+      const msg = err?.message || ''
+      if (isOfflineQueuedMessage(msg)) {
+        setSuccess(
+          `Backup salvato solo su questo browser per "${localeName}" (verrà sincronizzato quando torna la connessione).`,
+        )
+      } else {
+        setError(msg || `Backup salvato solo su questo browser per "${localeName}" (server non raggiungibile).`)
+      }
       setMembersBackupLocale(localeName)
       await refreshSavedLocaleNames()
       await refreshBackupMeta(planningBackupSlot, localeName)
@@ -2848,7 +2899,12 @@ export default function StaffPage() {
     setBackupBusy(true)
     setError('')
     try {
-      let mem = await fetchStaffMembers()
+      let mem = []
+      try {
+        mem = await fetchStaffMembers()
+      } catch {
+        mem = Array.isArray(members) ? [...members] : []
+      }
       const names = new Set(mem.map((m) => String(m.name || '').trim().toLowerCase()).filter(Boolean))
       let added = 0
       for (const m of rows) {
@@ -3000,8 +3056,18 @@ export default function StaffPage() {
     setError('')
     const backupRange = planningRangeFromBackup(from, to, latest.payload.planView)
     try {
-      const mem = await fetchStaffMembers()
-      const existing = await fetchStaffShifts(from, to)
+      let mem = []
+      try {
+        mem = await fetchStaffMembers()
+      } catch {
+        mem = Array.isArray(members) ? [...members] : []
+      }
+      let existing = []
+      try {
+        existing = await fetchStaffShifts(from, to)
+      } catch {
+        existing = Array.isArray(shifts) ? shifts : []
+      }
       const existingList = normalizeShiftRows(existing, mem)
       let created = 0
       let skipped = 0

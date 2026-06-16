@@ -158,6 +158,19 @@ function normalizeMembersLocaleKey(name) {
   return String(name || '').trim()
 }
 
+function membersLocaleCompareKey(name) {
+  return normalizeMembersLocaleKey(name).toLocaleLowerCase('it')
+}
+
+function findMembersLocaleMapKey(map, localeName) {
+  const target = membersLocaleCompareKey(localeName)
+  if (!target) return ''
+  for (const key of Object.keys(map || {})) {
+    if (membersLocaleCompareKey(key) === target) return key
+  }
+  return ''
+}
+
 function readMembersByLocaleMap() {
   try {
     const raw = window.localStorage.getItem(MEMBERS_BY_LOCALE_KEY)
@@ -176,9 +189,14 @@ function writeMembersByLocaleMap(map) {
 /** @returns {string[]} nomi locali con almeno un backup dipendenti salvato */
 export function listMembersLocaleBackupNames() {
   const map = readMembersByLocaleMap()
-  return Object.keys(map)
-    .filter((k) => map[k]?.payload?.members?.length)
-    .sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+  const dedup = new Map()
+  for (const rawKey of Object.keys(map)) {
+    if (!map[rawKey]?.payload?.members?.length) continue
+    const key = membersLocaleCompareKey(rawKey)
+    if (!key) continue
+    if (!dedup.has(key)) dedup.set(key, rawKey)
+  }
+  return [...dedup.values()].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
 }
 
 /** @returns {{ savedAt: string, payload: object } | null} */
@@ -186,13 +204,17 @@ export function getMembersLocaleBackup(localeName) {
   const key = normalizeMembersLocaleKey(localeName)
   if (!key) return null
   const map = readMembersByLocaleMap()
-  return map[key] ?? null
+  const matchedKey = findMembersLocaleMapKey(map, key)
+  if (!matchedKey) return null
+  return map[matchedKey] ?? null
 }
 
 export function saveMembersLocaleBackup(localeName, payload) {
   const key = normalizeMembersLocaleKey(localeName)
   if (!key) return null
   const map = readMembersByLocaleMap()
+  const matchedKey = findMembersLocaleMapKey(map, key)
+  if (matchedKey && matchedKey !== key) delete map[matchedKey]
   const entry = {
     savedAt: new Date().toISOString(),
     payload: { ...payload, localeName: key },
@@ -210,8 +232,9 @@ export function deleteMembersLocaleBackup(localeName) {
   const key = normalizeMembersLocaleKey(localeName)
   if (!key) return false
   const map = readMembersByLocaleMap()
-  if (!(key in map)) return false
-  delete map[key]
+  const matchedKey = findMembersLocaleMapKey(map, key)
+  if (!matchedKey) return false
+  delete map[matchedKey]
   writeMembersByLocaleMap(map)
   return true
 }
