@@ -1852,11 +1852,29 @@ export default function StaffPage() {
   async function handleDeleteMember(m) {
     if (!window.confirm(`Rimuovere ${m.name} e tutte le sue voci in pianificazione?`)) return
     try {
+      setError('')
       if (editingMemberId === m.id) resetMemberForm()
       if (memberInfoId === m.id) setMemberInfoId(null)
-      await deleteStaffMember(m.id)
-      setSuccess('Dipendente rimosso')
-      await refreshMembers()
+      const res = await deleteStaffMember(m.id)
+      const queuedOffline = Boolean(res?.__offline)
+      setMembers((prev) => prev.filter((row) => row.id !== m.id))
+      setShifts((prev) => prev.filter((row) => row.staff_member_id !== m.id))
+      setFormMemberIds((prev) => {
+        if (!prev.has(m.id)) return prev
+        const next = new Set(prev)
+        next.delete(m.id)
+        return next
+      })
+      if (queuedOffline || isOfflineQueuedMessage(res?.message)) {
+        setSuccess(`Dipendente rimosso in locale: sincronizzazione automatica alla prossima connessione.`)
+      } else {
+        setSuccess('Dipendente rimosso')
+      }
+      try {
+        await refreshMembers()
+      } catch {
+        // Offline senza cache GET: mantieni aggiornamento locale in memoria.
+      }
     } catch (err) {
       setError(err?.message || 'Errore eliminazione')
     }
@@ -1875,7 +1893,8 @@ export default function StaffPage() {
       setError('')
       setMemberInfoId(null)
       const r = await deleteAllStaffMembers()
-      const n = r?.deleted ?? 0
+      const queuedOffline = Boolean(r?.__offline)
+      const n = queuedOffline ? members.length : r?.deleted ?? 0
       markPlanningStale()
       setEditingShiftId(null)
       setFormMemberIds(new Set())
@@ -1884,12 +1903,20 @@ export default function StaffPage() {
       setFormEnd('16:00')
       setFormKind('shift')
       setFormNotes('')
-      await refreshMembers()
+      setMembers([])
+      setShifts([])
+      try {
+        await refreshMembers()
+      } catch {
+        // Offline senza cache GET: mantieni elenco locale vuoto.
+      }
       setHoursOverride({})
       setPayrollImporto({})
       setPayrollShifts([])
       setSuccess(
-        n > 0
+        queuedOffline
+          ? `Eliminati ${n} dipendenti in locale: sincronizzazione automatica alla prossima connessione.`
+          : n > 0
           ? `Eliminati ${n} dipendenti e tutta la pianificazione associata.`
           : 'Elenco dipendenti già vuoto.',
       )
