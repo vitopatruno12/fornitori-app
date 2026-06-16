@@ -1870,10 +1870,12 @@ export default function StaffPage() {
       } else {
         setSuccess('Dipendente rimosso')
       }
-      try {
-        await refreshMembers()
-      } catch {
-        // Offline senza cache GET: mantieni aggiornamento locale in memoria.
+      if (!queuedOffline) {
+        try {
+          await refreshMembers()
+        } catch {
+          // Mantieni aggiornamento locale in memoria.
+        }
       }
     } catch (err) {
       setError(err?.message || 'Errore eliminazione')
@@ -1892,9 +1894,11 @@ export default function StaffPage() {
     try {
       setError('')
       setMemberInfoId(null)
+      resetMemberForm()
+      const deletedCountBeforeSync = members.length
       const r = await deleteAllStaffMembers()
       const queuedOffline = Boolean(r?.__offline)
-      const n = queuedOffline ? members.length : r?.deleted ?? 0
+      const n = queuedOffline ? deletedCountBeforeSync : r?.deleted ?? 0
       markPlanningStale()
       setEditingShiftId(null)
       setFormMemberIds(new Set())
@@ -1905,10 +1909,12 @@ export default function StaffPage() {
       setFormNotes('')
       setMembers([])
       setShifts([])
-      try {
-        await refreshMembers()
-      } catch {
-        // Offline senza cache GET: mantieni elenco locale vuoto.
+      if (!queuedOffline) {
+        try {
+          await refreshMembers()
+        } catch {
+          // Mantieni elenco locale vuoto se il refresh fallisce dopo bulk delete.
+        }
       }
       setHoursOverride({})
       setPayrollImporto({})

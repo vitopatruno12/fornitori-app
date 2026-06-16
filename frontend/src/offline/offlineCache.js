@@ -150,9 +150,10 @@ export async function patchCachedListsForDelete(path) {
   }
 
   if (base === '/staff/members/bulk') {
+    await setCachedResponse('/staff/members', [])
     for (const row of all) {
       const key = String(row.key || '')
-      if (key !== '/staff/members') continue
+      if (!key.startsWith('/staff/shifts')) continue
       await dbPut(CACHE_STORE, { key: row.key, data: [], updatedAt: Date.now() })
     }
     return
