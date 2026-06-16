@@ -1891,6 +1891,12 @@ export default function StaffPage() {
     return String(value || '').trim()
   }
 
+  function isUserDeletableLocaleName(localeName) {
+    const target = normalizeLocaleName(localeName).toLocaleLowerCase('it')
+    if (!target) return false
+    return userDeletableLocaleNames.some((name) => normalizeLocaleName(name).toLocaleLowerCase('it') === target)
+  }
+
   function memberSnapshotFromRow(m) {
     return {
       name: m.name || '',
@@ -2204,7 +2210,7 @@ export default function StaffPage() {
       setError('Inserisci o seleziona il locale da eliminare.')
       return
     }
-    if (!userDeletableLocaleNames.includes(localeName)) {
+    if (!isUserDeletableLocaleName(localeName)) {
       setError(`"${localeName}" non può essere eliminato da qui (locale di sistema o non ancora salvato).`)
       return
     }
@@ -2242,8 +2248,14 @@ export default function StaffPage() {
   }
 
   async function syncMembersFromLocalePack(packMembers) {
-    const existing = await fetchStaffMembers()
-    const existingList = Array.isArray(existing) ? existing : []
+    let existingList = []
+    try {
+      const existing = await fetchStaffMembers()
+      existingList = Array.isArray(existing) ? existing : []
+    } catch {
+      // Offline senza cache GET: usa lo stato attuale in memoria.
+      existingList = Array.isArray(members) ? [...members] : []
+    }
     const packRows = Array.isArray(packMembers) ? packMembers : []
     const packByKey = new Map()
     for (const pm of packRows) {
@@ -2252,6 +2264,7 @@ export default function StaffPage() {
       packByKey.set(key, pm)
     }
     const keptIds = new Set()
+    const nextMembersByKey = new Map()
 
     for (const [, pm] of packByKey) {
       const key = String(pm.name || '').trim().toLocaleLowerCase('it')
@@ -2271,11 +2284,16 @@ export default function StaffPage() {
         sort_order: Number.isFinite(Number(pm.sort_order)) ? Number(pm.sort_order) : 0,
       }
       if (hit) {
-        await updateStaffMember(hit.id, body)
-        keptIds.add(hit.id)
+        const updated = await updateStaffMember(hit.id, body)
+        const updatedId = updated?.id ?? hit.id
+        keptIds.add(updatedId)
+        nextMembersByKey.set(key, { ...hit, ...body, id: updatedId })
       } else {
         const created = await createStaffMember(body)
-        if (created?.id != null) keptIds.add(created.id)
+        if (created?.id != null) {
+          keptIds.add(created.id)
+          nextMembersByKey.set(key, { ...body, id: created.id })
+        }
       }
     }
 
@@ -2285,8 +2303,13 @@ export default function StaffPage() {
       }
     }
 
-    const mem = await fetchStaffMembers()
-    const list = Array.isArray(mem) ? mem : []
+    let list = []
+    try {
+      const mem = await fetchStaffMembers()
+      list = Array.isArray(mem) ? mem : []
+    } catch {
+      list = Array.from(nextMembersByKey.values())
+    }
     setMembers(list)
     return list
   }
@@ -3343,7 +3366,7 @@ export default function StaffPage() {
               loading ||
               demoLoading ||
               reportLoading ||
-              !userDeletableLocaleNames.includes(normalizeLocaleName(localeStaffName))
+              !isUserDeletableLocaleName(localeStaffName)
             }
             title="Rimuove il locale selezionato dall'elenco salvato (anche sul server)"
           >
