@@ -30,9 +30,19 @@ def create_member(payload: staff_schema.StaffMemberCreate, db: Session = Depends
 
 
 @router.delete("/members/bulk", response_model=staff_schema.StaffMembersBulkDeleteResult)
-def delete_all_members_bulk(db: Session = Depends(get_db)):
+def delete_all_members_bulk(
+    name: Optional[str] = Query(None, min_length=1, max_length=255),
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
     """Elimina l’intero elenco dipendenti e tutta la pianificazione associata (CASCADE)."""
-    n = staff_service.delete_all_members(db)
+    try:
+        n = staff_service.delete_all_members(db, locale_name=name, access_code=code)
+    except ValueError as e:
+        msg = str(e)
+        if "Codice" in msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
     return staff_schema.StaffMembersBulkDeleteResult(deleted=n)
 
 
@@ -45,8 +55,19 @@ def update_member(member_id: int, payload: staff_schema.StaffMemberUpdate, db: S
 
 
 @router.delete("/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_member(member_id: int, db: Session = Depends(get_db)):
-    ok = staff_service.delete_member(db, member_id)
+def delete_member(
+    member_id: int,
+    name: Optional[str] = Query(None, min_length=1, max_length=255),
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
+    try:
+        ok = staff_service.delete_member(db, member_id, locale_name=name, access_code=code)
+    except ValueError as e:
+        msg = str(e)
+        if "Codice" in msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dipendente non trovato")
 

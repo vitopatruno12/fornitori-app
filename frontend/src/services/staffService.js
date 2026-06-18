@@ -15,13 +15,23 @@ export function updateStaffMember(id, data) {
   return apiFetch(`/staff/members/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }
 
-export function deleteStaffMember(id) {
-  return apiFetch(`/staff/members/${id}`, { method: 'DELETE' })
+function staffMemberDeleteQuery(localeName, accessCode) {
+  const q = new URLSearchParams()
+  const locale = String(localeName || '').trim()
+  const code = String(accessCode || '').replace(/\D/g, '')
+  if (locale) q.set('name', locale)
+  if (code.length === 6) q.set('code', code)
+  const suffix = q.toString()
+  return suffix ? `?${suffix}` : ''
+}
+
+export function deleteStaffMember(id, localeName, accessCode) {
+  return apiFetch(`/staff/members/${id}${staffMemberDeleteQuery(localeName, accessCode)}`, { method: 'DELETE' })
 }
 
 /** Elimina tutti i dipendenti e le voci di pianificazione collegate. */
-export function deleteAllStaffMembers() {
-  return apiFetch('/staff/members/bulk', { method: 'DELETE' })
+export function deleteAllStaffMembers(localeName, accessCode) {
+  return apiFetch(`/staff/members/bulk${staffMemberDeleteQuery(localeName, accessCode)}`, { method: 'DELETE' })
 }
 
 export function fetchStaffShifts(from, to) {

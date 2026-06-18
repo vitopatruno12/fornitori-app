@@ -89,7 +89,32 @@ def update_member(db: Session, member_id: int, payload: staff_schema.StaffMember
     return row
 
 
-def delete_member(db: Session, member_id: int) -> bool:
+def _verify_locale_access_code(
+    db: Session,
+    locale_name: Optional[str],
+    access_code: Optional[str],
+) -> None:
+    key = _normalize_locale_name(locale_name or "")
+    if not key:
+        return
+    row = _find_locale_pack_by_key(db, locale_name)
+    if not row:
+        return
+    stored_code = _normalize_access_code(row.access_code)
+    if not stored_code:
+        return
+    provided = _normalize_access_code(access_code)
+    if provided != stored_code:
+        raise ValueError("Codice locale non valido.")
+
+
+def delete_member(
+    db: Session,
+    member_id: int,
+    locale_name: Optional[str] = None,
+    access_code: Optional[str] = None,
+) -> bool:
+    _verify_locale_access_code(db, locale_name, access_code)
     row = db.query(StaffMember).filter(StaffMember.id == member_id).first()
     if not row:
         return False
@@ -98,8 +123,13 @@ def delete_member(db: Session, member_id: int) -> bool:
     return True
 
 
-def delete_all_members(db: Session) -> int:
+def delete_all_members(
+    db: Session,
+    locale_name: Optional[str] = None,
+    access_code: Optional[str] = None,
+) -> int:
     """Elimina tutti i dipendenti; le voci di pianificazione collegate vanno via in CASCADE."""
+    _verify_locale_access_code(db, locale_name, access_code)
     n = db.query(StaffMember).delete(synchronize_session=False)
     db.commit()
     return int(n)
@@ -535,11 +565,7 @@ def delete_locale_pack(
     row = _find_locale_pack_by_key(db, locale_name)
     if not row:
         return False
-    stored_code = _normalize_access_code(row.access_code)
-    if stored_code:
-        provided = _normalize_access_code(access_code)
-        if provided != stored_code:
-            raise ValueError("Codice locale non valido.")
+    _verify_locale_access_code(db, locale_name, access_code)
     db.delete(row)
     db.commit()
     return True

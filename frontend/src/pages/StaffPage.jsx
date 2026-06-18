@@ -1853,6 +1853,11 @@ export default function StaffPage() {
   }
 
   async function handleDeleteMember(m) {
+    const access = await assertActiveLocaleZoneAccess()
+    if (!access.ok) {
+      setError(localeAccessErrorMessage(access, 'eliminare dipendenti'))
+      return
+    }
     if (!window.confirm(`Rimuovere ${m.name} e tutte le sue voci in pianificazione?`)) return
     try {
       setError('')
@@ -1861,9 +1866,14 @@ export default function StaffPage() {
       let res = null
       let queuedOffline = false
       try {
-        res = await deleteStaffMember(m.id)
+        res = await deleteStaffMember(m.id, access.localeName || undefined, access.code)
         queuedOffline = isQueuedOfflineResponse(res)
       } catch (err) {
+        const msg = String(err?.message || '')
+        if (msg.includes('Codice') || msg.includes('403')) {
+          setError(localeAccessErrorMessage({ ...access, wrongCode: true }, 'eliminare dipendenti'))
+          return
+        }
         if (!isOnline()) {
           queuedOffline = true
           await patchCachedListsForDelete(`/staff/members/${m.id}`)
@@ -1897,6 +1907,11 @@ export default function StaffPage() {
 
   async function handleDeleteAllMembers() {
     if (members.length === 0) return
+    const access = await assertActiveLocaleZoneAccess()
+    if (!access.ok) {
+      setError(localeAccessErrorMessage(access, 'eliminare l\'elenco dipendenti'))
+      return
+    }
     if (
       !window.confirm(
         `Eliminare TUTTI i dipendenti (${members.length})?\n\nVerranno rimosse anche tutte le voci di pianificazione (turni, permessi, assenze, malattia) collegate. L’operazione non si può annullare.`,
@@ -1912,9 +1927,14 @@ export default function StaffPage() {
       let r = null
       let queuedOffline = false
       try {
-        r = await deleteAllStaffMembers()
+        r = await deleteAllStaffMembers(access.localeName || undefined, access.code)
         queuedOffline = isQueuedOfflineResponse(r)
       } catch (err) {
+        const msg = String(err?.message || '')
+        if (msg.includes('Codice') || msg.includes('403')) {
+          setError(localeAccessErrorMessage({ ...access, wrongCode: true }, 'eliminare l\'elenco dipendenti'))
+          return
+        }
         if (!isOnline()) {
           queuedOffline = true
           await patchCachedListsForDelete('/staff/members/bulk')
@@ -2197,6 +2217,38 @@ export default function StaffPage() {
     }
   }
 
+  async function assertActiveLocaleZoneAccess() {
+    let localeName = resolveCanonicalLocaleName(localeStaffName || membersBackupLocale)
+    if (!localeName) {
+      for (const n of savedLocaleNames) {
+        if (await localeRequiresAccessCode(n)) {
+          return { ok: false, localeName: '', needsCode: true, needsLocale: true }
+        }
+      }
+      return { ok: true, localeName: '', code: undefined }
+    }
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const access = await verifyLocaleZoneAccess(localeName, code)
+    if (!access.ok) {
+      return { ok: false, localeName, needsCode: access.needsCode, wrongCode: access.wrongCode }
+    }
+    return {
+      ok: true,
+      localeName,
+      code: isValidLocaleAccessCode(code) ? code : undefined,
+    }
+  }
+
+  function localeAccessErrorMessage(access, action) {
+    if (access.needsLocale) {
+      return `Seleziona il locale e inserisci il codice a 6 cifre prima di ${action}.`
+    }
+    if (access.needsCode) {
+      return `Inserisci il codice a 6 cifre del locale "${access.localeName}" per ${action}.`
+    }
+    return `Codice errato per "${access.localeName}". Non puoi ${action}.`
+  }
+
   async function resolveLocalePack(localeName, accessCode) {
     const key = resolveCanonicalLocaleName(localeName)
     if (!key) return null
@@ -2476,7 +2528,7 @@ export default function StaffPage() {
     }
   }
 
-  async function syncMembersFromLocalePack(packMembers) {
+  async function syncMembersFromLocalePack(packMembers, localeName, accessCode) {
     let existingList = []
     try {
       const existing = await fetchStaffMembers()
@@ -2528,7 +2580,7 @@ export default function StaffPage() {
 
     for (const m of existingList) {
       if (!keptIds.has(m.id)) {
-        await deleteStaffMember(m.id)
+        await deleteStaffMember(m.id, localeName || undefined, accessCode)
       }
     }
 
@@ -2580,7 +2632,11 @@ export default function StaffPage() {
     try {
       setError('')
       setShiftBusy(true)
-      const mem = await syncMembersFromLocalePack(pack.members)
+      const mem = await syncMembersFromLocalePack(
+        pack.members,
+        localeName,
+        isValidLocaleAccessCode(code) ? code : undefined,
+      )
       markPlanningStale()
       setMemberInfoId(null)
       setEditingShiftId(null)
@@ -3619,7 +3675,7 @@ export default function StaffPage() {
             className="btn btn-outline-danger"
             disabled={members.length === 0 || shiftBusy || demoLoading || reportLoading}
             onClick={() => void handleDeleteAllMembers()}
-            title="Rimuove tutti i dipendenti e tutta la pianificazione collegata (irreversibile)"
+            title="Rimuove tutti i dipendenti: serve il codice zona se il locale selezionato è protetto"
           >
             Elimina elenco dipendenti
           </button>
@@ -3803,7 +3859,12 @@ export default function StaffPage() {
                     >
                       Info
                     </button>
-                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDeleteMember(m)}>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={() => handleDeleteMember(m)}
+                      title="Richiede il codice zona se il locale selezionato è protetto"
+                    >
                       Elimina
                     </button>
                   </td>
