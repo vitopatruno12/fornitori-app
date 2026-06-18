@@ -440,6 +440,14 @@ def _ensure_staff_locale_packs_table() -> None:
                     """
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE staff_locale_packs
+                    ADD COLUMN IF NOT EXISTS access_code VARCHAR(6)
+                    """
+                )
+            )
     except Exception as e:
         logger.warning(
             "Impossibile verificare/creare staff_locale_packs: %s",

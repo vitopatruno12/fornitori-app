@@ -1,4 +1,6 @@
 import json
+import re
+import secrets
 from datetime import date, time, timedelta
 from typing import List, Optional
 
@@ -400,6 +402,33 @@ def _locale_members_from_json(raw: str) -> List[staff_schema.StaffLocaleMemberSn
         return []
 
 
+def _normalize_access_code(code: Optional[str]) -> str:
+    digits = re.sub(r"\D", "", str(code or ""))
+    return digits if len(digits) == 6 else ""
+
+
+def _generate_access_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _resolve_locale_access_code(
+    payload: staff_schema.StaffLocalePackUpsert,
+    existing: Optional[str],
+) -> str:
+    if payload.regenerate_access_code:
+        return _generate_access_code()
+    if payload.access_code:
+        normalized = _normalize_access_code(payload.access_code)
+        if not normalized:
+            raise ValueError("Codice locale non valido: servono 6 cifre numeriche.")
+        return normalized
+    if existing:
+        normalized = _normalize_access_code(existing)
+        if normalized:
+            return normalized
+    return _generate_access_code()
+
+
 def locale_pack_to_summary(row: StaffLocalePack) -> staff_schema.StaffLocalePackSummary:
     members = _locale_members_from_json(row.members_json)
     saved_at = row.updated_at.isoformat() if row.updated_at else None
@@ -407,16 +436,23 @@ def locale_pack_to_summary(row: StaffLocalePack) -> staff_schema.StaffLocalePack
         locale_name=row.locale_name,
         saved_at=saved_at,
         member_count=len(members),
+        requires_access_code=bool(_normalize_access_code(row.access_code)),
     )
 
 
-def locale_pack_to_read(row: StaffLocalePack) -> staff_schema.StaffLocalePackRead:
+def locale_pack_to_read(
+    row: StaffLocalePack,
+    *,
+    include_access_code: bool = False,
+) -> staff_schema.StaffLocalePackRead:
     members = _locale_members_from_json(row.members_json)
     saved_at = row.updated_at.isoformat() if row.updated_at else None
+    code = _normalize_access_code(row.access_code) or None
     return staff_schema.StaffLocalePackRead(
         locale_name=row.locale_name,
         saved_at=saved_at,
         members=members,
+        access_code=code if include_access_code else None,
     )
 
 
@@ -429,10 +465,19 @@ def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
     return [locale_pack_to_summary(r) for r in rows]
 
 
-def get_locale_pack(db: Session, locale_name: str) -> Optional[staff_schema.StaffLocalePackRead]:
+def get_locale_pack(
+    db: Session,
+    locale_name: str,
+    access_code: Optional[str] = None,
+) -> Optional[staff_schema.StaffLocalePackRead]:
     row = _find_locale_pack_by_key(db, locale_name)
     if not row:
         return None
+    stored_code = _normalize_access_code(row.access_code)
+    if stored_code:
+        provided = _normalize_access_code(access_code)
+        if provided != stored_code:
+            raise ValueError("Codice locale non valido.")
     return locale_pack_to_read(row)
 
 
@@ -462,15 +507,21 @@ def upsert_locale_pack(
                 )
 
     members_json = _locale_members_to_json(payload.members)
+    access_code = _resolve_locale_access_code(payload, target.access_code if target else None)
     if target:
         target.members_json = members_json
+        target.access_code = access_code
         row = target
     else:
-        row = StaffLocalePack(locale_name=key, members_json=members_json)
+        row = StaffLocalePack(
+            locale_name=key,
+            members_json=members_json,
+            access_code=access_code,
+        )
         db.add(row)
     db.commit()
     db.refresh(row)
-    return locale_pack_to_read(row)
+    return locale_pack_to_read(row, include_access_code=True)
 
 
 def delete_locale_pack(db: Session, locale_name: str) -> bool:

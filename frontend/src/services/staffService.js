@@ -72,16 +72,25 @@ export async function fetchStaffLocalePacks() {
   return asArray(data, 'staff/locale-packs')
 }
 
-export function fetchStaffLocalePack(localeName) {
+export function fetchStaffLocalePack(localeName, accessCode) {
   const q = new URLSearchParams({ name: String(localeName || '').trim() })
+  const code = String(accessCode || '').replace(/\D/g, '')
+  if (code.length === 6) q.set('code', code)
   return apiFetch(`/staff/locale-packs/detail?${q}`, SYNC_FETCH)
 }
 
-export function upsertStaffLocalePack(localeName, members) {
+export function upsertStaffLocalePack(localeName, members, accessCode, options = {}) {
+  const body = {
+    locale_name: String(localeName || '').trim(),
+    members,
+  }
+  const code = String(accessCode || '').replace(/\D/g, '')
+  if (code.length === 6) body.access_code = code
+  if (options.regenerateAccessCode) body.regenerate_access_code = true
   return apiFetch('/staff/locale-packs', {
     ...SYNC_FETCH,
     method: 'PUT',
-    body: JSON.stringify({ locale_name: String(localeName || '').trim(), members }),
+    body: JSON.stringify(body),
   }).then((result) => {
     if (result?.__offline) {
       throw new Error('Sei offline: i dati verranno inviati al server quando torna la connessione.')

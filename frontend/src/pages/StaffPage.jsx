@@ -45,6 +45,12 @@ import {
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
+import {
+  generateLocaleAccessCode,
+  isValidLocaleAccessCode,
+  normalizeLocaleAccessCode,
+  verifyLocaleAccessCode,
+} from '../utils/staffLocaleAccessCode.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
 
@@ -802,6 +808,7 @@ export default function StaffPage() {
   const [reportModalTitle, setReportModalTitle] = useState('Report personale (PDF)')
   const [reportLoading, setReportLoading] = useState(false)
   const [localeStaffName, setLocaleStaffName] = useState('')
+  const [localeAccessCode, setLocaleAccessCode] = useState('')
   const [savedLocaleNames, setSavedLocaleNames] = useState([])
   const [userDeletableLocaleNames, setUserDeletableLocaleNames] = useState([])
 
@@ -920,12 +927,7 @@ export default function StaffPage() {
       const loc = normalizeLocaleName(membersLocale)
       let membersAt = null
       if (loc) {
-        try {
-          const pack = await fetchStaffLocalePack(loc)
-          membersAt = pack?.saved_at || null
-        } catch {
-          membersAt = localePackSavedAtByName[loc] || getMembersLocaleBackupSavedAt(loc)
-        }
+        membersAt = localePackSavedAtByName[loc] || getMembersLocaleBackupSavedAt(loc)
       }
       const planKey = planningBackupServerKey(currentPlanningMonthYm(), planningSlot)
       let planningAt = null
@@ -1374,6 +1376,10 @@ export default function StaffPage() {
     const n = normalizeLocaleName(localeStaffName)
     if (!n) return
     setMembersBackupLocale(n)
+  }, [localeStaffName])
+
+  useEffect(() => {
+    setLocaleAccessCode('')
   }, [localeStaffName])
 
   useEffect(() => {
@@ -2015,6 +2021,21 @@ export default function StaffPage() {
     }
   }
 
+  async function readStoredLocaleAccessCode(localeName) {
+    const store = await readStaffLocaleStore()
+    const storeKey = findLocaleStoreKey(store, localeName)
+    const pack = storeKey ? store[storeKey] : null
+    return normalizeLocaleAccessCode(pack?.access_code)
+  }
+
+  async function resolveLocaleAccessCodeForSave(localeName) {
+    const typed = normalizeLocaleAccessCode(localeAccessCode)
+    if (isValidLocaleAccessCode(typed)) return typed
+    const stored = await readStoredLocaleAccessCode(localeName)
+    if (isValidLocaleAccessCode(stored)) return stored
+    return generateLocaleAccessCode()
+  }
+
   async function collectExistingLocalePacks() {
     const existing = []
     const seenKeys = new Set()
@@ -2026,26 +2047,28 @@ export default function StaffPage() {
       seenKeys.add(key)
       existing.push({ name: n, members })
     }
+    const store = await readStaffLocaleStore()
+    for (const [rawKey, pack] of Object.entries(store)) {
+      if (pack?.members?.length) addPack(rawKey, pack.members)
+    }
     try {
       const summaries = await fetchStaffLocalePacks()
       await Promise.all(
         summaries.map(async (row) => {
           const n = normalizeLocaleName(row?.locale_name)
           if (!n) return
+          const code = await readStoredLocaleAccessCode(n)
+          if (!isValidLocaleAccessCode(code)) return
           try {
-            const remote = await fetchStaffLocalePack(n)
+            const remote = await fetchStaffLocalePack(n, code)
             if (remote?.members?.length) addPack(n, remote.members)
           } catch {
-            // dettaglio non disponibile
+            // dettaglio non disponibile senza codice valido
           }
         }),
       )
     } catch {
       // server assente
-    }
-    const store = await readStaffLocaleStore()
-    for (const [rawKey, pack] of Object.entries(store)) {
-      if (pack?.members?.length) addPack(rawKey, pack.members)
     }
     for (const backupName of listMembersLocaleBackupNames()) {
       const backup = getMembersLocaleBackup(backupName)
@@ -2132,33 +2155,80 @@ export default function StaffPage() {
     return getLatestStaffBackup('payroll')
   }
 
-  async function resolveLocalePack(localeName) {
+  async function localeRequiresAccessCode(localeName) {
+    const stored = await readStoredLocaleAccessCode(localeName)
+    if (isValidLocaleAccessCode(stored)) return true
+    try {
+      const summaries = await fetchStaffLocalePacks()
+      const target = localeNameCompareKey(localeName)
+      const hit = summaries.find((row) => localeNameCompareKey(row?.locale_name) === target)
+      if (hit?.requires_access_code) return true
+    } catch {
+      // server assente: se in locale non c'è codice, non richiederlo
+    }
+    return false
+  }
+
+  async function resolveLocalePack(localeName, accessCode) {
     const key = normalizeLocaleName(localeName)
     if (!key) return null
+    const code = normalizeLocaleAccessCode(accessCode)
+    const requiresCode = await localeRequiresAccessCode(key)
+
+    if (requiresCode && !isValidLocaleAccessCode(code)) {
+      return { denied: true, needsCode: true }
+    }
+
+    const store = await readStaffLocaleStore()
+    const matchedStoreKey = findLocaleStoreKey(store, key)
+    const local = matchedStoreKey ? store[matchedStoreKey] : null
+    const localCode = normalizeLocaleAccessCode(local?.access_code)
+    if (localCode && isValidLocaleAccessCode(code) && !verifyLocaleAccessCode(localCode, code)) {
+      return { denied: true }
+    }
+
+    if (local?.members?.length && (!localCode || !code || verifyLocaleAccessCode(localCode, code))) {
+      return {
+        saved_at: local.saved_at,
+        members: local.members,
+        access_code: localCode || code || null,
+      }
+    }
+
     try {
-      const remote = await fetchStaffLocalePack(key)
+      const remote = await fetchStaffLocalePack(key, isValidLocaleAccessCode(code) ? code : undefined)
       if (remote && Array.isArray(remote.members)) {
         const pack = {
           saved_at: remote.saved_at || new Date().toISOString(),
           members: remote.members,
+          access_code: normalizeLocaleAccessCode(remote.access_code) || code || null,
         }
-        const store = await readStaffLocaleStore()
         const previousKey = findLocaleStoreKey(store, key)
         if (previousKey && previousKey !== key) delete store[previousKey]
         store[key] = pack
         await writeStaffLocaleStore(store)
         if (remote.members.length > 0) return pack
       }
-    } catch {
-      // server assente o locale non trovato
+    } catch (err) {
+      const msg = String(err?.message || '')
+      if (msg.includes('403') || msg.toLowerCase().includes('codice locale')) {
+        return { denied: true }
+      }
     }
-    const store = await readStaffLocaleStore()
-    const matchedStoreKey = findLocaleStoreKey(store, key)
-    const local = matchedStoreKey ? store[matchedStoreKey] : null
-    if (local?.members?.length) return local
+
     const backup = getMembersLocaleBackup(key)
+    const backupCode = normalizeLocaleAccessCode(backup?.payload?.access_code)
     if (backup?.payload?.members?.length) {
-      return { saved_at: backup.savedAt, members: backup.payload.members }
+      if (backupCode && isValidLocaleAccessCode(code) && !verifyLocaleAccessCode(backupCode, code)) {
+        return { denied: true }
+      }
+      if (!backupCode || !code || verifyLocaleAccessCode(backupCode, code)) {
+        return {
+          saved_at: backup.savedAt,
+          members: backup.payload.members,
+          access_code: backupCode || code || null,
+        }
+      }
     }
     return null
   }
@@ -2173,29 +2243,14 @@ export default function StaffPage() {
       const meta = {}
       try {
         const summaries = await fetchStaffLocalePacks()
-        await Promise.all(
-          summaries.map(async (row) => {
-            const n = normalizeLocaleName(row?.locale_name)
-            if (!n) return
-            serverNames.add(n)
-            userNames.add(n)
-            names.add(n)
-            if (row.saved_at) meta[n] = row.saved_at
-            try {
-              const remote = await fetchStaffLocalePack(n)
-              if (remote && Array.isArray(remote.members)) {
-                store[n] = {
-                  saved_at: remote.saved_at || row.saved_at || new Date().toISOString(),
-                  members: remote.members,
-                }
-                if (remote.saved_at) meta[n] = remote.saved_at
-              }
-            } catch {
-              // dettaglio locale non disponibile: resta il nome in elenco
-            }
-          }),
-        )
-        await writeStaffLocaleStore(store)
+        for (const row of summaries) {
+          const n = normalizeLocaleName(row?.locale_name)
+          if (!n) continue
+          serverNames.add(n)
+          userNames.add(n)
+          names.add(n)
+          if (row.saved_at) meta[n] = row.saved_at
+        }
       } catch (err) {
         if (isOnline()) {
           setLocaleSyncWarning(
@@ -2286,11 +2341,13 @@ export default function StaffPage() {
         return
       }
       const saveName = check.canonicalName
+      const accessCode = await resolveLocaleAccessCodeForSave(localeName)
       const store = await readStaffLocaleStore()
       const previousKey = findLocaleStoreKey(store, localeName)
       store[saveName] = {
         saved_at: new Date().toISOString(),
         members: snapshot,
+        access_code: accessCode,
       }
       if (previousKey && previousKey !== saveName) {
         delete store[previousKey]
@@ -2299,15 +2356,15 @@ export default function StaffPage() {
         setLocaleStaffName(saveName)
       }
       await writeStaffLocaleStore(store)
-      saveMembersLocaleBackup(saveName, { members: snapshot })
+      saveMembersLocaleBackup(saveName, { members: snapshot, access_code: accessCode })
       try {
-        await upsertStaffLocalePack(saveName, snapshot)
+        await upsertStaffLocalePack(saveName, snapshot, accessCode)
       } catch (err) {
         const msg = err?.message || ''
         await refreshSavedLocaleNames()
         if (isOfflineQueuedMessage(msg)) {
           setSuccess(
-            `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi, solo su questo browser — verrà sincronizzata quando torna la connessione).`,
+            `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — condividilo con il personale. Verrà sincronizzata quando torna la connessione.`,
           )
         } else {
           setError(msg || 'Salvato solo su questo browser: il server non ha ricevuto il locale (riprova con connessione attiva).')
@@ -2317,8 +2374,8 @@ export default function StaffPage() {
       await refreshSavedLocaleNames()
       setSuccess(
         check.renamed
-          ? check.message
-          : `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi, visibile su tutti i PC collegati al server).`,
+          ? `${check.message} Codice zona: ${accessCode}.`
+          : `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — solo chi conosce il codice può caricare questo locale.`,
       )
     } catch {
       setError('Errore nel salvataggio locale dei dipendenti')
@@ -2441,7 +2498,17 @@ export default function StaffPage() {
       setError('Inserisci il nome del locale prima di caricare i dipendenti')
       return
     }
-    const pack = await resolveLocalePack(localeName)
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const requiresCode = await localeRequiresAccessCode(localeName)
+    if (requiresCode && !isValidLocaleAccessCode(code)) {
+      setError('Inserisci il codice a 6 cifre del tuo locale (es. Bar Momento). Senza codice corretto non puoi caricare dipendenti di altre zone.')
+      return
+    }
+    const pack = await resolveLocalePack(localeName, code)
+    if (pack?.denied) {
+      setError('Codice errato: non puoi caricare i dipendenti di un altro locale.')
+      return
+    }
     if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
       setError(`Nessuna lista salvata trovata per il locale "${localeName}" (né su questo browser né sul server).`)
       return
@@ -2971,8 +3038,9 @@ export default function StaffPage() {
         return
       }
       const saveName = check.canonicalName
-      saveMembersLocaleBackup(saveName, { members: snapshot })
-      const saved = await upsertStaffLocalePack(saveName, snapshot)
+      const accessCode = await resolveLocaleAccessCodeForSave(localeName)
+      saveMembersLocaleBackup(saveName, { members: snapshot, access_code: accessCode })
+      const saved = await upsertStaffLocalePack(saveName, snapshot, accessCode)
       setMembersBackupLocale(saveName)
       if (saveName !== localeName) {
         setLocaleStaffName(saveName)
@@ -2985,8 +3053,8 @@ export default function StaffPage() {
       await refreshBackupMeta(planningBackupSlot, saveName)
       setSuccess(
         check.renamed
-          ? check.message
-          : `Backup dipendenti creato per "${saveName}" (${members.length} voci, condiviso sul server).`,
+          ? `${check.message} Codice zona: ${accessCode}.`
+          : `Backup dipendenti creato per "${saveName}" (${members.length} voci). Codice zona: ${accessCode}.`,
       )
     } catch (err) {
       const msg = err?.message || ''
@@ -3011,7 +3079,17 @@ export default function StaffPage() {
       setError('Seleziona il locale di cui ripristinare il backup dipendenti.')
       return
     }
-    const pack = await resolveLocalePack(localeName)
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const requiresCode = await localeRequiresAccessCode(localeName)
+    if (requiresCode && !isValidLocaleAccessCode(code)) {
+      setError('Inserisci il codice a 6 cifre del locale per ripristinare il backup.')
+      return
+    }
+    const pack = await resolveLocalePack(localeName, code)
+    if (pack?.denied) {
+      setError('Codice errato: non puoi ripristinare il backup di un altro locale.')
+      return
+    }
     const rows = pack?.members
     if (!rows?.length) {
       setError(`Nessun backup dipendenti per il locale "${localeName}".`)
@@ -3534,6 +3612,29 @@ export default function StaffPage() {
               ))}
             </select>
           </div>
+          <div className="form-group" style={{ marginBottom: 0, flex: '0 1 150px', minWidth: 140 }}>
+            <label>Codice zona (6 cifre)</label>
+            <input
+              className="form-control"
+              value={localeAccessCode}
+              onChange={(e) => setLocaleAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="123456"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              disabled={shiftBusy || loading || demoLoading || reportLoading}
+              title="Obbligatorio per caricare i dipendenti: ogni locale ha il suo codice. Chi salva il locale vede il codice nel messaggio di conferma."
+            />
+          </div>
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            onClick={() => setLocaleAccessCode(generateLocaleAccessCode())}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Genera un nuovo codice da usare al prossimo salvataggio"
+          >
+            Genera codice
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -3567,6 +3668,10 @@ export default function StaffPage() {
           >
             Elimina locale
           </button>
+          <p style={{ flex: '1 1 100%', margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: il personale può caricare solo la lista della propria zona (es. Bar Momento).
+            Al primo salvataggio compare il codice da comunicare al team; senza codice corretto non si accede agli elenchi degli altri locali.
+          </p>
         </div>
         <div className="table-wrap">
           <table className="app-table app-table--compact">

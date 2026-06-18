@@ -197,17 +197,21 @@ class StaffLocalePackSummary(BaseModel):
     locale_name: str
     saved_at: Optional[str] = None
     member_count: int = 0
+    requires_access_code: bool = False
 
 
 class StaffLocalePackRead(BaseModel):
     locale_name: str
     saved_at: Optional[str] = None
     members: List[StaffLocaleMemberSnapshot]
+    access_code: Optional[str] = None
 
 
 class StaffLocalePackUpsert(BaseModel):
     locale_name: str = Field(..., min_length=1, max_length=255)
     members: List[StaffLocaleMemberSnapshot]
+    access_code: Optional[str] = Field(None, min_length=6, max_length=6, pattern=r"^\d{6}$")
+    regenerate_access_code: bool = False
 
 
 class StaffBackupSummary(BaseModel):

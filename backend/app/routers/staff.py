@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -156,8 +156,15 @@ def list_locale_packs(db: Session = Depends(get_db)):
 
 
 @router.get("/locale-packs/detail", response_model=staff_schema.StaffLocalePackRead)
-def get_locale_pack(name: str = Query(..., min_length=1, max_length=255), db: Session = Depends(get_db)):
-    row = staff_service.get_locale_pack(db, name)
+def get_locale_pack(
+    name: str = Query(..., min_length=1, max_length=255),
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
+    try:
+        row = staff_service.get_locale_pack(db, name, access_code=code)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locale non trovato")
     return row
