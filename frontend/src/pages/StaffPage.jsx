@@ -1379,10 +1379,6 @@ export default function StaffPage() {
   }, [localeStaffName])
 
   useEffect(() => {
-    setLocaleAccessCode('')
-  }, [localeStaffName])
-
-  useEffect(() => {
     if (membersBackupLocale) return
     const first = membersBackupLocaleOptions.find((o) => o.value)?.value
     if (!first) return
@@ -1962,7 +1958,20 @@ export default function StaffPage() {
   }
 
   function localeNameCompareKey(value) {
-    return normalizeLocaleName(value).toLocaleLowerCase('it')
+    return normalizeLocaleName(value)
+      .toLocaleLowerCase('it')
+      .replace(/[\s_-]+/g, '')
+  }
+
+  function resolveCanonicalLocaleName(localeName) {
+    const target = localeNameCompareKey(localeName)
+    if (!target) return ''
+    const direct = normalizeLocaleName(localeName)
+    if (savedLocaleNames.some((n) => localeNameCompareKey(n) === target)) {
+      const hit = savedLocaleNames.find((n) => localeNameCompareKey(n) === target)
+      return hit || direct
+    }
+    return direct
   }
 
   function findLocaleStoreKey(store, localeName) {
@@ -2169,8 +2178,27 @@ export default function StaffPage() {
     return false
   }
 
+  async function verifyLocaleZoneAccess(localeName, accessCode) {
+    const code = normalizeLocaleAccessCode(accessCode)
+    const requiresCode = await localeRequiresAccessCode(localeName)
+    if (!requiresCode) return { ok: true }
+    if (!isValidLocaleAccessCode(code)) {
+      return { ok: false, needsCode: true }
+    }
+    const stored = await readStoredLocaleAccessCode(localeName)
+    if (stored && verifyLocaleAccessCode(stored, code)) {
+      return { ok: true }
+    }
+    try {
+      await fetchStaffLocalePack(localeName, code)
+      return { ok: true }
+    } catch {
+      return { ok: false, wrongCode: true }
+    }
+  }
+
   async function resolveLocalePack(localeName, accessCode) {
-    const key = normalizeLocaleName(localeName)
+    const key = resolveCanonicalLocaleName(localeName)
     if (!key) return null
     const code = normalizeLocaleAccessCode(accessCode)
     const requiresCode = await localeRequiresAccessCode(key)
@@ -2183,11 +2211,10 @@ export default function StaffPage() {
     const matchedStoreKey = findLocaleStoreKey(store, key)
     const local = matchedStoreKey ? store[matchedStoreKey] : null
     const localCode = normalizeLocaleAccessCode(local?.access_code)
-    if (localCode && isValidLocaleAccessCode(code) && !verifyLocaleAccessCode(localCode, code)) {
-      return { denied: true }
-    }
+    const localCodeOk =
+      !localCode || !isValidLocaleAccessCode(code) || verifyLocaleAccessCode(localCode, code)
 
-    if (local?.members?.length && (!localCode || !code || verifyLocaleAccessCode(localCode, code))) {
+    if (local?.members?.length && localCodeOk) {
       return {
         saved_at: local.saved_at,
         members: local.members,
@@ -2383,13 +2410,23 @@ export default function StaffPage() {
   }
 
   async function handleDeleteLocaleName() {
-    const localeName = normalizeLocaleName(localeStaffName)
+    const localeName = resolveCanonicalLocaleName(localeStaffName)
     if (!localeName) {
       setError('Inserisci o seleziona il locale da eliminare.')
       return
     }
     if (!isUserDeletableLocaleName(localeName)) {
       setError(`"${localeName}" non può essere eliminato da qui (locale di sistema o non ancora salvato).`)
+      return
+    }
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const access = await verifyLocaleZoneAccess(localeName, code)
+    if (!access.ok) {
+      if (access.needsCode) {
+        setError(`Inserisci il codice a 6 cifre per eliminare "${localeName}".`)
+      } else {
+        setError(`Codice errato per "${localeName}". Non puoi eliminare questo locale.`)
+      }
       return
     }
     if (
@@ -2401,10 +2438,19 @@ export default function StaffPage() {
     }
     setError('')
     try {
+      let serverDeleted = false
       try {
-        await deleteStaffLocalePack(localeName)
-      } catch {
-        // ok se presente solo in locale
+        await deleteStaffLocalePack(localeName, isValidLocaleAccessCode(code) ? code : undefined)
+        serverDeleted = true
+      } catch (err) {
+        const msg = String(err?.message || '')
+        if (msg.includes('Codice') || msg.includes('403')) {
+          setError(`Codice errato per "${localeName}". Non puoi eliminare questo locale.`)
+          return
+        }
+        if (!msg.includes('404') && !msg.includes('non trovato')) {
+          throw err
+        }
       }
       await removeStaffLocaleFromStore(localeName)
       deleteMembersLocaleBackup(localeName)
@@ -2417,9 +2463,14 @@ export default function StaffPage() {
         setMembersBackupLocale('')
       }
       setLocaleStaffName('')
+      setLocaleAccessCode('')
       await refreshSavedLocaleNames()
       await refreshBackupMeta()
-      setSuccess(`Locale "${localeName}" eliminato.`)
+      setSuccess(
+        serverDeleted
+          ? `Locale "${localeName}" eliminato.`
+          : `Locale "${localeName}" eliminato da questo browser (non trovato sul server).`,
+      )
     } catch (err) {
       setError(err?.message || 'Eliminazione locale non riuscita')
     }
@@ -2493,20 +2544,25 @@ export default function StaffPage() {
   }
 
   async function handleLoadMembersByLocale() {
-    const localeName = normalizeLocaleName(localeStaffName)
+    const localeName = resolveCanonicalLocaleName(localeStaffName)
     if (!localeName) {
       setError('Inserisci il nome del locale prima di caricare i dipendenti')
       return
     }
+    if (localeName !== normalizeLocaleName(localeStaffName)) {
+      setLocaleStaffName(localeName)
+    }
     const code = normalizeLocaleAccessCode(localeAccessCode)
     const requiresCode = await localeRequiresAccessCode(localeName)
     if (requiresCode && !isValidLocaleAccessCode(code)) {
-      setError('Inserisci il codice a 6 cifre del tuo locale (es. Bar Momento). Senza codice corretto non puoi caricare dipendenti di altre zone.')
+      setError(
+        `Inserisci il codice a 6 cifre per "${localeName}" (es. dal database). Senza codice corretto non puoi caricare dipendenti di altre zone.`,
+      )
       return
     }
     const pack = await resolveLocalePack(localeName, code)
     if (pack?.denied) {
-      setError('Codice errato: non puoi caricare i dipendenti di un altro locale.')
+      setError(`Codice errato per "${localeName}". Verifica il codice nel database e riprova.`)
       return
     }
     if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
@@ -3598,7 +3654,7 @@ export default function StaffPage() {
               className="form-control"
               value={
                 savedLocaleNames.find(
-                  (n) => n.toLocaleLowerCase('it') === localeStaffName.trim().toLocaleLowerCase('it'),
+                  (n) => localeNameCompareKey(n) === localeNameCompareKey(localeStaffName),
                 ) || ''
               }
               onChange={(e) => setLocaleStaffName(e.target.value)}
@@ -3664,7 +3720,7 @@ export default function StaffPage() {
               reportLoading ||
               !isUserDeletableLocaleName(localeStaffName)
             }
-            title="Rimuove il locale selezionato dall'elenco salvato (anche sul server)"
+            title="Rimuove il locale selezionato: serve il codice zona a 6 cifre se il locale è protetto"
           >
             Elimina locale
           </button>

@@ -99,8 +99,10 @@ export function upsertStaffLocalePack(localeName, members, accessCode, options =
   })
 }
 
-export function deleteStaffLocalePack(localeName) {
+export function deleteStaffLocalePack(localeName, accessCode) {
   const q = new URLSearchParams({ name: String(localeName || '').trim() })
+  const code = String(accessCode || '').replace(/\D/g, '')
+  if (code.length === 6) q.set('code', code)
   return apiFetch(`/staff/locale-packs?${q}`, { ...SYNC_FETCH, method: 'DELETE' })
 }
 

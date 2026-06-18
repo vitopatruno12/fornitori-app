@@ -179,11 +179,18 @@ def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session 
 
 
 @router.delete("/locale-packs", status_code=status.HTTP_204_NO_CONTENT)
-def delete_locale_pack(name: str = Query(..., min_length=1, max_length=255), db: Session = Depends(get_db)):
+def delete_locale_pack(
+    name: str = Query(..., min_length=1, max_length=255),
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
     try:
-        ok = staff_service.delete_locale_pack(db, name)
+        ok = staff_service.delete_locale_pack(db, name, access_code=code)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        msg = str(e)
+        if "Codice" in msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locale non trovato")
     return None

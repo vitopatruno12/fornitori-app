@@ -358,7 +358,7 @@ def _normalize_locale_name(name: str) -> str:
 
 
 def _locale_name_key(name: str) -> str:
-    return _normalize_locale_name(name).casefold()
+    return re.sub(r"[\s_\-]+", "", _normalize_locale_name(name).casefold())
 
 
 def _members_fingerprint(members: List[staff_schema.StaffLocaleMemberSnapshot]) -> str:
@@ -524,13 +524,22 @@ def upsert_locale_pack(
     return locale_pack_to_read(row, include_access_code=True)
 
 
-def delete_locale_pack(db: Session, locale_name: str) -> bool:
+def delete_locale_pack(
+    db: Session,
+    locale_name: str,
+    access_code: Optional[str] = None,
+) -> bool:
     key = _normalize_locale_name(locale_name)
     if not key:
         raise ValueError("Nome locale non valido")
     row = _find_locale_pack_by_key(db, locale_name)
     if not row:
         return False
+    stored_code = _normalize_access_code(row.access_code)
+    if stored_code:
+        provided = _normalize_access_code(access_code)
+        if provided != stored_code:
+            raise ValueError("Codice locale non valido.")
     db.delete(row)
     db.commit()
     return True
