@@ -55,8 +55,13 @@ def _is_fiscale_filter():
     )
 
 
+def _is_cassa_contanti_filter():
+    """Movimenti che muovono contanti in cassa (fiscale + non fiscale, escluso POS)."""
+    return or_(CashEntry.conto.is_(None), CashEntry.conto != POS_CONTO)
+
+
 def _is_extra_cassa(conto: Optional[str]) -> bool:
-    return conto in {NON_FISCALE_CONTO, POS_CONTO}
+    return conto == POS_CONTO
 
 
 def _net_amount_for_day(
@@ -67,8 +72,9 @@ def _net_amount_for_day(
     *,
     conto: Optional[str] = None,
     fiscale_only: bool = False,
+    cassa_contanti_only: bool = False,
 ) -> Decimal:
-    """Saldo netto (entrate − uscite) nel giorno, filtrato per conto o solo fiscale."""
+    """Saldo netto (entrate − uscite) nel giorno, filtrato per conto o solo fiscale/cassa contanti."""
     act_clause = _activity_filter(activity)
     entrate_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
         CashEntry.entry_date >= start,
@@ -88,6 +94,9 @@ def _net_amount_for_day(
     elif fiscale_only:
         entrate_q = entrate_q.filter(_is_fiscale_filter())
         uscite_q = uscite_q.filter(_is_fiscale_filter())
+    elif cassa_contanti_only:
+        entrate_q = entrate_q.filter(_is_cassa_contanti_filter())
+        uscite_q = uscite_q.filter(_is_cassa_contanti_filter())
     entrate = Decimal(str(entrate_q.scalar() or 0)).quantize(Decimal("0.01"))
     uscite = Decimal(str(uscite_q.scalar() or 0)).quantize(Decimal("0.01"))
     return (entrate - uscite).quantize(Decimal("0.01"))
@@ -127,7 +136,7 @@ def list_entries_with_balance(
             .filter(
                 CashEntry.entry_date < start,
                 CashEntry.type == "entrata",
-                _is_fiscale_filter(),
+                _is_cassa_contanti_filter(),
                 _activity_filter(activity),
             )
             .scalar()
@@ -137,7 +146,7 @@ def list_entries_with_balance(
             .filter(
                 CashEntry.entry_date < start,
                 CashEntry.type == "uscita",
-                _is_fiscale_filter(),
+                _is_cassa_contanti_filter(),
                 _activity_filter(activity),
             )
             .scalar()
@@ -291,7 +300,7 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
             CashEntry.entry_date >= start,
             CashEntry.entry_date <= end,
             CashEntry.type == "entrata",
-            _is_fiscale_filter(),
+            _is_cassa_contanti_filter(),
             act_clause,
         )
         .scalar()
@@ -302,7 +311,7 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
             CashEntry.entry_date >= start,
             CashEntry.entry_date <= end,
             CashEntry.type == "uscita",
-            _is_fiscale_filter(),
+            _is_cassa_contanti_filter(),
             act_clause,
         )
         .scalar()
@@ -310,17 +319,17 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
 
     entrate = Decimal(str(entrate or 0)).quantize(Decimal("0.01"))
     uscite = Decimal(str(uscite or 0)).quantize(Decimal("0.01"))
-    saldo_giorno = totale_fiscale
+    saldo_giorno = _net_amount_for_day(db, start, end, activity, cassa_contanti_only=True)
 
-    # Saldo cumulativo = somma di (entrate - uscite) fiscali fino a fine giornata
+    # Saldo cumulativo = somma di (entrate - uscite) in cassa contanti fino a fine giornata
     entrate_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_fiscale_filter(), act_clause)
+        .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_cassa_contanti_filter(), act_clause)
         .scalar()
     )
     uscite_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_fiscale_filter(), act_clause)
+        .filter(CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_cassa_contanti_filter(), act_clause)
         .scalar()
     )
     saldo_cum = (

@@ -842,45 +842,58 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   function isExtraCassa(entry) {
-    return isNonFiscale(entry) || isPos(entry)
+    return isPos(entry)
+  }
+
+  function buildLedgerFields(entry) {
+    const amount = Number(entry.amount || 0)
+    const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
+    const posTag = entry.conto === CONTO_POS
+    const isEntrata = entry.type === 'entrata'
+    const entrata = !posTag && isEntrata ? amount : 0
+    const uscita = !posTag && entry.type === 'uscita' ? amount : 0
+    const nonFiscale = nonFiscaleTag ? (isEntrata ? amount : -amount) : 0
+    const pos = posTag ? (isEntrata ? amount : -amount) : 0
+    const totaleMovimento = !nonFiscaleTag && !posTag ? entrata - uscita : 0
+    const affectsSaldo = !posTag
+    const cashDelta = affectsSaldo ? entrata - uscita : 0
+    const incasso = totaleMovimento + nonFiscale + pos
+    return {
+      entrata,
+      uscita,
+      nonFiscale,
+      pos,
+      totaleMovimento,
+      affectsSaldo,
+      cashDelta,
+      incasso,
+    }
+  }
+
+  function mapEntriesWithLedger(entryList, openingDefault) {
+    const cassaIniziale = openingCashInput === '' ? openingDefault : Number(openingCashInput || 0)
+    let running = cassaIniziale
+    const rows = entryList.map((entry) => {
+      const ledger = buildLedgerFields(entry)
+      if (ledger.affectsSaldo) running += ledger.cashDelta
+      return {
+        ...entry,
+        ...ledger,
+        cassaMattina: cassaIniziale,
+        cassaSera: running,
+      }
+    })
+    return { rows, cassaIniziale, cassaFinale: running }
   }
 
   const rowsWithLedger = React.useMemo(() => {
     if (!entries || entries.length === 0) return { rows: [], cassaIniziale: 0, cassaFinale: 0 }
 
-    const firstFiscale = entries.find(e => !isExtraCassa(e))
-    const defaultOpening = firstFiscale
-      ? Number(firstFiscale.saldo_progressivo) - (firstFiscale.type === 'entrata' ? Number(firstFiscale.amount) : -Number(firstFiscale.amount))
+    const firstCash = entries.find((e) => !isExtraCassa(e))
+    const defaultOpening = firstCash
+      ? Number(firstCash.saldo_progressivo) - (firstCash.type === 'entrata' ? Number(firstCash.amount) : -Number(firstCash.amount))
       : Number(entries[0].saldo_progressivo || 0)
-    const cassaIniziale = openingCashInput === '' ? defaultOpening : Number(openingCashInput || 0)
-
-    let running = cassaIniziale
-    const rows = entries.map((entry) => {
-      const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
-      const posTag = entry.conto === CONTO_POS
-      const entrata = !nonFiscaleTag && !posTag && entry.type === 'entrata' ? Number(entry.amount) : 0
-      const uscita = !nonFiscaleTag && !posTag && entry.type === 'uscita' ? Number(entry.amount) : 0
-      const nonFiscale = nonFiscaleTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
-      const pos = posTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
-      const totaleMovimento = entrata - uscita
-      const incasso = totaleMovimento + nonFiscale + pos
-      const affectsSaldo = !nonFiscaleTag && !posTag
-      if (affectsSaldo) running += totaleMovimento
-      return {
-        ...entry,
-        entrata,
-        uscita,
-        nonFiscale,
-        pos,
-        totaleMovimento,
-        affectsSaldo,
-        incasso,
-        cassaMattina: cassaIniziale,
-        cassaSera: running,
-      }
-    })
-
-    return { rows, cassaIniziale, cassaFinale: running }
+    return mapEntriesWithLedger(entries, defaultOpening)
   }, [entries, openingCashInput])
 
   const entriesForSelectedDay = useMemo(() => {
@@ -894,39 +907,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       return { rows: [], cassaIniziale: 0, cassaFinale: 0 }
     }
 
-    const firstFiscale = entriesForSelectedDay.find((e) => !isExtraCassa(e))
-    const defaultOpening = firstFiscale
-      ? Number(firstFiscale.saldo_progressivo) - (firstFiscale.type === 'entrata' ? Number(firstFiscale.amount) : -Number(firstFiscale.amount))
+    const firstCash = entriesForSelectedDay.find((e) => !isExtraCassa(e))
+    const defaultOpening = firstCash
+      ? Number(firstCash.saldo_progressivo) - (firstCash.type === 'entrata' ? Number(firstCash.amount) : -Number(firstCash.amount))
       : Number(entriesForSelectedDay[0].saldo_progressivo || 0)
-    const cassaIniziale = openingCashInput === '' ? defaultOpening : Number(openingCashInput || 0)
-
-    let running = cassaIniziale
-    const rows = entriesForSelectedDay.map((entry) => {
-      const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
-      const posTag = entry.conto === CONTO_POS
-      const entrata = !nonFiscaleTag && !posTag && entry.type === 'entrata' ? Number(entry.amount) : 0
-      const uscita = !nonFiscaleTag && !posTag && entry.type === 'uscita' ? Number(entry.amount) : 0
-      const nonFiscale = nonFiscaleTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
-      const pos = posTag ? (entry.type === 'entrata' ? Number(entry.amount) : -Number(entry.amount)) : 0
-      const totaleMovimento = entrata - uscita
-      const incasso = totaleMovimento + nonFiscale + pos
-      const affectsSaldo = !nonFiscaleTag && !posTag
-      if (affectsSaldo) running += totaleMovimento
-      return {
-        ...entry,
-        entrata,
-        uscita,
-        nonFiscale,
-        pos,
-        totaleMovimento,
-        affectsSaldo,
-        incasso,
-        cassaMattina: cassaIniziale,
-        cassaSera: running,
-      }
-    })
-
-    return { rows, cassaIniziale, cassaFinale: running }
+    return mapEntriesWithLedger(entriesForSelectedDay, defaultOpening)
   }, [entriesForSelectedDay, openingCashInput])
 
   const filteredMovementRows = useMemo(() => {
@@ -934,8 +919,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return rowsWithLedger.rows.filter((entry) => {
       if (movementKind === 'entrata' && (isExtraCassa(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
-      if (movementKind === 'fiscale' && isExtraCassa(entry)) return false
-      if (movementKind === 'nf' && !isExtraCassa(entry)) return false
+      if (movementKind === 'fiscale' && (isNonFiscale(entry) || isPos(entry))) return false
       if (movementKind === 'nf' && !isNonFiscale(entry)) return false
       if (movementKind === 'pos' && !isPos(entry)) return false
       if (!q) return true
@@ -1027,6 +1011,28 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 100)
   }
 
+  const cassaContantiGiornoComputed = React.useMemo(() => {
+    return entriesForSelectedDay.reduce((acc, e) => {
+      if (e.conto === CONTO_POS) return acc
+      const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
+      return acc + delta
+    }, 0)
+  }, [entriesForSelectedDay])
+
+  const entrateCassaGiornoComputed = React.useMemo(() => {
+    return entriesForSelectedDay.reduce((acc, e) => {
+      if (e.conto === CONTO_POS || e.type !== 'entrata') return acc
+      return acc + Number(e.amount || 0)
+    }, 0)
+  }, [entriesForSelectedDay])
+
+  const usciteCassaGiornoComputed = React.useMemo(() => {
+    return entriesForSelectedDay.reduce((acc, e) => {
+      if (e.conto === CONTO_POS || e.type !== 'uscita') return acc
+      return acc + Number(e.amount || 0)
+    }, 0)
+  }, [entriesForSelectedDay])
+
   const nonFiscaleGiornoComputed = React.useMemo(() => {
     return entriesForSelectedDay.reduce((acc, e) => {
       if (e.conto !== CONTO_NON_FISCALE) return acc
@@ -1058,9 +1064,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     ? Number(summary.totale_vendita)
     : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
-  const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : 0
-  const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : 0
-  const saldoGiornalieroFiscale = summary?.saldo_giornaliero != null ? Number(summary.saldo_giornaliero) : Number(fiscaleGiorno || 0)
+  const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : entrateCassaGiornoComputed
+  const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed
+  const saldoGiornalieroFiscale = summary?.saldo_giornaliero != null ? Number(summary.saldo_giornaliero) : cassaContantiGiornoComputed
 
   return (
     <div>
@@ -1228,7 +1234,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                   type="button"
                   className={formFlowTag === 'non_fiscale' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
                   onClick={() => setFormFlowTag('non_fiscale')}
-                  title="Movimento NON fiscale: compare nel riepilogo vendite ma non modifica la cassa fisica."
+                  title="Movimento NON fiscale: compare in cassa entrata/uscita e nel riepilogo vendite (escluso dal totale fiscale)."
                 >
                   Non fiscale
                 </button>
@@ -1490,7 +1496,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                     <td
                       className="text-end pn-amount-cell"
                       style={{
-                        color: isExtraCassa(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
+                        color: isPos(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
                       }}
                     >
                       € {formatAmount(entry.incasso)}
@@ -1609,7 +1615,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, non fiscale e POS calcolati dal server per quel giorno. Il saldo cassa usa solo i movimenti fiscali.
+          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, non fiscale e POS calcolati dal server per quel giorno. Il saldo cassa usa movimenti fiscali e non fiscali (escluso POS).
         </p>
         <div className="form-row">
           <div className="form-group">
@@ -1680,7 +1686,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         <div className="prima-nota-riepilogo-vendite" style={{ marginTop: '1rem' }}>
           <h3 className="prima-nota-riepilogo-vendite-title">Vendite del giorno — {activeActivityLabel}</h3>
           <p className="prima-nota-riepilogo-vendite-hint">
-            Fiscale, non fiscale e POS per il <strong>{formatDate(selectedDate)}</strong>. Il non fiscale non modifica la cassa fisica ma entra nel totale vendita.
+            Fiscale, non fiscale e POS per il <strong>{formatDate(selectedDate)}</strong>. Il non fiscale entra in cassa entrata/uscita e nel totale vendita.
           </p>
           <div className="table-wrap">
             <table className="app-table prima-nota-riepilogo-vendite-table">
@@ -1713,15 +1719,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           <table className="app-table">
             <tbody>
               <tr>
-                <td><strong>Totale entrate (fiscale)</strong></td>
+                <td><strong>Totale entrate cassa</strong></td>
                 <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(totaleEntrateGiorno)}</td>
               </tr>
               <tr>
-                <td><strong>Totale uscite (fiscale)</strong></td>
+                <td><strong>Totale uscite cassa</strong></td>
                 <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(totaleUsciteGiorno)}</td>
               </tr>
               <tr>
-                <td><strong>Saldo giornaliero (solo fiscale)</strong></td>
+                <td><strong>Saldo giornaliero cassa</strong></td>
                 <td className="text-end amount">€ {formatAmount(saldoGiornalieroFiscale)}</td>
               </tr>
               <tr>
@@ -1791,7 +1797,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                   <span className="badge-pn badge-pn--out">Uscita</span>
                 )}
               </p>
-              <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isExtraCassa(drawerEntry) ? 'var(--text-muted)' : drawerEntry.type === 'entrata' ? 'var(--success)' : 'var(--danger)' }}>
+              <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isPos(drawerEntry) ? 'var(--text-muted)' : drawerEntry.type === 'entrata' ? 'var(--success)' : 'var(--danger)' }}>
                 € {formatAmount(drawerEntry.amount)}
               </p>
               <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 0.75rem', fontSize: '0.9rem' }}>
