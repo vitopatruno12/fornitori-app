@@ -71,6 +71,19 @@ git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 log "Build frontend (file statici in frontend/dist)"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/build-frontend.sh"
 
+API_DIR="${API_DIR:-/opt/fornitori-app}"
+if [[ "$RESTART_API" == "1" ]] && [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f "$API_DIR")" != "$(readlink -f "$APP_DIR")" ]]; then
+  log "Aggiornamento backend API in $API_DIR (cartella usata da systemd)"
+  git -C "$API_DIR" fetch origin
+  git -C "$API_DIR" checkout "$BRANCH"
+  git -C "$API_DIR" pull --ff-only origin "$BRANCH"
+  if [[ -x "$API_DIR/backend/venv/bin/pip" ]]; then
+    "$API_DIR/backend/venv/bin/pip" install -q -r "$API_DIR/backend/requirements.txt" || {
+      warn "pip install in $API_DIR fallito; verifica dipendenze Python."
+    }
+  fi
+fi
+
 if [[ "$RESTART_API" == "1" ]]; then
   log "Restart API (fornitori-api) — create_all aggiunge solo tabelle/colonne mancanti, non cancella dati"
   if systemctl list-unit-files fornitori-api.service &>/dev/null; then
@@ -79,6 +92,10 @@ if [[ "$RESTART_API" == "1" ]]; then
     systemctl --no-pager --full status fornitori-api | head -12 || true
   else
     warn "Servizio fornitori-api non trovato. Salto restart."
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    log "Verifica rapida API"
+    curl -sf "http://127.0.0.1:8000/health" && echo "" || warn "Health locale non OK su :8000"
   fi
 fi
 
