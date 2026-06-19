@@ -2184,6 +2184,19 @@ export default function StaffPage() {
     return getLatestStaffBackup('payroll')
   }
 
+  function matchServerLocaleSummary(summaries, localeName) {
+    const target = localeNameCompareKey(localeName)
+    return (summaries || []).find((row) => localeNameCompareKey(row?.locale_name) === target)
+  }
+
+  async function listServerLocaleSummaries() {
+    try {
+      return await fetchStaffLocalePacks()
+    } catch {
+      return []
+    }
+  }
+
   async function localeRequiresAccessCode(localeName) {
     const stored = await readStoredLocaleAccessCode(localeName)
     if (isValidLocaleAccessCode(stored)) return true
@@ -2208,6 +2221,10 @@ export default function StaffPage() {
     const stored = await readStoredLocaleAccessCode(localeName)
     if (stored && verifyLocaleAccessCode(stored, code)) {
       return { ok: true }
+    }
+    const summaries = await listServerLocaleSummaries()
+    if (!matchServerLocaleSummary(summaries, localeName)) {
+      return { ok: false, wrongCode: true }
     }
     try {
       await fetchStaffLocalePack(localeName, code)
@@ -2275,6 +2292,10 @@ export default function StaffPage() {
     }
 
     try {
+      const summaries = await listServerLocaleSummaries()
+      if (!matchServerLocaleSummary(summaries, key)) {
+        throw new Error('locale_not_on_server')
+      }
       const remote = await fetchStaffLocalePack(key, isValidLocaleAccessCode(code) ? code : undefined)
       if (remote && Array.isArray(remote.members)) {
         const pack = {
