@@ -81,6 +81,20 @@ def upsert_locale_pack(payload: PrimaNotaLocalePackUpsert, db: Session = Depends
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.delete("/locale-packs/{activity_slug}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_locale_pack(
+    activity_slug: str,
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
+    try:
+        ok = prima_nota_locale_service.delete_locale_pack(db, activity_slug, access_code=code)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Codice locale non valido.")
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Locale non trovato")
+
+
 @router.get("/entries", response_model=List[CashEntryWithBalance])
 def list_entries(
     date_from: Optional[str] = Query(None, description="Data inizio (YYYY-MM-DD)"),

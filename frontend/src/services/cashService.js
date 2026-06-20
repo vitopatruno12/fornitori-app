@@ -47,6 +47,13 @@ export async function upsertPrimaNotaLocalePack(activitySlug, label, accessCode,
   })
 }
 
+export async function deletePrimaNotaLocalePack(activitySlug, accessCode) {
+  const slug = encodeURIComponent(String(activitySlug || '').trim())
+  const code = String(accessCode || '').replace(/\D/g, '')
+  const q = code.length === 6 ? `?code=${encodeURIComponent(code)}` : ''
+  await apiFetch(`/cash/locale-packs/${slug}${q}`, { method: 'DELETE' })
+}
+
 export async function fetchEntries(params = {}) {
   const searchParams = new URLSearchParams()
   if (params.date_from) searchParams.append('date_from', params.date_from)

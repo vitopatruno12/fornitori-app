@@ -56,6 +56,22 @@ export function persistCustomLocales(locales) {
   localStorage.setItem(PRIMA_NOTA_LOCALES_STORAGE_KEY, JSON.stringify(customs))
 }
 
+export function removeCustomLocaleById(localeId) {
+  const id = String(localeId || '').trim()
+  if (!id) return loadPrimaNotaLocales()
+  const all = loadPrimaNotaLocales()
+  const target = all.find((l) => l.id === id)
+  if (!target || target.builtin) return all
+  const next = all.filter((l) => l.id !== id)
+  persistCustomLocales(next)
+  return next
+}
+
+export function listCustomPrimaNotaLocales(locales = null) {
+  const list = locales || loadPrimaNotaLocales()
+  return list.filter((l) => !l.builtin)
+}
+
 export function normalizePrimaNotaActivity(id, locales = null) {
   if (!id) return DEFAULT_PRIMA_NOTA_ACTIVITY
   const list = locales || loadPrimaNotaLocales()

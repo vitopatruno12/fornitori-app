@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack } from '../services/cashService'
+import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
 import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
@@ -20,6 +20,7 @@ import {
   normalizeLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
 import {
+  clearStoredPrimaNotaAccessCode,
   listStoredPrimaNotaAccessSlugs,
   readStoredPrimaNotaAccessCode,
   saveStoredPrimaNotaAccessCode,
@@ -29,6 +30,7 @@ import {
   loadPrimaNotaLocales,
   localeLabel,
   normalizePrimaNotaActivity,
+  removeCustomLocaleById,
 } from '../constants/primaNotaLocales'
 
 const CONTO_NON_FISCALE = 'NON_FISCALE'
@@ -117,19 +119,21 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [unlockedSlugs, setUnlockedSlugs] = useState(() => new Set(listStoredPrimaNotaAccessSlugs()))
   const [unlockBusy, setUnlockBusy] = useState(false)
   const [saveCodeBusy, setSaveCodeBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const protectedSlugs = useMemo(
     () => protectedLocaleSummaries.filter((row) => row?.requires_access_code).map((row) => row.activity_slug),
     [protectedLocaleSummaries],
   )
 
-  const visibleLocales = useMemo(() => {
-    if (!operatorMode) return locales
-    return locales.filter((loc) => {
-      if (!protectedSlugs.includes(loc.id)) return true
-      return unlockedSlugs.has(loc.id)
-    })
-  }, [locales, operatorMode, protectedSlugs, unlockedSlugs])
+  function activeLocaleNeedsCode() {
+    return operatorMode && protectedSlugs.includes(activeActivity)
+  }
+
+  function hasActiveLocaleAccess() {
+    if (!activeLocaleNeedsCode()) return true
+    return isValidLocaleAccessCode(resolveActiveAccessCode())
+  }
 
   function resolveActiveAccessCode() {
     const stored = readStoredPrimaNotaAccessCode(activeActivity)
@@ -166,29 +170,76 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }
   }
 
-  async function handleUnlockProtectedLocale(activityId, code) {
+  async function handleVerifyAndSelectLocale(activityId, code) {
     setUnlockBusy(true)
     setError('')
     try {
       const access = await verifyLocaleAccess(activityId, code)
       if (!access.ok) {
-        setError(
-          access.needsCode
-            ? 'Inserisci il codice a 6 cifre del locale.'
-            : 'Codice errato: non puoi aprire questo locale.',
-        )
-        return
-      }
-      const allLocales = loadPrimaNotaLocales()
-      if (!allLocales.some((l) => l.id === activityId)) {
-        setError('Locale non trovato nell’elenco.')
-        return
+        if (!access.needsCode) {
+          setError('Codice errato: non puoi aprire questo locale.')
+        }
+        return false
       }
       selectActivity(activityId)
       setLocaleAccessCode(normalizeLocaleAccessCode(code))
-      setSuccess(`Locale «${localeLabel(activityId, allLocales)}» sbloccato.`)
+      setSuccess(`Locale «${localeLabel(activityId, locales)}» aperto.`)
+      return true
     } finally {
       setUnlockBusy(false)
+    }
+  }
+
+  async function handleDeleteCustomLocale(loc) {
+    if (!loc?.id || loc.builtin) return false
+    const label = loc.label || loc.id
+    let code = ''
+    if (protectedSlugs.includes(loc.id)) {
+      if (activeActivity === loc.id) {
+        code = normalizeLocaleAccessCode(localeAccessCode)
+      }
+      if (!isValidLocaleAccessCode(code)) {
+        code = readStoredPrimaNotaAccessCode(loc.id)
+      }
+      if (!isValidLocaleAccessCode(code)) {
+        setError(`Per eliminare «${label}» inserisci prima il codice a 6 cifre (seleziona il locale e salva/usa il codice).`)
+        return false
+      }
+    }
+    if (
+      !window.confirm(
+        `Eliminare il locale personalizzato «${label}»?\n\nSparisce dall’elenco su questo browser. I movimenti cassa già salvati sul server non vengono cancellati.`,
+      )
+    ) {
+      return false
+    }
+    setDeleteBusy(true)
+    setError('')
+    try {
+      try {
+        await deletePrimaNotaLocalePack(loc.id, code || undefined)
+      } catch {
+        // nessun pack sul server
+      }
+      clearStoredPrimaNotaAccessCode(loc.id)
+      const next = removeCustomLocaleById(loc.id)
+      setLocales(next)
+      setUnlockedSlugs((prev) => {
+        const s = new Set(prev)
+        s.delete(loc.id)
+        return s
+      })
+      await refreshProtectedLocaleSummaries()
+      if (activeActivity === loc.id) {
+        selectActivity(DEFAULT_PRIMA_NOTA_ACTIVITY)
+      }
+      setSuccess(`Locale «${label}» eliminato.`)
+      return true
+    } catch (e) {
+      setError(e?.message || 'Impossibile eliminare il locale.')
+      return false
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -441,12 +492,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }, 200)
   }, [loading, entries, highlightEntryId, movementPeriodFrom, movementPeriodTo])
 
-  useEffect(() => {
-    if (!operatorMode || visibleLocales.length === 0) return
-    if (!visibleLocales.some((loc) => loc.id === activeActivity)) {
-      selectActivity(visibleLocales[0].id)
-    }
-  }, [operatorMode, visibleLocales, activeActivity])
 
   useEffect(() => {
     loadSummary()
@@ -513,10 +558,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadEntries() {
-    if (operatorMode && protectedSlugs.includes(activeActivity) && !unlockedSlugs.has(activeActivity)) {
+    if (operatorMode && !hasActiveLocaleAccess()) {
       setEntries([])
       setLoading(false)
-      setError('Apri il locale con il codice a 6 cifre per visualizzare i movimenti.')
       return
     }
     try {
@@ -544,7 +588,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadSummary() {
-    if (operatorMode && protectedSlugs.includes(activeActivity) && !unlockedSlugs.has(activeActivity)) {
+    if (operatorMode && !hasActiveLocaleAccess()) {
       setSummary(null)
       return
     }
@@ -1241,7 +1285,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       {success && <div className="alert alert-success">{success}</div>}
 
       <PrimaNotaLocalePicker
-        locales={visibleLocales}
+        locales={locales}
         activeActivity={activeActivity}
         onSelect={selectActivity}
         onLocalesChange={setLocales}
@@ -1249,11 +1293,13 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         operatorMode={operatorMode}
         localeAccessCode={localeAccessCode}
         onLocaleAccessCodeChange={setLocaleAccessCode}
-        onUnlockProtectedLocale={handleUnlockProtectedLocale}
+        onVerifyAndSelectLocale={handleVerifyAndSelectLocale}
         onSaveLocaleAccessCode={handleSaveLocaleAccessCode}
+        onDeleteCustomLocale={handleDeleteCustomLocale}
         protectedSlugs={protectedSlugs}
         unlockBusy={unlockBusy}
         saveCodeBusy={saveCodeBusy}
+        deleteBusy={deleteBusy}
       />
 
       <div className="ui-toolbar-one card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem' }}>

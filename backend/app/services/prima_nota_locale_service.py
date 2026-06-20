@@ -164,3 +164,26 @@ def verify_activity_access(db: Session, activity: Optional[str], access_code: Op
     provided = _normalize_access_code(access_code)
     if provided != stored_code:
         raise ValueError("Codice locale non valido.")
+
+
+def delete_locale_pack(
+    db: Session,
+    activity_slug: str,
+    access_code: Optional[str] = None,
+) -> bool:
+    if not _ensure_table(db):
+        return False
+    slug = str(activity_slug or "").strip().lower()
+    if not is_valid_activity_slug(slug):
+        raise ValueError("Slug attività non valido.")
+    row = _find_pack(db, slug)
+    if not row:
+        return False
+    stored_code = _normalize_access_code(row.access_code)
+    if stored_code:
+        provided = _normalize_access_code(access_code)
+        if provided != stored_code:
+            raise ValueError("Codice locale non valido.")
+    db.delete(row)
+    db.commit()
+    return True
