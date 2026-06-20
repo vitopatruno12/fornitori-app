@@ -3,8 +3,8 @@ import { registerSW } from 'virtual:pwa-register'
 import {
   detectPwaUpdateScope,
   fetchRemoteSectionVersions,
-  scopeHashChanged,
-  storeSectionVersions,
+  updateAvailableForScope,
+  storeInstalledVersions,
 } from '../utils/pwaUpdateScope.ts'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
@@ -14,9 +14,19 @@ const PwaUpdateContext = createContext(null)
 async function shouldPromptUpdateForScope(scope) {
   try {
     const remote = await fetchRemoteSectionVersions()
-    return scopeHashChanged(scope, remote)
+    return updateAvailableForScope(scope, remote)
   } catch {
     return true
+  }
+}
+
+async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef) {
+  if (!reg?.waiting) return
+  const scope = detectPwaUpdateScope()
+  const relevant = await shouldPromptUpdateForScope(scope)
+  if (relevant) {
+    pendingScopeRef.current = scope
+    setUpdateReady(true)
   }
 }
 
@@ -29,10 +39,10 @@ export function PwaUpdateProvider({ children }) {
   const pendingScopeRef = useRef(null)
   const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator
 
-  const markScopeVersionsInstalled = useCallback(async () => {
+  const markVersionsInstalled = useCallback(async () => {
     try {
       const remote = await fetchRemoteSectionVersions()
-      if (Object.keys(remote).length) storeSectionVersions(remote)
+      storeInstalledVersions(remote)
     } catch {
       // ignore
     }
@@ -56,6 +66,7 @@ export function PwaUpdateProvider({ children }) {
       },
       onRegistered(registration) {
         registrationRef.current = registration || null
+        void probeWaitingWorker(registration, setUpdateReady, pendingScopeRef)
       },
       onRegisterError() {
         registrationRef.current = null
@@ -63,25 +74,25 @@ export function PwaUpdateProvider({ children }) {
     })
     updateSWRef.current = updateSW
 
-    void markScopeVersionsInstalled()
-
     return undefined
-  }, [swSupported, markScopeVersionsInstalled])
+  }, [swSupported])
 
   useEffect(() => {
     if (!swSupported) return undefined
 
-    const tick = () => {
+    const tick = async () => {
       const reg = registrationRef.current
-      if (reg) void reg.update()
+      if (!reg) return
+      await reg.update()
+      await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
     }
 
-    const intervalId = window.setInterval(tick, CHECK_INTERVAL_MS)
+    const intervalId = window.setInterval(() => void tick(), CHECK_INTERVAL_MS)
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') tick()
+      if (document.visibilityState === 'visible') void tick()
     }
-    const onFocus = () => tick()
+    const onFocus = () => void tick()
 
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
@@ -104,14 +115,17 @@ export function PwaUpdateProvider({ children }) {
       if (reg) {
         registrationRef.current = reg
         await reg.update()
+        await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
       }
-      const scope = detectPwaUpdateScope()
-      const relevant = await shouldPromptUpdateForScope(scope)
-      if (relevant) {
-        pendingScopeRef.current = scope
-        setUpdateReady(true)
-      } else {
-        setUpdateReady(false)
+      if (!reg?.waiting) {
+        const scope = detectPwaUpdateScope()
+        const relevant = await shouldPromptUpdateForScope(scope)
+        if (relevant) {
+          pendingScopeRef.current = scope
+          setUpdateReady(true)
+        } else {
+          setUpdateReady(false)
+        }
       }
     } finally {
       window.setTimeout(() => setChecking(false), 450)
@@ -124,14 +138,14 @@ export function PwaUpdateProvider({ children }) {
       return
     }
     setApplying(true)
-    void markScopeVersionsInstalled()
+    void markVersionsInstalled()
     const fn = updateSWRef.current
     if (typeof fn === 'function') {
       fn(true)
       return
     }
     window.location.reload()
-  }, [swSupported, markScopeVersionsInstalled])
+  }, [swSupported, markVersionsInstalled])
 
   const value = useMemo(
     () => ({

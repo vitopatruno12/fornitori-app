@@ -69,6 +69,7 @@ function hashFiles(relPaths) {
 }
 
 const versions = {
+  build: hashFiles(['**']),
   generatedAt: new Date().toISOString(),
   scopes: Object.fromEntries(
     Object.entries(SCOPE_FILES).map(([scope, files]) => [scope, hashFiles(files)]),
@@ -77,4 +78,4 @@ const versions = {
 
 const outPath = join(frontendRoot, 'public', 'section-versions.json')
 writeFileSync(outPath, `${JSON.stringify(versions, null, 2)}\n`, 'utf8')
-console.log('section-versions.json', versions.scopes)
+console.log('section-versions.json build=', versions.build, versions.scopes)

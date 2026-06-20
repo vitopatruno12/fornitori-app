@@ -37,7 +37,6 @@ export default defineConfig(({ mode }) => {
         'atlas-login-bg.png',
         'atlas-api-fetch-fix.js',
         'favicon.svg',
-        'section-versions.json',
       ],
       manifest: {
         name: 'ATLAS — Gestionale',
@@ -76,6 +75,10 @@ export default defineConfig(({ mode }) => {
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/, /^\/ai/, /^\/uploads/],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.endsWith('section-versions.json'),
+            handler: 'NetworkOnly',
+          },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api') || url.pathname.startsWith('/ai'),
             handler: 'NetworkOnly',

@@ -7,7 +7,14 @@ import {
 
 export type PwaUpdateScope = 'full' | 'station' | 'order' | 'delivery' | 'prima-nota'
 
-const STORAGE_PREFIX = 'atlasSectionVersion:'
+const STORAGE_PREFIX = 'atlasSectionVersion:v2:'
+const BUILD_KEY = 'atlasAppBuildId:v2'
+
+export type SectionVersionsPayload = {
+  build?: string
+  generatedAt?: string
+  scopes?: Record<string, string>
+}
 
 export function detectPwaUpdateScope(): PwaUpdateScope {
   if (isOperatorStationMode()) return 'station'
@@ -26,6 +33,15 @@ export function readStoredSectionVersion(scope: PwaUpdateScope): string {
   }
 }
 
+export function readStoredBuildId(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return localStorage.getItem(BUILD_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
 export function storeSectionVersions(scopes: Record<string, string>): void {
   if (typeof window === 'undefined') return
   try {
@@ -37,14 +53,33 @@ export function storeSectionVersions(scopes: Record<string, string>): void {
   }
 }
 
-export async function fetchRemoteSectionVersions(): Promise<Record<string, string>> {
+export function storeInstalledVersions(payload: SectionVersionsPayload): void {
+  const build = String(payload?.build || '').trim()
+  if (build) {
+    try {
+      localStorage.setItem(BUILD_KEY, build)
+    } catch {
+      // ignore
+    }
+  }
+  if (payload?.scopes && typeof payload.scopes === 'object') {
+    storeSectionVersions(payload.scopes)
+  }
+}
+
+export async function fetchRemoteSectionVersions(): Promise<SectionVersionsPayload> {
   if (typeof window === 'undefined') return {}
   const base = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/')
   const url = `${base}section-versions.json?ts=${Date.now()}`
   const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) return {}
   const data = await res.json()
-  return data?.scopes && typeof data.scopes === 'object' ? data.scopes : {}
+  if (!data || typeof data !== 'object') return {}
+  return {
+    build: typeof data.build === 'string' ? data.build : '',
+    generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : '',
+    scopes: data.scopes && typeof data.scopes === 'object' ? data.scopes : {},
+  }
 }
 
 export function scopeHashChanged(
@@ -56,4 +91,25 @@ export function scopeHashChanged(
   const local = readStoredSectionVersion(scope)
   if (!local) return true
   return local !== remote
+}
+
+/** True se c’è un deploy più recente rilevante per l’ambito corrente (postazione, prima nota, ecc.). */
+export function updateAvailableForScope(
+  scope: PwaUpdateScope,
+  payload: SectionVersionsPayload,
+): boolean {
+  const build = String(payload?.build || '').trim()
+  const storedBuild = readStoredBuildId()
+  const scopes = payload?.scopes || {}
+
+  if (!build) {
+    return scopeHashChanged(scope, scopes)
+  }
+  if (!storedBuild) {
+    return true
+  }
+  if (build === storedBuild) {
+    return false
+  }
+  return scopeHashChanged(scope, scopes)
 }
