@@ -1,4 +1,7 @@
-import { apiFetch, asArray } from './api'
+import { apiFetch, apiUrl, asArray } from './api'
+import { formatApiError, parseApiJson } from '../offline/offlineApiHelpers'
+import { getCachedResponse, isCacheableGetPath, setCachedResponse } from '../offline/offlineCache'
+import { isOnline } from '../offline/offlineStatus'
 
 /** Fetch senza cache browser: dati condivisi tra PC. */
 const SYNC_FETCH = { cache: 'no-store' }
@@ -122,12 +125,39 @@ export async function fetchStaffBackups(section) {
   return asArray(data, 'staff/backups')
 }
 
-export function fetchStaffBackupDetail(section, key) {
+/** Backup assente sul server → null (404 atteso, non è un errore). */
+export async function fetchStaffBackupDetail(section, key) {
   const q = new URLSearchParams({
     section: String(section || '').trim(),
     key: String(key || '').trim(),
   })
-  return apiFetch(`/staff/backups/detail?${q}`, SYNC_FETCH)
+  const path = `/staff/backups/detail?${q}`
+
+  if (!isOnline()) {
+    const cached = await getCachedResponse(path)
+    return cached ?? null
+  }
+
+  const response = await fetch(apiUrl(path), { cache: 'no-store' })
+  if (response.status === 404) return null
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(formatApiError(response.status, text))
+  }
+
+  const text = await response.text().catch(() => '')
+  const contentType = response.headers.get('content-type') || ''
+  const data = parseApiJson(text, path, contentType)
+
+  if (isCacheableGetPath(path)) {
+    try {
+      await setCachedResponse(path, data)
+    } catch {
+      // quota IndexedDB
+    }
+  }
+
+  return data
 }
 
 export function upsertStaffBackup(section, key, payload) {
