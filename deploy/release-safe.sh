@@ -66,6 +66,8 @@ fi
 log "Aggiornamento codice (git pull origin $BRANCH)"
 git -C "$APP_DIR" fetch origin
 git -C "$APP_DIR" checkout "$BRANCH"
+# section-versions.json viene rigenerato a ogni build: non deve bloccare il pull
+git -C "$APP_DIR" checkout -- frontend/public/section-versions.json 2>/dev/null || true
 git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 
 log "Build frontend (file statici in frontend/dist)"
@@ -76,6 +78,7 @@ if [[ "$RESTART_API" == "1" ]] && [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f 
   log "Aggiornamento backend API in $API_DIR (cartella usata da systemd)"
   git -C "$API_DIR" fetch origin
   git -C "$API_DIR" checkout "$BRANCH"
+  git -C "$API_DIR" checkout -- frontend/public/section-versions.json 2>/dev/null || true
   git -C "$API_DIR" pull --ff-only origin "$BRANCH"
   if [[ -x "$API_DIR/backend/venv/bin/pip" ]]; then
     "$API_DIR/backend/venv/bin/pip" install -q -r "$API_DIR/backend/requirements.txt" || {
