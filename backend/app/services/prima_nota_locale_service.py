@@ -1,6 +1,8 @@
+import logging
 import random
 from typing import List, Optional
 
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.prima_nota import is_valid_activity_slug
@@ -11,6 +13,10 @@ from ..schemas.cash import (
     PrimaNotaLocalePackUpsert,
 )
 
+logger = logging.getLogger(__name__)
+
+_table_ready = False
+
 
 def _normalize_access_code(code: Optional[str]) -> str:
     digits = "".join(ch for ch in str(code or "") if ch.isdigit())
@@ -19,6 +25,28 @@ def _normalize_access_code(code: Optional[str]) -> str:
 
 def _generate_access_code() -> str:
     return f"{random.randint(0, 999999):06d}"
+
+
+def _rollback_db(db: Session) -> None:
+    try:
+        db.rollback()
+    except SQLAlchemyError:
+        pass
+
+
+def _ensure_table(db: Session) -> bool:
+    """Crea la tabella al volo se manca (deploy senza restart API o create_all saltato)."""
+    global _table_ready
+    if _table_ready:
+        return True
+    try:
+        PrimaNotaLocalePack.__table__.create(bind=db.get_bind(), checkfirst=True)
+        _table_ready = True
+        return True
+    except SQLAlchemyError as exc:
+        _rollback_db(db)
+        logger.warning("Impossibile creare prima_nota_locale_packs: %s", exc)
+        return False
 
 
 def _resolve_access_code(payload: PrimaNotaLocalePackUpsert, existing: Optional[str]) -> str:
@@ -38,9 +66,17 @@ def _resolve_access_code(payload: PrimaNotaLocalePackUpsert, existing: Optional[
 
 def _find_pack(db: Session, activity_slug: str) -> Optional[PrimaNotaLocalePack]:
     slug = str(activity_slug or "").strip().lower()
-    if not slug:
+    if not slug or not _ensure_table(db):
         return None
-    return db.query(PrimaNotaLocalePack).filter(PrimaNotaLocalePack.activity_slug == slug).first()
+    try:
+        return db.query(PrimaNotaLocalePack).filter(PrimaNotaLocalePack.activity_slug == slug).first()
+    except ProgrammingError as exc:
+        _rollback_db(db)
+        logger.warning("Query prima_nota_locale_packs fallita: %s", exc)
+        return None
+    except SQLAlchemyError:
+        _rollback_db(db)
+        raise
 
 
 def pack_to_summary(row: PrimaNotaLocalePack) -> PrimaNotaLocalePackSummary:
@@ -62,8 +98,18 @@ def pack_to_read(row: PrimaNotaLocalePack, include_access_code: bool = False) ->
 
 
 def list_locale_packs(db: Session) -> List[PrimaNotaLocalePackSummary]:
-    rows = db.query(PrimaNotaLocalePack).order_by(PrimaNotaLocalePack.activity_slug.asc()).all()
-    return [pack_to_summary(r) for r in rows]
+    if not _ensure_table(db):
+        return []
+    try:
+        rows = db.query(PrimaNotaLocalePack).order_by(PrimaNotaLocalePack.activity_slug.asc()).all()
+        return [pack_to_summary(r) for r in rows]
+    except ProgrammingError as exc:
+        _rollback_db(db)
+        logger.warning("list_locale_packs fallita: %s", exc)
+        return []
+    except SQLAlchemyError:
+        _rollback_db(db)
+        raise
 
 
 def get_locale_pack(
@@ -83,6 +129,8 @@ def get_locale_pack(
 
 
 def upsert_locale_pack(db: Session, payload: PrimaNotaLocalePackUpsert) -> PrimaNotaLocalePackRead:
+    if not _ensure_table(db):
+        raise ValueError("Tabella codici locale non disponibile. Riavvia l'API o verifica il database.")
     slug = str(payload.activity_slug or "").strip().lower()
     if not is_valid_activity_slug(slug):
         raise ValueError("Slug attività non valido.")

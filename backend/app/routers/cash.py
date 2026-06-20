@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -40,11 +41,21 @@ def _verify_activity_access(
         prima_nota_locale_service.verify_activity_access(db, activity, access_code)
     except ValueError:
         raise HTTPException(status_code=403, detail="Codice locale non valido.")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Verifica codice locale non disponibile. Riprova tra qualche istante.",
+        )
 
 
 @router.get("/locale-packs", response_model=List[PrimaNotaLocalePackSummary])
 def list_locale_packs(db: Session = Depends(get_db)):
-    return prima_nota_locale_service.list_locale_packs(db)
+    try:
+        return prima_nota_locale_service.list_locale_packs(db)
+    except SQLAlchemyError:
+        db.rollback()
+        return []
 
 
 @router.get("/locale-packs/{activity_slug}", response_model=PrimaNotaLocalePackRead)
