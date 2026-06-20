@@ -148,7 +148,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const activeUsesStaffCode = Boolean(getStaffLocaleLinkForActivity(activeActivity))
 
   function activeLocaleNeedsCode() {
-    return operatorMode && protectedSlugs.includes(activeActivity)
+    return protectedSlugs.includes(activeActivity)
   }
 
   function hasActiveLocaleAccess() {
@@ -291,13 +291,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function handleSaveLocaleAccessCode() {
-    if (activeUsesStaffCode) {
-      setError('')
-      setSuccess(
-        `«${activeActivityLabel}» usa il codice del locale Personale «${activeStaffLocaleHint}». Impostalo o rigeneralo dalla sezione Personale.`,
-      )
-      return
-    }
     const code = normalizeLocaleAccessCode(localeAccessCode)
     if (!isValidLocaleAccessCode(code)) {
       setError('Inserisci o genera un codice a 6 cifre prima di salvarlo.')
@@ -310,8 +303,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       saveStoredPrimaNotaAccessCode(activeActivity, code)
       setUnlockedSlugs((prev) => new Set([...prev, activeActivity]))
       await refreshProtectedLocaleSummaries()
+      const staffNote = activeUsesStaffCode && activeStaffLocaleHint
+        ? ` Se in Personale «${activeStaffLocaleHint}» c’è un codice, quello ha priorità all’apertura.`
+        : ''
       setSuccess(
-        `Codice zona salvato per «${activeActivityLabel}»: ${saved?.access_code || code}. Condividilo con gli operatori di questo locale.`,
+        `Codice salvato per «${activeActivityLabel}»: ${saved?.access_code || code}. Condividilo con chi apre questo locale.${staffNote}`,
       )
     } catch (e) {
       setError(e?.message || 'Impossibile salvare il codice locale.')
@@ -613,7 +609,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadEntries() {
-    if (operatorMode && !hasActiveLocaleAccess()) {
+    if (!hasActiveLocaleAccess()) {
       setEntries([])
       setLoading(false)
       return
@@ -643,7 +639,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadSummary() {
-    if (operatorMode && !hasActiveLocaleAccess()) {
+    if (!hasActiveLocaleAccess()) {
       setSummary(null)
       return
     }
@@ -1302,6 +1298,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     ? Number(summary.totale_vendita)
     : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
+  const needsLocaleUnlock = activeLocaleNeedsCode() && !hasActiveLocaleAccess()
+
   const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : entrateCassaGiornoComputed
   const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed
   const saldoGiornalieroFiscale = summary?.saldo_giornaliero != null ? Number(summary.saldo_giornaliero) : cassaContantiGiornoComputed
@@ -1358,7 +1356,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         unlockBusy={unlockBusy}
         saveCodeBusy={saveCodeBusy}
         deleteBusy={deleteBusy}
+        autoPromptLocaleId={needsLocaleUnlock ? activeActivity : ''}
       />
+
+      {needsLocaleUnlock ? (
+        <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
+          Il registro di <strong>{activeActivityLabel}</strong> è protetto: seleziona il locale e inserisci il codice a 6
+          cifre per continuare.
+        </div>
+      ) : null}
 
       <div className="ui-toolbar-one card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem' }}>
         <div className="form-group">
