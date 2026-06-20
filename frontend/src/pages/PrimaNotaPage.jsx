@@ -13,7 +13,7 @@ import {
   savePrimaNotaBackup,
 } from '../utils/primaNotaLocalBackup.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
-import { getOperatorPrimaNotaPublicUrl } from '../utils/operatorMode.ts'
+import { getOperatorPrimaNotaPublicUrl, getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
 import {
   DEFAULT_PRIMA_NOTA_ACTIVITY,
   loadPrimaNotaLocales,
@@ -1089,9 +1089,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
       {!operatorMode && (
         <OperatorLinkCard
-          title="Link operatore (prima nota)"
-          description="Condividi questo indirizzo con chi deve registrare la cassa di un locale: vede Prima Nota senza menu Home, ordini, fatture ecc. I movimenti salvati compaiono nel gestionale completo, filtrati per locale."
-          links={[{ label: 'Link prima nota', url: getOperatorPrimaNotaPublicUrl() }]}
+          title="Link operatore"
+          description="Condividi con le postazioni di lavoro: il link unificato include Personale, Ordini e Prima Nota; oppure solo la cassa con il link dedicato."
+          links={[
+            { label: 'Postazione operativa (Personale + Ordini + Prima Nota)', url: getOperatorStationPublicUrl() },
+            { label: 'Solo Prima Nota', url: getOperatorPrimaNotaPublicUrl() },
+          ]}
         />
       )}
 

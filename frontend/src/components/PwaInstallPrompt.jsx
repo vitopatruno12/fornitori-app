@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { isOperatorStationMode, markOperatorStationEntryPoint } from '../utils/operatorMode.ts'
 
 /**
  * Suggerisce l'installazione PWA (schermata Home / app desktop) per usare ATLAS offline.
@@ -28,6 +29,7 @@ export default function PwaInstallPrompt() {
     const onInstalled = () => {
       setInstalled(true)
       setDeferredPrompt(null)
+      if (isOperatorStationMode()) markOperatorStationEntryPoint()
     }
 
     window.addEventListener('beforeinstallprompt', onBeforeInstall)

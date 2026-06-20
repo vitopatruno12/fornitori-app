@@ -1,5 +1,6 @@
 import React from 'react'
 import { validateAtlasLogin } from '../utils/atlasAuth'
+import { setOperatorStationLock } from '../utils/operatorMode.ts'
 import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './AtlasUpdateButton.jsx'
@@ -17,6 +18,7 @@ type OperatorSatelliteShellProps = {
   headerTitle: string
   headerSubtitle?: string
   nav?: OperatorNavItem[]
+  stationOnly?: boolean
   children: React.ReactNode
 }
 
@@ -26,6 +28,7 @@ export default function OperatorSatelliteShell({
   headerTitle,
   headerSubtitle = 'Collegato al gestionale ATLAS — salvataggio sullo stesso database',
   nav,
+  stationOnly = false,
   children,
 }: OperatorSatelliteShellProps) {
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
@@ -72,12 +75,14 @@ export default function OperatorSatelliteShell({
       setIsAuthenticated(true)
       setLoginPassword('')
       setIsLoggingIn(false)
+      if (stationOnly) setOperatorStationLock(true)
     }, 260)
   }
 
   function handleLogout() {
     setIsAuthenticated(false)
     setLoginPassword('')
+    if (stationOnly) setOperatorStationLock(false)
   }
 
   if (!isAuthenticated) {

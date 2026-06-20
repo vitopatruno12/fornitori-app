@@ -15,7 +15,7 @@ import {
   supplierOrderPdfUrl,
   updateSupplierOrder,
 } from '../services/supplierOrdersService'
-import { getOperatorOrderPublicUrl } from '../utils/operatorMode.ts'
+import { getOperatorOrderPublicUrl, getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
 
 const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'

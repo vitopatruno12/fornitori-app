@@ -53,6 +53,8 @@ import {
 } from '../utils/staffLocaleAccessCode.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
+import OperatorLinkCard from '../components/OperatorLinkCard.tsx'
+import { getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -771,7 +773,7 @@ function expandDemoRows() {
   return out
 }
 
-export default function StaffPage() {
+export default function StaffPage({ operatorMode = false }) {
   const [members, setMembers] = useState([])
   const [shifts, setShifts] = useState([])
   /** True dopo «Carica piano» (o demo) finché non cambi date/vista. */
@@ -3622,16 +3624,33 @@ export default function StaffPage() {
     <div className="staff-page">
       <header className="staff-page-hero">
         <div className="staff-page-hero-inner">
-          <h1 className="page-header staff-page-title">Personale</h1>
+          {!operatorMode ? <h1 className="page-header staff-page-title">Personale</h1> : null}
           <p className="staff-page-lead">
-            Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
-            <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
-            oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
-            <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
-            parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio sul server, recuperabile da altri PC e browser).
+            {operatorMode ? (
+              <>
+                Gestisci <strong>dipendenti</strong> e <strong>pianificazione turni</strong> per la postazione. Stessi dati e
+                salvataggio del gestionale ATLAS.
+              </>
+            ) : (
+              <>
+                Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
+                <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
+                oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
+                <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
+                parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio sul server, recuperabile da altri PC e browser).
+              </>
+            )}
           </p>
         </div>
       </header>
+
+      {!operatorMode && (
+        <OperatorLinkCard
+          title="Link postazione operativa"
+          description="Condividi con le postazioni di lavoro: un solo link con Personale, Ordini e Prima Nota, senza menu Home, fatture, fornitori ecc."
+          links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
+        />
+      )}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {localeSyncWarning && <div className="alert alert-warning">{localeSyncWarning}</div>}
@@ -4466,6 +4485,7 @@ export default function StaffPage() {
             </p>
           </div>
         ) : null}
+        {!operatorMode ? (
         <GeminiVoiceAssistant
           label="Turno a voce (Gemini)"
           hint='Un dipendente: "Marianna martedì 8-16". Tutti insieme (vista Settimana): "tutti i dipendenti da lunedì a venerdì turno 8-16". Salvataggio automatico di tutti i turni.'
@@ -4476,6 +4496,7 @@ export default function StaffPage() {
           disabled={shiftBusy}
           onClear={() => setAiShiftSummary('')}
         />
+        ) : null}
         {aiShiftSummary ? (
           <div className="alert alert-success" style={{ marginBottom: '0.75rem' }}>
             <strong>Gemini:</strong> {aiShiftSummary}

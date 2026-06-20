@@ -3,6 +3,8 @@ import { fetchDashboardSummary } from '../services/dashboardService'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import { useOffline } from '../offline/OfflineContext'
 import { getCachedResponseWithMeta } from '../offline/offlineCache'
+import OperatorLinkCard from '../components/OperatorLinkCard.tsx'
+import { getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
 
 const DASHBOARD_CACHE_PATH = '/dashboard/summary'
 
@@ -243,6 +245,12 @@ export default function HomePage() {
           Situazione al volo: cassa, banca, flussi del mese, fatture e attività recenti.
         </p>
       </header>
+
+      <OperatorLinkCard
+        title="Link postazione operativa"
+        description="Un solo indirizzo per le postazioni di lavoro: Personale, Ordini e Prima Nota senza il resto del menu. Installabile come app (PWA) su PC e tablet."
+        links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
+      />
 
       {loading && <DashboardSkeleton />}
       {error && <div className="alert alert-danger">{error}</div>}

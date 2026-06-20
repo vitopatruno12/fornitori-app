@@ -25,10 +25,17 @@ import { PwaUpdateProvider } from './pwa/PwaUpdateContext.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
 import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
 import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
+import OperatorStationApp from './OperatorStationApp.tsx'
 import {
   OPERATOR_DELIVERY_PATH,
   OPERATOR_ORDER_PATH,
   OPERATOR_PRIMA_NOTA_PATH,
+  OPERATOR_STATION_PATH,
+  getOperatorStationPublicUrl,
+  getOperatorStationView,
+  isOperatorStationLocked,
+  setOperatorStationLock,
+  shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
 
 type AiHistoryItem = {
@@ -43,6 +50,8 @@ type AiHistoryItem = {
 
 function App() {
   const { online } = useOffline()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
     try {
       return sessionStorage.getItem('atlasAuth') === '1'
@@ -55,8 +64,6 @@ function App() {
   const [loginError, setLoginError] = React.useState('')
   const [showPassword, setShowPassword] = React.useState(false)
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
-  const location = useLocation()
-  const navigate = useNavigate()
   const page = pathnameToPage(location.pathname)
   const [navOpen, setNavOpen] = React.useState(false)
   const [navActionsOpen, setNavActionsOpen] = React.useState(false)
@@ -507,6 +514,7 @@ function App() {
     setLoginError('')
     setIsLoggingIn(true)
     window.setTimeout(() => {
+      setOperatorStationLock(false)
       setIsAuthenticated(true)
       setLoginPassword('')
       setIsLoggingIn(false)
@@ -769,6 +777,26 @@ function App() {
   )
 }
 
+function MainAppGate() {
+  const location = useLocation()
+  const isStandalone =
+    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
+
+  if (isOperatorStationLocked()) {
+    return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
+  }
+
+  if (
+    shouldOpenOperatorStation() &&
+    isStandalone &&
+    (location.pathname === '/' || location.pathname === '')
+  ) {
+    return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
+  }
+
+  return <App />
+}
+
 function RootRouter() {
   return (
     <OfflineProvider>
@@ -778,7 +806,8 @@ function RootRouter() {
             <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
             <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
             <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
-            <Route path="/*" element={<App />} />
+            <Route path={OPERATOR_STATION_PATH} element={<OperatorStationApp />} />
+            <Route path="/*" element={<MainAppGate />} />
           </Routes>
         </BrowserRouter>
       </PwaUpdateProvider>

@@ -8,7 +8,14 @@ export const OPERATOR_DELIVERY_HISTORY_SUFFIX = '/storico'
 /** Percorso pubblico: Prima Nota di cassa (per locale / attività). */
 export const OPERATOR_PRIMA_NOTA_PATH = '/operatore-prima-nota'
 
+/** Postazione operativa: Personale, Ordini e Prima Nota in un solo link (PWA). */
+export const OPERATOR_STATION_PATH = '/operatore-postazione'
+
+const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
+const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
+
 export type OperatorDeliveryView = 'new-delivery' | 'history'
+export type OperatorStationView = 'staff' | 'orders' | 'prima-nota'
 
 import { ensureHttpsUrl } from './urlSecurity'
 
@@ -86,6 +93,66 @@ export function isOperatorPrimaNotaMode(): boolean {
   return queryMatches('operatore-prima-nota')
 }
 
+export function isOperatorStationMode(): boolean {
+  if (typeof window === 'undefined') return false
+  if (pathMatches(OPERATOR_STATION_PATH)) return true
+  if (hashMatches('operatore-postazione')) return true
+  return queryMatches('operatore-postazione')
+}
+
+export function isOperatorStationLocked(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return sessionStorage.getItem(OPERATOR_STATION_LOCK_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function shouldOpenOperatorStation(): boolean {
+  if (isOperatorStationLocked()) return true
+  if (typeof window === 'undefined') return false
+  try {
+    return localStorage.getItem(OPERATOR_ENTRY_POINT_KEY) === 'station'
+  } catch {
+    return false
+  }
+}
+
+export function setOperatorStationLock(active: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (active) {
+      sessionStorage.setItem(OPERATOR_STATION_LOCK_KEY, '1')
+      localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, 'station')
+    } else {
+      sessionStorage.removeItem(OPERATOR_STATION_LOCK_KEY)
+      localStorage.removeItem(OPERATOR_ENTRY_POINT_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function markOperatorStationEntryPoint(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, 'station')
+  } catch {
+    // ignore
+  }
+}
+
+export function getOperatorStationView(): OperatorStationView {
+  if (typeof window === 'undefined') return 'orders'
+  const q = new URLSearchParams(window.location.search)
+  const raw = String(q.get('sezione') || '').trim().toLowerCase()
+  if (raw === 'personale' || raw === 'staff') return 'staff'
+  if (raw === 'ordini' || raw === 'orders' || raw === 'ordine') return 'orders'
+  if (raw === 'prima-nota' || raw === 'primanota' || raw === 'cassa') return 'prima-nota'
+  return 'orders'
+}
+
 export function getOperatorDeliveryView(): OperatorDeliveryView {
   if (typeof window === 'undefined') return 'new-delivery'
   const path = normalizePathname()
@@ -113,6 +180,21 @@ export function getOperatorDeliveryPublicUrl(): string {
 
 export function getOperatorPrimaNotaPublicUrl(): string {
   return buildPublicUrl(OPERATOR_PRIMA_NOTA_PATH)
+}
+
+export function getOperatorStationPublicUrl(view: OperatorStationView = 'orders'): string {
+  const base = buildPublicUrl(OPERATOR_STATION_PATH)
+  if (view === 'orders') return base
+  const section = view === 'staff' ? 'personale' : 'prima-nota'
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}sezione=${section}`
+}
+
+/** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia sezione. */
+export function syncOperatorStationViewInUrl(view: OperatorStationView): void {
+  if (typeof window === 'undefined') return
+  const url = getOperatorStationPublicUrl(view)
+  window.history.replaceState(null, '', url)
 }
 
 /** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia scheda; resta sullo stesso percorso base. */
