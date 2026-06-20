@@ -18,7 +18,12 @@ from ..schemas.cash import (
     PrimaNotaLocalePackSummary,
     PrimaNotaLocalePackUpsert,
 )
-from ..services import cash_service, prima_nota_locale_service
+from ..constants.prima_nota_staff_locale import (
+    _locale_name_key,
+    match_staff_locale_name,
+    staff_locale_link_for_activity,
+)
+from ..services import cash_service, prima_nota_locale_service, staff_service
 
 router = APIRouter(prefix="/cash", tags=["cash"])
 
@@ -38,7 +43,7 @@ def _verify_activity_access(
     access_code: Optional[str] = None,
 ) -> None:
     try:
-        prima_nota_locale_service.verify_activity_access(db, activity, access_code)
+        _verify_prima_nota_activity_access(db, activity, access_code)
     except ValueError:
         raise HTTPException(status_code=403, detail="Codice locale non valido.")
     except SQLAlchemyError:
@@ -47,6 +52,32 @@ def _verify_activity_access(
             status_code=503,
             detail="Verifica codice locale non disponibile. Riprova tra qualche istante.",
         )
+
+
+def _verify_prima_nota_activity_access(
+    db: Session,
+    activity: Optional[str],
+    access_code: Optional[str] = None,
+) -> None:
+    """Verifica codice: prima Personale (locale collegato), poi pack Prima Nota custom."""
+    act = str(activity or "").strip().lower()
+    if not act:
+        return
+    preferred_staff = staff_locale_link_for_activity(act)
+    if preferred_staff:
+        summaries = staff_service.list_locale_packs(db)
+        names = [row.locale_name for row in summaries]
+        staff_name = match_staff_locale_name(preferred_staff, names)
+        hit = None
+        for row in summaries:
+            if _locale_name_key(row.locale_name) == _locale_name_key(staff_name):
+                hit = row
+                staff_name = row.locale_name
+                break
+        if hit and hit.requires_access_code:
+            staff_service._verify_locale_access_code(db, staff_name, access_code)
+            return
+    prima_nota_locale_service.verify_activity_access(db, activity, access_code)
 
 
 @router.get("/locale-packs", response_model=List[PrimaNotaLocalePackSummary])

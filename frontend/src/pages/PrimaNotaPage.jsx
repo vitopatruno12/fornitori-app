@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
+import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
 import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
@@ -19,6 +20,12 @@ import {
   isValidLocaleAccessCode,
   normalizeLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
+import {
+  getStaffLocaleLinkForActivity,
+  resolveStaffLocaleName,
+  staffLocaleHint,
+  staffLocaleRequiresCode,
+} from '../utils/primaNotaStaffLocaleLink.js'
 import {
   clearStoredPrimaNotaAccessCode,
   listStoredPrimaNotaAccessSlugs,
@@ -115,16 +122,30 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
+  const [staffLocaleSummaries, setStaffLocaleSummaries] = useState([])
   const [protectedLocaleSummaries, setProtectedLocaleSummaries] = useState([])
   const [unlockedSlugs, setUnlockedSlugs] = useState(() => new Set(listStoredPrimaNotaAccessSlugs()))
   const [unlockBusy, setUnlockBusy] = useState(false)
   const [saveCodeBusy, setSaveCodeBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
 
-  const protectedSlugs = useMemo(
-    () => protectedLocaleSummaries.filter((row) => row?.requires_access_code).map((row) => row.activity_slug),
-    [protectedLocaleSummaries],
-  )
+  const protectedSlugs = useMemo(() => {
+    const slugs = new Set()
+    for (const loc of locales) {
+      if (staffLocaleRequiresCode(loc.id, staffLocaleSummaries)) {
+        slugs.add(loc.id)
+      }
+    }
+    for (const row of protectedLocaleSummaries) {
+      if (row?.requires_access_code && row?.activity_slug) {
+        slugs.add(row.activity_slug)
+      }
+    }
+    return [...slugs]
+  }, [locales, staffLocaleSummaries, protectedLocaleSummaries])
+
+  const activeStaffLocaleHint = staffLocaleHint(activeActivity, staffLocaleSummaries)
+  const activeUsesStaffCode = Boolean(getStaffLocaleLinkForActivity(activeActivity))
 
   function activeLocaleNeedsCode() {
     return operatorMode && protectedSlugs.includes(activeActivity)
@@ -143,6 +164,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return undefined
   }
 
+  async function refreshStaffLocaleSummaries() {
+    try {
+      const rows = await fetchStaffLocalePacks()
+      setStaffLocaleSummaries(Array.isArray(rows) ? rows : [])
+    } catch {
+      setStaffLocaleSummaries([])
+    }
+  }
+
   async function refreshProtectedLocaleSummaries() {
     try {
       const rows = await fetchPrimaNotaLocalePacks()
@@ -155,11 +185,28 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   async function verifyLocaleAccess(activityId, code) {
     const slug = String(activityId || '').trim()
     if (!slug) return { ok: false, needsCode: true }
-    if (!protectedSlugs.includes(slug)) return { ok: true }
     const normalized = normalizeLocaleAccessCode(code)
     if (!isValidLocaleAccessCode(normalized)) return { ok: false, needsCode: true }
     const stored = readStoredPrimaNotaAccessCode(slug)
     if (stored && stored === normalized) return { ok: true }
+
+    if (staffLocaleRequiresCode(slug, staffLocaleSummaries)) {
+      const staffName = resolveStaffLocaleName(slug, staffLocaleSummaries)
+      if (!staffName) return { ok: false, wrongCode: true }
+      try {
+        await fetchStaffLocalePack(staffName, normalized)
+        saveStoredPrimaNotaAccessCode(slug, normalized)
+        setUnlockedSlugs((prev) => new Set([...prev, slug]))
+        return { ok: true }
+      } catch {
+        return { ok: false, wrongCode: true }
+      }
+    }
+
+    const primaNotaProtected = protectedLocaleSummaries.some(
+      (row) => row?.activity_slug === slug && row?.requires_access_code,
+    )
+    if (!primaNotaProtected) return { ok: true }
     try {
       await fetchPrimaNotaLocalePack(slug, normalized)
       saveStoredPrimaNotaAccessCode(slug, normalized)
@@ -244,6 +291,13 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function handleSaveLocaleAccessCode() {
+    if (activeUsesStaffCode) {
+      setError('')
+      setSuccess(
+        `«${activeActivityLabel}» usa il codice del locale Personale «${activeStaffLocaleHint}». Impostalo o rigeneralo dalla sezione Personale.`,
+      )
+      return
+    }
     const code = normalizeLocaleAccessCode(localeAccessCode)
     if (!isValidLocaleAccessCode(code)) {
       setError('Inserisci o genera un codice a 6 cifre prima di salvarlo.')
@@ -269,6 +323,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   useEffect(() => {
     loadSuppliers()
     loadPrimaNotaReference()
+    void refreshStaffLocaleSummaries()
     void refreshProtectedLocaleSummaries()
   }, [])
 
@@ -1297,6 +1352,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         onSaveLocaleAccessCode={handleSaveLocaleAccessCode}
         onDeleteCustomLocale={handleDeleteCustomLocale}
         protectedSlugs={protectedSlugs}
+        staffLocaleHintFor={(id) => staffLocaleHint(id, staffLocaleSummaries)}
+        activeUsesStaffCode={activeUsesStaffCode}
+        activeStaffLocaleHint={activeStaffLocaleHint}
         unlockBusy={unlockBusy}
         saveCodeBusy={saveCodeBusy}
         deleteBusy={deleteBusy}

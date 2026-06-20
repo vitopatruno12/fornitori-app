@@ -26,6 +26,9 @@ export default function PrimaNotaLocalePicker({
   onSaveLocaleAccessCode,
   onDeleteCustomLocale,
   protectedSlugs = [],
+  staffLocaleHintFor,
+  activeUsesStaffCode = false,
+  activeStaffLocaleHint = '',
   unlockBusy = false,
   saveCodeBusy = false,
   deleteBusy = false,
@@ -176,7 +179,14 @@ export default function PrimaNotaLocalePicker({
       {pendingLocaleId ? (
         <form className="prima-nota-locale-code-prompt" onSubmit={(e) => void confirmCodePrompt(e)}>
           <p className="prima-nota-locale-panel-hint">
-            Apri <strong>{localeLabel(pendingLocaleId, locales)}</strong>: inserisci il codice a 6 cifre.
+            Apri <strong>{localeLabel(pendingLocaleId, locales)}</strong>
+            {staffLocaleHintFor?.(pendingLocaleId) ? (
+              <>
+                : inserisci il codice del locale <strong>Personale «{staffLocaleHintFor(pendingLocaleId)}»</strong>.
+              </>
+            ) : (
+              ': inserisci il codice a 6 cifre.'
+            )}
           </p>
           <div className="prima-nota-locale-add-row">
             <input
@@ -248,38 +258,47 @@ export default function PrimaNotaLocalePicker({
           ) : null}
 
           <div className="prima-nota-locale-panel-actions" style={{ marginTop: '0.75rem' }}>
-            <label htmlFor="prima-nota-zone-code">Codice zona per «{currentLabel}»</label>
-            <div className="prima-nota-locale-add-row">
-              <input
-                id="prima-nota-zone-code"
-                type="text"
-                className="form-control"
-                value={localeAccessCode}
-                onChange={(ev) => onLocaleAccessCodeChange?.(ev.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="123456"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={6}
-              />
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-sm"
-                onClick={() => onLocaleAccessCodeChange?.(generateLocaleAccessCode())}
-              >
-                Genera
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={saveCodeBusy || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
-                onClick={() => void onSaveLocaleAccessCode?.()}
-              >
-                {saveCodeBusy ? 'Salvo…' : 'Salva codice'}
-              </button>
-            </div>
-            <p className="prima-nota-locale-panel-hint" style={{ marginTop: '0.35rem' }}>
-              Solo chi conosce il codice può aprire questo locale dalla postazione operativa.
-            </p>
+            {activeUsesStaffCode ? (
+              <p className="prima-nota-locale-panel-hint">
+                Il codice per «{currentLabel}» è quello del locale <strong>Personale «{activeStaffLocaleHint}»</strong>.
+                Impostalo o rigeneralo dalla sezione Personale; gli operatori useranno lo stesso codice in Prima Nota.
+              </p>
+            ) : (
+              <>
+                <label htmlFor="prima-nota-zone-code">Codice zona per «{currentLabel}»</label>
+                <div className="prima-nota-locale-add-row">
+                  <input
+                    id="prima-nota-zone-code"
+                    type="text"
+                    className="form-control"
+                    value={localeAccessCode}
+                    onChange={(ev) => onLocaleAccessCodeChange?.(ev.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={6}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => onLocaleAccessCodeChange?.(generateLocaleAccessCode())}
+                  >
+                    Genera
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={saveCodeBusy || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
+                    onClick={() => void onSaveLocaleAccessCode?.()}
+                  >
+                    {saveCodeBusy ? 'Salvo…' : 'Salva codice'}
+                  </button>
+                </div>
+                <p className="prima-nota-locale-panel-hint" style={{ marginTop: '0.35rem' }}>
+                  Solo chi conosce il codice può aprire questo locale personalizzato dalla postazione operativa.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="prima-nota-locale-panel-actions">

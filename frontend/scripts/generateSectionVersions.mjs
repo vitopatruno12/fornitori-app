@@ -20,6 +20,7 @@ const SCOPE_FILES = {
     'components/PrimaNotaLocalePicker.jsx',
     'utils/operatorMode.ts',
     'utils/primaNotaLocaleAccess.js',
+    'utils/primaNotaStaffLocaleLink.js',
     'utils/staffLocaleAccessCode.js',
     'pwa/PwaUpdateContext.jsx',
     'utils/pwaUpdateScope.ts',
@@ -32,6 +33,7 @@ const SCOPE_FILES = {
     'components/PrimaNotaLocalePicker.jsx',
     'components/OperatorSatelliteShell.tsx',
     'utils/primaNotaLocaleAccess.js',
+    'utils/primaNotaStaffLocaleLink.js',
   ],
 }
 
