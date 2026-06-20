@@ -31,12 +31,13 @@ export default defineConfig(({ mode }) => {
     },
     VitePWA({
       registerType: 'prompt',
-      includeAssets: [
+        includeAssets: [
         'pwa-icon.svg',
         'atlas-logo.svg',
         'atlas-login-bg.png',
         'atlas-api-fetch-fix.js',
         'favicon.svg',
+        'section-versions.json',
       ],
       manifest: {
         name: 'ATLAS — Gestionale',

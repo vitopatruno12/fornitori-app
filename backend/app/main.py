@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
         _ensure_staff_member_hourly_rate_column()
         _ensure_staff_payroll_months_table()
         _ensure_staff_locale_packs_table()
+        _ensure_prima_nota_locale_packs_table()
         _ensure_staff_backups_table()
     except OperationalError as e:
         _log_startup_exception(
@@ -451,6 +452,47 @@ def _ensure_staff_locale_packs_table() -> None:
     except Exception as e:
         logger.warning(
             "Impossibile verificare/creare staff_locale_packs: %s",
+            e,
+        )
+
+
+def _ensure_prima_nota_locale_packs_table() -> None:
+    """Codici di accesso per locali Prima Nota."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS prima_nota_locale_packs (
+                      id SERIAL PRIMARY KEY,
+                      activity_slug VARCHAR(32) NOT NULL,
+                      label VARCHAR(255),
+                      access_code VARCHAR(6),
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_prima_nota_locale_packs_slug UNIQUE (activity_slug)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_slug
+                    ON prima_nota_locale_packs (activity_slug)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE prima_nota_locale_packs
+                    ADD COLUMN IF NOT EXISTS access_code VARCHAR(6)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare prima_nota_locale_packs: %s",
             e,
         )
 

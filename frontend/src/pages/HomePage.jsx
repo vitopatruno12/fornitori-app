@@ -152,7 +152,7 @@ function Last6MonthsTrend({ rows, onOpenInvoices }) {
   )
 }
 
-export default function HomePage() {
+export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   const onNavigate = useAppNavigate()
   const { online } = useOffline()
   const [data, setData] = useState(null)
@@ -213,12 +213,14 @@ export default function HomePage() {
   const latestMonthKey = monthlyRows.length ? monthlyRows[monthlyRows.length - 1].month_key : null
 
   function openInvoicesWithFilter(monthKey, supplierLabel = '') {
+    if (operatorMode) return
     if (!monthKey) return
     sessionStorage.setItem('dashboardInvoicesFilter', JSON.stringify({ monthKey, supplierLabel }))
     onNavigate?.('invoices')
   }
 
   function openInvoicesOverdue() {
+    if (operatorMode) return
     onNavigate?.('invoices')
     window.setTimeout(() => {
       window.dispatchEvent(
@@ -230,8 +232,14 @@ export default function HomePage() {
   }
 
   function openPrimaNotaWithFilter(monthKey, movementKind = 'all', search = '') {
-    if (!monthKey) return
-    sessionStorage.setItem('primaNotaDashboardFilter', JSON.stringify({ monthKey, movementKind, search }))
+    if (!monthKey && !operatorMode) return
+    if (monthKey) {
+      sessionStorage.setItem('primaNotaDashboardFilter', JSON.stringify({ monthKey, movementKind, search }))
+    }
+    if (operatorMode) {
+      onOperatorNavigate?.('prima-nota')
+      return
+    }
     onNavigate?.('prima-nota')
   }
 
@@ -246,11 +254,13 @@ export default function HomePage() {
         </p>
       </header>
 
-      <OperatorLinkCard
-        title="Link postazione operativa"
-        description="Un solo indirizzo per le postazioni di lavoro: Personale, Ordini e Prima Nota senza il resto del menu. Installabile come app (PWA) su PC e tablet."
-        links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
-      />
+      {!operatorMode && (
+        <OperatorLinkCard
+          title="Link postazione operativa"
+          description="Un solo indirizzo per le postazioni di lavoro: Panoramica, Personale, Ordini e Prima Nota senza il resto del menu. Installabile come app (PWA) su PC e tablet."
+          links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
+        />
+      )}
 
       {loading && <DashboardSkeleton />}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -309,17 +319,21 @@ export default function HomePage() {
               <div className="dashboard-kpi-label">Fatture da pagare</div>
               <div className="dashboard-kpi-value">{data.fatture_da_pagare_count}</div>
               <div className="dashboard-kpi-sub">{eur(data.fatture_da_pagare_residuo)} residuo</div>
-              <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={() => onNavigate?.('invoices')}>
-                Apri fatture
-              </button>
+              {!operatorMode ? (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={() => onNavigate?.('invoices')}>
+                  Apri fatture
+                </button>
+              ) : null}
             </div>
             <div className="dashboard-kpi dashboard-kpi--danger">
               <div className="dashboard-kpi-label">Fatture scadute</div>
               <div className="dashboard-kpi-value">{data.fatture_scadute_count}</div>
               <div className="dashboard-kpi-sub">{eur(data.fatture_scadute_residuo)} residuo</div>
-              <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={openInvoicesOverdue}>
-                Apri fatture scadute
-              </button>
+              {!operatorMode ? (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={openInvoicesOverdue}>
+                  Apri fatture scadute
+                </button>
+              ) : null}
             </div>
           </section>
 
@@ -337,7 +351,7 @@ export default function HomePage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm dashboard-panel-action"
-                onClick={() => onNavigate?.('new-order')}
+                onClick={() => (operatorMode ? onOperatorNavigate?.('orders') : onNavigate?.('new-order'))}
               >
                 Nuovo ordine
               </button>
@@ -387,12 +401,12 @@ export default function HomePage() {
               <MonthlyFlowChart
                 rows={monthlyRows}
                 onOpenPrimaNota={(monthKey, kind) => openPrimaNotaWithFilter(monthKey, kind)}
-                onOpenInvoices={(monthKey) => openInvoicesWithFilter(monthKey)}
+                onOpenInvoices={operatorMode ? undefined : (monthKey) => openInvoicesWithFilter(monthKey)}
               />
             </section>
             <section className="card dashboard-panel">
               <h2 className="page-subheader">Andamento spese ultimi {windowMonths} mesi</h2>
-              <Last6MonthsTrend rows={spendTrendRows} onOpenInvoices={(monthKey) => openInvoicesWithFilter(monthKey)} />
+              <Last6MonthsTrend rows={spendTrendRows} onOpenInvoices={operatorMode ? undefined : (monthKey) => openInvoicesWithFilter(monthKey)} />
             </section>
           </div>
 
@@ -408,7 +422,7 @@ export default function HomePage() {
               <h2 className="page-subheader">Costi per fornitore</h2>
               <BreakdownBars
                 rows={data.costi_per_fornitore || []}
-                onSelect={(r) => openInvoicesWithFilter(latestMonthKey, r.label)}
+                onSelect={operatorMode ? undefined : (r) => openInvoicesWithFilter(latestMonthKey, r.label)}
               />
             </section>
           </div>
@@ -416,7 +430,11 @@ export default function HomePage() {
           <div className="dashboard-two-col">
             <section className="card dashboard-panel">
               <h2 className="page-subheader">Ultimi movimenti cassa</h2>
-              <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('prima-nota')}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm dashboard-panel-action"
+                onClick={() => (operatorMode ? onOperatorNavigate?.('prima-nota') : onNavigate?.('prima-nota'))}
+              >
                 Prima Nota
               </button>
               <div className="table-wrap">
@@ -457,9 +475,11 @@ export default function HomePage() {
 
             <section className="card dashboard-panel">
               <h2 className="page-subheader">Consegne recenti</h2>
-              <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('history')}>
-                Storico consegne
-              </button>
+              {!operatorMode ? (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('history')}>
+                  Storico consegne
+                </button>
+              ) : null}
               <div className="table-wrap">
                 <table className="app-table app-table--compact">
                   <thead>
@@ -501,9 +521,11 @@ export default function HomePage() {
                 <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
                   Fatture scadute (dettaglio)
                 </h2>
-                <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
-                  Apri fatture scadute
-                </button>
+                {!operatorMode ? (
+                  <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
+                    Apri fatture scadute
+                  </button>
+                ) : null}
               </div>
               <div className="table-wrap">
                 <table className="app-table app-table--compact">

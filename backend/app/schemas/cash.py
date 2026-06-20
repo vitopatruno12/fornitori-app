@@ -73,3 +73,23 @@ class PrimaNotaLinkDelivery(BaseModel):
 class PrimaNotaLinkOptions(BaseModel):
     invoices: List[PrimaNotaLinkInvoice]
     deliveries: List[PrimaNotaLinkDelivery]
+
+
+class PrimaNotaLocalePackSummary(BaseModel):
+    activity_slug: str
+    label: Optional[str] = None
+    requires_access_code: bool = False
+
+
+class PrimaNotaLocalePackRead(BaseModel):
+    activity_slug: str
+    label: Optional[str] = None
+    access_code: Optional[str] = None
+    requires_access_code: bool = False
+
+
+class PrimaNotaLocalePackUpsert(BaseModel):
+    activity_slug: str = Field(..., min_length=1, max_length=32)
+    label: Optional[str] = Field(None, max_length=255)
+    access_code: Optional[str] = Field(None, min_length=6, max_length=6, pattern=r"^\d{6}$")
+    regenerate_access_code: bool = False

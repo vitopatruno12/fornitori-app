@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions } from '../services/cashService'
+import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack } from '../services/cashService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
 import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
@@ -14,6 +14,16 @@ import {
 } from '../utils/primaNotaLocalBackup.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
 import { getOperatorPrimaNotaPublicUrl, getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
+import {
+  generateLocaleAccessCode,
+  isValidLocaleAccessCode,
+  normalizeLocaleAccessCode,
+} from '../utils/staffLocaleAccessCode.js'
+import {
+  listStoredPrimaNotaAccessSlugs,
+  readStoredPrimaNotaAccessCode,
+  saveStoredPrimaNotaAccessCode,
+} from '../utils/primaNotaLocaleAccess.js'
 import {
   DEFAULT_PRIMA_NOTA_ACTIVITY,
   loadPrimaNotaLocales,
@@ -102,11 +112,119 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [backupMeta, setBackupMeta] = useState(() => getLatestPrimaNotaBackup()?.savedAt ?? null)
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [localeAccessCode, setLocaleAccessCode] = useState('')
+  const [protectedLocaleSummaries, setProtectedLocaleSummaries] = useState([])
+  const [unlockedSlugs, setUnlockedSlugs] = useState(() => new Set(listStoredPrimaNotaAccessSlugs()))
+  const [unlockBusy, setUnlockBusy] = useState(false)
+  const [saveCodeBusy, setSaveCodeBusy] = useState(false)
+
+  const protectedSlugs = useMemo(
+    () => protectedLocaleSummaries.filter((row) => row?.requires_access_code).map((row) => row.activity_slug),
+    [protectedLocaleSummaries],
+  )
+
+  const visibleLocales = useMemo(() => {
+    if (!operatorMode) return locales
+    return locales.filter((loc) => {
+      if (!protectedSlugs.includes(loc.id)) return true
+      return unlockedSlugs.has(loc.id)
+    })
+  }, [locales, operatorMode, protectedSlugs, unlockedSlugs])
+
+  function resolveActiveAccessCode() {
+    const stored = readStoredPrimaNotaAccessCode(activeActivity)
+    const typed = normalizeLocaleAccessCode(localeAccessCode)
+    if (isValidLocaleAccessCode(typed)) return typed
+    if (isValidLocaleAccessCode(stored)) return stored
+    return undefined
+  }
+
+  async function refreshProtectedLocaleSummaries() {
+    try {
+      const rows = await fetchPrimaNotaLocalePacks()
+      setProtectedLocaleSummaries(Array.isArray(rows) ? rows : [])
+    } catch {
+      setProtectedLocaleSummaries([])
+    }
+  }
+
+  async function verifyLocaleAccess(activityId, code) {
+    const slug = String(activityId || '').trim()
+    if (!slug) return { ok: false, needsCode: true }
+    if (!protectedSlugs.includes(slug)) return { ok: true }
+    const normalized = normalizeLocaleAccessCode(code)
+    if (!isValidLocaleAccessCode(normalized)) return { ok: false, needsCode: true }
+    const stored = readStoredPrimaNotaAccessCode(slug)
+    if (stored && stored === normalized) return { ok: true }
+    try {
+      await fetchPrimaNotaLocalePack(slug, normalized)
+      saveStoredPrimaNotaAccessCode(slug, normalized)
+      setUnlockedSlugs((prev) => new Set([...prev, slug]))
+      return { ok: true }
+    } catch {
+      return { ok: false, wrongCode: true }
+    }
+  }
+
+  async function handleUnlockProtectedLocale(activityId, code) {
+    setUnlockBusy(true)
+    setError('')
+    try {
+      const access = await verifyLocaleAccess(activityId, code)
+      if (!access.ok) {
+        setError(
+          access.needsCode
+            ? 'Inserisci il codice a 6 cifre del locale.'
+            : 'Codice errato: non puoi aprire questo locale.',
+        )
+        return
+      }
+      const allLocales = loadPrimaNotaLocales()
+      if (!allLocales.some((l) => l.id === activityId)) {
+        setError('Locale non trovato nell’elenco.')
+        return
+      }
+      selectActivity(activityId)
+      setLocaleAccessCode(normalizeLocaleAccessCode(code))
+      setSuccess(`Locale «${localeLabel(activityId, allLocales)}» sbloccato.`)
+    } finally {
+      setUnlockBusy(false)
+    }
+  }
+
+  async function handleSaveLocaleAccessCode() {
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    if (!isValidLocaleAccessCode(code)) {
+      setError('Inserisci o genera un codice a 6 cifre prima di salvarlo.')
+      return
+    }
+    setSaveCodeBusy(true)
+    setError('')
+    try {
+      const saved = await upsertPrimaNotaLocalePack(activeActivity, activeActivityLabel, code)
+      saveStoredPrimaNotaAccessCode(activeActivity, code)
+      setUnlockedSlugs((prev) => new Set([...prev, activeActivity]))
+      await refreshProtectedLocaleSummaries()
+      setSuccess(
+        `Codice zona salvato per «${activeActivityLabel}»: ${saved?.access_code || code}. Condividilo con gli operatori di questo locale.`,
+      )
+    } catch (e) {
+      setError(e?.message || 'Impossibile salvare il codice locale.')
+    } finally {
+      setSaveCodeBusy(false)
+    }
+  }
 
   useEffect(() => {
     loadSuppliers()
     loadPrimaNotaReference()
+    void refreshProtectedLocaleSummaries()
   }, [])
+
+  useEffect(() => {
+    const stored = readStoredPrimaNotaAccessCode(activeActivity)
+    setLocaleAccessCode(stored || '')
+  }, [activeActivity])
 
   useEffect(() => {
     const onDataSynced = () => {
@@ -324,8 +442,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }, [loading, entries, highlightEntryId, movementPeriodFrom, movementPeriodTo])
 
   useEffect(() => {
+    if (!operatorMode || visibleLocales.length === 0) return
+    if (!visibleLocales.some((loc) => loc.id === activeActivity)) {
+      selectActivity(visibleLocales[0].id)
+    }
+  }, [operatorMode, visibleLocales, activeActivity])
+
+  useEffect(() => {
     loadSummary()
-  }, [selectedDate, activeActivity])
+  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode])
 
   useEffect(() => {
     let cancelled = false
@@ -338,6 +463,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           date_from: selectedDate,
           date_to: selectedDate,
           activity: activeActivity,
+          access_code: resolveActiveAccessCode(),
         })
         if (cancelled || !Array.isArray(dayEntries)) return
         setEntries((prev) => {
@@ -361,7 +487,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadEntries()
-  }, [movementPeriodFrom, movementPeriodTo, activeActivity])
+  }, [movementPeriodFrom, movementPeriodTo, activeActivity, unlockedSlugs, localeAccessCode])
 
   function selectActivity(activityId) {
     if (activityId === activeActivity) return
@@ -387,6 +513,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadEntries() {
+    if (operatorMode && protectedSlugs.includes(activeActivity) && !unlockedSlugs.has(activeActivity)) {
+      setEntries([])
+      setLoading(false)
+      setError('Apri il locale con il codice a 6 cifre per visualizzare i movimenti.')
+      return
+    }
     try {
       setLoading(true)
       setError('')
@@ -401,18 +533,23 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         date_from: from || undefined,
         date_to: to || undefined,
         activity: activeActivity,
+        access_code: resolveActiveAccessCode(),
       })
       setEntries(data)
     } catch (e) {
-      setError('Errore nel caricamento dei movimenti')
+      setError(e?.message?.includes('Codice') ? 'Codice locale non valido o mancante.' : 'Errore nel caricamento dei movimenti')
     } finally {
       setLoading(false)
     }
   }
 
   async function loadSummary() {
+    if (operatorMode && protectedSlugs.includes(activeActivity) && !unlockedSlugs.has(activeActivity)) {
+      setSummary(null)
+      return
+    }
     try {
-      const data = await fetchDailySummary(selectedDate, activeActivity)
+      const data = await fetchDailySummary(selectedDate, activeActivity, resolveActiveAccessCode())
       setSummary(data)
     } catch {
       setSummary(null)
@@ -436,7 +573,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     try {
       setDeletingDay(true)
       setError('')
-      await deleteEntriesForDay(selectedDate, activeActivity)
+      await deleteEntriesForDay(selectedDate, activeActivity, resolveActiveAccessCode())
       handleCancelEdit()
       setOpeningCashInput('')
       await loadEntries()
@@ -462,7 +599,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     try {
       setDeletingRange(true)
       setError('')
-      await deleteEntriesForRange(resetRangeFrom, resetRangeTo, activeActivity)
+      await deleteEntriesForRange(resetRangeFrom, resetRangeTo, activeActivity, resolveActiveAccessCode())
       handleCancelEdit()
       setOpeningCashInput('')
       await loadEntries()
@@ -519,10 +656,10 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       }
 
       if (editingId) {
-        await updateEntry(editingId, payload)
+        await updateEntry(editingId, payload, resolveActiveAccessCode())
         setSuccess('Movimento aggiornato')
       } else {
-        await createEntry(payload)
+        await createEntry(payload, resolveActiveAccessCode())
         setSuccess('Movimento registrato')
       }
 
@@ -596,7 +733,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   async function handleDelete(entry) {
     if (!window.confirm('Eliminare questo movimento?')) return
     try {
-      await deleteEntry(entry.id)
+      await deleteEntry(entry.id, resolveActiveAccessCode())
       setDrawerEntry((prev) => (prev && prev.id === entry.id ? null : prev))
       if (editingId === entry.id) handleCancelEdit()
       setSuccess('Movimento eliminato')
@@ -609,7 +746,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   function handleDownloadReport(e) {
     e.preventDefault()
-    const url = getExportUrl(exportDateFrom || undefined, exportDateTo || undefined, activeActivity)
+    const url = getExportUrl(exportDateFrom || undefined, exportDateTo || undefined, activeActivity, resolveActiveAccessCode())
     window.open(url, '_blank')
   }
 
@@ -659,6 +796,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           date_from: from || undefined,
           date_to: to || undefined,
           activity: activeActivity,
+          access_code: resolveActiveAccessCode(),
         })
         list = Array.isArray(list) ? list : []
       }
@@ -713,6 +851,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         date_from: from || undefined,
         date_to: to || undefined,
         activity,
+        access_code: resolveActiveAccessCode(),
       })
       const existingList = Array.isArray(existing) ? existing : []
       const existingKeys = new Set(existingList.map((e) => movementBackupKey(e)))
@@ -745,7 +884,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           payment_method_id: row.payment_method_id,
           category_id: row.category_id,
           activity,
-        })
+        }, resolveActiveAccessCode())
         created += 1
         existingKeys.add(key)
       }
@@ -1071,7 +1210,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   return (
     <div>
       <section className="staff-page-hero">
-        <h1 className="page-header staff-page-title">Prima Nota di Cassa</h1>
+        <h1 className="page-header staff-page-title">{operatorMode ? 'Prima Nota' : 'Prima Nota di Cassa'}</h1>
         <p className="staff-page-lead">
           {operatorMode ? (
             <>
@@ -1090,9 +1229,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       {!operatorMode && (
         <OperatorLinkCard
           title="Link operatore"
-          description="Condividi con le postazioni di lavoro: il link unificato include Personale, Ordini e Prima Nota; oppure solo la cassa con il link dedicato."
+          description="Condividi con le postazioni di lavoro: il link unificato include Panoramica, Personale, Ordini e Prima Nota; oppure solo la cassa con il link dedicato."
           links={[
-            { label: 'Postazione operativa (Personale + Ordini + Prima Nota)', url: getOperatorStationPublicUrl() },
+            { label: 'Postazione operativa (Panoramica + Personale + Ordini + Prima Nota)', url: getOperatorStationPublicUrl() },
             { label: 'Solo Prima Nota', url: getOperatorPrimaNotaPublicUrl() },
           ]}
         />
@@ -1102,11 +1241,19 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       {success && <div className="alert alert-success">{success}</div>}
 
       <PrimaNotaLocalePicker
-        locales={locales}
+        locales={visibleLocales}
         activeActivity={activeActivity}
         onSelect={selectActivity}
         onLocalesChange={setLocales}
         onNotify={(msg) => setSuccess(msg)}
+        operatorMode={operatorMode}
+        localeAccessCode={localeAccessCode}
+        onLocaleAccessCodeChange={setLocaleAccessCode}
+        onUnlockProtectedLocale={handleUnlockProtectedLocale}
+        onSaveLocaleAccessCode={handleSaveLocaleAccessCode}
+        protectedSlugs={protectedSlugs}
+        unlockBusy={unlockBusy}
+        saveCodeBusy={saveCodeBusy}
       />
 
       <div className="ui-toolbar-one card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem' }}>

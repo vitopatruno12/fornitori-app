@@ -15,7 +15,7 @@ const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
 export type OperatorDeliveryView = 'new-delivery' | 'history'
-export type OperatorStationView = 'staff' | 'orders' | 'prima-nota'
+export type OperatorStationView = 'overview' | 'staff' | 'orders' | 'prima-nota'
 
 import { ensureHttpsUrl } from './urlSecurity'
 
@@ -150,7 +150,8 @@ export function getOperatorStationView(): OperatorStationView {
   if (raw === 'personale' || raw === 'staff') return 'staff'
   if (raw === 'ordini' || raw === 'orders' || raw === 'ordine') return 'orders'
   if (raw === 'prima-nota' || raw === 'primanota' || raw === 'cassa') return 'prima-nota'
-  return 'orders'
+  if (raw === 'panoramica' || raw === 'overview' || raw === 'dashboard') return 'overview'
+  return 'overview'
 }
 
 export function getOperatorDeliveryView(): OperatorDeliveryView {
@@ -182,10 +183,11 @@ export function getOperatorPrimaNotaPublicUrl(): string {
   return buildPublicUrl(OPERATOR_PRIMA_NOTA_PATH)
 }
 
-export function getOperatorStationPublicUrl(view: OperatorStationView = 'orders'): string {
+export function getOperatorStationPublicUrl(view: OperatorStationView = 'overview'): string {
   const base = buildPublicUrl(OPERATOR_STATION_PATH)
-  if (view === 'orders') return base
-  const section = view === 'staff' ? 'personale' : 'prima-nota'
+  if (view === 'overview') return base
+  const section =
+    view === 'staff' ? 'personale' : view === 'orders' ? 'ordini' : 'prima-nota'
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}sezione=${section}`
 }

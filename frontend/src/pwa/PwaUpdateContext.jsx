@@ -1,9 +1,24 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { registerSW } from 'virtual:pwa-register'
+import {
+  detectPwaUpdateScope,
+  fetchRemoteSectionVersions,
+  scopeHashChanged,
+  storeSectionVersions,
+} from '../utils/pwaUpdateScope.ts'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 
 const PwaUpdateContext = createContext(null)
+
+async function shouldPromptUpdateForScope(scope) {
+  try {
+    const remote = await fetchRemoteSectionVersions()
+    return scopeHashChanged(scope, remote)
+  } catch {
+    return true
+  }
+}
 
 export function PwaUpdateProvider({ children }) {
   const [updateReady, setUpdateReady] = useState(false)
@@ -11,15 +26,30 @@ export function PwaUpdateProvider({ children }) {
   const [applying, setApplying] = useState(false)
   const updateSWRef = useRef(null)
   const registrationRef = useRef(null)
+  const pendingScopeRef = useRef(null)
   const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+
+  const markScopeVersionsInstalled = useCallback(async () => {
+    try {
+      const remote = await fetchRemoteSectionVersions()
+      if (Object.keys(remote).length) storeSectionVersions(remote)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     if (!swSupported) return undefined
 
     const updateSW = registerSW({
       immediate: true,
-      onNeedRefresh() {
-        setUpdateReady(true)
+      async onNeedRefresh() {
+        const scope = detectPwaUpdateScope()
+        const relevant = await shouldPromptUpdateForScope(scope)
+        if (relevant) {
+          pendingScopeRef.current = scope
+          setUpdateReady(true)
+        }
       },
       onOfflineReady() {
         // cache pronta per offline
@@ -33,8 +63,10 @@ export function PwaUpdateProvider({ children }) {
     })
     updateSWRef.current = updateSW
 
+    void markScopeVersionsInstalled()
+
     return undefined
-  }, [swSupported])
+  }, [swSupported, markScopeVersionsInstalled])
 
   useEffect(() => {
     if (!swSupported) return undefined
@@ -73,6 +105,14 @@ export function PwaUpdateProvider({ children }) {
         registrationRef.current = reg
         await reg.update()
       }
+      const scope = detectPwaUpdateScope()
+      const relevant = await shouldPromptUpdateForScope(scope)
+      if (relevant) {
+        pendingScopeRef.current = scope
+        setUpdateReady(true)
+      } else {
+        setUpdateReady(false)
+      }
     } finally {
       window.setTimeout(() => setChecking(false), 450)
     }
@@ -84,13 +124,14 @@ export function PwaUpdateProvider({ children }) {
       return
     }
     setApplying(true)
+    void markScopeVersionsInstalled()
     const fn = updateSWRef.current
     if (typeof fn === 'function') {
       fn(true)
       return
     }
     window.location.reload()
-  }, [swSupported])
+  }, [swSupported, markScopeVersionsInstalled])
 
   const value = useMemo(
     () => ({
