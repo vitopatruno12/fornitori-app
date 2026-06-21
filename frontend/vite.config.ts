@@ -1,5 +1,20 @@
 import { defineConfig, loadEnv } from 'vite'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { VitePWA } from 'vite-plugin-pwa'
+
+function loadAtlasSectionVersions(): { build: string; scopes: Record<string, string> } {
+  try {
+    const raw = readFileSync(join(process.cwd(), 'public', 'section-versions.json'), 'utf8')
+    const parsed = JSON.parse(raw) as { build?: string; scopes?: Record<string, string> }
+    return {
+      build: String(parsed?.build || ''),
+      scopes: parsed?.scopes && typeof parsed.scopes === 'object' ? parsed.scopes : {},
+    }
+  } catch {
+    return { build: '', scopes: {} }
+  }
+}
 
 /** Dev: il browser usa solo /api e /ai (HTTPS in produzione); proxy interno verso i backend locali. */
 export default defineConfig(({ mode }) => {
@@ -14,9 +29,13 @@ export default defineConfig(({ mode }) => {
     }
   }
 
+  const atlasVersions = mode === 'production' ? loadAtlasSectionVersions() : { build: 'dev', scopes: {} }
+
   return {
   define: {
     'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBase),
+    __ATLAS_BUILD_ID__: JSON.stringify(atlasVersions.build),
+    __ATLAS_SCOPE_HASHES__: JSON.stringify(atlasVersions.scopes),
   },
   plugins: [
     {

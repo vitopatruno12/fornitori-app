@@ -37,6 +37,8 @@ const SCOPE_FILES = {
     'components/OperatorSatelliteShell.tsx',
     'utils/primaNotaLocaleAccess.js',
     'utils/primaNotaStaffLocaleLink.js',
+    'pwa/PwaUpdateContext.jsx',
+    'utils/pwaUpdateScope.ts',
   ],
 }
 

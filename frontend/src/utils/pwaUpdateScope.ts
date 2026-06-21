@@ -7,8 +7,8 @@ import {
 
 export type PwaUpdateScope = 'full' | 'station' | 'order' | 'delivery' | 'prima-nota'
 
-const STORAGE_PREFIX = 'atlasSectionVersion:v2:'
-const BUILD_KEY = 'atlasAppBuildId:v2'
+const STORAGE_PREFIX = 'atlasSectionVersion:v3:'
+const BUILD_KEY = 'atlasAppBuildId:v3'
 
 export type SectionVersionsPayload = {
   build?: string
@@ -22,6 +22,27 @@ export function detectPwaUpdateScope(): PwaUpdateScope {
   if (isOperatorDeliveryMode()) return 'delivery'
   if (isOperatorPrimaNotaMode()) return 'prima-nota'
   return 'full'
+}
+
+/** Build id del bundle JS attualmente in esecuzione (non localStorage). */
+export function getRunningBuildId(): string {
+  try {
+    return typeof __ATLAS_BUILD_ID__ !== 'undefined' ? String(__ATLAS_BUILD_ID__ || '').trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+export function getRunningScopeHash(scope: PwaUpdateScope): string {
+  try {
+    const scopes =
+      typeof __ATLAS_SCOPE_HASHES__ !== 'undefined' && __ATLAS_SCOPE_HASHES__
+        ? __ATLAS_SCOPE_HASHES__
+        : {}
+    return String(scopes[scope] || '').trim()
+  } catch {
+    return ''
+  }
 }
 
 export function readStoredSectionVersion(scope: PwaUpdateScope): string {
@@ -86,30 +107,40 @@ export function scopeHashChanged(
   scope: PwaUpdateScope,
   remoteScopes: Record<string, string>,
 ): boolean {
-  const remote = String(remoteScopes[scope] || '')
-  if (!remote) return true
+  const remote = String(remoteScopes[scope] || '').trim()
+  if (!remote) return false
+
+  const running = getRunningScopeHash(scope)
+  if (running) return running !== remote
+
   const local = readStoredSectionVersion(scope)
   if (!local) return true
   return local !== remote
 }
 
-/** True se c’è un deploy più recente rilevante per l’ambito corrente (postazione, prima nota, ecc.). */
+/** True se il server ha un deploy più recente per l’ambito corrente. */
 export function updateAvailableForScope(
   scope: PwaUpdateScope,
   payload: SectionVersionsPayload,
 ): boolean {
-  const build = String(payload?.build || '').trim()
-  const storedBuild = readStoredBuildId()
+  if (import.meta.env.DEV) return false
+
+  const remoteBuild = String(payload?.build || '').trim()
+  const runningBuild = getRunningBuildId()
   const scopes = payload?.scopes || {}
 
-  if (!build) {
-    return scopeHashChanged(scope, scopes)
-  }
-  if (!storedBuild) {
-    return true
-  }
-  if (build === storedBuild) {
+  if (runningBuild && runningBuild !== 'dev') {
+    if (!remoteBuild) return scopeHashChanged(scope, scopes)
+    if (runningBuild !== remoteBuild) {
+      return scopeHashChanged(scope, scopes)
+    }
     return false
   }
+
+  if (!remoteBuild) return scopeHashChanged(scope, scopes)
+
+  const storedBuild = readStoredBuildId()
+  if (!storedBuild) return scopeHashChanged(scope, scopes)
+  if (storedBuild === remoteBuild) return false
   return scopeHashChanged(scope, scopes)
 }

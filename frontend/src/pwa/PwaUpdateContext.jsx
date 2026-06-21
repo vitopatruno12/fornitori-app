@@ -5,10 +5,11 @@ import {
   fetchRemoteSectionVersions,
   updateAvailableForScope,
   storeInstalledVersions,
+  getRunningBuildId,
 } from '../utils/pwaUpdateScope.ts'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
-const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v2'
+const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v3'
 
 const PwaUpdateContext = createContext(null)
 
@@ -36,7 +37,14 @@ async function probeRemoteVersions(setUpdateReady, pendingScopeRef, skipProbeRef
 async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipProbeRef) {
   if (skipProbeRef?.current) return false
   if (!reg?.waiting) return false
-  return probeRemoteVersions(setUpdateReady, pendingScopeRef, skipProbeRef)
+  const scope = detectPwaUpdateScope()
+  const relevant = await shouldPromptUpdateForScope(scope)
+  if (relevant) {
+    pendingScopeRef.current = scope
+    setUpdateReady(true)
+    return true
+  }
+  return false
 }
 
 export function PwaUpdateProvider({ children }) {
@@ -75,6 +83,14 @@ export function PwaUpdateProvider({ children }) {
         skipVersionProbeRef.current = false
         setUpdateReady(false)
         setApplying(false)
+      })
+    } else if (!import.meta.env.DEV) {
+      void fetchRemoteSectionVersions().then((remote) => {
+        const running = getRunningBuildId()
+        if (running && remote.build && running === remote.build) {
+          storeInstalledVersions(remote)
+          setUpdateReady(false)
+        }
       })
     }
 

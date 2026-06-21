@@ -17,3 +17,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** Iniettato a build da section-versions.json (vite.config.ts). */
+declare const __ATLAS_BUILD_ID__: string
+declare const __ATLAS_SCOPE_HASHES__: Record<string, string>
