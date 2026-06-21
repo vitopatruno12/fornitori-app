@@ -73,6 +73,17 @@ git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 log "Build frontend (file statici in frontend/dist)"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/build-frontend.sh"
 
+if [[ -f "$APP_DIR/deploy/apply-db-migrations.sh" ]]; then
+  if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+    log "Migrazioni database (codici locale Personale / Prima Nota)"
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/apply-db-migrations.sh" || {
+      warn "Migrazioni SQL non riuscite. I codici Prima Nota potrebbero non salvarsi finché non si applica la migrazione."
+    }
+  else
+    warn "PostgreSQL non attivo: salto migrazioni SQL."
+  fi
+fi
+
 API_DIR="${API_DIR:-/opt/fornitori-app}"
 if [[ "$RESTART_API" == "1" ]] && [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f "$API_DIR")" != "$(readlink -f "$APP_DIR")" ]]; then
   log "Aggiornamento backend API in $API_DIR (cartella usata da systemd)"

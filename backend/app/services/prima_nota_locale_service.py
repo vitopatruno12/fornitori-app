@@ -36,11 +36,14 @@ def _rollback_db(db: Session) -> None:
         pass
 
 
-def ensure_prima_nota_locale_packs_table() -> bool:
+def ensure_prima_nota_locale_packs_table(*, force: bool = False) -> bool:
     """Crea la tabella con SQL grezzo (affidabile anche senza restart API)."""
     global _table_ready
-    if _table_ready:
-        return True
+    if _table_ready and not force:
+        if _verify_table_ready():
+            return True
+        _table_ready = False
+
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -60,23 +63,60 @@ def ensure_prima_nota_locale_packs_table() -> bool:
             conn.execute(
                 text(
                     """
-                    CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_slug
-                    ON prima_nota_locale_packs (activity_slug)
+                    ALTER TABLE prima_nota_locale_packs
+                    ADD COLUMN IF NOT EXISTS label VARCHAR(255)
                     """
                 )
             )
             conn.execute(
                 text(
                     """
-                    CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_access_code
-                    ON prima_nota_locale_packs (access_code)
+                    ALTER TABLE prima_nota_locale_packs
+                    ADD COLUMN IF NOT EXISTS access_code VARCHAR(6)
                     """
                 )
             )
-        _table_ready = True
-        return True
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE prima_nota_locale_packs
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
+                    """
+                )
+            )
+        for index_sql in (
+            """
+            CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_slug
+            ON prima_nota_locale_packs (activity_slug)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_access_code
+            ON prima_nota_locale_packs (access_code)
+            """,
+        ):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(index_sql))
+            except SQLAlchemyError as exc:
+                logger.warning("Indice prima_nota_locale_packs: %s", exc)
+
+        if _verify_table_ready():
+            _table_ready = True
+            return True
+        logger.warning("Tabella prima_nota_locale_packs non verificabile dopo CREATE")
+        return False
     except SQLAlchemyError as exc:
-        logger.warning("Impossibile creare prima_nota_locale_packs: %s", exc)
+        _table_ready = False
+        logger.error("Impossibile creare prima_nota_locale_packs: %s", exc)
+        return False
+
+
+def _verify_table_ready() -> bool:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1 FROM prima_nota_locale_packs LIMIT 1"))
+        return True
+    except SQLAlchemyError:
         return False
 
 
@@ -108,7 +148,14 @@ def _find_pack(db: Session, activity_slug: str) -> Optional[PrimaNotaLocalePack]
         return db.query(PrimaNotaLocalePack).filter(PrimaNotaLocalePack.activity_slug == slug).first()
     except ProgrammingError as exc:
         _rollback_db(db)
+        global _table_ready
+        _table_ready = False
         logger.warning("Query prima_nota_locale_packs fallita: %s", exc)
+        if _ensure_table(db):
+            try:
+                return db.query(PrimaNotaLocalePack).filter(PrimaNotaLocalePack.activity_slug == slug).first()
+            except ProgrammingError:
+                _rollback_db(db)
         return None
     except SQLAlchemyError:
         _rollback_db(db)
@@ -165,8 +212,11 @@ def get_locale_pack(
 
 
 def upsert_locale_pack(db: Session, payload: PrimaNotaLocalePackUpsert) -> PrimaNotaLocalePackRead:
-    if not _ensure_table(db):
-        raise ValueError("Tabella codici locale non disponibile. Riavvia l'API o verifica il database.")
+    if not ensure_prima_nota_locale_packs_table(force=True):
+        raise ValueError(
+            "Tabella codici locale non disponibile. Sul server esegui: "
+            "sudo RESTART_API=1 APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/release-safe.sh"
+        )
     slug = str(payload.activity_slug or "").strip().lower()
     if not is_valid_activity_slug(slug):
         raise ValueError("Slug attività non valido.")
