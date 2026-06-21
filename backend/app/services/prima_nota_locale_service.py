@@ -214,8 +214,9 @@ def get_locale_pack(
 def upsert_locale_pack(db: Session, payload: PrimaNotaLocalePackUpsert) -> PrimaNotaLocalePackRead:
     if not ensure_prima_nota_locale_packs_table(force=True):
         raise ValueError(
-            "Tabella codici locale non disponibile. Sul server esegui: "
-            "sudo RESTART_API=1 APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/release-safe.sh"
+            "Tabella codici locale non disponibile. Sul server esegui:\n"
+            "sudo DB_NAME=fornitori_db bash deploy/ensure-prima-nota-locale-table.sh\n"
+            "poi: sudo RESTART_API=1 APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/release-safe.sh"
         )
     slug = str(payload.activity_slug or "").strip().lower()
     if not is_valid_activity_slug(slug):

@@ -73,15 +73,18 @@ git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 log "Build frontend (file statici in frontend/dist)"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/build-frontend.sh"
 
-if [[ -f "$APP_DIR/deploy/apply-db-migrations.sh" ]]; then
-  if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+  if [[ -f "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh" ]]; then
+    log "Tabella codici Prima Nota (obbligatoria per salvare i codici locale)"
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh"
+  elif [[ -f "$APP_DIR/deploy/apply-db-migrations.sh" ]]; then
     log "Migrazioni database (codici locale Personale / Prima Nota)"
-    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/apply-db-migrations.sh" || {
-      warn "Migrazioni SQL non riuscite. I codici Prima Nota potrebbero non salvarsi finché non si applica la migrazione."
-    }
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/apply-db-migrations.sh"
   else
-    warn "PostgreSQL non attivo: salto migrazioni SQL."
+    warn "Script migrazione assente: esegui manualmente deploy/ensure-prima-nota-locale-table.sh"
   fi
+else
+  warn "PostgreSQL non attivo: salto creazione tabella codici Prima Nota."
 fi
 
 API_DIR="${API_DIR:-/opt/fornitori-app}"
