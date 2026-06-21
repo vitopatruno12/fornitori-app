@@ -8,6 +8,7 @@ import {
 } from '../utils/pwaUpdateScope.ts'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
+const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v2'
 
 const PwaUpdateContext = createContext(null)
 
@@ -20,14 +21,20 @@ async function shouldPromptUpdateForScope(scope) {
   }
 }
 
-async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef) {
-  if (!reg?.waiting) return
+async function probeRemoteVersions(setUpdateReady, pendingScopeRef) {
   const scope = detectPwaUpdateScope()
   const relevant = await shouldPromptUpdateForScope(scope)
   if (relevant) {
     pendingScopeRef.current = scope
     setUpdateReady(true)
+    return true
   }
+  return false
+}
+
+async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef) {
+  if (!reg?.waiting) return false
+  return probeRemoteVersions(setUpdateReady, pendingScopeRef)
 }
 
 export function PwaUpdateProvider({ children }) {
@@ -51,6 +58,15 @@ export function PwaUpdateProvider({ children }) {
   useEffect(() => {
     if (!swSupported) return undefined
 
+    try {
+      if (sessionStorage.getItem(PENDING_INSTALL_KEY) === '1') {
+        sessionStorage.removeItem(PENDING_INSTALL_KEY)
+        void markVersionsInstalled()
+      }
+    } catch {
+      // ignore
+    }
+
     const updateSW = registerSW({
       immediate: true,
       async onNeedRefresh() {
@@ -66,7 +82,12 @@ export function PwaUpdateProvider({ children }) {
       },
       onRegistered(registration) {
         registrationRef.current = registration || null
-        void probeWaitingWorker(registration, setUpdateReady, pendingScopeRef)
+        void (async () => {
+          const waiting = await probeWaitingWorker(registration, setUpdateReady, pendingScopeRef)
+          if (!waiting) {
+            await probeRemoteVersions(setUpdateReady, pendingScopeRef)
+          }
+        })()
       },
       onRegisterError() {
         registrationRef.current = null
@@ -75,18 +96,25 @@ export function PwaUpdateProvider({ children }) {
     updateSWRef.current = updateSW
 
     return undefined
-  }, [swSupported])
+  }, [swSupported, markVersionsInstalled])
 
   useEffect(() => {
     if (!swSupported) return undefined
 
     const tick = async () => {
       const reg = registrationRef.current
-      if (!reg) return
+      if (!reg) {
+        await probeRemoteVersions(setUpdateReady, pendingScopeRef)
+        return
+      }
       await reg.update()
-      await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
+      const waiting = await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
+      if (!waiting) {
+        await probeRemoteVersions(setUpdateReady, pendingScopeRef)
+      }
     }
 
+    void tick()
     const intervalId = window.setInterval(() => void tick(), CHECK_INTERVAL_MS)
 
     const onVisible = () => {
@@ -111,21 +139,22 @@ export function PwaUpdateProvider({ children }) {
     }
     setChecking(true)
     try {
+      let found = false
       const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration())
       if (reg) {
         registrationRef.current = reg
         await reg.update()
-        await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
-      }
-      if (!reg?.waiting) {
-        const scope = detectPwaUpdateScope()
-        const relevant = await shouldPromptUpdateForScope(scope)
-        if (relevant) {
-          pendingScopeRef.current = scope
-          setUpdateReady(true)
+        const waiting = await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef)
+        if (waiting) {
+          found = true
         } else {
-          setUpdateReady(false)
+          found = await probeRemoteVersions(setUpdateReady, pendingScopeRef)
         }
+      } else {
+        found = await probeRemoteVersions(setUpdateReady, pendingScopeRef)
+      }
+      if (!found) {
+        setUpdateReady(false)
       }
     } finally {
       window.setTimeout(() => setChecking(false), 450)
@@ -138,14 +167,18 @@ export function PwaUpdateProvider({ children }) {
       return
     }
     setApplying(true)
-    void markVersionsInstalled()
+    try {
+      sessionStorage.setItem(PENDING_INSTALL_KEY, '1')
+    } catch {
+      // ignore
+    }
     const fn = updateSWRef.current
     if (typeof fn === 'function') {
       fn(true)
       return
     }
     window.location.reload()
-  }, [swSupported, markVersionsInstalled])
+  }, [swSupported])
 
   const value = useMemo(
     () => ({

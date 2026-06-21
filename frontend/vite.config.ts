@@ -72,6 +72,7 @@ export default defineConfig(({ mode }) => {
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,webmanifest}'],
+        globIgnores: ['**/section-versions.json'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/, /^\/ai/, /^\/uploads/],
         runtimeCaching: [

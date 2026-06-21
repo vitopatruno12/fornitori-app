@@ -7,6 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = join(__dirname, '..')
 const srcRoot = join(frontendRoot, 'src')
 
+/** Stili globali: contano per ogni ambito satellitare. */
+const SHARED_SCOPE_FILES = ['style.css']
+
 /** File sorgente per ambito aggiornamento (hash combinato per scope). */
 const SCOPE_FILES = {
   full: ['**'],
@@ -57,9 +60,8 @@ function hashFiles(relPaths) {
   const selected =
     relPaths.includes('**')
       ? allFiles.sort()
-      : relPaths
-          .map((p) => p.replace(/\\/g, '/'))
-          .filter((p) => allFiles.includes(p))
+      : [...new Set([...SHARED_SCOPE_FILES, ...relPaths.map((p) => p.replace(/\\/g, '/'))])]
+          .filter((p) => p === 'style.css' || allFiles.includes(p))
           .sort()
   for (const rel of selected) {
     const content = readFileSync(join(srcRoot, rel))
