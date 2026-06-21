@@ -11,7 +11,7 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     if (applying || checking) return
     try {
       if (updateReady) {
-        applyUpdate()
+        await applyUpdate()
       } else {
         await checkForUpdate()
       }
