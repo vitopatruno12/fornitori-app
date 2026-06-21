@@ -2,10 +2,12 @@ import logging
 import random
 from typing import List, Optional
 
+from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.prima_nota import is_valid_activity_slug
+from ..database import engine
 from ..models.prima_nota_locale_pack import PrimaNotaLocalePack
 from ..schemas.cash import (
     PrimaNotaLocalePackRead,
@@ -34,19 +36,53 @@ def _rollback_db(db: Session) -> None:
         pass
 
 
-def _ensure_table(db: Session) -> bool:
-    """Crea la tabella al volo se manca (deploy senza restart API o create_all saltato)."""
+def ensure_prima_nota_locale_packs_table() -> bool:
+    """Crea la tabella con SQL grezzo (affidabile anche senza restart API)."""
     global _table_ready
     if _table_ready:
         return True
     try:
-        PrimaNotaLocalePack.__table__.create(bind=db.get_bind(), checkfirst=True)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS prima_nota_locale_packs (
+                      id SERIAL PRIMARY KEY,
+                      activity_slug VARCHAR(32) NOT NULL,
+                      label VARCHAR(255),
+                      access_code VARCHAR(6),
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_prima_nota_locale_packs_slug UNIQUE (activity_slug)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_slug
+                    ON prima_nota_locale_packs (activity_slug)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_access_code
+                    ON prima_nota_locale_packs (access_code)
+                    """
+                )
+            )
         _table_ready = True
         return True
     except SQLAlchemyError as exc:
-        _rollback_db(db)
         logger.warning("Impossibile creare prima_nota_locale_packs: %s", exc)
         return False
+
+
+def _ensure_table(db: Session) -> bool:
+    """Crea la tabella al volo se manca (deploy senza restart API o create_all saltato)."""
+    return ensure_prima_nota_locale_packs_table()
 
 
 def _resolve_access_code(payload: PrimaNotaLocalePackUpsert, existing: Optional[str]) -> str:
