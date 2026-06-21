@@ -28,6 +28,8 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
         ? 'Installa aggiornamento'
         : 'Aggiornamento'
 
+  const showUpdateBadge = updateReady && !applying && !checking
+
   const title = updateReady
     ? 'Nuova versione pronta: clicca per aggiornare ATLAS'
     : 'Controlla se è disponibile un aggiornamento dell’app'
@@ -36,7 +38,7 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     return (
       <button
         type="button"
-        className={`atlas-update-btn atlas-update-btn--fab${updateReady ? ' has-update' : ''} ${className}`.trim()}
+        className={`atlas-update-btn atlas-update-btn--fab${showUpdateBadge ? ' has-update' : ''} ${className}`.trim()}
         onClick={() => void handleClick()}
         disabled={applying || checking}
         title={title}
@@ -46,7 +48,7 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
         <span className="atlas-update-btn-icon" aria-hidden>
           ↻
         </span>
-        {updateReady ? (
+        {showUpdateBadge ? (
           <span className="atlas-update-badge" aria-label="Aggiornamento disponibile">
             1
           </span>
@@ -58,14 +60,14 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
   return (
     <button
       type="button"
-      className={`atlas-update-btn${updateReady ? ' has-update' : ''}${navStyle ? ' atlas-update-btn--nav' : ''} ${className}`.trim()}
+      className={`atlas-update-btn${showUpdateBadge ? ' has-update' : ''}${navStyle ? ' atlas-update-btn--nav' : ''} ${className}`.trim()}
       onClick={() => void handleClick()}
       disabled={applying || checking}
       title={title}
       aria-live="polite"
     >
       <span className="atlas-update-btn-label">{label}</span>
-      {updateReady ? (
+      {showUpdateBadge ? (
         <span className="atlas-update-badge" aria-label="Aggiornamento disponibile">
           1
         </span>

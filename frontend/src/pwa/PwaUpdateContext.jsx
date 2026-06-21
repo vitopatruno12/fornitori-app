@@ -10,8 +10,45 @@ import {
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v3'
+const APPLY_FAILSAFE_MS = 4000
 
 const PwaUpdateContext = createContext(null)
+
+function waitForWaitingWorker(reg, timeoutMs = 2000) {
+  if (!reg || reg.waiting) return Promise.resolve()
+  return new Promise((resolve) => {
+    const installing = reg.installing
+    if (!installing) {
+      resolve()
+      return
+    }
+    const done = () => {
+      installing.removeEventListener('statechange', onStateChange)
+      resolve()
+    }
+    const onStateChange = () => {
+      if (installing.state === 'installed' || reg.waiting) done()
+    }
+    installing.addEventListener('statechange', onStateChange)
+    window.setTimeout(done, timeoutMs)
+  })
+}
+
+async function clearWorkboxCaches() {
+  if (typeof caches === 'undefined') return
+  try {
+    const keys = await caches.keys()
+    await Promise.all(keys.map((key) => caches.delete(key)))
+  } catch {
+    // ignore
+  }
+}
+
+function hardReloadPage() {
+  const url = new URL(window.location.href)
+  url.searchParams.set('_atlas_u', String(Date.now()))
+  window.location.replace(url.toString())
+}
 
 async function shouldPromptUpdateForScope(scope) {
   try {
@@ -68,6 +105,8 @@ export function PwaUpdateProvider({ children }) {
 
   useEffect(() => {
     if (!swSupported) return undefined
+
+    setApplying(false)
 
     try {
       if (sessionStorage.getItem(PENDING_INSTALL_KEY) === '1') {
@@ -197,41 +236,50 @@ export function PwaUpdateProvider({ children }) {
 
   const applyUpdate = useCallback(async () => {
     if (!swSupported) {
-      window.location.reload()
+      hardReloadPage()
       return
     }
+
     setApplying(true)
     setUpdateReady(false)
+
+    const failsafeId = window.setTimeout(() => {
+      setApplying(false)
+    }, APPLY_FAILSAFE_MS)
+
     try {
       sessionStorage.setItem(PENDING_INSTALL_KEY, '1')
     } catch {
       // ignore
     }
 
-    const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration())
-    const fn = updateSWRef.current
-    const hasWaiting = Boolean(reg?.waiting)
+    try {
+      const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration())
+      registrationRef.current = reg || null
 
-    if (hasWaiting && typeof fn === 'function') {
-      let reloaded = false
-      const onControllerChange = () => {
-        if (reloaded) return
-        reloaded = true
-        navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
-        window.location.reload()
+      if (reg) {
+        await reg.update()
+        await waitForWaitingWorker(reg)
       }
-      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange)
-      fn(true)
-      window.setTimeout(() => {
-        navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
-        if (!reloaded) {
-          window.location.reload()
-        }
-      }, 6000)
-      return
-    }
 
-    window.location.reload()
+      const fn = updateSWRef.current
+      if (reg?.waiting && typeof fn === 'function') {
+        fn(true)
+        window.setTimeout(() => {
+          window.clearTimeout(failsafeId)
+          hardReloadPage()
+        }, 400)
+        return
+      }
+
+      await clearWorkboxCaches()
+      window.clearTimeout(failsafeId)
+      hardReloadPage()
+    } catch {
+      window.clearTimeout(failsafeId)
+      setApplying(false)
+      hardReloadPage()
+    }
   }, [swSupported])
 
   const value = useMemo(
