@@ -195,7 +195,7 @@ export default function PrimaNotaLocalePicker({
             </p>
           ) : (
             <p className="prima-nota-locale-panel-hint">
-              Genera un codice a 6 cifre e salvalo: chi apre questo locale dovrà inserirlo prima di vedere il registro.
+              Genera un codice a 6 cifre e salvalo: chi apre questo locale dovrà inserirlo e cliccare <strong>Accedi</strong> prima di vedere il registro.
             </p>
           )}
           <div className="prima-nota-locale-add-row">
@@ -205,6 +205,13 @@ export default function PrimaNotaLocalePicker({
               className="form-control"
               value={localeAccessCode}
               onChange={(ev) => onLocaleAccessCodeChange?.(ev.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(ev) => {
+                if (ev.key !== 'Enter') return
+                const code = normalizeLocaleAccessCode(localeAccessCode)
+                if (!isValidLocaleAccessCode(code) || unlockBusy) return
+                ev.preventDefault()
+                void onVerifyAndSelectLocale?.(activeActivity, code)
+              }}
               placeholder="123456"
               inputMode="numeric"
               autoComplete="off"
@@ -224,6 +231,14 @@ export default function PrimaNotaLocalePicker({
               onClick={() => void onSaveLocaleAccessCode?.()}
             >
               {saveCodeBusy ? 'Salvo…' : 'Salva codice'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-success btn-sm"
+              disabled={unlockBusy || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
+              onClick={() => void onVerifyAndSelectLocale?.(activeActivity, normalizeLocaleAccessCode(localeAccessCode))}
+            >
+              {unlockBusy ? 'Accesso…' : 'Accedi'}
             </button>
           </div>
         </div>
@@ -256,8 +271,8 @@ export default function PrimaNotaLocalePicker({
               autoFocus
               aria-label="Codice locale"
             />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={unlockBusy}>
-              {unlockBusy ? 'Verifica…' : 'Apri locale'}
+            <button type="submit" className="btn btn-success btn-sm" disabled={unlockBusy}>
+              {unlockBusy ? 'Accesso…' : 'Accedi'}
             </button>
             <button type="button" className="btn btn-outline-secondary btn-sm" onClick={cancelCodePrompt} disabled={unlockBusy}>
               Annulla

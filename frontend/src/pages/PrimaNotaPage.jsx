@@ -165,6 +165,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   function hasActiveLocaleAccess() {
     if (!activeLocaleNeedsCode()) return true
+    if (!unlockedSlugs.has(activeActivity)) return false
     return isValidLocaleAccessCode(resolveActiveAccessCode())
   }
 
@@ -1394,8 +1395,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
       {needsLocaleUnlock ? (
         <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
-          Il registro di <strong>{activeActivityLabel}</strong> è protetto: seleziona il locale e inserisci il codice a 6
-          cifre per continuare.
+          Il registro di <strong>{activeActivityLabel}</strong> è protetto: inserisci il codice a 6 cifre e clicca{' '}
+          <strong>Accedi</strong> per continuare.
         </div>
       ) : null}
 
