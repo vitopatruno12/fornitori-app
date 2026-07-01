@@ -251,6 +251,20 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }
   }
 
+  function handleCloseLocaleAccess() {
+    if (!activeLocaleNeedsCode() || !hasActiveLocaleAccess()) return
+    clearStoredPrimaNotaAccessCode(activeActivity)
+    setUnlockedSlugs((prev) => {
+      const next = new Set(prev)
+      next.delete(activeActivity)
+      return next
+    })
+    setLocaleAccessCode('')
+    setDrawerEntry(null)
+    setError('')
+    setSuccess(`Registro «${activeActivityLabel}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`)
+  }
+
   async function handleDeleteCustomLocale(loc) {
     if (!loc?.id || loc.builtin) return false
     const label = loc.label || loc.id
@@ -1334,6 +1348,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0) + Number(refillGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
   const needsLocaleUnlock = activeLocaleNeedsCode() && !hasActiveLocaleAccess()
+  const localeRegisterOpen = activeLocaleNeedsCode() && hasActiveLocaleAccess()
 
   const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : entrateCassaGiornoComputed
   const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed
@@ -1382,6 +1397,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         localeAccessCode={localeAccessCode}
         onLocaleAccessCodeChange={setLocaleAccessCode}
         onVerifyAndSelectLocale={handleVerifyAndSelectLocale}
+        onCloseLocaleAccess={handleCloseLocaleAccess}
+        localeRegisterOpen={localeRegisterOpen}
         onSaveLocaleAccessCode={handleSaveLocaleAccessCode}
         onDeleteCustomLocale={handleDeleteCustomLocale}
         protectedSlugs={protectedSlugs}

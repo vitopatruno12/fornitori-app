@@ -23,6 +23,8 @@ export default function PrimaNotaLocalePicker({
   localeAccessCode = '',
   onLocaleAccessCodeChange,
   onVerifyAndSelectLocale,
+  onCloseLocaleAccess,
+  localeRegisterOpen = false,
   onSaveLocaleAccessCode,
   onDeleteCustomLocale,
   protectedSlugs = [],
@@ -235,10 +237,36 @@ export default function PrimaNotaLocalePicker({
             <button
               type="button"
               className="btn btn-success btn-sm"
-              disabled={unlockBusy || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
+              disabled={unlockBusy || localeRegisterOpen || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
               onClick={() => void onVerifyAndSelectLocale?.(activeActivity, normalizeLocaleAccessCode(localeAccessCode))}
             >
               {unlockBusy ? 'Accesso…' : 'Accedi'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              disabled={!localeRegisterOpen}
+              onClick={() => onCloseLocaleAccess?.()}
+              title="Chiude il registro di questo locale: servirà di nuovo il codice per Accedi."
+            >
+              Chiudi
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {operatorMode && activeRequiresCode && localeRegisterOpen && !pendingLocaleId ? (
+        <div className="prima-nota-locale-code-setup">
+          <p className="prima-nota-locale-panel-hint" style={{ marginBottom: '0.5rem' }}>
+            Registro <strong>{currentLabel}</strong> aperto.
+          </p>
+          <div className="prima-nota-locale-add-row">
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              onClick={() => onCloseLocaleAccess?.()}
+            >
+              Chiudi registro
             </button>
           </div>
         </div>
