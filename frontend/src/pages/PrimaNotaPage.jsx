@@ -44,6 +44,9 @@ const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
 const CONTO_REFILL = 'REFILL'
 
+const REGISTRO_CHIUSO_SAVE_MSG =
+  'Registro chiuso: non puoi salvare. Apri con Accedi per salvare i movimenti.'
+
 function isExtraCassaConto(conto) {
   return conto === CONTO_POS || conto === CONTO_REFILL
 }
@@ -168,6 +171,17 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     if (!activeLocaleNeedsCode()) return true
     if (!unlockedSlugs.has(activeActivity)) return false
     return isValidLocaleAccessCode(resolveActiveAccessCode())
+  }
+
+  function isRegisterClosed() {
+    return activeLocaleNeedsCode() && !hasActiveLocaleAccess()
+  }
+
+  function movementMutationError(err, fallback) {
+    if (isRegisterClosed()) return REGISTRO_CHIUSO_SAVE_MSG
+    const msg = String(err?.message || '')
+    if (/403/.test(msg) && /codice locale/i.test(msg)) return REGISTRO_CHIUSO_SAVE_MSG
+    return fallback
   }
 
   function resolveActiveAccessCode() {
@@ -752,6 +766,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       return
     }
 
+    if (isRegisterClosed()) {
+      setError(REGISTRO_CHIUSO_SAVE_MSG)
+      return
+    }
+
     try {
       setSaving(true)
       const entryDate = formEntryDate || selectedDate
@@ -807,7 +826,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       await loadEntries()
       await loadSummary()
     } catch (err) {
-      setError(editingId ? 'Errore nella modifica del movimento' : 'Errore nel salvataggio del movimento')
+      setError(
+        movementMutationError(
+          err,
+          editingId ? 'Errore nella modifica del movimento' : 'Errore nel salvataggio del movimento',
+        ),
+      )
     } finally {
       setSaving(false)
     }
@@ -858,6 +882,10 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   async function handleDelete(entry) {
     if (!window.confirm('Eliminare questo movimento?')) return
+    if (isRegisterClosed()) {
+      setError(REGISTRO_CHIUSO_SAVE_MSG)
+      return
+    }
     try {
       await deleteEntry(entry.id, resolveActiveAccessCode())
       setDrawerEntry((prev) => (prev && prev.id === entry.id ? null : prev))
@@ -865,8 +893,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       setSuccess('Movimento eliminato')
       await loadEntries()
       await loadSummary()
-    } catch {
-      setError('Errore nell\'eliminazione del movimento')
+    } catch (err) {
+      setError(movementMutationError(err, 'Errore nell\'eliminazione del movimento'))
     }
   }
 
