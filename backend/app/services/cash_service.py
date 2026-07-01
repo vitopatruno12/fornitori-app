@@ -18,6 +18,8 @@ from ..schemas.cash import CashEntryCreate
 
 NON_FISCALE_CONTO = "NON_FISCALE"
 POS_CONTO = "POS"
+REFILL_CONTO = "REFILL"
+EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO)
 
 
 def normalize_activity(activity: Optional[str]) -> str:
@@ -51,17 +53,17 @@ def _activity_filter(activity: Optional[str]):
 def _is_fiscale_filter():
     return or_(
         CashEntry.conto.is_(None),
-        CashEntry.conto.notin_([NON_FISCALE_CONTO, POS_CONTO]),
+        CashEntry.conto.notin_([NON_FISCALE_CONTO, POS_CONTO, REFILL_CONTO]),
     )
 
 
 def _is_cassa_contanti_filter():
-    """Movimenti che muovono contanti in cassa (fiscale + non fiscale, escluso POS)."""
-    return or_(CashEntry.conto.is_(None), CashEntry.conto != POS_CONTO)
+    """Movimenti che muovono contanti in cassa (fiscale + non fiscale, esclusi POS e Refill)."""
+    return or_(CashEntry.conto.is_(None), CashEntry.conto.notin_(EXTRA_CASSA_CONTI))
 
 
 def _is_extra_cassa(conto: Optional[str]) -> bool:
-    return conto == POS_CONTO
+    return conto in EXTRA_CASSA_CONTI
 
 
 def _net_amount_for_day(
@@ -292,7 +294,10 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
     totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
     totale_pos = _net_amount_for_day(db, start, end, activity, conto=POS_CONTO)
-    totale_vendita = (totale_fiscale + totale_non_fiscale + totale_pos).quantize(Decimal("0.01"))
+    totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
+    totale_vendita = (
+        totale_fiscale + totale_non_fiscale + totale_pos + totale_refill
+    ).quantize(Decimal("0.01"))
 
     entrate = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
@@ -345,6 +350,7 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
         "totale_fiscale": totale_fiscale,
         "totale_non_fiscale": totale_non_fiscale,
         "totale_pos": totale_pos,
+        "totale_refill": totale_refill,
         "totale_vendita": totale_vendita,
     }
 
