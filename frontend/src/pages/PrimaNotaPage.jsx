@@ -103,6 +103,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
   const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | refill
+  const posOnlyEntrata = formFlowTag === 'pos'
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
   const [formInvoiceId, setFormInvoiceId] = useState('')
@@ -742,7 +743,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       const entryDate = formEntryDate || selectedDate
       const payload = {
         entry_date: entryDate.includes('T') ? entryDate : `${entryDate}T12:00:00`,
-        type: formType,
+        type: formFlowTag === 'pos' ? 'entrata' : formType,
         amount: Number(formAmount),
         description: descTrimmed,
         note: formNote.trim() || null,
@@ -807,6 +808,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     setFormNote(entry.note || '')
     setFormConto(entry.conto || '')
     setFormFlowTag(flowTagFromConto(entry.conto))
+    if (entry.conto === CONTO_POS) setFormType('entrata')
     setFormRifDocumento(entry.riferimento_documento || '')
     setFormSupplierId(entry.supplier_id ? String(entry.supplier_id) : '')
     setFormInvoiceId(entry.invoice_id ? String(entry.invoice_id) : '')
@@ -1108,7 +1110,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     const entrata = !extraCassaTag && isEntrata ? amount : 0
     const uscita = !extraCassaTag && entry.type === 'uscita' ? amount : 0
     const nonFiscale = nonFiscaleTag ? (isEntrata ? amount : -amount) : 0
-    const pos = posTag ? (isEntrata ? amount : -amount) : 0
+    const pos = posTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const totaleMovimento = !nonFiscaleTag && !extraCassaTag ? entrata - uscita : 0
     const affectsSaldo = !extraCassaTag
@@ -1178,7 +1180,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
       if (movementKind === 'fiscale' && (isNonFiscale(entry) || isExtraCassa(entry))) return false
       if (movementKind === 'nf' && !isNonFiscale(entry)) return false
-      if (movementKind === 'pos' && !isPos(entry)) return false
+      if (movementKind === 'pos' && (!isPos(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (!q) return true
       const blob = [entry.description, entry.note, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
@@ -1302,9 +1304,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   const posGiornoComputed = React.useMemo(() => {
     return entriesForSelectedDay.reduce((acc, e) => {
-      if (e.conto !== CONTO_POS) return acc
-      const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
-      return acc + delta
+      if (e.conto !== CONTO_POS || e.type !== 'entrata') return acc
+      return acc + Number(e.amount || 0)
     }, 0)
   }, [entriesForSelectedDay])
 
@@ -1500,19 +1501,26 @@ export default function PrimaNotaPage({ operatorMode = false }) {
               <div className="btn-group" style={{ marginTop: 0 }}>
                 <button
                   type="button"
-                  className={formType === 'entrata' ? 'btn btn-primary' : 'btn btn-secondary'}
+                  className={formType === 'entrata' || posOnlyEntrata ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('entrata')}
                 >
                   Cassa entrata
                 </button>
                 <button
                   type="button"
-                  className={formType === 'uscita' ? 'btn btn-primary' : 'btn btn-secondary'}
+                  className={formType === 'uscita' && !posOnlyEntrata ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('uscita')}
+                  disabled={posOnlyEntrata}
+                  title={posOnlyEntrata ? 'Il POS registra solo pagamenti in entrata' : undefined}
                 >
                   Cassa uscita
                 </button>
               </div>
+              {posOnlyEntrata ? (
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  POS: solo pagamenti ricevuti (cassa entrata).
+                </p>
+              ) : null}
             </div>
             <div className="form-group" style={{ flex: '1 1 220px', minWidth: 200 }}>
               <label>Tipologia voce</label>
@@ -1536,8 +1544,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                 <button
                   type="button"
                   className={formFlowTag === 'pos' ? 'btn btn-vino' : 'btn btn-secondary'}
-                  onClick={() => setFormFlowTag('pos')}
-                  title="Flusso POS/Bancomat: registrato nelle vendite ma escluso dalla cassa fisica."
+                  onClick={() => {
+                    setFormFlowTag('pos')
+                    setFormType('entrata')
+                  }}
+                  title="Flusso POS/Bancomat: solo pagamenti in entrata, escluso dalla cassa fisica."
                 >
                   POS
                 </button>
@@ -1552,7 +1563,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
               </div>
             </div>
             <div className="form-group">
-              <label>Importo {formType === 'entrata' ? 'entrata' : 'uscita'} (€)</label>
+              <label>Importo {posOnlyEntrata || formType === 'entrata' ? 'entrata' : 'uscita'} (€)</label>
               <input
                 id="prima-nota-amount"
                 type="number"

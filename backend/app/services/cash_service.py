@@ -104,6 +104,37 @@ def _net_amount_for_day(
     return (entrate - uscite).quantize(Decimal("0.01"))
 
 
+def _entrata_amount_for_day(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    activity: Optional[str],
+    *,
+    conto: str,
+) -> Decimal:
+    """Somma solo le entrate nel giorno per un conto (es. POS = pagamenti ricevuti)."""
+    act_clause = _activity_filter(activity)
+    total = (
+        db.query(func.coalesce(func.sum(CashEntry.amount), 0))
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            CashEntry.type == "entrata",
+            CashEntry.conto == conto,
+            act_clause,
+        )
+        .scalar()
+    )
+    return Decimal(str(total or 0)).quantize(Decimal("0.01"))
+
+
+def _normalize_cash_entry_payload(payload: dict) -> dict:
+    """POS ammette solo entrata (pagamenti merce ricevuti)."""
+    if payload.get("conto") == POS_CONTO:
+        payload = {**payload, "type": "entrata"}
+    return payload
+
+
 def list_entries(
     db: Session,
     date_from: Optional[datetime] = None,
@@ -187,7 +218,7 @@ def list_entries_with_balance(
 
 
 def create_entry(db: Session, data: CashEntryCreate) -> CashEntry:
-    payload = data.model_dump()
+    payload = _normalize_cash_entry_payload(data.model_dump())
     e = CashEntry(
         entry_date=payload["entry_date"],
         type=payload["type"],
@@ -220,7 +251,7 @@ def update_entry(db: Session, entry_id: int, data: CashEntryCreate) -> Optional[
     if not entry:
         return None
 
-    payload = data.model_dump()
+    payload = _normalize_cash_entry_payload(data.model_dump())
     entry.entry_date = payload["entry_date"]
     entry.type = payload["type"]
     entry.amount = payload["amount"]
@@ -293,7 +324,7 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
 
     totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
-    totale_pos = _net_amount_for_day(db, start, end, activity, conto=POS_CONTO)
+    totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
     totale_vendita = (
         totale_fiscale + totale_non_fiscale + totale_pos + totale_refill
