@@ -37,78 +37,19 @@ def _rollback_db(db: Session) -> None:
 
 
 def ensure_prima_nota_locale_packs_table(*, force: bool = False) -> bool:
-    """Crea la tabella con SQL grezzo (affidabile anche senza restart API)."""
+    """Verifica che la tabella esista (creazione solo via script deploy come superuser PG)."""
     global _table_ready
-    if _table_ready and not force:
-        if _verify_table_ready():
-            return True
-        _table_ready = False
-
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS prima_nota_locale_packs (
-                      id SERIAL PRIMARY KEY,
-                      activity_slug VARCHAR(32) NOT NULL,
-                      label VARCHAR(255),
-                      access_code VARCHAR(6),
-                      updated_at TIMESTAMPTZ DEFAULT NOW(),
-                      CONSTRAINT uq_prima_nota_locale_packs_slug UNIQUE (activity_slug)
-                    )
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    ALTER TABLE prima_nota_locale_packs
-                    ADD COLUMN IF NOT EXISTS label VARCHAR(255)
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    ALTER TABLE prima_nota_locale_packs
-                    ADD COLUMN IF NOT EXISTS access_code VARCHAR(6)
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    ALTER TABLE prima_nota_locale_packs
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
-                    """
-                )
-            )
-        for index_sql in (
-            """
-            CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_slug
-            ON prima_nota_locale_packs (activity_slug)
-            """,
-            """
-            CREATE INDEX IF NOT EXISTS ix_prima_nota_locale_packs_access_code
-            ON prima_nota_locale_packs (access_code)
-            """,
-        ):
-            try:
-                with engine.begin() as conn:
-                    conn.execute(text(index_sql))
-            except SQLAlchemyError as exc:
-                logger.warning("Indice prima_nota_locale_packs: %s", exc)
-
-        if _verify_table_ready():
-            _table_ready = True
-            return True
-        logger.warning("Tabella prima_nota_locale_packs non verificabile dopo CREATE")
-        return False
-    except SQLAlchemyError as exc:
-        _table_ready = False
-        logger.error("Impossibile creare prima_nota_locale_packs: %s", exc)
-        return False
+    if _table_ready and not force and _verify_table_ready():
+        return True
+    if _verify_table_ready():
+        _table_ready = True
+        return True
+    _table_ready = False
+    logger.warning(
+        "prima_nota_locale_packs assente o non accessibile. "
+        "Esegui sul server: sudo DB_NAME=fornitori_db bash deploy/ensure-prima-nota-locale-table.sh"
+    )
+    return False
 
 
 def _verify_table_ready() -> bool:
@@ -116,12 +57,13 @@ def _verify_table_ready() -> bool:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1 FROM prima_nota_locale_packs LIMIT 1"))
         return True
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        logger.warning("prima_nota_locale_packs non accessibile: %s", exc)
         return False
 
 
 def _ensure_table(db: Session) -> bool:
-    """Crea la tabella al volo se manca (deploy senza restart API o create_all saltato)."""
+    """Verifica che la tabella codici locale sia disponibile per l'utente DB dell'API."""
     return ensure_prima_nota_locale_packs_table()
 
 

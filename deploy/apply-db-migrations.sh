@@ -57,3 +57,8 @@ for name in "${SAFE_MIGRATIONS[@]}"; do
 done
 
 log "Migrazioni completate."
+
+if [[ -f "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh" ]]; then
+  log "Permessi e tabella codici Prima Nota (owner app user)"
+  DB_NAME="$DB_NAME" bash "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh"
+fi
