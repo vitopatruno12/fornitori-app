@@ -625,7 +625,8 @@ function enumerateDayCells(start, end) {
   return cells
 }
 
-const MAX_PLANNING_PERIOD_DAYS = 93
+/** Intervallo massimo vista Periodo (Dal–Al): ~6 mesi; es. 1 apr → 31 lug = 122 giorni. */
+const MAX_PLANNING_PERIOD_DAYS = 186
 /** Limite turni creati in un solo comando vocale Gemini (es. 10 dipendenti × 7 giorni). */
 const MAX_GEMINI_SHIFTS_BATCH = 80
 /** Limite prudente per `https://wa.me/?text=…` (query troppo lunghe = link rotto o bloccato dal browser). */
@@ -1311,13 +1312,19 @@ export default function StaffPage({ operatorMode = false }) {
     return Array.from({ length: 7 }, (_, i) => addDays(weekAnchor, i))
   }, [weekAnchor])
 
+  const periodDayCount = useMemo(() => {
+    if (planView !== 'period') return 0
+    return daysInclusiveCount(periodFrom, periodTo)
+  }, [planView, periodFrom, periodTo])
+
+  const periodTooLong = planView === 'period' && periodDayCount > MAX_PLANNING_PERIOD_DAYS
+
   const displayDayCells = useMemo(() => {
     if (planView === 'week') return dayCells
     if (planView === 'day') return [dayFocus]
-    const n = daysInclusiveCount(periodFrom, periodTo)
-    if (n > MAX_PLANNING_PERIOD_DAYS) return []
+    if (periodDayCount > MAX_PLANNING_PERIOD_DAYS) return []
     return enumerateDayCells(periodFrom, periodTo)
-  }, [planView, dayCells, dayFocus, periodFrom, periodTo])
+  }, [planView, dayCells, dayFocus, periodFrom, periodTo, periodDayCount])
 
   /** Intervallo date per il report PDF in base alla vista: settimana lun–dom, singolo giorno, o Dal–Al. */
   const reportPdfRange = useMemo(() => {
@@ -4315,9 +4322,13 @@ export default function StaffPage({ operatorMode = false }) {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={loading || demoLoading}
+              disabled={loading || demoLoading || periodTooLong}
               onClick={() => reloadPlanning()}
-              title="Scarica turni dal server per il periodo selezionato"
+              title={
+                periodTooLong
+                  ? `Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`
+                  : 'Scarica turni dal server per il periodo selezionato'
+              }
             >
               {loading ? 'Caricamento…' : 'Carica piano'}
             </button>
@@ -4342,7 +4353,7 @@ export default function StaffPage({ operatorMode = false }) {
                     ? 'Report PDF della settimana (lun–dom): ore turno, permessi, assenze e malattia per dipendente.'
                     : planView === 'day'
                       ? 'Report PDF del giorno selezionato: stesso riepilogo per quel solo giorno.'
-                      : 'Report PDF dell’intervallo Dal–Al (fino a 93 giorni): stesso riepilogo sul periodo.'
+                      : `Report PDF dell’intervallo Dal–Al (fino a ${MAX_PLANNING_PERIOD_DAYS} giorni): stesso riepilogo sul periodo.`
               }
             >
               {reportLoading ? 'Report…' : 'Report PDF'}
@@ -4392,15 +4403,23 @@ export default function StaffPage({ operatorMode = false }) {
             <>
               Intervallo caricato: <strong>{rangeFromStr}</strong> → <strong>{rangeToStr}</strong>
               <span style={{ marginLeft: '0.5rem', opacity: 0.85 }}>
-                ({displayDayCells.length} {displayDayCells.length === 1 ? 'giorno' : 'giorni'} in griglia)
+                ({periodTooLong ? `${periodDayCount} giorni — troppo lungo` : `${displayDayCells.length} ${displayDayCells.length === 1 ? 'giorno' : 'giorni'} in griglia`})
               </span>
             </>
           )}
         </p>
 
+        {periodTooLong ? (
+          <div className="alert alert-warning" style={{ marginBottom: '0.75rem' }}>
+            Intervallo <strong>{periodLoStr}</strong> → <strong>{periodHiStr}</strong> = {periodDayCount} giorni: supera il
+            massimo di <strong>{MAX_PLANNING_PERIOD_DAYS}</strong> giorni. Restringi «Dal» / «Al», poi clicca{' '}
+            <strong>Carica piano</strong>.
+          </div>
+        ) : null}
+
         {loading && <p className="loading">Caricamento…</p>}
 
-        {!loading && (
+        {!loading && !periodTooLong && (
           <div
             className={
               planView === 'day'
