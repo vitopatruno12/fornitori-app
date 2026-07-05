@@ -1,7 +1,7 @@
 import json
 import re
 import secrets
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
 from sqlalchemy import func
@@ -541,6 +541,7 @@ def upsert_locale_pack(
     if target:
         target.members_json = members_json
         target.access_code = access_code
+        _touch_updated_at(target)
         row = target
     else:
         row = StaffLocalePack(
@@ -569,6 +570,10 @@ def delete_locale_pack(
     db.delete(row)
     db.commit()
     return True
+
+
+def _touch_updated_at(row) -> None:
+    row.updated_at = datetime.now(timezone.utc)
 
 
 def _normalize_backup_section(section: str) -> str:
@@ -646,6 +651,7 @@ def upsert_backup(db: Session, payload: staff_schema.StaffBackupUpsert) -> staff
     payload_json = json.dumps(body, ensure_ascii=False)
     if row:
         row.payload_json = payload_json
+        _touch_updated_at(row)
     else:
         row = StaffBackup(section=sec, backup_key=key, payload_json=payload_json)
         db.add(row)

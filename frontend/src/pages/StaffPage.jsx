@@ -42,6 +42,7 @@ import {
   savePlanningWeekBackup,
   saveStaffBackup,
   planningBackupServerKey,
+  pickNewestSavedAt,
 } from '../utils/staffLocalBackup.js'
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
@@ -930,27 +931,44 @@ export default function StaffPage({ operatorMode = false }) {
       const loc = normalizeLocaleName(membersLocale)
       let membersAt = null
       if (loc) {
-        membersAt = localePackSavedAtByName[loc] || getMembersLocaleBackupSavedAt(loc)
+        membersAt = pickNewestSavedAt(
+          localePackSavedAtByName[loc],
+          getMembersLocaleBackupSavedAt(loc),
+        )
+        try {
+          const summaries = await fetchStaffLocalePacks()
+          const hit = summaries.find((row) => normalizeLocaleName(row?.locale_name) === loc)
+          membersAt = pickNewestSavedAt(membersAt, hit?.saved_at)
+        } catch {
+          // server assente
+        }
       }
       const planKey = planningBackupServerKey(currentPlanningMonthYm(), planningSlot)
-      let planningAt = null
+      const localPlanningAt = getPlanningWeekBackupSavedAt(currentPlanningMonthYm(), planningSlot)
+      let serverPlanningAt = null
       if (planKey) {
         try {
           const plan = await fetchStaffBackupDetail('planning', planKey)
-          planningAt = plan?.saved_at || null
+          serverPlanningAt = plan?.saved_at || null
         } catch {
-          planningAt = getPlanningWeekBackupSavedAt(currentPlanningMonthYm(), planningSlot)
+          serverPlanningAt = null
         }
       }
-      let payrollAt = null
+      const planningAt = pickNewestSavedAt(localPlanningAt, serverPlanningAt)
+      let serverPayrollAt = null
       if (payrollYm) {
         try {
           const pay = await fetchStaffBackupDetail('payroll', payrollYm)
-          payrollAt = pay?.saved_at || null
+          serverPayrollAt = pay?.saved_at || null
         } catch {
-          payrollAt = getLatestStaffBackup('payroll')?.savedAt ?? null
+          serverPayrollAt = null
         }
       }
+      const localPayrollAt =
+        payrollYm && getLatestStaffBackup('payroll')?.payload?.payrollMonthYm === payrollYm
+          ? getLatestStaffBackup('payroll')?.savedAt ?? null
+          : null
+      const payrollAt = pickNewestSavedAt(localPayrollAt, serverPayrollAt)
       setBackupMeta({
         members: membersAt,
         planning: planningAt,
@@ -1159,32 +1177,52 @@ export default function StaffPage({ operatorMode = false }) {
     setPayrollShiftsRefreshing(true)
     setError('')
     try {
-      const data = await fetchStaffShifts(payrollFromStr, payrollToStr)
-      const shifts = Array.isArray(data) ? data : []
-      setPayrollShifts(shifts)
+      const monthData = await fetchStaffShifts(payrollFromStr, payrollToStr)
+      let merged = Array.isArray(monthData) ? monthData : []
+      if (planningLoaded && shifts.length > 0) {
+        const from = rangeFromStr
+        const to = rangeToStr
+        const inRange = (wd) => wd >= from && wd <= to
+        merged = merged.filter((s) => !inRange(shiftWorkDateKey(s.work_date)))
+        const planningSlice = shifts.filter((s) => inRange(shiftWorkDateKey(s.work_date)))
+        merged = [...merged, ...planningSlice]
+      }
+      const normalized = normalizeShiftRows(merged, members)
+      setPayrollShifts(normalized)
       const oreMap = new Map()
-      for (const row of aggregateWeeklyStaffStats(members, shifts, payrollFromStr, payrollToStr)) {
+      for (const row of aggregateWeeklyStaffStats(members, normalized, payrollFromStr, payrollToStr)) {
         oreMap.set(row.memberId, row.oreTurno)
       }
       setHoursOverride({})
       setPayrollImporto((prev) => {
-        if (!Object.keys(prev).length) return prev
         const next = { ...prev }
         for (const m of members) {
-          if (prev[m.id] === undefined) continue
           const ore = oreMap.get(m.id) ?? 0
           const rate = parseDecimalInput(rateDraft[m.id] ?? m.hourly_rate)
           next[m.id] = ore * rate
         }
         return next
       })
-      setSuccess('Ore lavorate aggiornate dai turni del mese.')
+      const rangeNote =
+        planningLoaded && rangeFromStr && rangeToStr
+          ? ` (include settimana/periodo caricato ${rangeFromStr} → ${rangeToStr})`
+          : ''
+      setSuccess(`Ore lavorate aggiornate dai turni del mese${rangeNote}.`)
     } catch {
       setError('Aggiornamento ore dai turni non riuscito')
     } finally {
       setPayrollShiftsRefreshing(false)
     }
-  }, [members, payrollFromStr, payrollToStr, rateDraft])
+  }, [
+    members,
+    payrollFromStr,
+    payrollToStr,
+    planningLoaded,
+    shifts,
+    rangeFromStr,
+    rangeToStr,
+    rateDraft,
+  ])
 
   const buildPayrollLinesForSave = useCallback(() => {
     const lines = []
@@ -3360,7 +3398,10 @@ export default function StaffPage({ operatorMode = false }) {
           notes: s.notes || null,
         })),
       }
-      savePlanningWeekBackup(monthYm, planningBackupSlot, payload)
+      const localEntry = savePlanningWeekBackup(monthYm, planningBackupSlot, payload)
+      if (localEntry?.savedAt) {
+        setBackupMeta((prev) => ({ ...prev, planning: localEntry.savedAt }))
+      }
       const planKey = planningBackupServerKey(monthYm, planningBackupSlot)
       try {
         await upsertStaffBackup('planning', planKey, payload)
@@ -3508,7 +3549,10 @@ export default function StaffPage({ operatorMode = false }) {
         lines,
         archiveMonths: Array.isArray(archiveMonths) ? archiveMonths : [],
       }
-      saveStaffBackup('payroll', payload)
+      const localPayrollEntry = saveStaffBackup('payroll', payload)
+      if (localPayrollEntry?.savedAt) {
+        setBackupMeta((prev) => ({ ...prev, payroll: localPayrollEntry.savedAt }))
+      }
       try {
         await upsertStaffBackup('payroll', payrollMonthYm, payload)
         await refreshPayrollBackupOptions()
@@ -3972,7 +4016,7 @@ export default function StaffPage({ operatorMode = false }) {
             className="btn btn-vino btn-sm"
             onClick={() => void refreshPayrollHoursFromShifts()}
             disabled={members.length === 0 || payrollShiftsRefreshing || shiftBusy}
-            title="Ricarica i turni del mese da pianificazione e aggiorna le ore in tabella"
+            title="Ricarica i turni del mese e include la settimana/periodo caricato in pianificazione"
           >
             {payrollShiftsRefreshing ? 'Aggiornamento…' : 'Aggiorna ore'}
           </button>

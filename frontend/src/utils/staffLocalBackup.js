@@ -56,6 +56,20 @@ export function saveStaffBackup(kind, payload) {
   return entry
 }
 
+export function pickNewestSavedAt(...candidates) {
+  let best = null
+  let bestTs = -1
+  for (const c of candidates) {
+    if (!c) continue
+    const ts = Date.parse(c)
+    if (!Number.isNaN(ts) && ts > bestTs) {
+      bestTs = ts
+      best = c
+    }
+  }
+  return best
+}
+
 export function formatStaffBackupLabel(savedAt) {
   if (!savedAt) return null
   const d = new Date(savedAt)
