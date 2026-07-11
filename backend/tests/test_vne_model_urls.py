@@ -34,6 +34,27 @@ def test_supervlt_urls_from_virtuo_mucche_volanti():
     assert urls["referer_url"] == "http://vneremote.com/27/234/supervlt/?param=NO"
 
 
+def test_supervlt_urls_from_virtuo_risacca():
+    urls = _supervlt_urls_from_virtuo_machine("http://www.vneremote.com/vne/VIRTUO20221721/")
+    assert urls["status_url"] == "http://vneremote.com/33/220/supervlt/stato"
+    assert urls["referer_url"] == "http://vneremote.com/33/220/supervlt/?param=NO"
+    assert "27/234" not in urls["status_url"]
+
+
+def test_complete_model_config_risacca_rejects_mucche_path():
+    model = VneModelConfig(
+        id="model-1",
+        label="La Risacca",
+        machine_url="http://www.vneremote.com/vne/VIRTUO20221721/",
+        status_url="http://vneremote.com/27/234/supervlt/stato",
+        model_code="VIRTUO20221721",
+    )
+    out = _complete_model_config(model)
+    assert "33/220" in (out.status_url or "")
+    assert "27/234" not in (out.status_url or "")
+    assert "27/234" not in (out.referer_url or "")
+
+
 def test_complete_model_config_from_virtuo_machine_url():
     model = VneModelConfig(
         id="model-2",
@@ -68,6 +89,8 @@ def test_models_defaults_use_virtuo_machine_urls():
     assert models["model-1"].machine_url.endswith("/vne/VIRTUO20221721/")
     assert models["model-2"].machine_url.endswith("/vne/VIRTUO20221720/")
     assert models["model-3"].machine_url.endswith("/vne/VIRTUO20221707/")
+    assert models["model-1"].status_url == "http://vneremote.com/33/220/supervlt/stato"
+    assert "27/234" not in (models["model-1"].status_url or "")
     assert models["model-2"].status_url == "http://vneremote.com/22/25/supervlt/stato"
     assert models["model-3"].status_url == "http://vneremote.com/27/234/supervlt/stato"
 

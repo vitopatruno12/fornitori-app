@@ -471,6 +471,41 @@ def _supervlt_urls_from_status(status_url: Optional[str]) -> Dict[str, str]:
     }
 
 
+def _virtuo_id_for_model(model: VneModelConfig) -> Optional[str]:
+    return (_virtuo_id_from_url(model.machine_url) or model.model_code or "").upper() or None
+
+
+def _enforce_virtuo_supervlt_mapping(model: VneModelConfig) -> VneModelConfig:
+    """Corregge URL supervlt errati per macchine VIRTUO note (es. 27/234 su La Risacca)."""
+    virtuo_id = _virtuo_id_for_model(model)
+    pair = _VIRTUO_SUPERvLT_FALLBACK.get(virtuo_id or "")
+    if not pair:
+        return model
+    status = (model.status_url or "").lower()
+    if status and f"/{pair}/supervlt/" in status:
+        return model
+    machine = model.machine_url or f"http://www.vneremote.com/vne/{virtuo_id}/"
+    derived = _supervlt_urls_from_virtuo_machine(machine)
+    if not derived:
+        return model
+    return VneModelConfig(
+        id=model.id,
+        label=model.label,
+        machine_url=model.machine_url or machine,
+        status_url=derived.get("status_url"),
+        sel_operazioni_url=derived.get("sel_operazioni_url"),
+        operazioni_url=derived.get("operazioni_url"),
+        sel_chiusure_url=derived.get("sel_chiusure_url"),
+        chiusure_url=derived.get("chiusure_url"),
+        contabilita_url=derived.get("contabilita_url"),
+        referer_url=derived.get("referer_url"),
+        model_code=model.model_code or virtuo_id,
+        sala=model.sala,
+        city=model.city,
+        region=model.region,
+    )
+
+
 def _complete_model_config(model: VneModelConfig) -> VneModelConfig:
     derived: Dict[str, str] = {}
     if model.status_url and "/supervlt/" in model.status_url.lower():
@@ -478,8 +513,9 @@ def _complete_model_config(model: VneModelConfig) -> VneModelConfig:
     elif model.machine_url:
         derived = _supervlt_urls_from_virtuo_machine(model.machine_url)
     if not derived:
-        return model
-    return VneModelConfig(
+        return _enforce_virtuo_supervlt_mapping(model)
+    return _enforce_virtuo_supervlt_mapping(
+        VneModelConfig(
         id=model.id,
         label=model.label,
         machine_url=model.machine_url,
@@ -494,19 +530,20 @@ def _complete_model_config(model: VneModelConfig) -> VneModelConfig:
         sala=model.sala,
         city=model.city,
         region=model.region,
+        )
     )
 
 
 def _models() -> List[VneModelConfig]:
     """Tre slot modelli VNE (1 configurato, 2-3 pronti)."""
     m1_machine = _env_url("VNE_MODEL_1_MACHINE_URL", "http://www.vneremote.com/vne/VIRTUO20221721/")
-    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "")
+    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "http://vneremote.com/33/220/supervlt/stato")
     m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "")
     m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "")
     m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "")
     m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "")
     m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "")
-    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "")
+    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/33/220/supervlt/?param=NO")
     m2_machine = _env_url("VNE_MODEL_2_MACHINE_URL", "http://www.vneremote.com/vne/VIRTUO20221720/")
     m2 = _env_url("VNE_MODEL_2_STATUS_URL", "")
     m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "")
@@ -1051,9 +1088,11 @@ def _resolve_model_config(
     origin: str,
     deadline: Optional[float] = None,
 ) -> VneModelConfig:
-    """Dopo login, apre la pagina VIRTUO e scopre il path supervlt attivo."""
+    """Dopo login, apre la pagina VIRTUO e scopre il path supervlt attivo (solo se non mappato)."""
     base = _complete_model_config(model)
-    if model.status_url and "/supervlt/" in model.status_url.lower():
+    if _virtuo_id_for_model(base) in _VIRTUO_SUPERvLT_FALLBACK:
+        return base
+    if base.status_url and "/supervlt/" in base.status_url.lower():
         return base
     machine_url = model.machine_url or (
         model.status_url if _is_virtuo_machine_url(model.status_url) else None
