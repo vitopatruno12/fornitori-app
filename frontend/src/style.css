@@ -2296,13 +2296,8 @@ select.form-control {
 
 /* --- restored: tmp-grid-widths.css --- */
 .workbook-grid.vne-contabilita-grid,
-.workbook-grid.vne-status-grid {
-  min-width: 0;
-  width: 100%;
-  table-layout: fixed;
-}
-
-.vne-machines-grid {
+.workbook-grid.vne-status-grid,
+.workbook-grid.vne-machines-grid {
   min-width: 0;
   width: 100%;
   table-layout: fixed;
@@ -3047,7 +3042,7 @@ select.form-control {
   padding-bottom: 0.25rem;
 }
 
-.vne-legacy-skin .vne-chiusure-style:not(.vne-closings-style):not(.vne-operations-style):not(.vne-status-style):not(.vne-contabilita-style) {
+.vne-legacy-skin .vne-chiusure-style:not(.vne-closings-style):not(.vne-operations-style):not(.vne-machines-style):not(.vne-status-style):not(.vne-contabilita-style) {
   border: 0;
   padding-top: 0.2rem;
   max-width: 840px;
@@ -3110,6 +3105,8 @@ select.form-control {
 
 .vne-legacy-skin .vne-status-style .pagamenti-grid-wrap,
 .vne-legacy-skin .vne-status-style .workbook-grid-wrap,
+.vne-legacy-skin .vne-machines-style .pagamenti-grid-wrap,
+.vne-legacy-skin .vne-machines-style .workbook-grid-wrap,
 .vne-legacy-skin .vne-contabilita-style .pagamenti-grid-wrap,
 .vne-legacy-skin .vne-contabilita-style .workbook-grid-wrap,
 .vne-legacy-skin .vne-operations-style .pagamenti-grid-wrap,
@@ -3121,6 +3118,7 @@ select.form-control {
 }
 
 .vne-legacy-skin .vne-status-style .workbook-grid .excel-cell,
+.vne-legacy-skin .vne-machines-style .workbook-grid .excel-cell,
 .vne-legacy-skin .vne-contabilita-style .workbook-grid .excel-cell,
 .vne-legacy-skin .vne-operations-style .workbook-grid .excel-cell,
 .vne-legacy-skin .vne-closings-style .workbook-grid .excel-cell {
@@ -3315,7 +3313,7 @@ select.form-control {
   background: #ffffff;
 }
 
-.vne-legacy-skin .vne-chiusure-style:not(.vne-closings-style):not(.vne-operations-style):not(.vne-status-style):not(.vne-contabilita-style) .form-row {
+.vne-legacy-skin .vne-chiusure-style:not(.vne-closings-style):not(.vne-operations-style):not(.vne-machines-style):not(.vne-status-style):not(.vne-contabilita-style) .form-row {
   max-width: 800px;
   margin: 0 auto;
 }
@@ -3444,9 +3442,21 @@ select.form-control {
   background: #fff;
 }
 
-.vne-legacy-skin .vne-legacy-shell {
+.vne-legacy-skin .vne-chiusure-style:not(.vne-closings-style):not(.vne-operations-style):not(.vne-machines-style):not(.vne-status-style):not(.vne-contabilita-style) .vne-legacy-shell {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.vne-legacy-skin .vne-operations-style .vne-legacy-shell,
+.vne-legacy-skin .vne-closings-style .vne-legacy-shell,
+.vne-legacy-skin .vne-machines-style .vne-legacy-shell,
+.vne-legacy-skin .vne-machines-style .vne-machines-overview,
+.vne-legacy-skin .vne-status-style .vne-legacy-shell,
+.vne-legacy-skin .vne-contabilita-style .vne-legacy-shell,
+.vne-legacy-skin .vne-contabilita-style .vne-contabilita-shell {
+  max-width: none;
+  width: 100%;
+  margin: 0;
 }
 
 .vne-legacy-skin .vne-legacy-menu-row {
@@ -3561,10 +3571,11 @@ select.form-control {
   margin-top: 0;
 }
 
-.vne-legacy-skin .vne-machines-overview .pagamenti-grid-wrap,
-.vne-legacy-skin .vne-machines-overview .workbook-grid-wrap {
-  overflow-x: hidden;
-  overflow-y: auto;
+.vne-legacy-skin .vne-machines-style .workbook-grid th:not(.text-end),
+.vne-legacy-skin .vne-machines-style .workbook-grid .excel-cell:not(.excel-cell-num),
+.vne-legacy-skin .vne-status-style .workbook-grid th:not(.text-end),
+.vne-legacy-skin .vne-status-style .workbook-grid .excel-cell:not(.excel-cell-num) {
+  text-align: left;
 }
 
 .vne-legacy-skin .vne-machines-grid .excel-cell {
