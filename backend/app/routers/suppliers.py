@@ -1,11 +1,12 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..schemas import supplier as supplier_schema
 from ..services import supplier_service
+from ..services.supplier_invoice_parse_service import parse_supplier_invoice_upload
 
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
@@ -15,6 +16,11 @@ router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 @router.get("/", response_model=List[supplier_schema.SupplierWithStats], include_in_schema=False)
 def list_suppliers(db: Session = Depends(get_db)):
   return supplier_service.list_suppliers_with_stats(db)
+
+
+@router.post("/parse-invoice", response_model=supplier_schema.SupplierInvoiceParseOut)
+async def parse_supplier_invoice(file: UploadFile = File(...)):
+  return await parse_supplier_invoice_upload(file)
 
 
 @router.get("/{supplier_id}", response_model=supplier_schema.SupplierRead)

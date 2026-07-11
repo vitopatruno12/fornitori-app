@@ -2,6 +2,7 @@ import React from 'react'
 import OperatorSatelliteShell from './components/OperatorSatelliteShell.tsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
+import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import {
   getOperatorDeliveryView,
   syncOperatorDeliveryViewInUrl,
@@ -16,7 +17,8 @@ export default function OperatorDeliveryApp() {
     syncOperatorDeliveryViewInUrl(next)
   }, [])
 
-  const headerTitle = view === 'history' ? 'Storico consegne' : 'Nuova consegna'
+  const headerTitle =
+    view === 'history' ? 'Storico consegne' : view === 'magazzino' ? 'Magazzino' : 'Nuova consegna'
 
   return (
     <OperatorSatelliteShell
@@ -29,6 +31,14 @@ export default function OperatorDeliveryApp() {
           label: 'Nuova consegna',
           active: view === 'new-delivery',
           onClick: () => setDeliveryView('new-delivery'),
+          items: [
+            {
+              id: 'magazzino',
+              label: 'Magazzino',
+              active: view === 'magazzino',
+              onClick: () => setDeliveryView('magazzino'),
+            },
+          ],
         },
         {
           id: 'history',
@@ -38,7 +48,13 @@ export default function OperatorDeliveryApp() {
         },
       ]}
     >
-      {view === 'new-delivery' ? <NewDeliveryPage operatorMode /> : <DeliveriesHistoryPage operatorMode />}
+      {view === 'magazzino' ? (
+        <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+      ) : view === 'new-delivery' ? (
+        <NewDeliveryPage operatorMode />
+      ) : (
+        <DeliveriesHistoryPage operatorMode />
+      )}
     </OperatorSatelliteShell>
   )
 }

@@ -2,9 +2,22 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { createDeliveryBatch, fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList, addPriceListBatch, deletePriceListItem } from '../services/priceListService'
+import {
+  PRICE_LIST_WORKBOOK_COLUMNS,
+  PRICE_LIST_WORKBOOK_TITLE,
+  priceListWorkbookCellValue,
+  priceListWorkbookTotals,
+  priceListWorkbookTotalsLabel,
+} from '../utils/priceListWorkbook.js'
+import {
+  DELIVERY_ITEMS_WORKBOOK_COLUMNS,
+  DELIVERY_ITEMS_WORKBOOK_TITLE,
+  deliveryItemDiffTone,
+  deliveryItemReadonlyCellValue,
+  deliveryItemsWorkbookTotals,
+  deliveryItemsWorkbookTotalsLabel,
+} from '../utils/deliveryItemsWorkbook.js'
 import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
-import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
-import { getOperatorDeliveryPublicUrl } from '../utils/operatorMode.ts'
 
 const emptyItem = () => ({
   product_description: '',
@@ -15,15 +28,6 @@ const emptyItem = () => ({
   anomaly_note: '',
 })
 const emptyPriceRow = () => ({ product_description: '', unit_price: '' })
-
-function lineImponibile(item) {
-  const w = Number(item.weight_kg) || 0
-  const p = Number(item.pieces) || 0
-  const up = Number(item.unit_price) || 0
-  if (w > 0) return (w * up).toFixed(2)
-  if (p > 0) return (p * up).toFixed(2)
-  return '—'
-}
 
 function listPriceForDescription(priceList, description) {
   const d = (description || '').trim()
@@ -116,6 +120,10 @@ export default function NewDeliveryPage({ operatorMode = false }) {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
     return s ? s.name : ''
   }, [suppliers, supplierId])
+
+  const priceListTotals = useMemo(() => priceListWorkbookTotals(priceList), [priceList])
+
+  const deliveryItemsTotals = useMemo(() => deliveryItemsWorkbookTotals(items), [items])
 
   useEffect(() => {
     loadSuppliers()
@@ -457,30 +465,26 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   return (
     <div>
       <section className="staff-page-hero">
-      <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
-      <p className="staff-page-lead">
-        {operatorMode ? (
-          <>
-            Registra scarichi merce con DDT e righe prodotto. I dati vengono salvati nel gestionale ATLAS come nel modulo
-            completo.
-          </>
-        ) : (
-          <>
-            Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
-            fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
-            spedizione</strong>, che viene registrata nelle note della consegna.
-          </>
-        )}
-      </p>
+        <div className="delivery-hero-row">
+          <div className="delivery-hero-copy">
+            <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
+            <p className="staff-page-lead">
+              {operatorMode ? (
+                <>
+                  Registra scarichi merce con DDT e righe prodotto. I dati vengono salvati nel gestionale ATLAS come nel modulo
+                  completo.
+                </>
+              ) : (
+                <>
+                  Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
+                  fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
+                  spedizione</strong>, che viene registrata nelle note della consegna.
+                </>
+              )}
+            </p>
+          </div>
+        </div>
       </section>
-
-      {!operatorMode && (
-        <OperatorLinkCard
-          title="Link operatore (consegne)"
-          description="Un solo indirizzo per l’operatore: dentro trova Nuova consegna e Storico consegne (schede in alto). Stesso login e stesso database del gestionale, senza il resto del menu."
-          links={[{ label: 'Link consegne', url: getOperatorDeliveryPublicUrl() }]}
-        />
-      )}
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -555,7 +559,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
             }}
           >
             <h3 className="page-subheader" style={{ margin: 0, alignSelf: 'center' }}>
-              Prodotti consegnati
+              {DELIVERY_ITEMS_WORKBOOK_TITLE}
             </h3>
             <div
               style={{
@@ -612,113 +616,140 @@ export default function NewDeliveryPage({ operatorMode = false }) {
               </button>
             </div>
           </div>
-          <div className="table-wrap" style={{ marginBottom: '1rem' }}>
-            <table className="app-table">
-              <thead>
-                <tr>
-                  <th>Prodotto</th>
-                  <th style={{ minWidth: 90 }}>Peso (kg)</th>
-                  <th style={{ minWidth: 80 }}>Pezzi</th>
-                  <th style={{ minWidth: 110 }}>Prezzo unit. €</th>
-                  <th style={{ minWidth: 100 }}>Tot. riga (imp.)</th>
-                  <th style={{ minWidth: 100 }}>Listino €</th>
-                  <th style={{ minWidth: 100 }}>Diff. listino</th>
-                  <th style={{ minWidth: 160 }}>Note</th>
-                  <th style={{ minWidth: 160 }}>Destinazione</th>
-                  <th style={{ minWidth: 160 }}>Note anomalie</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, index) => {
-                  const listP = listPriceForDescription(priceList, item.product_description)
-                  const diff = diffVsList(priceList, item.product_description, item.unit_price)
-                  return (
-                    <tr key={index}>
-                      <td>
-                        <input
-                          className="form-control"
-                          value={item.product_description}
-                          onChange={(e) => updateItem(index, 'product_description', e.target.value)}
-                          placeholder="es. carciofi, arance"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          step="0.001"
-                          className="form-control"
-                          value={item.weight_kg}
-                          onChange={(e) => updateItem(index, 'weight_kg', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          className="form-control"
-                          value={item.pieces}
-                          onChange={(e) => updateItem(index, 'pieces', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="form-control"
-                          value={item.unit_price}
-                          onChange={(e) => updateItem(index, 'unit_price', e.target.value)}
-                        />
-                      </td>
-                      <td className="text-end amount">{lineImponibile(item)}</td>
-                      <td className="text-end amount">{listP != null ? listP.toFixed(2) : '—'}</td>
-                      <td
-                        className="text-end amount"
-                        style={{
-                          color:
-                            diff != null && Number(diff) > 0
-                              ? 'var(--danger, #c0392b)'
-                              : diff != null && Number(diff) < 0
-                                ? 'var(--success, #1e8449)'
-                                : undefined,
-                        }}
+          <div className="pagamenti-workbook-card workbook-card-nested" style={{ marginBottom: '1rem' }}>
+            <div className="pagamenti-workbook-toolbar">
+              <div className="pagamenti-workbook-toolbar-left">
+                <span className="pagamenti-workbook-title">{DELIVERY_ITEMS_WORKBOOK_TITLE}</span>
+                <span className="pagamenti-workbook-sheet-label">{items.length} righe</span>
+              </div>
+            </div>
+            <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
+              <table className="app-table excel-table pagamenti-grid workbook-grid delivery-items-grid">
+                <colgroup>
+                  {DELIVERY_ITEMS_WORKBOOK_COLUMNS.map((col) => (
+                    <col key={col.id} style={{ minWidth: col.width }} />
+                  ))}
+                  <col style={{ minWidth: 100 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {DELIVERY_ITEMS_WORKBOOK_COLUMNS.map((col) => (
+                      <th
+                        key={col.id}
+                        className={[
+                          col.numeric ? 'text-end' : '',
+                          col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                        ].filter(Boolean).join(' ')}
                       >
-                        {diff != null ? `${Number(diff) > 0 ? '+' : ''}${diff}` : '—'}
-                      </td>
-                      <td>
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="sup-actions-col">Azioni</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, index) => {
+                    const listP = listPriceForDescription(priceList, item.product_description)
+                    const diff = diffVsList(priceList, item.product_description, item.unit_price)
+                    const destination = deliveryLocation.trim()
+                    return (
+                      <tr key={index} className="workbook-grid-row">
+                        {DELIVERY_ITEMS_WORKBOOK_COLUMNS.map((col) => {
+                          if (col.readonly) {
+                            const diffTone = col.id === 'price_diff' ? deliveryItemDiffTone(diff) : ''
+                            return (
+                              <td
+                                key={col.id}
+                                className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                              >
+                                <input
+                                  className={[
+                                    'excel-cell',
+                                    'pagamenti-cell-readonly',
+                                    col.numeric ? 'excel-cell-num' : '',
+                                    col.emphasis ? 'workbook-cell-emphasis' : '',
+                                    diffTone,
+                                  ].filter(Boolean).join(' ')}
+                                  value={deliveryItemReadonlyCellValue(item, col, {
+                                    rowIndex: index,
+                                    listPrice: listP,
+                                    diff,
+                                    destination,
+                                  })}
+                                  readOnly
+                                  tabIndex={-1}
+                                  aria-label={`${col.label} riga ${index + 1}`}
+                                />
+                              </td>
+                            )
+                          }
+                          const fieldValue = item[col.id] ?? ''
+                          return (
+                            <td
+                              key={col.id}
+                              className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                            >
+                              <input
+                                className={[
+                                  'excel-cell',
+                                  col.numeric ? 'excel-cell-num' : '',
+                                  col.emphasis ? 'workbook-cell-emphasis' : '',
+                                ].filter(Boolean).join(' ')}
+                                type={col.numeric && col.id !== 'product_description' ? 'number' : 'text'}
+                                step={col.id === 'weight_kg' ? '0.001' : col.id === 'unit_price' ? '0.01' : undefined}
+                                value={fieldValue}
+                                onChange={(e) => updateItem(index, col.id, e.target.value)}
+                                placeholder={
+                                  col.id === 'product_description'
+                                    ? 'es. carciofi, arance'
+                                    : col.id === 'note' || col.id === 'anomaly_note'
+                                      ? 'opzionale'
+                                      : undefined
+                                }
+                                aria-label={`${col.label} riga ${index + 1}`}
+                              />
+                            </td>
+                          )
+                        })}
+                        <td className="sup-actions-col">
+                          <div className="sup-actions-btns">
+                            <button
+                              type="button"
+                              className="btn btn-outline-danger btn-sm"
+                              onClick={() => removeItem(index)}
+                              disabled={items.length <= 1}
+                            >
+                              Rimuovi
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  <tr className="workbook-row-totals">
+                    {DELIVERY_ITEMS_WORKBOOK_COLUMNS.map((col) => (
+                      <td
+                        key={`tot-${col.id}`}
+                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      >
                         <input
-                          className="form-control"
-                          value={item.note}
-                          onChange={(e) => updateItem(index, 'note', e.target.value)}
-                          placeholder="opzionale"
+                          className={[
+                            'excel-cell',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'workbook-cell-total',
+                          ].filter(Boolean).join(' ')}
+                          value={deliveryItemsWorkbookTotalsLabel(col.id, deliveryItemsTotals)}
+                          readOnly
+                          tabIndex={-1}
                         />
                       </td>
-                      <td style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                        {deliveryLocation.trim() || '—'}
-                      </td>
-                      <td>
-                        <input
-                          className="form-control"
-                          value={item.anomaly_note}
-                          onChange={(e) => updateItem(index, 'anomaly_note', e.target.value)}
-                          placeholder="opzionale"
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-outline-danger"
-                          onClick={() => removeItem(index)}
-                          disabled={items.length <= 1}
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        >
-                          Rimuovi
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                    ))}
+                    <td className="sup-actions-col" />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <button type="button" className="btn btn-secondary" onClick={addItem} style={{ marginBottom: '1rem' }}>
             + Aggiungi riga
@@ -804,48 +835,115 @@ export default function NewDeliveryPage({ operatorMode = false }) {
               </div>
             </form>
 
-            {priceListLoading && <p className="loading">Caricamento prezzario...</p>}
-            {!priceListLoading && priceList.length > 0 && (
-              <div className="table-wrap">
-                <table className="app-table">
-                  <thead>
-                    <tr>
-                      <th>Tipo merce</th>
-                      <th className="text-end amount">Prezzo unit. (€)</th>
-                      <th>Azioni</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priceList.map((p) => (
-                      <tr key={p.id}>
-                        <td>{p.product_description}</td>
-                        <td className="text-end amount">{Number(p.unit_price).toFixed(2)}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                            onClick={() => applyPriceToItem(p)}
-                          >
-                            Usa
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                            onClick={() => handleDeletePrice(p)}
-                          >
-                            Elimina
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {priceListLoading && <p className="loading pagamenti-loading">Caricamento prezzario…</p>}
+            {!priceListLoading && (
+              <div className="pagamenti-workbook-card workbook-card-nested">
+                <div className="pagamenti-workbook-toolbar">
+                  <div className="pagamenti-workbook-toolbar-left">
+                    <span className="pagamenti-workbook-title">{PRICE_LIST_WORKBOOK_TITLE}</span>
+                    {supplierLabel ? (
+                      <span className="pagamenti-workbook-sheet-label">{supplierLabel}</span>
+                    ) : null}
+                    <span className="pagamenti-workbook-sheet-label">{priceList.length} voci</span>
+                  </div>
+                </div>
+                {priceList.length > 0 ? (
+                  <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
+                    <table className="app-table excel-table pagamenti-grid workbook-grid price-list-grid">
+                      <colgroup>
+                        {PRICE_LIST_WORKBOOK_COLUMNS.map((col) => (
+                          <col key={col.id} style={{ minWidth: col.width }} />
+                        ))}
+                        <col style={{ minWidth: 140 }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          {PRICE_LIST_WORKBOOK_COLUMNS.map((col) => (
+                            <th
+                              key={col.id}
+                              className={[
+                                col.numeric ? 'text-end' : '',
+                                col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                              ].filter(Boolean).join(' ')}
+                            >
+                              {col.label}
+                            </th>
+                          ))}
+                          <th className="sup-actions-col">Azioni</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {priceList.map((p, rowIndex) => (
+                          <tr key={p.id} className="workbook-grid-row">
+                            {PRICE_LIST_WORKBOOK_COLUMNS.map((col) => (
+                              <td
+                                key={col.id}
+                                className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                              >
+                                <input
+                                  className={[
+                                    'excel-cell',
+                                    'pagamenti-cell-readonly',
+                                    col.numeric ? 'excel-cell-num' : '',
+                                    col.emphasis ? 'workbook-cell-emphasis' : '',
+                                  ].filter(Boolean).join(' ')}
+                                  value={priceListWorkbookCellValue(p, col, { rowIndex })}
+                                  readOnly
+                                  tabIndex={-1}
+                                  aria-label={`${col.label} ${p.product_description}`}
+                                />
+                              </td>
+                            ))}
+                            <td className="sup-actions-col">
+                              <div className="sup-actions-btns">
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => applyPriceToItem(p)}
+                                >
+                                  Usa
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-sm"
+                                  onClick={() => handleDeletePrice(p)}
+                                >
+                                  Elimina
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="workbook-row-totals">
+                          {PRICE_LIST_WORKBOOK_COLUMNS.map((col) => (
+                            <td
+                              key={`tot-${col.id}`}
+                              className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                            >
+                              <input
+                                className={[
+                                  'excel-cell',
+                                  'pagamenti-cell-readonly',
+                                  col.numeric ? 'excel-cell-num' : '',
+                                  'workbook-cell-total',
+                                ].filter(Boolean).join(' ')}
+                                value={priceListWorkbookTotalsLabel(col.id, priceListTotals)}
+                                readOnly
+                                tabIndex={-1}
+                              />
+                            </td>
+                          ))}
+                          <td className="sup-actions-col" />
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="empty-state" style={{ padding: '1rem' }}>
+                    Nessuna voce nel prezzario per questo fornitore. Aggiungine una sopra.
+                  </p>
+                )}
               </div>
-            )}
-            {!priceListLoading && priceList.length === 0 && (
-              <p className="empty-state">Nessuna voce nel prezzario per questo fornitore. Aggiungine una sopra.</p>
             )}
           </>
         ) : (

@@ -20,19 +20,15 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     }
   }
 
-  const label = applying
-    ? 'Aggiornamento…'
-    : checking
-      ? 'Controllo…'
-      : updateReady
-        ? 'Installa aggiornamento'
-        : 'Aggiornamento'
+  const label = applying ? 'Aggiornamento…' : checking ? 'Controllo…' : 'Aggiornamento'
 
   const showUpdateBadge = updateReady && !applying && !checking
 
   const title = updateReady
-    ? 'Nuova versione pronta: clicca per aggiornare ATLAS'
+    ? 'Nuova versione pronta: clicca per installare l’aggiornamento'
     : 'Controlla se è disponibile un aggiornamento dell’app'
+
+  const ariaLabel = updateReady && !applying && !checking ? 'Installa aggiornamento' : label
 
   if (iconOnly) {
     return (
@@ -64,6 +60,7 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
       onClick={() => void handleClick()}
       disabled={applying || checking}
       title={title}
+      aria-label={ariaLabel}
       aria-live="polite"
     >
       <span className="atlas-update-btn-label">{label}</span>

@@ -9,6 +9,7 @@ class SupplierOrderItemCreate(BaseModel):
   product_description: str = Field(..., min_length=1, max_length=255)
   pieces: Optional[int] = Field(default=None, ge=0)
   weight_kg: Optional[Decimal] = Field(default=None, ge=0)
+  volume_liters: Optional[Decimal] = Field(default=None, ge=0)
   note: Optional[str] = None
 
 
@@ -45,6 +46,7 @@ class SupplierOrderItemRead(BaseModel):
   product_description: str
   pieces: Optional[int] = None
   weight_kg: Optional[Decimal] = None
+  volume_liters: Optional[Decimal] = None
   note: Optional[str] = None
 
   class Config:

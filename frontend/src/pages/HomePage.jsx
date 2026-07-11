@@ -3,9 +3,32 @@ import { fetchDashboardSummary } from '../services/dashboardService'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import { useOffline } from '../offline/OfflineContext'
 import { getCachedResponseWithMeta } from '../offline/offlineCache'
-import OperatorLinkCard from '../components/OperatorLinkCard.tsx'
-import { getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
-
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import {
+  DASHBOARD_DELIVERIES_COLUMNS,
+  DASHBOARD_DELIVERIES_TITLE,
+  DASHBOARD_MOVEMENTS_COLUMNS,
+  DASHBOARD_MOVEMENTS_TITLE,
+  DASHBOARD_OVERDUE_INVOICES_COLUMNS,
+  DASHBOARD_OVERDUE_INVOICES_TITLE,
+  DASHBOARD_PENDING_ORDERS_COLUMNS,
+  DASHBOARD_PENDING_ORDERS_TITLE,
+  DASHBOARD_PRICE_INCREASE_COLUMNS,
+  DASHBOARD_PRICE_INCREASE_TITLE,
+  dashboardDeliveryCellValue,
+  dashboardDeliveriesTotals,
+  dashboardDeliveriesTotalsLabel,
+  dashboardMovementCellValue,
+  dashboardMovementsTotals,
+  dashboardMovementsTotalsLabel,
+  dashboardOverdueInvoiceCellValue,
+  dashboardOverdueInvoicesTotals,
+  dashboardOverdueInvoicesTotalsLabel,
+  dashboardPendingOrderCellValue,
+  dashboardPendingOrdersTotalsLabel,
+  dashboardPriceIncreaseCellValue,
+  dashboardPriceIncreaseTotalsLabel,
+} from '../utils/dashboardWorkbook.js'
 const DASHBOARD_CACHE_PATH = '/dashboard/summary'
 
 function formatCachedAt(ts) {
@@ -24,20 +47,6 @@ function formatCachedAt(ts) {
 function eur(n) {
   if (n == null || n === '') return '—'
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(n))
-}
-
-function formatDt(value) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return String(value)
-  return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
-}
-
-function formatDateShort(value) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return String(value)
-  return d.toLocaleDateString('it-IT')
 }
 
 function MonthlyFlowChart({ rows, onOpenPrimaNota, onOpenInvoices }) {
@@ -210,6 +219,16 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     return monthlyRows.map((r) => ({ label: r.month_label, monthKey: r.month_key, amount: r.uscite }))
   }, [monthlyRows])
 
+  const pendingOrders = data?.ordini_consegna_in_ritardo || []
+  const latestMovements = data?.ultimi_movimenti || []
+  const recentDeliveries = data?.consegne_recenti || []
+  const overdueInvoices = data?.fatture_scadute_elenco || []
+  const priceIncreases = data?.fornitori_prezzi_in_aumento || []
+
+  const movementsTotals = useMemo(() => dashboardMovementsTotals(latestMovements), [latestMovements])
+  const deliveriesTotals = useMemo(() => dashboardDeliveriesTotals(recentDeliveries), [recentDeliveries])
+  const overdueTotals = useMemo(() => dashboardOverdueInvoicesTotals(overdueInvoices), [overdueInvoices])
+
   const latestMonthKey = monthlyRows.length ? monthlyRows[monthlyRows.length - 1].month_key : null
 
   function openInvoicesWithFilter(monthKey, supplierLabel = '') {
@@ -253,14 +272,6 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           Situazione al volo: cassa, banca, flussi del mese, fatture e attività recenti.
         </p>
       </header>
-
-      {!operatorMode && (
-        <OperatorLinkCard
-          title="Link postazione operativa"
-          description="Un solo indirizzo per le postazioni di lavoro: Panoramica, Personale, Ordini e Prima Nota senza il resto del menu. Installabile come app (PWA) su PC e tablet."
-          links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
-        />
-      )}
 
       {loading && <DashboardSkeleton />}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -337,15 +348,12 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
             </div>
           </section>
 
-          {(data.ordini_consegna_in_ritardo || []).length > 0 && (
+          {(pendingOrders.length > 0) && (
             <section
-              className="card dashboard-panel"
+              className="card dashboard-panel pagamenti-workbook-card"
               style={{ marginBottom: '1rem', borderLeft: '4px solid var(--danger, #c0392b)' }}
             >
-              <h2 className="page-subheader" style={{ marginTop: 0 }}>
-                Ordini in sospeso: consegna prevista superata
-              </h2>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '-0.35rem' }}>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0 0.75rem' }}>
                 Promemoria: questi ordini sono ancora &quot;in sospeso&quot; ma la data consegna indicata è nel passato.
               </p>
               <button
@@ -355,30 +363,17 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               >
                 Nuovo ordine
               </button>
-              <div className="table-wrap">
-                <table className="app-table app-table--compact">
-                  <thead>
-                    <tr>
-                      <th>N.</th>
-                      <th>Fornitore</th>
-                      <th>Data ordine</th>
-                      <th>Consegna prev.</th>
-                      <th>Merce</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.ordini_consegna_in_ritardo || []).map((o) => (
-                      <tr key={o.id}>
-                        <td>#{o.sequence_number ?? o.id}</td>
-                        <td>{o.supplier_name}</td>
-                        <td>{formatDateShort(o.order_date)}</td>
-                        <td>{formatDateShort(o.expected_delivery_date)}</td>
-                        <td title={o.merchandise_summary || ''}>{o.merchandise_summary || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <WorkbookGrid
+                title={DASHBOARD_PENDING_ORDERS_TITLE}
+                sheetLabel={`${pendingOrders.length} ordini`}
+                columns={DASHBOARD_PENDING_ORDERS_COLUMNS}
+                rows={pendingOrders}
+                cellValue={dashboardPendingOrderCellValue}
+                totalsLabel={dashboardPendingOrdersTotalsLabel}
+                totals={pendingOrders.length}
+                gridClassName="dashboard-pending-orders-grid"
+                rowKey={(row) => String(row.id)}
+              />
             </section>
           )}
 
@@ -428,8 +423,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           </div>
 
           <div className="dashboard-two-col">
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Ultimi movimenti cassa</h2>
+            <section className="card dashboard-panel pagamenti-workbook-card">
               <button
                 type="button"
                 className="btn btn-secondary btn-sm dashboard-panel-action"
@@ -437,163 +431,78 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               >
                 Prima Nota
               </button>
-              <div className="table-wrap">
-                <table className="app-table app-table--compact">
-                  <thead>
-                    <tr>
-                      <th>Data</th>
-                      <th>Tipo</th>
-                      <th className="text-end">Importo</th>
-                      <th>Descrizione</th>
-                      <th>Conto</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.ultimi_movimenti || []).map((m) => (
-                      <tr key={m.id}>
-                        <td>{formatDt(m.entry_date)}</td>
-                        <td>{m.type === 'entrata' ? 'Entrata' : 'Uscita'}</td>
-                        <td className={`text-end amount ${m.type === 'entrata' ? 'text-pos' : 'text-neg'}`}>
-                          {m.type === 'entrata' ? '+' : '−'}
-                          {eur(m.amount)}
-                        </td>
-                        <td>{m.description || '—'}</td>
-                        <td>{m.conto || '—'}</td>
-                      </tr>
-                    ))}
-                    {(!data.ultimi_movimenti || data.ultimi_movimenti.length === 0) && (
-                      <tr>
-                        <td colSpan={5} className="empty-state">
-                          Nessun movimento registrato.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <WorkbookGrid
+                title={DASHBOARD_MOVEMENTS_TITLE}
+                sheetLabel={`${latestMovements.length} movimenti`}
+                columns={DASHBOARD_MOVEMENTS_COLUMNS}
+                rows={latestMovements}
+                cellValue={dashboardMovementCellValue}
+                totalsLabel={dashboardMovementsTotalsLabel}
+                totals={movementsTotals}
+                gridClassName="dashboard-movements-grid"
+                emptyMessage="Nessun movimento registrato."
+                rowKey={(row) => String(row.id)}
+              />
             </section>
 
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Consegne recenti</h2>
+            <section className="card dashboard-panel pagamenti-workbook-card">
               {!operatorMode ? (
                 <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('history')}>
                   Storico consegne
                 </button>
               ) : null}
-              <div className="table-wrap">
-                <table className="app-table app-table--compact">
-                  <thead>
-                    <tr>
-                      <th>Data</th>
-                      <th>Fornitore</th>
-                      <th>Merce</th>
-                      <th className="text-end">Tot.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.consegne_recenti || []).map((c) => (
-                      <tr key={c.id}>
-                        <td>{formatDateShort(c.delivery_date)}</td>
-                        <td>{c.supplier_name}</td>
-                        <td>{c.product_description || '—'}</td>
-                        <td className="text-end amount">{eur(c.total)}</td>
-                      </tr>
-                    ))}
-                    {(!data.consegne_recenti || data.consegne_recenti.length === 0) && (
-                      <tr>
-                        <td colSpan={4} className="empty-state">
-                          Nessuna consegna.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <WorkbookGrid
+                title={DASHBOARD_DELIVERIES_TITLE}
+                sheetLabel={`${recentDeliveries.length} consegne`}
+                columns={DASHBOARD_DELIVERIES_COLUMNS}
+                rows={recentDeliveries}
+                cellValue={dashboardDeliveryCellValue}
+                totalsLabel={dashboardDeliveriesTotalsLabel}
+                totals={deliveriesTotals}
+                gridClassName="dashboard-deliveries-grid"
+                emptyMessage="Nessuna consegna."
+                rowKey={(row) => String(row.id)}
+              />
             </section>
           </div>
 
           <div className="dashboard-two-col">
-            <section className="card dashboard-panel">
-              <div
-                className="ui-toolbar-one"
-                style={{ marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}
-              >
-                <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
-                  Fatture scadute (dettaglio)
-                </h2>
-                {!operatorMode ? (
-                  <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
-                    Apri fatture scadute
-                  </button>
-                ) : null}
-              </div>
-              <div className="table-wrap">
-                <table className="app-table app-table--compact">
-                  <thead>
-                    <tr>
-                      <th>Fornitore</th>
-                      <th>N. fattura</th>
-                      <th>Scadenza</th>
-                      <th className="text-end">Residuo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.fatture_scadute_elenco || []).map((f) => (
-                      <tr key={f.id}>
-                        <td>{f.supplier_name}</td>
-                        <td>{f.invoice_number}</td>
-                        <td>{formatDateShort(f.due_date)}</td>
-                        <td className="text-end amount">{eur(f.residual)}</td>
-                      </tr>
-                    ))}
-                    {(!data.fatture_scadute_elenco || data.fatture_scadute_elenco.length === 0) && (
-                      <tr>
-                        <td colSpan={4} className="empty-state">
-                          Nessuna fattura scaduta (o tutto saldato).
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+            <section className="card dashboard-panel pagamenti-workbook-card">
+              {!operatorMode ? (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
+                  Apri fatture scadute
+                </button>
+              ) : null}
+              <WorkbookGrid
+                title={DASHBOARD_OVERDUE_INVOICES_TITLE}
+                sheetLabel={`${overdueInvoices.length} fatture`}
+                columns={DASHBOARD_OVERDUE_INVOICES_COLUMNS}
+                rows={overdueInvoices}
+                cellValue={dashboardOverdueInvoiceCellValue}
+                totalsLabel={dashboardOverdueInvoicesTotalsLabel}
+                totals={overdueTotals}
+                gridClassName="dashboard-overdue-invoices-grid"
+                emptyMessage="Nessuna fattura scaduta (o tutto saldato)."
+                rowKey={(row) => String(row.id)}
+              />
             </section>
 
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Fornitori con aumento prezzi</h2>
+            <section className="card dashboard-panel pagamenti-workbook-card">
               <p className="dashboard-hint">
                 Confronto tra le ultime due consegne dello stesso prodotto (stesso fornitore): prezzo unitario in aumento.
               </p>
-              <div className="table-wrap">
-                <table className="app-table app-table--compact">
-                  <thead>
-                    <tr>
-                      <th>Fornitore</th>
-                      <th>Prodotto</th>
-                      <th className="text-end">Prima</th>
-                      <th className="text-end">Ultima</th>
-                      <th>Ultima consegna</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.fornitori_prezzi_in_aumento || []).map((row, i) => (
-                      <tr key={`${row.supplier_name}-${row.product_description}-${i}`}>
-                        <td>{row.supplier_name}</td>
-                        <td>{row.product_description}</td>
-                        <td className="text-end amount">{eur(row.previous_unit_price)}</td>
-                        <td className="text-end amount">{eur(row.latest_unit_price)}</td>
-                        <td>{formatDateShort(row.latest_date)}</td>
-                      </tr>
-                    ))}
-                    {(!data.fornitori_prezzi_in_aumento || data.fornitori_prezzi_in_aumento.length === 0) && (
-                      <tr>
-                        <td colSpan={5} className="empty-state">
-                          Nessun aumento rilevato (servono almeno due consegne per prodotto).
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <WorkbookGrid
+                title={DASHBOARD_PRICE_INCREASE_TITLE}
+                sheetLabel={`${priceIncreases.length} righe`}
+                columns={DASHBOARD_PRICE_INCREASE_COLUMNS}
+                rows={priceIncreases}
+                cellValue={dashboardPriceIncreaseCellValue}
+                totalsLabel={dashboardPriceIncreaseTotalsLabel}
+                totals={priceIncreases.length}
+                gridClassName="dashboard-price-increase-grid"
+                emptyMessage="Nessun aumento rilevato (servono almeno due consegne per prodotto)."
+                rowKey={(row, rowIndex) => `${row.supplier_name}-${row.product_description}-${rowIndex}`}
+              />
             </section>
           </div>
         </>

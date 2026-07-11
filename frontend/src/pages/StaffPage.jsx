@@ -15,6 +15,7 @@ import {
   fetchStaffLocalePack,
   upsertStaffLocalePack,
   fetchStaffBackupDetail,
+  fetchStaffBackupSavedAt,
   fetchStaffBackups,
   upsertStaffBackup,
   deleteStaffLocalePack,
@@ -54,8 +55,19 @@ import {
 } from '../utils/staffLocaleAccessCode.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
-import OperatorLinkCard from '../components/OperatorLinkCard.tsx'
-import { getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
+import {
+  STAFF_MEMBERS_COLUMNS,
+  STAFF_MEMBERS_WORKBOOK_TITLE,
+  staffMemberCellValue,
+  staffMembersTotalsLabel,
+} from '../utils/staffMembersWorkbook.js'
+import {
+  STAFF_PAYROLL_COLUMNS,
+  STAFF_PAYROLL_WORKBOOK_TITLE,
+  staffPayrollCellValue,
+  staffPayrollTotals,
+  staffPayrollTotalsLabel,
+} from '../utils/staffPayrollWorkbook.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 
@@ -331,6 +343,111 @@ function planningRangeFromBackup(fromStr, toStr, planView) {
   return { view: 'week', start: anchor, end: addDays(anchor, 6), weekAnchor: anchor }
 }
 
+function addDaysToYmd(ymd, days) {
+  const d = parseYMD(ymd)
+  if (Number.isNaN(d.getTime())) return ymd
+  return toYMD(addDays(d, days))
+}
+
+const PLANNING_CLIPBOARD_LS = 'atlas_planning_clipboard_v1'
+
+/** Periodo attualmente visibile in base alla vista planning. */
+function computeVisiblePlanningRange(planView, weekAnchor, dayFocus, periodFrom, periodTo) {
+  let start
+  let end
+  if (planView === 'week') {
+    start = new Date(weekAnchor.getFullYear(), weekAnchor.getMonth(), weekAnchor.getDate())
+    end = addDays(start, 6)
+  } else if (planView === 'day') {
+    start = new Date(dayFocus.getFullYear(), dayFocus.getMonth(), dayFocus.getDate())
+    end = start
+  } else {
+    const fa = toYMD(periodFrom)
+    const fb = toYMD(periodTo)
+    start =
+      fa <= fb
+        ? new Date(periodFrom.getFullYear(), periodFrom.getMonth(), periodFrom.getDate())
+        : new Date(periodTo.getFullYear(), periodTo.getMonth(), periodTo.getDate())
+    end =
+      fa <= fb
+        ? new Date(periodTo.getFullYear(), periodTo.getMonth(), periodTo.getDate())
+        : new Date(periodFrom.getFullYear(), periodFrom.getMonth(), periodFrom.getDate())
+  }
+  const fromStr = toYMD(start)
+  const toStr = toYMD(end)
+  return { start, end, fromStr, toStr, dayCount: daysInclusiveCount(start, end) }
+}
+
+function dayOffsetFromRangeStart(fromYmd, workYmd) {
+  const from = parseYMD(fromYmd)
+  const d = parseYMD(workYmd)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(d.getTime())) return 0
+  return Math.round((d.getTime() - from.getTime()) / 86400000)
+}
+
+function readPlanningClipboard() {
+  try {
+    const raw = localStorage.getItem(PLANNING_CLIPBOARD_LS)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.sourceFromStr || !Array.isArray(parsed.shifts)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writePlanningClipboard(pack) {
+  try {
+    if (pack) localStorage.setItem(PLANNING_CLIPBOARD_LS, JSON.stringify(pack))
+    else localStorage.removeItem(PLANNING_CLIPBOARD_LS)
+  } catch {
+    // ignore
+  }
+}
+
+function buildPlanningClipboardPack(planView, sourceFromStr, sourceToStr, dayCount, sourceShifts) {
+  return {
+    planView,
+    sourceFromStr,
+    sourceToStr,
+    dayCount,
+    copiedAt: new Date().toISOString(),
+    shifts: sourceShifts.map((row) => ({
+      staff_member_id: Number(row.staff_member_id) || null,
+      staff_member_name: String(row.staff_member_name || ''),
+      work_date: shiftWorkDateKey(row.work_date),
+      dayOffset: dayOffsetFromRangeStart(sourceFromStr, shiftWorkDateKey(row.work_date)),
+      entry_kind: row.entry_kind || 'shift',
+      time_start: timeInputValue(row.time_start),
+      time_end: timeInputValue(row.time_end),
+      notes: String(row.notes || ''),
+    })),
+  }
+}
+
+function planningClipboardSummary(pack) {
+  if (!pack?.shifts?.length) return ''
+  return `${formatShortItDate(pack.sourceFromStr)} – ${formatShortItDate(pack.sourceToStr)} (${pack.shifts.length} voci)`
+}
+
+function copyPlanningSourceLabel(planView) {
+  if (planView === 'week') return 'settimana visibile'
+  if (planView === 'day') return 'giorno visibile'
+  return 'periodo visibile'
+}
+
+function resolveStaffIdForShiftRow(row, members) {
+  const id = Number(row.staff_member_id)
+  if (id && members.some((m) => Number(m.id) === id)) return id
+  return resolveMemberIdFromBackupName(row.staff_member_name, members)
+}
+
+function memberNameById(members, staffId) {
+  const m = (members || []).find((row) => Number(row.id) === Number(staffId))
+  return m?.name || ''
+}
+
 function timeInputValue(t) {
   if (!t) return ''
   return String(t).slice(0, 5)
@@ -424,6 +541,104 @@ function buildShiftApiPayload(staffId, workDate, entryKind, timeStart, timeEnd, 
     payload.time_end = timeEnd ? `${timeEnd}:00` : null
   }
   return { data: payload }
+}
+
+async function fetchPlanningShiftsInRange(fromStr, toStr, members, localShifts) {
+  try {
+    return normalizeShiftRows(await fetchStaffShifts(fromStr, toStr), members)
+  } catch (err) {
+    if (!isOnline()) {
+      return normalizeShiftRows(
+        (localShifts || []).filter((row) => {
+          const wd = shiftWorkDateKey(row.work_date)
+          return wd >= fromStr && wd <= toStr
+        }),
+        members,
+      )
+    }
+    throw err
+  }
+}
+
+async function replicatePlanningShifts({
+  clipShifts,
+  destFromStr,
+  destToStr,
+  members,
+  destExisting,
+}) {
+  let mem = members
+  try {
+    const fetched = await fetchStaffMembers()
+    if (Array.isArray(fetched) && fetched.length) mem = fetched
+  } catch {
+    /* usa elenco locale */
+  }
+
+  const existingList = normalizeShiftRows(destExisting, mem)
+  let created = 0
+  let skipped = 0
+  let missingNames = 0
+
+  for (const row of clipShifts) {
+    const staffId = resolveStaffIdForShiftRow(row, mem)
+    if (!staffId) {
+      skipped += 1
+      missingNames += 1
+      continue
+    }
+    const kind = row.entry_kind || 'shift'
+    const dayOffset = Number.isFinite(row.dayOffset)
+      ? row.dayOffset
+      : dayOffsetFromRangeStart(destFromStr, shiftWorkDateKey(row.work_date))
+    const newWorkDate = addDaysToYmd(destFromStr, dayOffset)
+    if (newWorkDate < destFromStr || newWorkDate > destToStr) {
+      skipped += 1
+      continue
+    }
+    const exists = existingList.some((s) =>
+      shiftEntryMatches(s, staffId, newWorkDate, kind, row.time_start, row.time_end),
+    )
+    if (exists) {
+      skipped += 1
+      continue
+    }
+    const built = buildShiftApiPayload(
+      staffId,
+      newWorkDate,
+      kind,
+      timeInputValue(row.time_start),
+      timeInputValue(row.time_end),
+      row.notes || '',
+    )
+    if (built.error) {
+      skipped += 1
+      continue
+    }
+    const createdRow = await createStaffShift(built.data)
+    created += 1
+    const memberName = row.staff_member_name || memberNameById(mem, staffId)
+    existingList.push(
+      normalizeShiftRows(
+        [
+          {
+            ...createdRow,
+            staff_member_name: createdRow?.staff_member_name || memberName,
+          },
+        ],
+        mem,
+      )[0] || {
+        staff_member_id: staffId,
+        staff_member_name: memberName,
+        work_date: newWorkDate,
+        entry_kind: kind,
+        time_start: built.data.time_start,
+        time_end: built.data.time_end,
+      },
+    )
+  }
+
+  return { created, skipped, missingNames, members: mem }
 }
 
 function expandBulkShiftsHeuristic(spoken, members, context) {
@@ -815,6 +1030,7 @@ export default function StaffPage({ operatorMode = false }) {
   const [localeAccessCode, setLocaleAccessCode] = useState('')
   const [savedLocaleNames, setSavedLocaleNames] = useState([])
   const [userDeletableLocaleNames, setUserDeletableLocaleNames] = useState([])
+  const [planningClipboard, setPlanningClipboard] = useState(() => readPlanningClipboard())
 
   const [formMemberIds, setFormMemberIds] = useState(() => new Set())
   const formMemberSelectAllRef = React.useRef(null)
@@ -948,8 +1164,7 @@ export default function StaffPage({ operatorMode = false }) {
       let serverPlanningAt = null
       if (planKey) {
         try {
-          const plan = await fetchStaffBackupDetail('planning', planKey)
-          serverPlanningAt = plan?.saved_at || null
+          serverPlanningAt = await fetchStaffBackupSavedAt('planning', planKey)
         } catch {
           serverPlanningAt = null
         }
@@ -958,8 +1173,7 @@ export default function StaffPage({ operatorMode = false }) {
       let serverPayrollAt = null
       if (payrollYm) {
         try {
-          const pay = await fetchStaffBackupDetail('payroll', payrollYm)
-          serverPayrollAt = pay?.saved_at || null
+          serverPayrollAt = await fetchStaffBackupSavedAt('payroll', payrollYm)
         } catch {
           serverPayrollAt = null
         }
@@ -1084,9 +1298,9 @@ export default function StaffPage({ operatorMode = false }) {
     })
   }, [members, oreTurnoByMemberId, hoursOverride])
 
-  const payrollTotalImporto = useMemo(
-    () => Object.values(payrollImporto).reduce((sum, v) => sum + (Number(v) || 0), 0),
-    [payrollImporto],
+  const payrollWorkbookTotals = useMemo(
+    () => staffPayrollTotals(payrollRows, payrollImporto),
+    [payrollRows, payrollImporto],
   )
 
   useEffect(() => {
@@ -3198,6 +3412,126 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }
 
+  async function handleCopyPlanning() {
+    if (shiftBusy || loading) return
+    if (planView === 'period' && periodTooLong) {
+      setError(`Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`)
+      return
+    }
+    if (members.length === 0) {
+      setError('Aggiungi almeno un dipendente prima di copiare il planning.')
+      return
+    }
+
+    const { fromStr: sourceFromStr, toStr: sourceToStr, dayCount } = computeVisiblePlanningRange(
+      planView,
+      weekAnchor,
+      dayFocus,
+      periodFrom,
+      periodTo,
+    )
+    const srcLabel = copyPlanningSourceLabel(planView)
+
+    setShiftBusy(true)
+    setError('')
+    try {
+      let mem = members
+      try {
+        const fetched = await fetchStaffMembers()
+        if (Array.isArray(fetched) && fetched.length) mem = fetched
+      } catch {
+        /* usa elenco locale */
+      }
+
+      const sourceShifts = await fetchPlanningShiftsInRange(sourceFromStr, sourceToStr, mem, shifts)
+      if (!sourceShifts.length) {
+        setError(`Nessuna voce nella ${srcLabel} (${sourceFromStr} → ${sourceToStr}).`)
+        return
+      }
+
+      const pack = buildPlanningClipboardPack(planView, sourceFromStr, sourceToStr, dayCount, sourceShifts)
+      setPlanningClipboard(pack)
+      writePlanningClipboard(pack)
+      setSuccess(
+        `Copiati ${sourceShifts.length} turni (${sourceFromStr} → ${sourceToStr}). Vai al periodo di destinazione e premi Incolla.`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Copia planning non riuscita')
+    } finally {
+      setShiftBusy(false)
+    }
+  }
+
+  async function handlePastePlanning() {
+    if (shiftBusy || loading) return
+    if (planView === 'period' && periodTooLong) {
+      setError(`Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`)
+      return
+    }
+    if (members.length === 0) {
+      setError('Aggiungi almeno un dipendente prima di incollare il planning.')
+      return
+    }
+    const pack = planningClipboard
+    if (!pack?.shifts?.length) {
+      setError('Nessun planning copiato. Usa prima Copia sulla settimana o periodo sorgente.')
+      return
+    }
+
+    const {
+      start: destStart,
+      end: destEnd,
+      fromStr: destFromStr,
+      toStr: destToStr,
+      dayCount: destDayCount,
+    } = computeVisiblePlanningRange(planView, weekAnchor, dayFocus, periodFrom, periodTo)
+    const dstLabel = copyPlanningSourceLabel(planView)
+
+    if (destDayCount < pack.dayCount) {
+      setError(
+        `Il periodo visibile (${destFromStr} → ${destToStr}, ${destDayCount} giorni) è più corto del planning copiato (${pack.sourceFromStr} → ${pack.sourceToStr}, ${pack.dayCount} giorni).`,
+      )
+      return
+    }
+
+    if (
+      !window.confirm(
+        `Incollare ${pack.shifts.length} voci copiate da ${pack.sourceFromStr} → ${pack.sourceToStr} nella ${dstLabel} (${destFromStr} → ${destToStr})?\n\nOgni dipendente viene ricollegato per nome. Le voci già presenti nel periodo di destinazione non vengono duplicate.`,
+      )
+    ) {
+      return
+    }
+
+    setShiftBusy(true)
+    setError('')
+    try {
+      const destExisting = await fetchPlanningShiftsInRange(destFromStr, destToStr, members, shifts)
+      const { created, skipped, missingNames } = await replicatePlanningShifts({
+        clipShifts: pack.shifts,
+        destFromStr,
+        destToStr,
+        members,
+        destExisting,
+      })
+
+      markPlanningStale()
+      await loadForRange(destStart, destEnd)
+      setPlanningLoaded(true)
+
+      const missingMsg =
+        missingNames > 0 ? ` ${missingNames} voci saltate: dipendente non trovato in anagrafica.` : ''
+      setSuccess(
+        created > 0
+          ? `Incollati ${created} turni nella ${dstLabel} (${destFromStr} → ${destToStr}).${skipped ? ` Saltate ${skipped} voci.` : ''}${missingMsg}`
+          : `Nessuna nuova voce incollata: il periodo ha già tutte le voci oppure non ci sono turni validi da incollare.${missingMsg}`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Incolla planning non riuscita')
+    } finally {
+      setShiftBusy(false)
+    }
+  }
+
   async function handleBackupMembers() {
     if (members.length === 0) {
       setError('Nessun dipendente da salvare nel backup.')
@@ -3695,14 +4029,6 @@ export default function StaffPage({ operatorMode = false }) {
         </div>
       </header>
 
-      {!operatorMode && (
-        <OperatorLinkCard
-          title="Link postazione operativa"
-          description="Condividi con le postazioni di lavoro: un solo link con Personale, Ordini e Prima Nota, senza menu Home, fatture, fornitori ecc."
-          links={[{ label: 'Postazione operativa', url: getOperatorStationPublicUrl() }]}
-        />
-      )}
-
       {error && <div className="alert alert-danger">{error}</div>}
       {localeSyncWarning && <div className="alert alert-warning">{localeSyncWarning}</div>}
       {success && <div className="alert alert-info">{success}</div>}
@@ -3876,100 +4202,145 @@ export default function StaffPage({ operatorMode = false }) {
             Al primo salvataggio compare il codice da comunicare al team; senza codice corretto non si accede agli elenchi degli altri locali.
           </p>
         </div>
-        <div className="table-wrap">
-          <table className="app-table app-table--compact">
-            <thead>
-              <tr>
-                <th>Nome (piano)</th>
-                <th>Email</th>
-                <th>Telefono</th>
-                <th>Città</th>
-                <th>Ordine</th>
-                <th>Attivo</th>
-                <th className="text-end">Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m, idx) => (
-                <tr key={m.id}>
-                  <td style={{ fontWeight: 600 }}>{m.name}</td>
-                  <td style={{ fontSize: '0.9rem', maxWidth: 200 }} title={m.email || ''}>
-                    {m.email ? (
-                      <a href={`mailto:${m.email}`}>{m.email}</a>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }} title={m.phone || ''}>
-                    {m.phone ? (
-                      <a href={`tel:${m.phone.replace(/\s/g, '')}`}>{m.phone}</a>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.9rem', maxWidth: 140 }} title={m.city || ''}>
-                    {m.city || <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                  </td>
-                  <td className="text-center staff-member-order" title={`Ordine automatico (posizione ${idx + 1})`}>
-                    {idx + 1}
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={m.is_active}
-                      onChange={async (e) => {
-                        try {
-                          await updateStaffMember(m.id, { is_active: e.target.checked })
-                          await refreshMembers()
-                        } catch (err) {
-                          const msg = String(err?.message || '')
-                          await refreshMembers()
-                          if (msg.includes('404') || msg.includes('non trovato')) {
-                            setError('Dipendente non più presente: elenco aggiornato.')
-                          } else {
-                            setError('Aggiornamento stato non riuscito')
-                          }
-                        }
-                      }}
-                    />
-                  </td>
-                  <td className="text-end staff-member-actions">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => handleEditMember(m)}
-                      title="Modifica anagrafica nel modulo sopra"
-                    >
-                      Modifica
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm"
-                      onClick={() => setMemberInfoId(m.id)}
-                      title="Scheda rapida: nome, cognome, email, telefono, città, età"
-                    >
-                      Info
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => handleDeleteMember(m)}
-                      title="Richiede il codice zona se il locale selezionato è protetto"
-                    >
-                      Elimina
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {members.length === 0 && (
+        <div className="workbook-card-nested">
+          <div className="pagamenti-workbook-toolbar">
+            <div className="pagamenti-workbook-toolbar-left">
+              <span className="pagamenti-workbook-title">{STAFF_MEMBERS_WORKBOOK_TITLE}</span>
+              <span className="pagamenti-workbook-sheet-label">{members.length} dipendenti</span>
+            </div>
+          </div>
+          <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
+            <table className="app-table excel-table pagamenti-grid workbook-grid staff-members-grid">
+              <colgroup>
+                {STAFF_MEMBERS_COLUMNS.map((col) => (
+                  <col key={col.id} style={{ minWidth: col.width }} />
+                ))}
+                <col style={{ minWidth: 240 }} />
+              </colgroup>
+              <thead>
                 <tr>
-                  <td colSpan={7} className="empty-state">
-                    Nessun dipendente: aggiungi almeno un nome per pianificare i turni.
-                  </td>
+                  {STAFF_MEMBERS_COLUMNS.map((col) => (
+                    <th
+                      key={col.id}
+                      className={[
+                        col.numeric ? 'text-end' : '',
+                        col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th className="sup-actions-col">Azioni</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {members.map((m, idx) => (
+                  <tr key={m.id} className="workbook-grid-row">
+                    {STAFF_MEMBERS_COLUMNS.map((col) => (
+                      <td
+                        key={col.id}
+                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      >
+                        {col.id === 'is_active' ? (
+                          <div className="staff-workbook-checkbox-cell">
+                            <input
+                              type="checkbox"
+                              checked={m.is_active}
+                              onChange={async (e) => {
+                                try {
+                                  await updateStaffMember(m.id, { is_active: e.target.checked })
+                                  await refreshMembers()
+                                } catch (err) {
+                                  const msg = String(err?.message || '')
+                                  await refreshMembers()
+                                  if (msg.includes('404') || msg.includes('non trovato')) {
+                                    setError('Dipendente non più presente: elenco aggiornato.')
+                                  } else {
+                                    setError('Aggiornamento stato non riuscito')
+                                  }
+                                }
+                              }}
+                              aria-label={`Attivo ${m.name}`}
+                            />
+                          </div>
+                        ) : (
+                          <input
+                            className={[
+                              'excel-cell',
+                              'pagamenti-cell-readonly',
+                              col.numeric ? 'excel-cell-num' : '',
+                              col.emphasis ? 'workbook-cell-emphasis' : '',
+                            ].filter(Boolean).join(' ')}
+                            value={staffMemberCellValue(m, col, { rowIndex: idx })}
+                            readOnly
+                            tabIndex={-1}
+                            aria-label={`${col.label} ${m.name}`}
+                          />
+                        )}
+                      </td>
+                    ))}
+                    <td className="sup-actions-col">
+                      <div className="sup-actions-btns staff-member-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleEditMember(m)}
+                          title="Modifica anagrafica nel modulo sopra"
+                        >
+                          Modifica
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => setMemberInfoId(m.id)}
+                          title="Scheda rapida: nome, cognome, email, telefono, città, età"
+                        >
+                          Info
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => handleDeleteMember(m)}
+                          title="Richiede il codice zona se il locale selezionato è protetto"
+                        >
+                          Elimina
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {members.length === 0 ? (
+                  <tr>
+                    <td colSpan={STAFF_MEMBERS_COLUMNS.length + 1} className="empty-state">
+                      Nessun dipendente: aggiungi almeno un nome per pianificare i turni.
+                    </td>
+                  </tr>
+                ) : (
+                  <tr className="workbook-row-totals">
+                    {STAFF_MEMBERS_COLUMNS.map((col) => (
+                      <td
+                        key={`tot-${col.id}`}
+                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      >
+                        <input
+                          className={[
+                            'excel-cell',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'workbook-cell-total',
+                          ].filter(Boolean).join(' ')}
+                          value={staffMembersTotalsLabel(col.id, members.length)}
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </td>
+                    ))}
+                    <td className="sup-actions-col" />
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -4029,129 +4400,183 @@ export default function StaffPage({ operatorMode = false }) {
             Calcola tutti gli importi
           </button>
         </div>
-        <div className="table-wrap">
-          <table className="app-table app-table--compact">
-            <thead>
-              <tr>
-                <th>Dipendente</th>
-                <th style={{ minWidth: 100 }}>Ore lavorate</th>
-                <th style={{ minWidth: 100 }}>Prezzo / ora (€)</th>
-                <th className="text-end" style={{ minWidth: 120 }}>
-                  Importo
-                </th>
-                <th style={{ minWidth: 220 }}>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payrollRows.map(({ member: m, computedOre }) => (
-                <tr key={m.id}>
-                  <td style={{ fontWeight: 600 }}>{m.name}</td>
-                  <td>
-                    <input
-                      type="number"
-                      step="0.25"
-                      min="0"
-                      className="form-control"
-                      style={{ width: 96 }}
-                      value={
-                        hoursOverride[m.id] !== undefined
-                          ? hoursOverride[m.id]
-                          : formatHoursDecimal(computedOre)
-                      }
-                      onChange={(e) =>
-                        setHoursOverride((prev) => ({ ...prev, [m.id]: e.target.value }))
-                      }
-                      title={
-                        computedOre > 0
-                          ? `Ore da turni nel periodo: ${formatHoursDecimal(computedOre)}`
-                          : 'Nessun turno nel periodo'
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="form-control"
-                      style={{ width: 96 }}
-                      value={rateDraft[m.id] ?? (m.hourly_rate != null ? String(m.hourly_rate) : '')}
-                      onChange={(e) =>
-                        setRateDraft((prev) => ({ ...prev, [m.id]: e.target.value }))
-                      }
-                      onBlur={async (e) => {
-                        const raw = e.target.value.trim()
-                        const v = raw === '' ? null : parseDecimalInput(raw)
-                        const prev = m.hourly_rate == null ? null : Number(m.hourly_rate)
-                        if (v === prev || (v == null && prev == null)) return
-                        try {
-                          await updateStaffMember(m.id, { hourly_rate: v })
-                          await refreshMembers()
-                        } catch {
-                          setError('Salvataggio prezzo/ora non riuscito')
-                        }
-                      }}
-                    />
-                  </td>
-                  <td className="text-end amount" style={{ fontWeight: 600 }}>
-                    {payrollImporto[m.id] !== undefined
-                      ? formatEurAmount(payrollImporto[m.id])
-                      : '—'}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm"
-                        onClick={() => setPayrollDaysInfoMemberId(m.id)}
-                        title="Giorni e ore dai turni nel periodo"
-                      >
-                        Info giorni lavorati
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => calculatePayrollImporto(m.id)}
-                      >
-                        Calcola
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm"
-                        onClick={() => clearPayrollImporto(m.id)}
-                        disabled={payrollImporto[m.id] === undefined}
-                        title="Elimina importo calcolato"
-                      >
-                        Cancella
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {members.length === 0 && (
+        <div className="workbook-card-nested">
+          <div className="pagamenti-workbook-toolbar">
+            <div className="pagamenti-workbook-toolbar-left">
+              <span className="pagamenti-workbook-title">{STAFF_PAYROLL_WORKBOOK_TITLE}</span>
+              <span className="pagamenti-workbook-sheet-label">{payrollRows.length} dipendenti</span>
+            </div>
+          </div>
+          <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
+            <table className="app-table excel-table pagamenti-grid workbook-grid staff-payroll-grid">
+              <colgroup>
+                {STAFF_PAYROLL_COLUMNS.map((col) => (
+                  <col key={col.id} style={{ minWidth: col.width }} />
+                ))}
+                <col style={{ minWidth: 320 }} />
+              </colgroup>
+              <thead>
                 <tr>
-                  <td colSpan={5} className="empty-state">
-                    Aggiungi dipendenti per calcolare ore e importi.
-                  </td>
+                  {STAFF_PAYROLL_COLUMNS.map((col) => (
+                    <th
+                      key={col.id}
+                      className={[
+                        col.numeric ? 'text-end' : '',
+                        col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th className="sup-actions-col">Azioni</th>
                 </tr>
-              )}
-            </tbody>
-            {members.length > 0 && (
-              <tfoot>
-                <tr>
-                  <td colSpan={3} className="text-end" style={{ fontWeight: 600 }}>
-                    Totale importi calcolati
-                  </td>
-                  <td className="text-end amount" style={{ fontWeight: 700 }}>
-                    {Object.keys(payrollImporto).length > 0
-                      ? formatEurAmount(payrollTotalImporto)
-                      : '—'}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
+              </thead>
+              <tbody>
+                {payrollRows.map(({ member: m, computedOre, ore }, rowIndex) => (
+                  <tr key={m.id} className="workbook-grid-row">
+                    {STAFF_PAYROLL_COLUMNS.map((col) => {
+                      if (col.id === 'hours') {
+                        return (
+                          <td key={col.id}>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              className={['excel-cell', 'excel-cell-num'].join(' ')}
+                              value={
+                                hoursOverride[m.id] !== undefined
+                                  ? hoursOverride[m.id]
+                                  : formatHoursDecimal(computedOre)
+                              }
+                              onChange={(e) =>
+                                setHoursOverride((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              title={
+                                computedOre > 0
+                                  ? `Ore da turni nel periodo: ${formatHoursDecimal(computedOre)}`
+                                  : 'Nessun turno nel periodo'
+                              }
+                              aria-label={`Ore lavorate ${m.name}`}
+                            />
+                          </td>
+                        )
+                      }
+                      if (col.id === 'hourly_rate') {
+                        return (
+                          <td key={col.id}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className={['excel-cell', 'excel-cell-num'].join(' ')}
+                              value={rateDraft[m.id] ?? (m.hourly_rate != null ? String(m.hourly_rate) : '')}
+                              onChange={(e) =>
+                                setRateDraft((prev) => ({ ...prev, [m.id]: e.target.value }))
+                              }
+                              onBlur={async (e) => {
+                                const raw = e.target.value.trim()
+                                const v = raw === '' ? null : parseDecimalInput(raw)
+                                const prev = m.hourly_rate == null ? null : Number(m.hourly_rate)
+                                if (v === prev || (v == null && prev == null)) return
+                                try {
+                                  await updateStaffMember(m.id, { hourly_rate: v })
+                                  await refreshMembers()
+                                } catch {
+                                  setError('Salvataggio prezzo/ora non riuscito')
+                                }
+                              }}
+                              aria-label={`Prezzo ora ${m.name}`}
+                            />
+                          </td>
+                        )
+                      }
+                      return (
+                        <td
+                          key={col.id}
+                          className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                        >
+                          <input
+                            className={[
+                              'excel-cell',
+                              'pagamenti-cell-readonly',
+                              col.numeric ? 'excel-cell-num' : '',
+                              col.emphasis ? 'workbook-cell-emphasis' : '',
+                              col.id === 'importo' ? 'workbook-cell-total' : '',
+                            ].filter(Boolean).join(' ')}
+                            value={staffPayrollCellValue(
+                              { member: m, computedOre, ore },
+                              col,
+                              { rowIndex, importo: payrollImporto[m.id] },
+                            )}
+                            readOnly
+                            tabIndex={-1}
+                            aria-label={`${col.label} ${m.name}`}
+                          />
+                        </td>
+                      )
+                    })}
+                    <td className="sup-actions-col">
+                      <div className="sup-actions-btns">
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => setPayrollDaysInfoMemberId(m.id)}
+                          title="Giorni e ore dai turni nel periodo"
+                        >
+                          Info giorni
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => calculatePayrollImporto(m.id)}
+                        >
+                          Calcola
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => clearPayrollImporto(m.id)}
+                          disabled={payrollImporto[m.id] === undefined}
+                          title="Elimina importo calcolato"
+                        >
+                          Cancella
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {members.length === 0 ? (
+                  <tr>
+                    <td colSpan={STAFF_PAYROLL_COLUMNS.length + 1} className="empty-state">
+                      Aggiungi dipendenti per calcolare ore e importi.
+                    </td>
+                  </tr>
+                ) : (
+                  <tr className="workbook-row-totals">
+                    {STAFF_PAYROLL_COLUMNS.map((col) => (
+                      <td
+                        key={`tot-${col.id}`}
+                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      >
+                        <input
+                          className={[
+                            'excel-cell',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'workbook-cell-total',
+                          ].filter(Boolean).join(' ')}
+                          value={staffPayrollTotalsLabel(col.id, payrollWorkbookTotals)}
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </td>
+                    ))}
+                    <td className="sup-actions-col" />
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -4419,6 +4844,47 @@ export default function StaffPage({ operatorMode = false }) {
             </button>
             <button
               type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={shiftBusy || loading || demoLoading || periodTooLong || members.length === 0}
+              onClick={() => void handleCopyPlanning()}
+              title={
+                periodTooLong
+                  ? `Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`
+                  : planView === 'week'
+                    ? 'Copia turni e nomi dipendenti della settimana visibile negli appunti planning'
+                    : planView === 'day'
+                      ? 'Copia le voci del giorno visibile negli appunti planning'
+                      : 'Copia turni e nomi del periodo visibile negli appunti planning'
+              }
+            >
+              {shiftBusy ? 'Copia…' : 'Copia'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={
+                shiftBusy ||
+                loading ||
+                demoLoading ||
+                periodTooLong ||
+                members.length === 0 ||
+                !planningClipboard?.shifts?.length
+              }
+              onClick={() => void handlePastePlanning()}
+              title={
+                !planningClipboard?.shifts?.length
+                  ? 'Prima usa Copia sulla settimana o periodo sorgente'
+                  : planView === 'week'
+                    ? `Incolla il planning copiato (${planningClipboardSummary(planningClipboard)}) nella settimana visibile`
+                    : planView === 'day'
+                      ? `Incolla il planning copiato (${planningClipboardSummary(planningClipboard)}) nel giorno visibile`
+                      : `Incolla il planning copiato (${planningClipboardSummary(planningClipboard)}) nel periodo visibile`
+              }
+            >
+              {shiftBusy ? 'Incolla…' : 'Incolla'}
+            </button>
+            <button
+              type="button"
               className="btn btn-outline-danger btn-sm"
               disabled={shiftBusy || loading || demoLoading}
               onClick={handleDeleteWeekPlanning}
@@ -4451,6 +4917,11 @@ export default function StaffPage({ operatorMode = false }) {
               </span>
             </>
           )}
+          {planningClipboard?.shifts?.length ? (
+            <span style={{ marginLeft: '0.65rem', opacity: 0.9 }}>
+              · Planning copiato: <strong>{planningClipboardSummary(planningClipboard)}</strong>
+            </span>
+          ) : null}
         </p>
 
         {periodTooLong ? (

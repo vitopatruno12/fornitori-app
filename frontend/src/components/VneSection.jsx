@@ -1,4 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import VneWorkbookGrid from './VneWorkbookGrid.jsx'
+import VneFilterWorkbook from './VneFilterWorkbook.jsx'
+import {
+  VNE_CLOSINGS_COLUMNS,
+  VNE_CLOSINGS_WORKBOOK_TITLE,
+  VNE_KEY_VALUE_COLUMNS,
+  VNE_OPERATIONS_COLUMNS,
+  VNE_OPERATIONS_WORKBOOK_TITLE,
+  flattenVneContabilitaRows,
+  flattenVneStatusRows,
+  vneClosingCellValue,
+  vneClosingsTotals,
+  vneClosingsTotalsLabel,
+  vneKeyValueCellValue,
+  vneKeyValueTotalsLabel,
+  vneOperationCellValue,
+  vneOperationsTotals,
+  vneOperationsTotalsLabel,
+} from '../utils/vneWorkbook.js'
+import {
+  VNE_MACHINES_COLUMNS,
+  VNE_MACHINES_WORKBOOK_TITLE,
+  vneMachineCellTone,
+  vneMachineCellValue,
+  vneMachinesTotalsLabel,
+} from '../utils/vneMachinesWorkbook.js'
 import {
   fetchVneModels,
   fetchVneHealth,
@@ -8,22 +34,8 @@ import {
   fetchVneCashClosingFilters,
   queryVneCashClosings,
   fetchVneContabilita,
+  fetchVneMachinesOverview,
 } from '../services/vneService'
-
-function eur(v) {
-  if (v == null || Number.isNaN(Number(v))) return '—'
-  return Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function statusMoneteDettaglio(status) {
-  if (Array.isArray(status?.monete_dettaglio) && status.monete_dettaglio.length > 0) {
-    return status.monete_dettaglio
-  }
-  if (Array.isArray(status?.hopper?.monete) && status.hopper.monete.length > 0) {
-    return status.hopper.monete
-  }
-  return []
-}
 
 function localInputToVneDate(value) {
   const v = String(value || '').trim()
@@ -33,21 +45,9 @@ function localInputToVneDate(value) {
   return `${d}-${m}-${y} 00:00`
 }
 
-function sectionLabel(k) {
-  const map = {
-    monete: 'Monete',
-    banconote: 'Banconote',
-    pagamenti: 'Pagamenti',
-    pagamento_manuale: 'Pagamento manuale',
-    rimborso: 'Rimborso',
-    riepilogo: 'Riepilogo',
-    prelievi: 'Prelievi',
-  }
-  return map[k] || k
-}
-
 export default function VneSection({ embedded = false }) {
   const SECTION_HOME = 'home'
+  const SECTION_MACCHINE = 'macchine'
   const SECTION_CONTABILITA = 'contabilita'
   const SECTION_STATO = 'stato'
   const SECTION_OPERAZIONI = 'operazioni'
@@ -80,8 +80,24 @@ export default function VneSection({ embedded = false }) {
   const [closingsAutoRefreshEnabled, setClosingsAutoRefreshEnabled] = useState(false)
   const [modelConnectivity, setModelConnectivity] = useState({})
   const [healthWarning, setHealthWarning] = useState('')
+  const [machineRows, setMachineRows] = useState([])
+  const [loadingMachines, setLoadingMachines] = useState(false)
+  const [machinesUpdatedAt, setMachinesUpdatedAt] = useState('')
 
   const selected = useMemo(() => models.find((m) => m.id === selectedId) || null, [models, selectedId])
+  const contabilitaRows = useMemo(() => flattenVneContabilitaRows(contabilita), [contabilita])
+  const statusRows = useMemo(() => flattenVneStatusRows(status), [status])
+  const operationsTotals = useMemo(() => vneOperationsTotals(opsRows), [opsRows])
+  const closingsTotals = useMemo(() => vneClosingsTotals(closingRows), [closingRows])
+  const machineColumns = useMemo(
+    () =>
+      VNE_MACHINES_COLUMNS.map((col) =>
+        col.id === 'online' || col.id === 'alarm'
+          ? { ...col, tone: (row) => vneMachineCellTone(row, col) }
+          : col,
+      ),
+    [],
+  )
 
   useEffect(() => {
     let mounted = true
@@ -247,6 +263,36 @@ export default function VneSection({ embedded = false }) {
     }
   }
 
+  async function loadMachinesOverview() {
+    setLoadingMachines(true)
+    setError('')
+    try {
+      const data = await fetchVneMachinesOverview()
+      const rows = Array.isArray(data?.rows) ? data.rows : []
+      setMachineRows(rows)
+      setMachinesUpdatedAt(data?.updated_at || '')
+      setModelConnectivity((prev) => {
+        const next = { ...prev }
+        for (const row of rows) {
+          if (!row?.model_id) continue
+          next[row.model_id] = String(row.online || '').toLowerCase() === 'online' ? 'online' : 'offline'
+        }
+        return next
+      })
+    } catch (e) {
+      setMachineRows([])
+      setError(e?.message || 'Errore lettura stato macchine VNE')
+    } finally {
+      setLoadingMachines(false)
+    }
+  }
+
+  function openMachineFromOverview(row) {
+    if (!row?.model_id) return
+    setSelectedId(row.model_id)
+    setActiveSection(SECTION_STATO)
+  }
+
   useEffect(() => {
     if (!selectedId) return
     loadStatus(selectedId)
@@ -262,6 +308,10 @@ export default function VneSection({ embedded = false }) {
 
   useEffect(() => {
     if (!selectedId || !selected) return
+    if (activeSection === SECTION_MACCHINE) {
+      loadMachinesOverview()
+      return
+    }
     if (activeSection === SECTION_CONTABILITA && selected.contabilita_url) {
       loadContabilita(selectedId)
       return
@@ -279,6 +329,7 @@ export default function VneSection({ embedded = false }) {
     if (!selectedId || !autoRefreshEnabled) return undefined
     const tick = () => {
       loadStatus(selectedId)
+      if (activeSection === SECTION_MACCHINE) loadMachinesOverview()
       if (opsAutoRefreshEnabled) runOperationsQuery(selectedId)
       if (closingsAutoRefreshEnabled) runCashClosingQuery(selectedId)
       if (activeSection === SECTION_CONTABILITA) loadContabilita(selectedId)
@@ -353,7 +404,6 @@ export default function VneSection({ embedded = false }) {
               <article key={m.id} className="support-tech-card">
                 <div className="support-tech-card-head">
                   <h3 className="support-tech-name">{m.label}</h3>
-                  <span className="support-tech-role">{m.configured ? 'Configurato' : 'Da configurare'}</span>
                 </div>
                 <div style={{ marginBottom: '0.4rem' }}>
                   <span
@@ -392,9 +442,6 @@ export default function VneSection({ embedded = false }) {
                         : 'Verifica...'}
                   </span>
                 </div>
-                <div className="support-tech-phone" style={{ wordBreak: 'break-all' }}>
-                  {m.status_url || 'Nessun URL impostato'}
-                </div>
                 <div className="support-tech-actions">
                   <button
                     type="button"
@@ -415,6 +462,9 @@ export default function VneSection({ embedded = false }) {
           <div className="vne-section-nav">
             <button type="button" className={activeSection === SECTION_HOME ? 'vne-nav-btn is-active' : 'vne-nav-btn'} onClick={() => setActiveSection(SECTION_HOME)}>
               Home
+            </button>
+            <button type="button" className={activeSection === SECTION_MACCHINE ? 'vne-nav-btn is-active' : 'vne-nav-btn'} onClick={() => setActiveSection(SECTION_MACCHINE)}>
+              Stato macchine
             </button>
             <button type="button" className={activeSection === SECTION_CONTABILITA ? 'vne-nav-btn is-active' : 'vne-nav-btn'} onClick={() => setActiveSection(SECTION_CONTABILITA)}>
               Contabilita
@@ -437,8 +487,57 @@ export default function VneSection({ embedded = false }) {
         </div>
       </section>
 
+      {activeSection === SECTION_MACCHINE && (
+      <section className="card vne-chiusure-style vne-machines-style">
+        <div className="vne-legacy-header">
+          <h2 className="page-subheader" style={{ margin: 0 }}>Stato macchine</h2>
+          <div className="vne-legacy-logo" aria-hidden />
+        </div>
+        <div className="vne-legacy-shell vne-machines-overview">
+          <div className="vne-legacy-menu-row">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setActiveSection(SECTION_HOME)}>
+              Home
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => loadMachinesOverview()} disabled={loadingMachines}>
+              {loadingMachines ? 'Aggiornamento…' : 'Aggiorna elenco'}
+            </button>
+          </div>
+          {machinesUpdatedAt ? (
+            <p className="vne-chiusure-hint" style={{ marginTop: '0.35rem' }}>
+              Ultimo aggiornamento remoto · {machinesUpdatedAt}
+            </p>
+          ) : null}
+          <VneWorkbookGrid
+            title={VNE_MACHINES_WORKBOOK_TITLE}
+            sheetLabel={
+              loadingMachines
+                ? 'Caricamento…'
+                : machineRows.length > 0
+                  ? `${machineRows.length} macchine`
+                  : 'Nessuna macchina'
+            }
+            columns={machineColumns}
+            rows={machineRows}
+            cellValue={vneMachineCellValue}
+            totalsLabel={(columnId) => vneMachinesTotalsLabel(columnId, machineRows)}
+            totals={machineRows}
+            gridClassName="vne-machines-grid"
+            loading={loadingMachines}
+            emptyMessage="Nessuna macchina VNE configurata."
+            rowKey={(row) => row.model_id}
+            onRowClick={openMachineFromOverview}
+            getRowClassName={() => 'pn-row-click'}
+            getCellTitle={(row, col) => (col.id === 'levels' || col.id === 'alarm' ? String(row[col.id] || '') : '')}
+          />
+          <p className="vne-chiusure-hint" style={{ marginTop: '0.55rem' }}>
+            Clicca una riga per aprire lo <strong>Stato</strong> della macchina selezionata.
+          </p>
+        </div>
+      </section>
+      )}
+
       {activeSection === SECTION_CONTABILITA && (
-      <section className="card vne-chiusure-style">
+      <section className="card vne-chiusure-style vne-contabilita-style">
         <div className="vne-legacy-header">
           <h2 className="page-subheader" style={{ margin: 0 }}>Contabilita</h2>
           <div className="vne-legacy-logo" aria-hidden />
@@ -460,43 +559,22 @@ export default function VneSection({ embedded = false }) {
             <p className="empty-state">Nessun dato contabilita disponibile.</p>
           )}
           {!selected?.contabilita_url ? null : !loadingContabilita && contabilita && (
-            <table className="vne-contabilita-table">
-              <tbody>
-                {Object.entries(contabilita.sections || {}).map(([sectionKey, items]) => {
-                  const normalizedItems = Array.isArray(items) ? items : []
-                  return (
-                    <React.Fragment key={sectionKey}>
-                      <tr>
-                        <td className="vne-contabilita-title" colSpan={2}>{sectionLabel(sectionKey)}</td>
-                      </tr>
-                      {normalizedItems.length === 0 ? (
-                        <tr>
-                          <td className="vne-contabilita-col" colSpan={2}>—</td>
-                        </tr>
-                      ) : (
-                        normalizedItems.map((item, idx) => (
-                          <tr key={`${sectionKey}-${item.label}-${idx}`}>
-                            <td className="vne-contabilita-col">{item.label || '—'}</td>
-                            <td className="vne-contabilita-col vne-contabilita-amount">
-                              {item.value_eur != null ? `${eur(item.value_eur)} €` : (item.raw_value || '—')}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </React.Fragment>
-                  )
-                })}
-                <tr>
-                  <td className="vne-contabilita-footer" colSpan={2}>
-                    V.N.E. Sistema di controllo remoto
-                    <br />
-                    {contabilita.updated_at_text || '—'}
-                    <br />
-                    Modello: {selected?.label || selectedId}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <VneWorkbookGrid
+              title="Contabilità"
+              sheetLabel={`${contabilitaRows.length} righe · ${selected?.label || selectedId}`}
+              columns={VNE_KEY_VALUE_COLUMNS}
+              rows={contabilitaRows}
+              cellValue={vneKeyValueCellValue}
+              totalsLabel={vneKeyValueTotalsLabel}
+              totals={contabilitaRows.length}
+              gridClassName="vne-contabilita-grid"
+              emptyMessage="Nessun dato contabilità disponibile."
+            />
+          )}
+          {!loadingContabilita && contabilita?.updated_at_text && (
+            <p className="vne-chiusure-hint" style={{ marginTop: '0.65rem' }}>
+              V.N.E. Sistema di controllo remoto · {contabilita.updated_at_text}
+            </p>
           )}
         </div>
       </section>
@@ -523,137 +601,24 @@ export default function VneSection({ embedded = false }) {
           {!status && !loadingStatus && <p className="empty-state">Nessun dato disponibile.</p>}
           {loadingStatus && <p className="loading">Lettura stato da VNE…</p>}
 
-          {status && (() => {
-            const moneteDettaglio = statusMoneteDettaglio(status)
-            return (
-            <table className="vne-contabilita-table vne-status-table">
-              <tbody>
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>{status.title || 'Stato'}</td>
-                </tr>
-
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Stato accettatore JCM</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Presente</td>
-                  <td className="vne-contabilita-col">{status.accettatore?.presente || '—'}</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Errore</td>
-                  <td className="vne-contabilita-col">{status.accettatore?.errore || '—'}</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Firmware</td>
-                  <td className="vne-contabilita-col">{status.accettatore?.firmware || '—'}</td>
-                </tr>
-
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Cassette</td>
-                </tr>
-                {status.cassette?.length ? status.cassette.map((c, idx) => (
-                  <tr key={`${c.cassetta}-${idx}`}>
-                    <td className="vne-contabilita-col">
-                      Cassetta {c.cassetta} — presente {c.presente}, taglio {c.taglio_eur} €
-                    </td>
-                    <td className="vne-contabilita-col vne-contabilita-amount">
-                      {c.banconote} banconote — {c.totale_eur} €
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td className="vne-contabilita-col" colSpan={2}>Nessuna cassetta rilevata.</td>
-                  </tr>
-                )}
-
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Contenuto stacker</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Totale stacker</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.contenuto_stacker_eur)} €</td>
-                </tr>
-                {status.stacker_banconote?.length ? status.stacker_banconote.map((b, idx) => (
-                  <tr key={`stacker-${b.taglio_eur}-${idx}`}>
-                    <td className="vne-contabilita-col">{b.taglio_eur} €</td>
-                    <td className="vne-contabilita-col vne-contabilita-amount">{b.quantita} banconote</td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td className="vne-contabilita-col" colSpan={2}>Nessun dettaglio stacker.</td>
-                  </tr>
-                )}
-
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Stato Hopper</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Smart Hopper 1</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{status.hopper?.smart_hopper_1_eur || '—'} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Firmware hopper</td>
-                  <td className="vne-contabilita-col">{status.hopper?.firmware || '—'}</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Quantità monete</td>
-                </tr>
-                {moneteDettaglio.length ? moneteDettaglio.map((m, idx) => (
-                  <tr key={`moneta-${m.taglio_eur}-${idx}`}>
-                    <td className="vne-contabilita-col">{m.taglio_eur} €</td>
-                    <td className="vne-contabilita-col vne-contabilita-amount">{m.quantita} monete</td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td className="vne-contabilita-col" colSpan={2}>Nessun dettaglio monete (riavvia backend dopo deploy).</td>
-                  </tr>
-                )}
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Hopper</td>
-                </tr>
-                {status.hopper?.units?.length ? status.hopper.units.map((u, idx) => (
-                  <tr key={`hopper-${u.hopper}-${idx}`}>
-                    <td className="vne-contabilita-col">Hopper {u.hopper}</td>
-                    <td className="vne-contabilita-col">
-                      Presente {u.presente} — Errore {u.errore} — Vuoto {u.vuoto} — Pieno {u.pieno}
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td className="vne-contabilita-col" colSpan={2}>Nessun hopper rilevato.</td>
-                  </tr>
-                )}
-                <tr>
-                  <td className="vne-contabilita-col">Totale cassa</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_cassa_eur)} €</td>
-                </tr>
-
-                <tr>
-                  <td className="vne-contabilita-title" colSpan={2}>Riepilogo</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Banconote</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.banconote_eur)} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Monete</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.monete_eur)} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-col">Totale</td>
-                  <td className="vne-contabilita-col vne-contabilita-amount">{eur(status.totale_eur)} €</td>
-                </tr>
-                <tr>
-                  <td className="vne-contabilita-footer" colSpan={2}>
-                    V.N.E. Sistema di controllo remoto
-                    <br />
-                    {status.updated_at_text || '—'}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            )
-          })()}
+          {status && (
+            <VneWorkbookGrid
+              title={status.title || 'Stato'}
+              sheetLabel={`${statusRows.length} attributi · ${selected?.label || selectedId}`}
+              columns={VNE_KEY_VALUE_COLUMNS}
+              rows={statusRows}
+              cellValue={vneKeyValueCellValue}
+              totalsLabel={vneKeyValueTotalsLabel}
+              totals={statusRows.length}
+              gridClassName="vne-status-grid"
+              emptyMessage="Nessun dato stato disponibile."
+            />
+          )}
+          {status?.updated_at_text && (
+            <p className="vne-chiusure-hint" style={{ marginTop: '0.65rem' }}>
+              V.N.E. Sistema di controllo remoto · {status.updated_at_text}
+            </p>
+          )}
         </div>
       </section>
       )}
@@ -665,177 +630,300 @@ export default function VneSection({ embedded = false }) {
           <div className="vne-legacy-logo" aria-hidden />
         </div>
         <div className="vne-legacy-shell">
-          <div className="vne-legacy-menu-row">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setActiveSection(SECTION_HOME)}>
-              Home
-            </button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => runOperationsQuery(selectedId)} disabled={loadingOps || !selectedId}>
-              {loadingOps ? 'Ricerca…' : 'Cerca operazioni'}
-            </button>
-            <button
-              type="button"
-              className={opsAutoRefreshEnabled ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-              onClick={() => setOpsAutoRefreshEnabled((v) => !v)}
-              disabled={!autoRefreshEnabled}
-              title={!autoRefreshEnabled ? 'Attiva prima auto-refresh globale' : 'Aggiorna automaticamente questa tabella ai prossimi tick'}
-            >
-              {opsAutoRefreshEnabled ? 'Auto ON' : 'Auto OFF'}
-            </button>
-          </div>
-          <p className="vne-chiusure-hint" style={{ marginTop: '0.35rem' }}>
-            Modello: <strong>{selected?.label || selectedId}</strong> — formato data <strong>dd-mm-yyyy hh:mm</strong>.
-          </p>
+          <VneFilterWorkbook
+            title="Filtri operazioni"
+            sheetLabel={`Modello: ${selected?.label || selectedId || '—'} · formato dd-mm-yyyy hh:mm`}
+            gridClassName="vne-operations-filter-grid"
+            fields={[
+              {
+                id: 'from',
+                label: 'Data inizio',
+                width: 14,
+                fluid: true,
+                render: () => (
+                  <input
+                    type="date"
+                    className="excel-cell vne-filter-input"
+                    value={opsFrom}
+                    onChange={(e) => setOpsFrom(e.target.value)}
+                    aria-label="Data inizio"
+                  />
+                ),
+              },
+              {
+                id: 'type',
+                label: 'Tipo operazione',
+                width: 22,
+                fluid: true,
+                render: () => (
+                  <select
+                    className="excel-cell vne-filter-input vne-filter-select"
+                    multiple
+                    value={opsSelectedTypes}
+                    onChange={(e) => setOpsSelectedTypes(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    aria-label="Tipo operazione"
+                    disabled={opsFilters.operations.length === 0}
+                  >
+                    {opsFilters.operations.map((v) => (
+                      <option key={v || 'blank-op'} value={v}>{v || '(vuoto)'}</option>
+                    ))}
+                  </select>
+                ),
+              },
+              {
+                id: 'to',
+                label: 'Data fine',
+                width: 14,
+                fluid: true,
+                render: () => (
+                  <input
+                    type="date"
+                    className="excel-cell vne-filter-input"
+                    value={opsTo}
+                    onChange={(e) => setOpsTo(e.target.value)}
+                    aria-label="Data fine"
+                  />
+                ),
+              },
+              {
+                id: 'user',
+                label: 'Utente',
+                width: 16,
+                fluid: true,
+                render: () => (
+                  <select
+                    className="excel-cell vne-filter-input vne-filter-select"
+                    multiple
+                    value={opsSelectedUsers}
+                    onChange={(e) => setOpsSelectedUsers(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    aria-label="Utente"
+                    disabled={opsFilters.users.length === 0}
+                  >
+                    {opsFilters.users.map((u) => (
+                      <option key={u || 'blank-user'} value={u}>{u || '(vuoto)'}</option>
+                    ))}
+                  </select>
+                ),
+              },
+              {
+                id: 'home',
+                label: 'Home',
+                width: 10,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button type="button" className="btn btn-secondary btn-sm vne-filter-btn" onClick={() => setActiveSection(SECTION_HOME)}>
+                    Home
+                  </button>
+                ),
+              },
+              {
+                id: 'search',
+                label: 'Cerca operazioni',
+                width: 12,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm vne-filter-btn"
+                    onClick={() => runOperationsQuery(selectedId)}
+                    disabled={loadingOps || !selectedId || !selected?.sel_operazioni_url}
+                  >
+                    {loadingOps ? 'Ricerca…' : 'Cerca operazioni'}
+                  </button>
+                ),
+              },
+              {
+                id: 'auto',
+                label: 'Auto OFF',
+                width: 12,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button
+                    type="button"
+                    className={opsAutoRefreshEnabled ? 'btn btn-primary btn-sm vne-filter-btn' : 'btn btn-secondary btn-sm vne-filter-btn'}
+                    onClick={() => setOpsAutoRefreshEnabled((v) => !v)}
+                    disabled={!autoRefreshEnabled}
+                    title={!autoRefreshEnabled ? 'Attiva prima auto-refresh globale' : 'Aggiorna automaticamente questa tabella ai prossimi tick'}
+                  >
+                    {opsAutoRefreshEnabled ? 'Auto ON' : 'Auto OFF'}
+                  </button>
+                ),
+              },
+            ]}
+          />
           {!selected?.sel_operazioni_url && (
             <p className="empty-state">Operazioni non configurate per questo modello.</p>
           )}
-          <div className="form-row">
-            <div className="form-group">
-              <label>Data inizio</label>
-              <input type="date" className="form-control" value={opsFrom} onChange={(e) => setOpsFrom(e.target.value)} style={{ minWidth: 170 }} />
-            </div>
-            <div className="form-group">
-              <label>Data fine</label>
-              <input type="date" className="form-control" value={opsTo} onChange={(e) => setOpsTo(e.target.value)} style={{ minWidth: 170 }} />
-            </div>
-          </div>
-          {(opsFilters.operations.length > 0 || opsFilters.users.length > 0) && (
-            <div className="form-row">
-              <div className="form-group" style={{ flex: '1 1 280px' }}>
-                <label>Tipo operazione</label>
-                <select
-                  className="form-control"
-                  multiple
-                  value={opsSelectedTypes}
-                  onChange={(e) => setOpsSelectedTypes(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                  style={{ minHeight: 96 }}
-                >
-                  {opsFilters.operations.map((v) => (
-                    <option key={v || 'blank-op'} value={v}>{v || '(vuoto)'}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group" style={{ flex: '1 1 240px' }}>
-                <label>Utente</label>
-                <select
-                  className="form-control"
-                  multiple
-                  value={opsSelectedUsers}
-                  onChange={(e) => setOpsSelectedUsers(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                  style={{ minHeight: 96 }}
-                >
-                  {opsFilters.users.map((u) => (
-                    <option key={u || 'blank-user'} value={u}>{u || '(vuoto)'}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-          {loadingOps && <p className="loading">Caricamento operazioni…</p>}
-          {!loadingOps && opsRows.length === 0 && (
-            !selected?.sel_operazioni_url ? null :
-            <p className="empty-state">Nessuna operazione caricata. Imposta i filtri e premi «Cerca operazioni».</p>
-          )}
-          {!loadingOps && opsRows.length > 0 && (
-            <div className="vne-operations-legacy-list">
-              {opsRows.map((r, idx) => (
-                <div key={`${r.when_text}-${idx}`} className="vne-operations-legacy-item">
-                  <div><strong>Operazione del:</strong> {r.when_text || '—'}</div>
-                  <div><strong>Tipo operazione:</strong> {r.operation_type || '—'}</div>
-                  <div><strong>Valore:</strong> {r.value_eur != null ? `${eur(r.value_eur)} €` : '—'}</div>
-                  <div><strong>Commento:</strong> {r.comment || '—'}</div>
-                  <div><strong>Eseguita da:</strong> {r.executed_by || '—'}</div>
-                </div>
-              ))}
-            </div>
+          {(loadingOps || opsRows.length > 0 || selected?.sel_operazioni_url) && (
+            <VneWorkbookGrid
+              title={VNE_OPERATIONS_WORKBOOK_TITLE}
+              sheetLabel={
+                loadingOps
+                  ? 'Caricamento…'
+                  : opsRows.length > 0
+                    ? `${opsRows.length} operazioni`
+                    : 'Nessuna operazione'
+              }
+              columns={VNE_OPERATIONS_COLUMNS}
+              rows={opsRows}
+              cellValue={vneOperationCellValue}
+              totalsLabel={vneOperationsTotalsLabel}
+              totals={operationsTotals}
+              gridClassName="vne-operations-grid"
+              loading={loadingOps}
+              emptyMessage={
+                !selected?.sel_operazioni_url
+                  ? 'Operazioni non configurate per questo modello.'
+                  : 'Nessuna operazione caricata. Imposta i filtri e premi «Cerca operazioni».'
+              }
+            />
           )}
         </div>
       </section>
       )}
 
       {activeSection === SECTION_CHIUSURE && (
-      <section className="card vne-chiusure-style">
+      <section className="card vne-chiusure-style vne-closings-style">
         <div className="vne-legacy-header">
           <h2 className="page-subheader" style={{ margin: 0 }}>Chiusure di cassa</h2>
           <div className="vne-legacy-logo" aria-hidden />
         </div>
         <div className="vne-legacy-shell">
-          <div className="vne-legacy-menu-row">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setActiveSection(SECTION_HOME)}>
-              Home
-            </button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => runCashClosingQuery(selectedId)} disabled={loadingClosings || !selectedId}>
-              {loadingClosings ? 'Ricerca…' : 'Cerca chiusure'}
-            </button>
-            <button
-              type="button"
-              className={closingsAutoRefreshEnabled ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-              onClick={() => setClosingsAutoRefreshEnabled((v) => !v)}
-              disabled={!autoRefreshEnabled}
-              title={!autoRefreshEnabled ? 'Attiva prima auto-refresh globale' : 'Aggiorna automaticamente questa tabella ai prossimi tick'}
-            >
-              {closingsAutoRefreshEnabled ? 'Auto ON' : 'Auto OFF'}
-            </button>
-          </div>
-          <p className="vne-chiusure-hint" style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginTop: '0.35rem' }}>
-            Modello: <strong>{selected?.label || selectedId}</strong> — formato data <strong>dd-mm-yyyy hh:mm</strong>.
-          </p>
+          <VneFilterWorkbook
+            title="Filtri chiusure di cassa"
+            sheetLabel={`Modello: ${selected?.label || selectedId || '—'} · formato dd-mm-yyyy hh:mm`}
+            gridClassName="vne-closings-filter-grid"
+            fields={[
+              {
+                id: 'from',
+                label: 'Data inizio',
+                width: 16,
+                fluid: true,
+                render: () => (
+                  <input
+                    type="date"
+                    className="excel-cell vne-filter-input"
+                    value={closingFrom}
+                    onChange={(e) => setClosingFrom(e.target.value)}
+                    aria-label="Data inizio"
+                  />
+                ),
+              },
+              {
+                id: 'to',
+                label: 'Data fine',
+                width: 16,
+                fluid: true,
+                render: () => (
+                  <input
+                    type="date"
+                    className="excel-cell vne-filter-input"
+                    value={closingTo}
+                    onChange={(e) => setClosingTo(e.target.value)}
+                    aria-label="Data fine"
+                  />
+                ),
+              },
+              {
+                id: 'operator',
+                label: 'Operatore',
+                width: 24,
+                fluid: true,
+                render: () => (
+                  <select
+                    className="excel-cell vne-filter-input vne-filter-select"
+                    multiple
+                    value={closingOperators}
+                    onChange={(e) => setClosingOperators(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    aria-label="Operatore"
+                    disabled={closingFilters.operators.length === 0}
+                  >
+                    {closingFilters.operators.map((o) => (
+                      <option key={o || 'blank-opr'} value={o}>{o || '(vuoto)'}</option>
+                    ))}
+                  </select>
+                ),
+              },
+              {
+                id: 'home',
+                label: 'Home',
+                width: 11,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button type="button" className="btn btn-secondary btn-sm vne-filter-btn" onClick={() => setActiveSection(SECTION_HOME)}>
+                    Home
+                  </button>
+                ),
+              },
+              {
+                id: 'search',
+                label: 'Cerca chiusure',
+                width: 14,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm vne-filter-btn"
+                    onClick={() => runCashClosingQuery(selectedId)}
+                    disabled={loadingClosings || !selectedId || !selected?.sel_chiusure_url}
+                  >
+                    {loadingClosings ? 'Ricerca…' : 'Cerca chiusure'}
+                  </button>
+                ),
+              },
+              {
+                id: 'auto',
+                label: 'Auto OFF',
+                width: 12,
+                fluid: true,
+                action: true,
+                render: () => (
+                  <button
+                    type="button"
+                    className={closingsAutoRefreshEnabled ? 'btn btn-primary btn-sm vne-filter-btn' : 'btn btn-secondary btn-sm vne-filter-btn'}
+                    onClick={() => setClosingsAutoRefreshEnabled((v) => !v)}
+                    disabled={!autoRefreshEnabled}
+                    title={!autoRefreshEnabled ? 'Attiva prima auto-refresh globale' : 'Aggiorna automaticamente questa tabella ai prossimi tick'}
+                  >
+                    {closingsAutoRefreshEnabled ? 'Auto ON' : 'Auto OFF'}
+                  </button>
+                ),
+              },
+            ]}
+          />
           {!selected?.sel_chiusure_url && (
             <p className="empty-state">Chiusure non configurate per questo modello.</p>
           )}
-          <div className="form-row">
-          <div className="form-group">
-            <label>Data inizio</label>
-            <input type="date" className="form-control" value={closingFrom} onChange={(e) => setClosingFrom(e.target.value)} style={{ minWidth: 170 }} />
-          </div>
-          <div className="form-group">
-            <label>Data fine</label>
-            <input type="date" className="form-control" value={closingTo} onChange={(e) => setClosingTo(e.target.value)} style={{ minWidth: 170 }} />
-          </div>
-          <div className="form-group" style={{ flex: '1 1 260px' }}>
-            <label>Operatore</label>
-            <select
-              className="form-control"
-              multiple
-              value={closingOperators}
-              onChange={(e) => setClosingOperators(Array.from(e.target.selectedOptions).map((o) => o.value))}
-              style={{ minHeight: 88 }}
-            >
-              {closingFilters.operators.map((o) => (
-                <option key={o || 'blank-opr'} value={o}>{o || '(vuoto)'}</option>
-              ))}
-            </select>
-          </div>
-          </div>
-          {loadingClosings && <p className="loading">Caricamento chiusure…</p>}
-          {!loadingClosings && closingRows.length === 0 && (
-            !selected?.sel_chiusure_url ? null :
-            <p className="empty-state">Nessuna chiusura caricata. Imposta i filtri e premi «Cerca chiusure».</p>
+          {(loadingClosings || closingRows.length > 0 || selected?.sel_chiusure_url) && (
+            <VneWorkbookGrid
+              title={VNE_CLOSINGS_WORKBOOK_TITLE}
+              sheetLabel={
+                loadingClosings
+                  ? 'Caricamento…'
+                  : closingRows.length > 0
+                    ? `${closingRows.length} chiusure`
+                    : 'Nessuna chiusura'
+              }
+              columns={VNE_CLOSINGS_COLUMNS}
+              rows={closingRows}
+              cellValue={vneClosingCellValue}
+              totalsLabel={vneClosingsTotalsLabel}
+              totals={closingsTotals}
+              gridClassName="vne-closings-grid"
+              loading={loadingClosings}
+              emptyMessage={
+                !selected?.sel_chiusure_url
+                  ? 'Chiusure non configurate per questo modello.'
+                  : 'Nessuna chiusura caricata. Imposta i filtri e premi «Cerca chiusure».'
+              }
+            />
           )}
-          {!loadingClosings && closingRows.length > 0 && (
-            <div className="table-wrap vne-chiusure-table-wrap">
-              <table className="app-table app-table--compact vne-chiusure-table">
-                <thead>
-                  <tr>
-                    <th>Data / ora</th>
-                    <th>Operatore</th>
-                    <th className="text-end">Totale €</th>
-                    <th>Dettaglio</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closingRows.map((r, idx) => (
-                    <tr key={`${r.when_text}-${idx}`}>
-                      <td>{r.when_text || '—'}</td>
-                      <td>{r.operator || '—'}</td>
-                      <td className="text-end">{r.total_eur != null ? eur(r.total_eur) : '—'}</td>
-                    <td className="vne-chiusure-dettaglio">{r.raw_block || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          </div>
+        </div>
       </section>
       )}
     </div>

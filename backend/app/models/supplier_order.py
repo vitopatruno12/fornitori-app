@@ -43,6 +43,7 @@ class SupplierOrderItem(Base):
   product_description = Column(String(255), nullable=False)
   pieces = Column(Integer, nullable=True)
   weight_kg = Column(Numeric(10, 3), nullable=True)
+  volume_liters = Column(Numeric(10, 3), nullable=True)
   note = Column(Text, nullable=True)
 
   order = relationship("SupplierOrder", back_populates="items")

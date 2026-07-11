@@ -5,6 +5,7 @@ import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
 import { mapOrderLinesToRows } from '../utils/orderLinesNormalize.js'
 import { applyOrderAiResponse, mergeOrderProductRows } from '../utils/orderAiApply.js'
 import OrderVoiceFieldAssistant from '../components/OrderVoiceFieldAssistant.jsx'
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import {
   createSupplierOrder,
@@ -15,10 +16,39 @@ import {
   supplierOrderPdfUrl,
   updateSupplierOrder,
 } from '../services/supplierOrdersService'
-import { getOperatorOrderPublicUrl, getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
+import { ORDER_QUICK_PRODUCTS } from '../constants/orderQuickProducts.js'
+import { quickProductBtnClassName } from '../utils/orderQuickProductColors.js'
+import {
+  SUPPLIER_PRODUCT_BLOCKED_MESSAGE,
+  isProductAllowedForSupplier,
+  isProductCategoryAllowedForSupplier,
+  resolveQuickProductCategory,
+} from '../utils/supplierOrderProducts.js'
+import {
+  ORDER_HISTORY_COLUMNS,
+  ORDER_HISTORY_WORKBOOK_TITLE,
+  orderHistoryCellValue,
+} from '../utils/orderHistoryWorkbook.js'
+import {
+  ORDER_MERCHANDISE_COLUMNS,
+  ORDER_MERCHANDISE_WORKBOOK_TITLE,
+  orderMerchandiseCellValue,
+  orderMerchandiseListinoMeta,
+  orderMerchandiseTotals,
+  orderMerchandiseTotalsLabel,
+} from '../utils/orderMerchandiseWorkbook.js'
 
-const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', note: '' })
+const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', volume_liters: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'
+
+function appendOrderLineQtyBits(bits, item) {
+  const it = item || {}
+  if (it.pieces != null && it.pieces !== '' && !Number.isNaN(Number(it.pieces))) bits.push(`${it.pieces} pz`)
+  if (it.weight_kg != null && it.weight_kg !== '' && !Number.isNaN(Number(it.weight_kg))) bits.push(`${it.weight_kg} kg`)
+  if (it.volume_liters != null && it.volume_liters !== '' && !Number.isNaN(Number(it.volume_liters))) {
+    bits.push(`${it.volume_liters} l`)
+  }
+}
 
 function normalizeWhatsAppNumber(raw) {
   if (!raw) return null
@@ -36,6 +66,15 @@ function formatDateIt(iso) {
   const [y, m, day] = String(iso).slice(0, 10).split('-')
   if (!y || !m || !day) return iso
   return `${day}/${m}/${y}`
+}
+
+function escapeHtml(s) {
+  if (s == null) return ''
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function todayIso() {
@@ -77,44 +116,6 @@ function monthRangeFromYm(ym) {
   return { from, to }
 }
 
-function listPriceForDescription(priceList, description) {
-  const d = (description || '').trim()
-  if (!d) return null
-  const key = d.toLowerCase()
-  const row = priceList.find((x) => (x.product_description || '').trim().toLowerCase() === key)
-  return row != null ? Number(row.unit_price) : null
-}
-
-/** Mostra il prezzo listino in formato leggibile (solo suggerimento, stesso dato del prezzario). */
-function formatListinoCell(priceList, description) {
-  const d = (description || '').trim()
-  if (!d) {
-    return { text: '—', title: 'Scrivi il prodotto: qui compare il prezzo unitario dal prezzario se c’è una voce uguale.' }
-  }
-  const p = listPriceForDescription(priceList, d)
-  if (p == null || Number.isNaN(p)) {
-    return {
-      text: '—',
-      title:
-        'Nessuna voce nel prezzario con questa descrizione. In Nuova consegna → Prezzario aggiungi la merce e il prezzo, oppure usa la stessa scritta del listino (anche maiuscole diverse).',
-    }
-  }
-  const formatted = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(p)
-  return {
-    text: formatted,
-    title: `Prezzo unitario dal prezzario fornitore (${formatted} / cad.). Riferimento per confronto in consegna; non sostituisce il contratto reale.`,
-  }
-}
-
-function escapeHtml(s) {
-  if (s == null) return ''
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
 /** Testo messaggio WhatsApp da un ordine già salvato (con righe). */
 function buildWhatsAppTextFromOrder(order) {
   const supplierName = order.supplier_name || ''
@@ -135,8 +136,7 @@ function buildWhatsAppTextFromOrder(order) {
   const items = order.items || []
   items.forEach((it) => {
     const bits = [it.product_description || '']
-    if (it.pieces != null && !Number.isNaN(Number(it.pieces))) bits.push(`${it.pieces} pz`)
-    if (it.weight_kg != null && !Number.isNaN(Number(it.weight_kg))) bits.push(`${it.weight_kg} kg`)
+    appendOrderLineQtyBits(bits, it)
     if (it.note) bits.push(`(${it.note})`)
     lines.push(`• ${bits.filter(Boolean).join(' — ')}`)
   })
@@ -159,7 +159,10 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [orderNoteInternal, setOrderNoteInternal] = useState('')
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('')
   const [deliveryLocation, setDeliveryLocation] = useState('')
-  const [rows, setRows] = useState([emptyRow()])
+  const [rows, setRows] = useState([])
+  const [lineEditor, setLineEditor] = useState(null)
+  const [productChoice, setProductChoice] = useState(null)
+  const [supplierProductBlock, setSupplierProductBlock] = useState(null)
   const [loadingSuppliers, setLoadingSuppliers] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -179,9 +182,6 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [copyFromOrderId, setCopyFromOrderId] = useState('')
   const [deletingAllOrders, setDeletingAllOrders] = useState(false)
   const [aiSummary, setAiSummary] = useState('')
-  const [operatorLinkCopied, setOperatorLinkCopied] = useState(false)
-
-  const operatorOrderUrl = useMemo(() => getOperatorOrderPublicUrl(), [])
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -238,6 +238,19 @@ export default function NewOrderPage({ operatorMode = false }) {
   const filledRows = useMemo(
     () => rows.filter((r) => (r.product_description || '').trim()),
     [rows],
+  )
+
+  const merchandiseLines = useMemo(
+    () =>
+      rows
+        .map((row, sourceIndex) => ({ ...row, __sourceIndex: sourceIndex }))
+        .filter((row) => (row.product_description || '').trim()),
+    [rows],
+  )
+
+  const merchandiseWorkbookTotals = useMemo(
+    () => orderMerchandiseTotals(filledRows),
+    [filledRows],
   )
 
   const stats = useMemo(() => {
@@ -421,7 +434,9 @@ export default function NewOrderPage({ operatorMode = false }) {
     setOrderNoteInternal('')
     setExpectedDeliveryDate('')
     setDeliveryLocation('')
-    setRows([emptyRow()])
+    setRows([])
+    setLineEditor(null)
+    setProductChoice(null)
     setSuccessDetail(null)
     setAnomalyReport(null)
   }
@@ -435,8 +450,136 @@ export default function NewOrderPage({ operatorMode = false }) {
   }
 
   function removeRow(index) {
-    if (rows.length <= 1) return
     setRows((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function showSupplierProductBlock(productLabel) {
+    setSupplierProductBlock({
+      message: SUPPLIER_PRODUCT_BLOCKED_MESSAGE,
+      product: productLabel || '',
+      supplier: selectedSupplier?.name || supplierLabel || '',
+    })
+  }
+
+  function assertSupplierProductCategory(categoryLabel) {
+    if (!selectedSupplier) return true
+    if (isProductCategoryAllowedForSupplier(selectedSupplier, categoryLabel)) return true
+    showSupplierProductBlock(categoryLabel)
+    return false
+  }
+
+  function assertSupplierProductName(productName) {
+    if (!selectedSupplier) return true
+    if (isProductAllowedForSupplier(selectedSupplier, productName)) return true
+    const category = resolveQuickProductCategory(productName) || productName
+    showSupplierProductBlock(category)
+    return false
+  }
+
+  function openAddProductLine(product) {
+    if (!supplierId) {
+      setError('Seleziona un fornitore prima di aggiungere prodotti')
+      return
+    }
+    setError('')
+    setProductChoice(null)
+    setLineEditor({ mode: 'add', product, pieces: '', weight_kg: '', volume_liters: '', note: '' })
+  }
+
+  function handleQuickProductClick(item) {
+    if (!supplierId) {
+      setError('Seleziona un fornitore prima di aggiungere prodotti')
+      return
+    }
+    if (!assertSupplierProductCategory(item.label)) return
+    setError('')
+    if (item.variants?.length) {
+      setProductChoice({ title: item.label, options: item.variants })
+      return
+    }
+    openAddProductLine(item.label)
+  }
+
+  function closeProductChoice() {
+    setProductChoice(null)
+  }
+
+  function pickProductVariant(option) {
+    if (productChoice?.title && !assertSupplierProductCategory(productChoice.title)) return
+    closeProductChoice()
+    openAddProductLine(option)
+  }
+
+  function openEditProductLine(index) {
+    const row = rows[index]
+    if (!row || !(row.product_description || '').trim()) return
+    setError('')
+    setLineEditor({
+      mode: 'edit',
+      index,
+      product: (row.product_description || '').trim(),
+      pieces: row.pieces ?? '',
+      weight_kg: row.weight_kg ?? '',
+      volume_liters: row.volume_liters ?? '',
+      note: row.note ?? '',
+    })
+  }
+
+  function closeLineEditor() {
+    setLineEditor(null)
+  }
+
+  function updateLineEditorField(field, value) {
+    setLineEditor((prev) => (prev ? { ...prev, [field]: value } : prev))
+  }
+
+  function saveLineEditor() {
+    if (!lineEditor) return
+    const product = (lineEditor.product || '').trim()
+    if (!product) return
+    if (!assertSupplierProductName(product)) return
+    const pieces = lineEditor.pieces
+    const weight_kg = lineEditor.weight_kg
+    const volume_liters = lineEditor.volume_liters
+    const note = String(lineEditor.note || '').trim()
+    const hasPieces = pieces !== '' && pieces != null && !Number.isNaN(Number(pieces))
+    const hasKg = weight_kg !== '' && weight_kg != null && !Number.isNaN(Number(weight_kg))
+    const hasLiters = volume_liters !== '' && volume_liters != null && !Number.isNaN(Number(volume_liters))
+    if (!hasPieces && !hasKg && !hasLiters && !note) {
+      setError('Inserisci almeno pezzi, kg, litri o una nota')
+      return
+    }
+    const row = {
+      product_description: product,
+      pieces: hasPieces ? pieces : '',
+      weight_kg: hasKg ? weight_kg : '',
+      volume_liters: hasLiters ? volume_liters : '',
+      note,
+    }
+    if (lineEditor.mode === 'add') {
+      setRows((prev) => [...prev, row])
+    } else if (lineEditor.mode === 'edit' && lineEditor.index != null) {
+      setRows((prev) => prev.map((r, i) => (i === lineEditor.index ? row : r)))
+    }
+    setError('')
+    closeLineEditor()
+  }
+
+  function removeLineFromEditor() {
+    if (!lineEditor || lineEditor.mode !== 'edit' || lineEditor.index == null) return
+    removeRow(lineEditor.index)
+    closeLineEditor()
+  }
+
+  function removeProductLine(index) {
+    const row = rows[index]
+    const desc = (row?.product_description || '').trim()
+    if (!desc) return
+    if (!window.confirm(`Rimuovere "${desc}" dall'ordine?`)) return
+    removeRow(index)
+    if (lineEditor?.mode === 'edit' && lineEditor.index === index) {
+      closeLineEditor()
+    }
   }
 
   function buildPayload() {
@@ -444,10 +587,13 @@ export default function NewOrderPage({ operatorMode = false }) {
       .map((r) => {
         const wkRaw = r.weight_kg === '' || r.weight_kg == null ? null : Number(r.weight_kg)
         const weight_kg = wkRaw != null && !Number.isNaN(wkRaw) ? wkRaw : null
+        const volRaw = r.volume_liters === '' || r.volume_liters == null ? null : Number(r.volume_liters)
+        const volume_liters = volRaw != null && !Number.isNaN(volRaw) ? volRaw : null
         return {
           product_description: (r.product_description || '').trim(),
           pieces: r.pieces === '' || r.pieces == null ? null : Number(r.pieces),
           weight_kg,
+          volume_liters,
           note: (r.note || '').trim() || null,
         }
       })
@@ -486,8 +632,7 @@ export default function NewOrderPage({ operatorMode = false }) {
     lines.push('')
     payload.items.forEach((it) => {
       const bits = [it.product_description]
-      if (it.pieces != null && !Number.isNaN(it.pieces)) bits.push(`${it.pieces} pz`)
-      if (it.weight_kg != null && !Number.isNaN(it.weight_kg)) bits.push(`${it.weight_kg} kg`)
+      appendOrderLineQtyBits(bits, it)
       if (it.note) bits.push(`(${it.note})`)
       lines.push(`• ${bits.join(' — ')}`)
     })
@@ -503,6 +648,7 @@ export default function NewOrderPage({ operatorMode = false }) {
         product_description: r.product_description || '',
         pieces: r.pieces || '',
         weight_kg: r.weight_kg || '',
+        volume_liters: r.volume_liters || '',
         note: r.note || '',
       }))
       localStorage.setItem(TEMPLATE_LS, JSON.stringify(snap))
@@ -529,6 +675,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           product_description: r.product_description || '',
           pieces: r.pieces != null ? String(r.pieces) : '',
           weight_kg: r.weight_kg != null && r.weight_kg !== '' ? String(r.weight_kg) : '',
+          volume_liters: r.volume_liters != null && r.volume_liters !== '' ? String(r.volume_liters) : '',
           note: r.note || '',
         })),
       )
@@ -567,10 +714,12 @@ export default function NewOrderPage({ operatorMode = false }) {
             product_description: it.product_description || '',
             pieces: it.pieces != null ? String(it.pieces) : '',
             weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
+            volume_liters: it.volume_liters != null && it.volume_liters !== '' ? String(it.volume_liters) : '',
             note: it.note || '',
           }))
-        : [emptyRow()]
+        : []
       setRows(list)
+      setLineEditor(null)
       setAnomalyReport(null)
       setSuccess(
         `Ordine n. ${orderDisplayNum(o)} ripreso come nuovo (data ${formatDateIt(todayIso())}, in sospeso). Modifica le righe e salva per creare un ordine distinto.`,
@@ -674,6 +823,11 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Aggiungi almeno un prodotto con descrizione')
       return
     }
+    const blocked = payload.items.find((item) => !isProductAllowedForSupplier(selectedSupplier, item.product_description))
+    if (blocked) {
+      showSupplierProductBlock(blocked.product_description)
+      return
+    }
     const check = await runAnomalyCheck(payload)
     if (check?.has_anomalies && check?.severity === 'medium') {
       const ok = window.confirm(
@@ -711,7 +865,8 @@ export default function NewOrderPage({ operatorMode = false }) {
       setOrderNote('')
       setOrderNoteInternal('')
       setExpectedDeliveryDate('')
-      setRows([emptyRow()])
+      setRows([])
+      setLineEditor(null)
       setAnomalyReport(null)
       await refreshRecentOrders()
     } catch {
@@ -914,6 +1069,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           items: payload.items.map((it) => ({
             product_description: it.product_description,
             weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
+            volume_liters: it.volume_liters != null && it.volume_liters !== '' ? String(it.volume_liters) : '',
             pieces: it.pieces != null ? String(it.pieces) : '',
             unit_price: '',
             note: it.note || '',
@@ -958,10 +1114,12 @@ export default function NewOrderPage({ operatorMode = false }) {
             product_description: it.product_description || '',
             pieces: it.pieces != null ? String(it.pieces) : '',
             weight_kg: it.weight_kg != null && it.weight_kg !== '' ? String(it.weight_kg) : '',
+            volume_liters: it.volume_liters != null && it.volume_liters !== '' ? String(it.volume_liters) : '',
             note: it.note || '',
           }))
-        : [emptyRow()]
+        : []
       setRows(list)
+      setLineEditor(null)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch {
       setError('Impossibile caricare l’ordine')
@@ -1012,22 +1170,6 @@ export default function NewOrderPage({ operatorMode = false }) {
 
   const waPreview = buildWhatsAppMessage()
 
-  async function copyOperatorLink() {
-    const url = operatorOrderUrl
-    try {
-      await navigator.clipboard.writeText(url)
-    } catch {
-      const el = document.createElement('textarea')
-      el.value = url
-      document.body.appendChild(el)
-      el.select()
-      document.execCommand('copy')
-      document.body.removeChild(el)
-    }
-    setOperatorLinkCopied(true)
-    window.setTimeout(() => setOperatorLinkCopied(false), 2500)
-  }
-
   return (
     <div>
       <section className="staff-page-hero">
@@ -1050,39 +1192,6 @@ export default function NewOrderPage({ operatorMode = false }) {
         )}
       </p>
       </section>
-
-      {!operatorMode && (
-        <section className="card operator-link-card" style={{ marginBottom: '1rem' }}>
-          <h2 className="page-subheader" style={{ marginTop: 0, fontSize: '1.05rem' }}>
-            Link operatore (solo nuovo ordine)
-          </h2>
-          <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            Condividi questo indirizzo con chi deve <strong>solo compilare ordini</strong>: vede la stessa pagina Nuovo ordine,
-            senza menu Home, consegne, fatture ecc. Gli ordini salvati compaiono nel gestionale completo.
-          </p>
-          <div className="operator-link-row">
-            <input
-              type="text"
-              className="form-control"
-              readOnly
-              value={operatorOrderUrl}
-              aria-label="Link pagina operatore"
-              onFocus={(e) => e.target.select()}
-            />
-            <button type="button" className="btn btn-primary" onClick={() => copyOperatorLink()}>
-              {operatorLinkCopied ? 'Copiato' : 'Copia link'}
-            </button>
-            <a
-              href={operatorOrderUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-secondary"
-            >
-              Apri
-            </a>
-          </div>
-        </section>
-      )}
 
       {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -1267,122 +1376,241 @@ export default function NewOrderPage({ operatorMode = false }) {
           <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
             Prodotti da ordinare
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '-0.35rem', marginBottom: '0.5rem' }}>
-            Ogni prodotto = <strong>una riga</strong>. <strong>Prodotto</strong> solo il nome (es. arance);{' '}
-            <strong>Pezzi</strong> solo il numero (es. 10); <strong>Kg</strong> solo il peso (es. 5).
-            Anche a voce: «arance 10 pezzi», «arance kg 5», «5 kg pasta».
-            Con voce/AI le righe si <strong>aggiungono</strong> a quelle già presenti. Listino = prezzo promemoria dal prezzario.
-          </p>
+          {!supplierId && (
+            <p className="alert alert-warning" style={{ fontSize: '0.85rem', marginBottom: '0.65rem' }}>
+              Scegli un fornitore per abilitare i pulsanti prodotti.
+            </p>
+          )}
+          <div className="order-product-grid" role="group" aria-label="Prodotti rapidi">
+            {ORDER_QUICK_PRODUCTS.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className={quickProductBtnClassName(item.label, { choice: Boolean(item.variants?.length) })}
+                disabled={!supplierId || saving}
+                onClick={() => handleQuickProductClick(item)}
+                title={
+                  item.variants?.length
+                    ? `Scegli tipo di ${item.label.toLowerCase()}`
+                    : `Aggiungi ${item.label} all'ordine`
+                }
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {productChoice && (
+            <div className="staff-report-modal-backdrop" role="presentation" onClick={closeProductChoice}>
+              <div
+                className="card staff-report-modal order-product-choice-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="order-product-choice-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="order-product-choice-title" className="page-subheader" style={{ marginTop: 0 }}>
+                  Scegli {productChoice.title.toLowerCase()}
+                </h3>
+                <div className="order-product-choice-grid" role="group" aria-label={`Varianti ${productChoice.title}`}>
+                  {productChoice.options.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={quickProductBtnClassName(productChoice.title, { extra: 'order-product-choice-option' })}
+                      onClick={() => pickProductVariant(option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ marginTop: '1rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={closeProductChoice}>
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {supplierProductBlock && (
+            <div
+              className="staff-report-modal-backdrop"
+              role="presentation"
+              onClick={() => setSupplierProductBlock(null)}
+            >
+              <div
+                className="card staff-report-modal order-product-choice-modal"
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="supplier-product-block-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="supplier-product-block-title" className="page-subheader" style={{ marginTop: 0 }}>
+                  Prodotto non consentito
+                </h3>
+                <p style={{ margin: '0.5rem 0 0', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {supplierProductBlock.message}
+                  {supplierProductBlock.supplier ? (
+                    <>
+                      <br />
+                      Fornitore: <strong>{supplierProductBlock.supplier}</strong>
+                    </>
+                  ) : null}
+                  {supplierProductBlock.product ? (
+                    <>
+                      <br />
+                      Prodotto: <strong>{supplierProductBlock.product}</strong>
+                    </>
+                  ) : null}
+                </p>
+                <div style={{ marginTop: '1rem' }}>
+                  <button type="button" className="btn btn-primary" onClick={() => setSupplierProductBlock(null)}>
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {priceListLoading && supplierId && (
             <p className="loading" style={{ fontSize: '0.85rem' }}>
               Caricamento listino fornitore…
             </p>
           )}
-          <div className="table-wrap" style={{ marginBottom: '1rem' }}>
-            <table className="app-table">
-              <thead>
-                <tr>
-                  <th>Prodotto</th>
-                  <th
-                    style={{ minWidth: 100 }}
-                    title="Prezzo unitario dal prezzario fornitore quando la descrizione coincide (anche senza distinzione maiuscole/minuscole)."
+          <WorkbookGrid
+            title={ORDER_MERCHANDISE_WORKBOOK_TITLE}
+            sheetLabel={`${filledRows.length} prodotti`}
+            columns={ORDER_MERCHANDISE_COLUMNS}
+            rows={merchandiseLines}
+            cellValue={(row, column, ctx) => {
+              const listino = orderMerchandiseListinoMeta(priceList, row.product_description)
+              return orderMerchandiseCellValue(row, column, {
+                ...ctx,
+                listinoText: listino.text,
+              })
+            }}
+            totalsLabel={orderMerchandiseTotalsLabel}
+            totals={merchandiseWorkbookTotals}
+            gridClassName="order-merchandise-grid"
+            emptyMessage="Nessun prodotto. Usa i pulsanti sopra o la compilazione a voce / AI."
+            rowKey={(row) => `${row.__sourceIndex}-${row.product_description}`}
+            getRowClassName={(row) =>
+              dupDescriptions.has((row.product_description || '').trim().toLowerCase()) ? 'order-line-row--dup' : ''
+            }
+            getCellTitle={(row, column) =>
+              column.id === 'listino'
+                ? orderMerchandiseListinoMeta(priceList, row.product_description).title
+                : ''
+            }
+            actionsHeader="Azioni"
+            renderActions={(row) => {
+              const desc = (row.product_description || '').trim()
+              const sourceIndex = row.__sourceIndex
+              return (
+                <div className="sup-actions-btns order-line-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => openEditProductLine(sourceIndex)}
+                    title={`Modifica ${desc}`}
                   >
-                    Listino (€/u)
-                  </th>
-                  <th style={{ minWidth: 90 }}>Pezzi</th>
-                  <th style={{ minWidth: 100 }}>Kg</th>
-                  <th style={{ minWidth: 200 }}>Note</th>
-                  <th style={{ minWidth: 200 }}>Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => {
-                  const desc = (row.product_description || '').trim()
-                  const listino = formatListinoCell(priceList, row.product_description)
-                  const isDup = desc && dupDescriptions.has(desc.toLowerCase())
-                  return (
-                    <tr key={index} className={isDup ? 'table-warning' : undefined} style={isDup ? { background: 'rgba(255, 193, 7, 0.12)' } : undefined}>
-                      <td>
-                        <input
-                          id={`order-line-prod-${index}`}
-                          className="form-control"
-                          value={row.product_description}
-                          onChange={(e) => updateRow(index, 'product_description', e.target.value)}
-                          placeholder="es. carciofi, arance"
-                        />
-                      </td>
-                      <td
-                        className="text-end amount"
-                        style={{ fontSize: '0.9rem', color: 'var(--text-muted)', cursor: 'help' }}
-                        title={listino.title}
-                      >
-                        {listino.text}
-                      </td>
-                      <td>
-                        <input
-                          id={`order-line-pcs-${index}`}
-                          type="number"
-                          min="0"
-                          className="form-control"
-                          value={row.pieces}
-                          onChange={(e) => updateRow(index, 'pieces', e.target.value)}
-                          placeholder="opz."
-                        />
-                      </td>
-                      <td>
-                        <input
-                          id={`order-line-kg-${index}`}
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          className="form-control"
-                          value={row.weight_kg}
-                          onChange={(e) => updateRow(index, 'weight_kg', e.target.value)}
-                          placeholder="opz."
-                          title="Peso in chilogrammi (es. 2,5 per ortofrutta sfusa)"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          id={`order-line-note-${index}`}
-                          className="form-control"
-                          value={row.note}
-                          onChange={(e) => updateRow(index, 'note', e.target.value)}
-                          placeholder="opzionale"
-                        />
-                      </td>
-                      <td>
-                        <div className="btn-group" style={{ marginTop: 0 }}>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                            onClick={() => document.getElementById(`order-line-prod-${index}`)?.focus()}
-                            title="Passa alla modifica di questa riga"
-                          >
-                            Modifica
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger"
-                            onClick={() => removeRow(index)}
-                            disabled={rows.length <= 1}
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                          >
-                            Rimuovi
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                    Modifica
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={() => removeProductLine(sourceIndex)}
+                    title={`Elimina ${desc}`}
+                  >
+                    Elimina
+                  </button>
+                </div>
+              )
+            }}
+          />
 
-          <button type="button" className="btn btn-secondary" onClick={addRow} style={{ marginBottom: '1rem' }}>
-            + Aggiungi riga
-          </button>
+          {lineEditor && (
+            <div className="staff-report-modal-backdrop" role="presentation" onClick={closeLineEditor}>
+              <div
+                className="card staff-report-modal order-line-editor-modal"
+                style={{ maxWidth: 480 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="order-line-editor-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="order-line-editor-title" className="page-subheader" style={{ marginTop: 0 }}>
+                  {lineEditor.mode === 'add' ? 'Aggiungi' : 'Modifica'}: {lineEditor.product}
+                </h3>
+                <div className="form-row" style={{ marginBottom: '0.75rem' }}>
+                  <div className="form-group" style={{ flex: '1 1 100px', marginBottom: 0 }}>
+                    <label htmlFor="order-line-editor-pcs">Pezzi</label>
+                    <input
+                      id="order-line-editor-pcs"
+                      type="number"
+                      min="0"
+                      className="form-control"
+                      value={lineEditor.pieces}
+                      onChange={(e) => updateLineEditorField('pieces', e.target.value)}
+                      placeholder="opz."
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group" style={{ flex: '1 1 100px', marginBottom: 0 }}>
+                    <label htmlFor="order-line-editor-kg">Kg</label>
+                    <input
+                      id="order-line-editor-kg"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      className="form-control"
+                      value={lineEditor.weight_kg}
+                      onChange={(e) => updateLineEditorField('weight_kg', e.target.value)}
+                      placeholder="opz."
+                    />
+                  </div>
+                  <div className="form-group" style={{ flex: '1 1 100px', marginBottom: 0 }}>
+                    <label htmlFor="order-line-editor-lit">Litri</label>
+                    <input
+                      id="order-line-editor-lit"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      className="form-control"
+                      value={lineEditor.volume_liters}
+                      onChange={(e) => updateLineEditorField('volume_liters', e.target.value)}
+                      placeholder="opz."
+                      title="Volume in litri (es. bottiglie, bibite, vino alla spina)"
+                    />
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label htmlFor="order-line-editor-note">Note</label>
+                  <input
+                    id="order-line-editor-note"
+                    className="form-control"
+                    value={lineEditor.note}
+                    onChange={(e) => updateLineEditorField('note', e.target.value)}
+                    placeholder="opzionale"
+                  />
+                </div>
+                <div className="btn-group" style={{ flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-primary" onClick={saveLineEditor}>
+                    {lineEditor.mode === 'add' ? 'Aggiungi' : 'Salva modifiche'}
+                  </button>
+                  {lineEditor.mode === 'edit' && (
+                    <button type="button" className="btn btn-outline-danger" onClick={removeLineFromEditor}>
+                      Rimuovi
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-secondary" onClick={closeLineEditor}>
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="form-row" style={{ alignItems: 'stretch', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
             <div className="form-group" style={{ flex: '1 1 320px', minWidth: 280, marginBottom: 0 }}>
@@ -1537,36 +1765,15 @@ export default function NewOrderPage({ operatorMode = false }) {
       </section>
 
       {supplierId && (
-        <section className="card">
-          <h2 className="page-subheader" style={{ marginTop: 0 }}>
-            Storico ordini (stesso fornitore)
-          </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.75rem' }}>
-            Dal nome fornitore puoi aprire una <strong>chat WhatsApp</strong>; da Azioni invii il <strong>testo dell’ordine</strong> salvato o apri il{' '}
-            <strong>PDF</strong>. <strong>Nuovo da questo</strong> copia l’ordine nel modulo come bozza nuova;{' '}
-            <strong>Modifica</strong> cambia l’ordine salvato. Destinazione: campo nell&apos;ordine sopra o in{' '}
-            <strong>Nuova consegna</strong>.{' '}
-            &quot;Stampa elenco&quot; per PDF dello storico filtrato.
-          </p>
-          <div className="form-row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>
-            <div className="form-group">
-              <label>Filtra per mese (data ordine)</label>
-              <input type="month" className="form-control" value={historyMonth} onChange={(e) => setHistoryMonth(e.target.value)} />
+        <section className="card pagamenti-workbook-card suppliers-workbook-card">
+          <div className="pagamenti-workbook-toolbar">
+            <div className="pagamenti-workbook-toolbar-left">
+              <span className="pagamenti-workbook-title">{ORDER_HISTORY_WORKBOOK_TITLE}</span>
+              <span className="pagamenti-workbook-sheet-label">
+                {recentOrders.length} ordini
+              </span>
             </div>
-            <div className="form-group">
-              <label>Stato</label>
-              <select className="form-control" value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)} style={{ maxWidth: 200 }}>
-                <option value="">Tutti</option>
-                <option value="pending">In sospeso</option>
-                <option value="sent">Inviato</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setHistoryMonth(''); setHistoryStatus('') }}>
-                Reset filtri
-              </button>
-            </div>
-            <div className="form-group">
+            <div className="pagamenti-workbook-actions">
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -1576,9 +1783,7 @@ export default function NewOrderPage({ operatorMode = false }) {
               >
                 Stampa / PDF elenco
               </button>
-            </div>
-            {!operatorMode && (
-              <div className="form-group">
+              {!operatorMode && (
                 <button
                   type="button"
                   className="btn btn-outline-danger btn-sm"
@@ -1586,111 +1791,105 @@ export default function NewOrderPage({ operatorMode = false }) {
                   onClick={handleDeleteAllOrders}
                   title="Elimina tutti gli ordini del fornitore selezionato"
                 >
-                  {deletingAllOrders ? 'Eliminazione...' : 'Elimina tutto lo storico (fornitore)'}
+                  {deletingAllOrders ? 'Eliminazione...' : 'Elimina tutto lo storico'}
                 </button>
-              </div>
-            )}
-          </div>
-          {recentOrders.length === 0 ? (
-            <p className="empty-state">Nessun ordine con i filtri attuali.</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="app-table app-table--compact">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th className="text-end" style={{ whiteSpace: 'nowrap' }}>N.</th>
-                    <th>Consegna prev.</th>
-                    <th>Firma ordine</th>
-                    <th>Fornitore / WhatsApp</th>
-                    <th>Descrizione merce</th>
-                    <th>Stato</th>
-                    <th className="text-end">Azioni</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentOrders.map((o) => {
-                    const supplierChatUrl = whatsappUrlForSupplierChat(o.supplier_id)
-                    return (
-                      <tr key={o.id}>
-                        <td>{formatDateIt(o.order_date)}</td>
-                        <td className="text-end" style={{ fontWeight: 600 }}>{orderDisplayNum(o)}</td>
-                        <td>{o.expected_delivery_date ? formatDateIt(o.expected_delivery_date) : '—'}</td>
-                        <td>{o.order_signed_by || '—'}</td>
-                        <td>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem' }}>
-                            <span>{o.supplier_name || supplierLabel || '—'}</span>
-                            {supplierChatUrl ? (
-                              <a
-                                href={supplierChatUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="btn btn-whatsapp"
-                                style={{ padding: '0.2rem 0.45rem', fontSize: '0.75rem', textDecoration: 'none', lineHeight: 1.2 }}
-                                title="Apri chat WhatsApp con il fornitore"
-                              >
-                                Chat
-                              </a>
-                            ) : (
-                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }} title="Aggiungi il cellulare in Fornitori">
-                                —
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td title={o.merchandise_summary || ''}>{truncate(o.merchandise_summary, 56)}</td>
-                        <td>{statusLabel(o.status)}</td>
-                        <td className="text-end" style={{ whiteSpace: 'nowrap' }}>
-                          <button
-                            type="button"
-                            className="btn btn-whatsapp"
-                            style={{ padding: '0.35rem 0.55rem', fontSize: '0.8rem', marginRight: '0.3rem' }}
-                            onClick={() => handleWhatsAppSavedOrder(o)}
-                            title="Invia testo ordine su WhatsApp"
-                          >
-                            Ordine WA
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', marginRight: '0.35rem' }}
-                            onClick={() => handleOpenPdf(o.id)}
-                          >
-                            PDF
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', marginRight: '0.35rem' }}
-                            onClick={() => handleLoadOrderAsNew(o.id)}
-                            title="Copia questo ordine nel modulo sopra come nuovo (data odierna); la numerazione interna resta in archivio finché non salvi un nuovo ordine"
-                          >
-                            Nuovo da questo
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', marginRight: '0.35rem' }}
-                            onClick={() => handleEditOrder(o)}
-                          >
-                            Modifica
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger"
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                            onClick={() => handleDeleteOrder(o)}
-                          >
-                            Elimina
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              )}
             </div>
-          )}
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 1rem 0.75rem' }}>
+            Dal fornitore puoi aprire la chat WhatsApp; da Azioni invii il testo dell&apos;ordine o apri il PDF.
+            <strong> Nuovo da questo</strong> copia l&apos;ordine nel modulo; <strong>Modifica</strong> aggiorna l&apos;ordine salvato.
+          </p>
+          <div className="form-row" style={{ margin: '0 1rem 0.75rem', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>Filtra per mese (data ordine)</label>
+              <input type="month" className="form-control" value={historyMonth} onChange={(e) => setHistoryMonth(e.target.value)} />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>Stato</label>
+              <select className="form-control" value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)} style={{ maxWidth: 200 }}>
+                <option value="">Tutti</option>
+                <option value="pending">In sospeso</option>
+                <option value="sent">Inviato</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setHistoryMonth(''); setHistoryStatus('') }}>
+                Reset filtri
+              </button>
+            </div>
+          </div>
+          <WorkbookGrid
+            title={ORDER_HISTORY_WORKBOOK_TITLE}
+            sheetLabel={`${recentOrders.length} righe`}
+            columns={ORDER_HISTORY_COLUMNS}
+            rows={recentOrders}
+            cellValue={(order, column, ctx) =>
+              orderHistoryCellValue(order, column, { ...ctx, supplierLabel })
+            }
+            gridClassName="order-history-grid"
+            emptyMessage="Nessun ordine con i filtri attuali."
+            rowKey={(order) => String(order.id)}
+            getCellTitle={(order, column) =>
+              column.id === 'merchandise_summary' ? String(order.merchandise_summary || '') : ''
+            }
+            actionsHeader="Azioni"
+            renderActions={(order) => {
+              const supplierChatUrl = whatsappUrlForSupplierChat(order.supplier_id)
+              return (
+                <div className="sup-actions-btns order-line-actions" onClick={(e) => e.stopPropagation()}>
+                  {supplierChatUrl ? (
+                    <a
+                      href={supplierChatUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-whatsapp btn-sm"
+                      title="Apri chat WhatsApp con il fornitore"
+                    >
+                      Chat
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-whatsapp btn-sm"
+                    onClick={() => handleWhatsAppSavedOrder(order)}
+                    title="Invia testo ordine su WhatsApp"
+                  >
+                    Ordine WA
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleOpenPdf(order.id)}
+                  >
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleLoadOrderAsNew(order.id)}
+                    title="Copia questo ordine nel modulo sopra come nuovo"
+                  >
+                    Nuovo
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleEditOrder(order)}
+                  >
+                    Modifica
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={() => handleDeleteOrder(order)}
+                  >
+                    Elimina
+                  </button>
+                </div>
+              )
+            }}
+          />
         </section>
       )}
     </div>

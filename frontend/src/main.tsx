@@ -8,11 +8,15 @@ import { pathnameToPage, pageToPath, VALID_PAGES, type PageKey } from './appPath
 import HomePage from './pages/HomePage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
+import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import InvoicesPage from './pages/InvoicesPage.jsx'
+import PagamentiPage from './pages/PagamentiPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
+import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
+import OperatorLinksPage from './pages/OperatorLinksPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
@@ -20,6 +24,7 @@ import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
 import PwaInstallPrompt from './components/PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './components/AtlasUpdateButton.jsx'
+import AppNavDropdown from './components/AppNavDropdown.tsx'
 import { OfflineProvider, useOffline } from './offline/OfflineContext.jsx'
 import { PwaUpdateProvider } from './pwa/PwaUpdateContext.jsx'
 import OperatorOrderApp from './OperatorOrderApp.tsx'
@@ -198,12 +203,15 @@ function App() {
     suppliers: 'fornitori',
     'new-order': 'ordini',
     'new-delivery': 'consegne',
+    magazzino: 'magazzino',
     history: 'consegne',
     invoices: 'fatture',
+    pagamenti: 'pagamenti',
     'prima-nota': 'prima-nota',
     staff: 'personale',
+    'staff-report': 'report personale',
+    'staff-operator-links': 'link operatori',
     'support-tech': 'assistenza-tecnici',
-    vne: 'vne',
   }
 
   async function runAi(promptOverride?: string) {
@@ -338,6 +346,10 @@ function App() {
         'Che controlli fare prima di registrare una consegna?',
         'Dammi checklist rapida nuova consegna',
       ],
+      magazzino: [
+        'Come registro un prelievo merce dal magazzino?',
+        'Quali campi servono per entrata e uscita magazzino?',
+      ],
       history: [
         'Come trovo consegne anomale rapidamente?',
         'Quali filtri usare per analizzare il mese?',
@@ -346,18 +358,26 @@ function App() {
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
       ],
+      pagamenti: [
+        'Come leggo il foglio pagamenti fornitori?',
+        'Dove trovo i totali mensili da pagare?',
+      ],
       'prima-nota': [
         'Filtra solo uscite e aiutami a trovare anomalie',
         'Compila movimento da comando testuale',
       ],
       staff: ['Come organizzo i turni su più settimane?', 'Che differenza c’è tra permesso e assenza in pianificazione?'],
+      'staff-report': [
+        'Come stampo il report personale del mese?',
+        'Dove trovo il riepilogo ore per dipendente?',
+      ],
+      'staff-operator-links': [
+        'Quale link devo dare all’operatore per gli ordini?',
+        'Differenza tra postazione operativa e solo Prima Nota',
+      ],
       'support-tech': [
         'Come registro un intervento completato assistenza?',
         'Differenza tra voce pianificata e lavoro svolto?',
-      ],
-      vne: [
-        'Mostra stato cassa automatica in tempo reale',
-        'Filtra operazioni VNE per data e utente',
       ],
     }
     return map[page] || []
@@ -614,11 +634,29 @@ function App() {
             <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Home</NavLink>
             <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fornitori</NavLink>
             <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuovo ordine</NavLink>
-            <NavLink to="/new-delivery" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuova consegna</NavLink>
+            <AppNavDropdown
+              label="Nuova consegna"
+              to="/new-delivery"
+              items={[{ to: '/magazzino', label: 'Magazzino' }]}
+              onNavigate={() => setNavOpen(false)}
+            />
             <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
-            <NavLink to="/invoices" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fatture fornitori</NavLink>
+            <AppNavDropdown
+              label="Fatture fornitori"
+              to="/invoices"
+              items={[{ to: '/pagamenti', label: 'Pagamenti' }]}
+              onNavigate={() => setNavOpen(false)}
+            />
             <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Prima Nota Cassa</NavLink>
-            <NavLink to="/staff" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Personale</NavLink>
+            <AppNavDropdown
+              label="Personale"
+              to="/staff"
+              items={[
+                { to: '/staff/report', label: 'Report personale' },
+                { to: '/staff/link-operatori', label: 'Link operatori' },
+              ]}
+              onNavigate={() => setNavOpen(false)}
+            />
             <NavLink to="/support-tech" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Assistenza tecnici</NavLink>
             <NavLink to="/vne" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>VNE</NavLink>
           </div>
@@ -675,9 +713,13 @@ function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/new-order" element={<NewOrderPage />} />
           <Route path="/new-delivery" element={<NewDeliveryPage />} />
+          <Route path="/magazzino" element={<MagazzinoPage />} />
           <Route path="/history" element={<DeliveriesHistoryPage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
+          <Route path="/pagamenti" element={<PagamentiPage />} />
           <Route path="/prima-nota" element={<PrimaNotaPage />} />
+          <Route path="/staff/report" element={<ReportPersonalePage />} />
+          <Route path="/staff/link-operatori" element={<OperatorLinksPage />} />
           <Route path="/staff" element={<StaffPage />} />
           <Route path="/support-tech" element={<SupportTechniciansPage />} />
           <Route path="/vne" element={<VnePage />} />

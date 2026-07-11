@@ -57,12 +57,17 @@ class VneModelConfig:
     id: str
     label: str
     status_url: Optional[str]
+    machine_url: Optional[str] = None
     sel_operazioni_url: Optional[str] = None
     operazioni_url: Optional[str] = None
     sel_chiusure_url: Optional[str] = None
     chiusure_url: Optional[str] = None
     contabilita_url: Optional[str] = None
     referer_url: Optional[str] = None
+    model_code: Optional[str] = None
+    sala: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
 
 
 class VneModelOut(BaseModel):
@@ -212,8 +217,160 @@ class VneHealthOut(BaseModel):
     models: List[VneHealthModelOut]
 
 
+class VneMachineOverviewRow(BaseModel):
+    model_id: str
+    machine_name: str
+    model_code: Optional[str] = None
+    sala: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
+    alarm: str = "—"
+    levels: str = "—"
+    online: str = "Offline"
+    detail: Optional[str] = None
+    totale_eur: Optional[float] = None
+    banconote_eur: Optional[float] = None
+    monete_eur: Optional[float] = None
+
+
+class VneMachinesOverviewOut(BaseModel):
+    rows: List[VneMachineOverviewRow]
+    updated_at: Optional[str] = None
+
+
 def _env(name: str, default: str = "") -> str:
     return (os.getenv(name, default) or "").strip()
+
+
+def _env_model_meta(model_index: int, field: str, default: str = "") -> str:
+    return _env(f"VNE_MODEL_{model_index}_{field.upper()}", default)
+
+
+def _model_code_for(model: VneModelConfig) -> Optional[str]:
+    if model.model_code:
+        return model.model_code
+    return _virtuo_id_from_url(model.machine_url)
+
+
+def _format_eur_it(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _summarize_vne_alarm(html: str, reachable: bool, accettatore: VneAccettatoreStatus, hopper: VneHopperStatus) -> str:
+    if not reachable:
+        if _is_vne_connection_error(html):
+            return "Connessione assente"
+        if _is_machine_blocked(html):
+            return "Macchina non accessibile"
+        return "Offline"
+    alarms: List[str] = []
+    err = (accettatore.errore or "").strip()
+    if err and err.lower() not in {"no", "none", "0", "ok", "—", "-"}:
+        alarms.append(f"Accettatore: {err}")
+    for unit in hopper.units or []:
+        unit_err = (unit.errore or "").strip()
+        if unit_err and unit_err.lower() not in {"no", "none", "0", "ok", "—", "-"}:
+            alarms.append(f"Hopper {unit.hopper}: {unit_err}")
+        if (unit.vuoto or "").strip().lower() in {"si", "sì", "yes", "1"}:
+            alarms.append(f"Hopper {unit.hopper} vuoto")
+    return " · ".join(alarms) if alarms else "OK"
+
+
+def _summarize_vne_levels(
+    *,
+    totale: Optional[float],
+    banconote: Optional[float],
+    monete: Optional[float],
+    hopper: VneHopperStatus,
+    reachable: bool,
+) -> str:
+    if not reachable:
+        return "—"
+    parts: List[str] = []
+    if totale is not None:
+        parts.append(f"Tot {_format_eur_it(totale)} €")
+    if banconote is not None:
+        parts.append(f"Ban {_format_eur_it(banconote)} €")
+    if monete is not None:
+        parts.append(f"Mon {_format_eur_it(monete)} €")
+    if hopper.smart_hopper_1_eur:
+        parts.append(f"Hopper {hopper.smart_hopper_1_eur} €")
+    return " · ".join(parts) if parts else "—"
+
+
+def _machine_overview_row(
+    model: VneModelConfig,
+    html: str,
+    *,
+    reachable: bool,
+    detail: str,
+    lista_entry: Optional[Dict[str, object]] = None,
+    lista_loaded: bool = False,
+) -> VneMachineOverviewRow:
+    hopper = _parse_hopper(html) if reachable else VneHopperStatus()
+    accettatore = _parse_accettatore(html) if reachable else VneAccettatoreStatus()
+    banconote = (
+        _extract_first_number(
+            html,
+            [r"Banconote:\s*([0-9.,]+)\s*&euro;", r"Banconote:\s*([0-9.,]+)\s*€"],
+        )
+        if reachable
+        else None
+    )
+    monete = (
+        _extract_first_number(
+            html,
+            [r"Monete:\s*([0-9.,]+)\s*&euro;", r"Monete:\s*([0-9.,]+)\s*€"],
+        )
+        if reachable
+        else None
+    )
+    totale = (
+        _extract_first_number(
+            html,
+            [
+                r"Totale:\s*([0-9.,]+)\s*&euro;",
+                r"Totale:\s*([0-9.,]+)\s*€",
+                r"Totale\s+IN\s*:\s*([0-9.,]+)\s*&euro;",
+            ],
+        )
+        if reachable
+        else None
+    )
+    lista_sala = (lista_entry.get("sala") if lista_entry else None)
+    lista_city = (lista_entry.get("city") if lista_entry else None)
+    lista_region = (lista_entry.get("region") if lista_entry else None)
+    return VneMachineOverviewRow(
+        model_id=model.id,
+        machine_name=model.label,
+        model_code=_model_code_for(model),
+        sala=_overview_field_from_lista(model.sala, lista_sala),
+        city=_overview_field_from_lista(model.city, lista_city),
+        region=_overview_field_from_lista(model.region, lista_region),
+        alarm=_summarize_vne_alarm(html, reachable, accettatore, hopper),
+        levels=_summarize_vne_levels(
+            totale=totale,
+            banconote=banconote,
+            monete=monete,
+            hopper=hopper,
+            reachable=reachable,
+        ),
+        online=_online_label_for_overview(
+            lista_entry=lista_entry,
+            lista_loaded=lista_loaded,
+            reachable=reachable,
+        ),
+        detail=detail or None,
+        totale_eur=totale,
+        banconote_eur=banconote,
+        monete_eur=monete,
+    )
 
 
 def _env_url(name: str, default: str = "") -> str:
@@ -247,33 +404,130 @@ def _is_ssl_protocol_error(exc: Exception) -> bool:
     return "unsupported protocol" in msg or "wrong version number" in msg or "ssl" in msg and "protocol" in msg
 
 
+_VIRTUO_SUPERvLT_FALLBACK: Dict[str, str] = {
+    "VIRTUO20221721": "33/220",  # La Risacca (override con VNE_MODEL_1_STATUS_URL se diverso)
+    "VIRTUO20221720": "22/25",  # Mani in Pasta
+    "VIRTUO20221707": "27/234",  # Le Mucche Volanti
+}
+
+
+def _is_virtuo_machine_url(url: Optional[str]) -> bool:
+    return "/vne/virtuo" in (url or "").lower()
+
+
+def _virtuo_id_from_url(url: Optional[str]) -> Optional[str]:
+    m = re.search(r"/vne/(VIRTUO\d+)/?", url or "", flags=re.IGNORECASE)
+    return m.group(1).upper() if m else None
+
+
+def _is_vne_connection_error(html: str, url: str = "") -> bool:
+    low = f"{html or ''} {url or ''}".lower()
+    return "paginaerrore/connessione" in low
+
+
+def _discover_supervlt_path_pair(html: str, *extra_urls: str) -> Optional[str]:
+    corpus = "\n".join([html or ""] + [u or "" for u in extra_urls])
+    for pattern in (
+        r"(?:https?://[^\"'\s<>]+)?/(\d+/\d+)/supervlt/",
+        r"['\"](/(\d+/\d+)/supervlt/?)['\"]",
+    ):
+        m = re.search(pattern, corpus, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _supervlt_urls_from_virtuo_machine(machine_url: Optional[str]) -> Dict[str, str]:
+    pair = _VIRTUO_SUPERvLT_FALLBACK.get(_virtuo_id_from_url(machine_url) or "")
+    if not pair:
+        return {}
+    return _supervlt_urls_from_status(f"http://vneremote.com/{pair}/supervlt/stato")
+
+
+def _supervlt_urls_from_status(status_url: Optional[str]) -> Dict[str, str]:
+    """Deriva gli URL supervlt dal path .../supervlt/stato (es. /27/234/)."""
+    url = (status_url or "").strip()
+    if not url:
+        return {}
+    parsed = urllib.parse.urlparse(url)
+    path = parsed.path or ""
+    marker = "/supervlt/"
+    idx = path.lower().find(marker)
+    if idx < 0:
+        return {}
+    base_path = path[: idx + len(marker)].rstrip("/")
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+    if not origin:
+        return {}
+    base = f"{origin}{base_path}"
+    return {
+        "status_url": f"{base}/stato",
+        "sel_operazioni_url": f"{base}/sel_operazioni",
+        "operazioni_url": f"{base}/operazioni/",
+        "sel_chiusure_url": f"{base}/sel_chiusure",
+        "chiusure_url": f"{base}/chiusure/",
+        "contabilita_url": f"{base}/contabilita",
+        "referer_url": f"{base}/?param=NO",
+    }
+
+
+def _complete_model_config(model: VneModelConfig) -> VneModelConfig:
+    derived: Dict[str, str] = {}
+    if model.status_url and "/supervlt/" in model.status_url.lower():
+        derived = _supervlt_urls_from_status(model.status_url)
+    elif model.machine_url:
+        derived = _supervlt_urls_from_virtuo_machine(model.machine_url)
+    if not derived:
+        return model
+    return VneModelConfig(
+        id=model.id,
+        label=model.label,
+        machine_url=model.machine_url,
+        status_url=model.status_url or derived.get("status_url"),
+        sel_operazioni_url=model.sel_operazioni_url or derived.get("sel_operazioni_url"),
+        operazioni_url=model.operazioni_url or derived.get("operazioni_url"),
+        sel_chiusure_url=model.sel_chiusure_url or derived.get("sel_chiusure_url"),
+        chiusure_url=model.chiusure_url or derived.get("chiusure_url"),
+        contabilita_url=model.contabilita_url or derived.get("contabilita_url"),
+        referer_url=model.referer_url or derived.get("referer_url"),
+        model_code=model.model_code,
+        sala=model.sala,
+        city=model.city,
+        region=model.region,
+    )
+
+
 def _models() -> List[VneModelConfig]:
     """Tre slot modelli VNE (1 configurato, 2-3 pronti)."""
-    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "http://vneremote.com/20/101/supervlt/stato")
-    m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "http://vneremote.com/20/101/supervlt/sel_operazioni")
-    m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "http://vneremote.com/20/101/supervlt/operazioni/")
-    m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "http://vneremote.com/20/101/supervlt/sel_chiusure")
-    m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "http://vneremote.com/20/101/supervlt/chiusure/")
-    m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "http://vneremote.com/20/101/supervlt/contabilita")
-    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "http://vneremote.com/20/101/supervlt/?param=NO")
-    m2 = _env_url("VNE_MODEL_2_STATUS_URL", "http://vneremote.com/34/92/supervlt/stato")
-    m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "http://vneremote.com/34/92/supervlt/sel_operazioni")
-    m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "http://vneremote.com/34/92/supervlt/operazioni/")
-    m2_sel_chiusure = _env_url("VNE_MODEL_2_SEL_CHIUSURE_URL", "http://vneremote.com/34/92/supervlt/sel_chiusure")
-    m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "http://vneremote.com/34/92/supervlt/chiusure/")
-    m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "http://vneremote.com/34/92/supervlt/contabilita")
-    m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "http://vneremote.com/34/92/supervlt/?param=NO")
-    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/33/220/supervlt/stato")
-    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "http://vneremote.com/33/220/supervlt/sel_operazioni")
-    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "http://vneremote.com/33/220/supervlt/operazioni/")
-    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/sel_chiusure")
-    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "http://vneremote.com/33/220/supervlt/chiusure/")
-    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "http://vneremote.com/33/220/supervlt/contabilita")
-    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/33/220/supervlt/?param=NO")
-    return [
+    m1_machine = _env_url("VNE_MODEL_1_MACHINE_URL", "http://www.vneremote.com/vne/VIRTUO20221721/")
+    m1 = _env_url("VNE_MODEL_1_STATUS_URL", "")
+    m1_sel_ops = _env_url("VNE_MODEL_1_SEL_OPERAZIONI_URL", "")
+    m1_ops = _env_url("VNE_MODEL_1_OPERAZIONI_URL", "")
+    m1_sel_chiusure = _env_url("VNE_MODEL_1_SEL_CHIUSURE_URL", "")
+    m1_chiusure = _env_url("VNE_MODEL_1_CHIUSURE_URL", "")
+    m1_contabilita = _env_url("VNE_MODEL_1_CONTABILITA_URL", "")
+    m1_ref = _env_url("VNE_MODEL_1_REFERER_URL", "")
+    m2_machine = _env_url("VNE_MODEL_2_MACHINE_URL", "http://www.vneremote.com/vne/VIRTUO20221720/")
+    m2 = _env_url("VNE_MODEL_2_STATUS_URL", "")
+    m2_sel_ops = _env_url("VNE_MODEL_2_SEL_OPERAZIONI_URL", "")
+    m2_ops = _env_url("VNE_MODEL_2_OPERAZIONI_URL", "")
+    m2_sel_chiusure = _env_url("VNE_MODEL_2_SEL_CHIUSURE_URL", "")
+    m2_chiusure = _env_url("VNE_MODEL_2_CHIUSURE_URL", "")
+    m2_contabilita = _env_url("VNE_MODEL_2_CONTABILITA_URL", "")
+    m2_ref = _env_url("VNE_MODEL_2_REFERER_URL", "")
+    m3_machine = _env_url("VNE_MODEL_3_MACHINE_URL", "http://www.vneremote.com/vne/VIRTUO20221707/")
+    m3 = _env_url("VNE_MODEL_3_STATUS_URL", "http://vneremote.com/27/234/supervlt/stato")
+    m3_sel_ops = _env_url("VNE_MODEL_3_SEL_OPERAZIONI_URL", "")
+    m3_ops = _env_url("VNE_MODEL_3_OPERAZIONI_URL", "")
+    m3_sel_chiusure = _env_url("VNE_MODEL_3_SEL_CHIUSURE_URL", "")
+    m3_chiusure = _env_url("VNE_MODEL_3_CHIUSURE_URL", "")
+    m3_contabilita = _env_url("VNE_MODEL_3_CONTABILITA_URL", "")
+    m3_ref = _env_url("VNE_MODEL_3_REFERER_URL", "http://vneremote.com/27/234/supervlt/?param=NO")
+    raw = [
         VneModelConfig(
             id="model-1",
             label="La Risacca",
+            machine_url=m1_machine or None,
             status_url=m1 or None,
             sel_operazioni_url=m1_sel_ops or None,
             operazioni_url=m1_ops or None,
@@ -281,10 +535,15 @@ def _models() -> List[VneModelConfig]:
             chiusure_url=m1_chiusure or None,
             contabilita_url=m1_contabilita or None,
             referer_url=m1_ref or None,
+            model_code=_env_model_meta(1, "MODEL_CODE", "VIRTUO20221721"),
+            sala=_env_model_meta(1, "SALA", "Bar Momento"),
+            city=_env_model_meta(1, "CITY", "Viareggio"),
+            region=_env_model_meta(1, "REGION", "Toscana"),
         ),
         VneModelConfig(
             id="model-2",
             label="Mani in Pasta",
+            machine_url=m2_machine or None,
             status_url=m2 or None,
             sel_operazioni_url=m2_sel_ops or None,
             operazioni_url=m2_ops or None,
@@ -292,10 +551,15 @@ def _models() -> List[VneModelConfig]:
             chiusure_url=m2_chiusure or None,
             contabilita_url=m2_contabilita or None,
             referer_url=m2_ref or None,
+            model_code=_env_model_meta(2, "MODEL_CODE", "VIRTUO20221720"),
+            sala=_env_model_meta(2, "SALA", "Mani in Pasta"),
+            city=_env_model_meta(2, "CITY", "Viareggio"),
+            region=_env_model_meta(2, "REGION", "Toscana"),
         ),
         VneModelConfig(
             id="model-3",
             label="Le Mucche Volanti",
+            machine_url=m3_machine or None,
             status_url=m3 or None,
             sel_operazioni_url=m3_sel_ops or None,
             operazioni_url=m3_ops or None,
@@ -303,8 +567,13 @@ def _models() -> List[VneModelConfig]:
             chiusure_url=m3_chiusure or None,
             contabilita_url=m3_contabilita or None,
             referer_url=m3_ref or None,
+            model_code=_env_model_meta(3, "MODEL_CODE", "VIRTUO20221707"),
+            sala=_env_model_meta(3, "SALA", "Le Mucche Volanti"),
+            city=_env_model_meta(3, "CITY", "Viareggio"),
+            region=_env_model_meta(3, "REGION", "Toscana"),
         ),
     ]
+    return [_complete_model_config(m) for m in raw]
 
 
 def _credentials_configured() -> bool:
@@ -553,8 +822,12 @@ def _origin_from_url(url: Optional[str], default: str = "http://vneremote.com") 
     return default
 
 
+def _model_origin(model: VneModelConfig, default: str = "http://www.vneremote.com") -> str:
+    return _origin_from_url(model.machine_url or model.status_url, default=default)
+
+
 def _has_vne_session(cj: CookieJar) -> bool:
-    return any(c.name == "sessionid" for c in cj)
+    return any(c.name in ("sessionid", "sessionvneremote") for c in cj)
 
 
 def _has_vne_machine_tunnel(cj: CookieJar) -> bool:
@@ -565,6 +838,9 @@ def _has_vne_machine_tunnel(cj: CookieJar) -> bool:
 def _machine_tunnel_urls(model: VneModelConfig) -> List[str]:
     """URL da visitare per agganciare il tunnel; ?param=NO per primo (come nel browser)."""
     raw: List[str] = []
+    if model.machine_url:
+        for mu in _host_variants(model.machine_url):
+            raw.append(mu)
     for ru in _host_variants(model.referer_url):
         if not ru:
             continue
@@ -598,6 +874,115 @@ def _looks_like_login_page(html: str) -> bool:
     return has_user and has_pass
 
 
+def _strip_td_text(raw: str) -> str:
+    x = raw or ""
+    x = re.sub(r"(?i)<br\s*/?>", " ", x)
+    x = re.sub(r"<[^>]+>", " ", x)
+    return re.sub(r"\s+", " ", html.unescape(x)).strip()
+
+
+def _normalize_vne_lista_field(text: str) -> Optional[str]:
+    cleaned = (text or "").strip()
+    if not cleaned or cleaned.lower() in {"none", "non disponibile"}:
+        return None
+    return cleaned
+
+
+def _parse_vne_lista_online(td_html: str) -> Optional[bool]:
+    low = (td_html or "").lower()
+    if 'alt="on"' in low or "iconaonverticale" in low:
+        return True
+    if 'alt="off"' in low or "iconaoffverticale" in low:
+        return False
+    return None
+
+
+def _parse_vne_lista_page(html_text: str) -> Dict[str, Dict[str, object]]:
+    """Estrae righe da /vne/lista/ indicizzate per codice VIRTUO."""
+    if not html_text or _looks_like_login_page(html_text):
+        return {}
+    rows: Dict[str, Dict[str, object]] = {}
+    tbody_match = re.search(r"<tbody>(.*?)</tbody>", html_text, flags=re.IGNORECASE | re.DOTALL)
+    if not tbody_match:
+        return rows
+    for tr in re.finditer(r"<tr[^>]*>(.*?)</tr>", tbody_match.group(1), flags=re.IGNORECASE | re.DOTALL):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", tr.group(1), flags=re.IGNORECASE | re.DOTALL)
+        if len(cells) < 8:
+            continue
+        machine_code = _strip_td_text(cells[0])
+        virtuo_match = re.search(r"VIRTUO\d+", machine_code, flags=re.IGNORECASE)
+        if not virtuo_match:
+            continue
+        key = virtuo_match.group(0).upper()
+        rows[key] = {
+            "machine_code": key,
+            "model_name": _normalize_vne_lista_field(_strip_td_text(cells[1])),
+            "sala": _normalize_vne_lista_field(_strip_td_text(cells[2])),
+            "city": _normalize_vne_lista_field(_strip_td_text(cells[3])),
+            "region": _normalize_vne_lista_field(_strip_td_text(cells[4])),
+            "alarm": _normalize_vne_lista_field(_strip_td_text(cells[5])),
+            "levels": _normalize_vne_lista_field(_strip_td_text(cells[6])),
+            "online": _parse_vne_lista_online(cells[7]),
+        }
+    return rows
+
+
+def _fetch_vne_lista_map(
+    opener: urllib.request.OpenerDirector,
+    *,
+    origin: str,
+    deadline: Optional[float] = None,
+) -> Dict[str, Dict[str, object]]:
+    landing_url = _env_url("VNE_LANDING_URL", f"{origin.rstrip('/')}/vne/")
+    lista_url = _env_url("VNE_LIST_URL", f"{origin.rstrip('/')}/vne/lista/")
+    try:
+        _fetch_html(opener, landing_url, referer=landing_url, deadline=deadline)
+    except Exception:
+        pass
+    html_text = _fetch_html(opener, lista_url, referer=landing_url, deadline=deadline)
+    if _looks_like_login_page(html_text):
+        return {}
+    return _parse_vne_lista_page(html_text)
+
+
+def _online_label_for_overview(
+    *,
+    lista_entry: Optional[Dict[str, object]],
+    lista_loaded: bool,
+    reachable: bool,
+) -> str:
+    if lista_loaded:
+        if not lista_entry:
+            return "Non in lista"
+        online = lista_entry.get("online")
+        if online is True:
+            return "Online"
+        if online is False:
+            return "Offline"
+        return "Non disponibile"
+    if _credentials_configured():
+        return "Non disponibile"
+    return "Online" if reachable else "Offline"
+
+
+def _overview_field_from_lista(model_value: Optional[str], lista_value: Optional[str]) -> Optional[str]:
+    if model_value:
+        return model_value
+    return lista_value or None
+
+
+def _status_html_ok(html: str) -> bool:
+    if not html or _is_machine_blocked(html) or _looks_like_login_page(html):
+        return False
+    low = html.lower()
+    return 'class="title"' in low or "<title>stato</title>" in low or "stato accettatore" in low
+
+
+def _status_referer(model: VneModelConfig) -> str:
+    """Referer usato dal browser per /stato (menu macchina con ?param=NO)."""
+    return _referer_for_model_page(model) or model.referer_url or _base_supervlt_referer(model)
+
+
 def _vne_post_login(
     opener: urllib.request.OpenerDirector,
     cj: CookieJar,
@@ -606,7 +991,7 @@ def _vne_post_login(
     post_data: Dict[str, str],
     deadline: Optional[float] = None,
 ) -> bool:
-    """POST login; True se compare sessionid (anche se redirect landing fallisce)."""
+    """POST login; True se compare sessionid o sessionvneremote (anche se redirect landing fallisce)."""
     page_origin = f"{urllib.parse.urlparse(page_url).scheme}://{urllib.parse.urlparse(page_url).netloc}"
     body = urllib.parse.urlencode(post_data).encode("utf-8")
     headers = {
@@ -640,13 +1025,70 @@ def _navigate_machine_tunnel(
     origin: str,
     deadline: Optional[float] = None,
 ) -> None:
-    """Simula login → /vne/ → selezione macchina come sul portale remoto."""
+    """Simula login → /vne/lista/ → macchina VIRTUO → tunnel supervlt."""
     landing_url = _env_url("VNE_LANDING_URL", f"{origin.rstrip('/')}/vne/")
+    lista_url = _env_url("VNE_LIST_URL", f"{origin.rstrip('/')}/vne/lista/")
     try:
         _fetch_html(opener, landing_url, referer=landing_url, deadline=deadline)
     except Exception:
         pass
+    try:
+        _fetch_html(opener, lista_url, referer=landing_url, deadline=deadline)
+    except Exception:
+        pass
+    if model.machine_url:
+        for mu in _host_variants(model.machine_url):
+            try:
+                _fetch_html(opener, mu, referer=lista_url, deadline=deadline)
+            except Exception:
+                continue
     _warm_machine_session(opener, model, deadline=deadline, cj=_cookie_jar_from_opener(opener))
+
+
+def _resolve_model_config(
+    model: VneModelConfig,
+    opener: urllib.request.OpenerDirector,
+    origin: str,
+    deadline: Optional[float] = None,
+) -> VneModelConfig:
+    """Dopo login, apre la pagina VIRTUO e scopre il path supervlt attivo."""
+    base = _complete_model_config(model)
+    if model.status_url and "/supervlt/" in model.status_url.lower():
+        return base
+    machine_url = model.machine_url or (
+        model.status_url if _is_virtuo_machine_url(model.status_url) else None
+    )
+    if not machine_url:
+        return base
+    lista_url = _env_url("VNE_LIST_URL", f"{origin.rstrip('/')}/vne/lista/")
+    pair: Optional[str] = None
+    for mu in _host_variants(machine_url):
+        try:
+            html = _fetch_html(opener, mu, referer=lista_url, deadline=deadline)
+            if _is_vne_connection_error(html, mu):
+                continue
+            pair = _discover_supervlt_path_pair(html, mu) or pair
+            if pair:
+                break
+        except Exception:
+            continue
+    if not pair:
+        return base
+    discovered = _supervlt_urls_from_status(f"http://vneremote.com/{pair}/supervlt/stato")
+    if not discovered:
+        return base
+    return VneModelConfig(
+        id=model.id,
+        label=model.label,
+        machine_url=machine_url,
+        status_url=discovered.get("status_url"),
+        sel_operazioni_url=discovered.get("sel_operazioni_url"),
+        operazioni_url=discovered.get("operazioni_url"),
+        sel_chiusure_url=discovered.get("sel_chiusure_url"),
+        chiusure_url=discovered.get("chiusure_url"),
+        contabilita_url=discovered.get("contabilita_url"),
+        referer_url=discovered.get("referer_url"),
+    )
 
 
 def _warm_machine_session(
@@ -690,7 +1132,7 @@ def _maybe_login_vne(
     origin: Optional[str] = None,
 ) -> bool:
     """
-    Login su VNE Remote. Ritorna True solo se la sessione Django (sessionid) è attiva.
+    Login su VNE Remote. Ritorna True se la sessione portale (sessionid o sessionvneremote) è attiva.
     """
     base_origin = origin or "http://vneremote.com"
     login_page_url = _env_url("VNE_LOGIN_URL", f"{base_origin}/accounts/login/?next=/vne/")
@@ -778,7 +1220,7 @@ def _read_status_html(
 ) -> str:
     return _open_bytes_with_retries(
         opener,
-        _build_req(model.status_url or "", model.referer_url),
+        _build_req(model.status_url or "", _status_referer(model)),
         deadline=deadline,
     ).decode("utf-8", errors="ignore")
 
@@ -793,7 +1235,7 @@ def _authenticated_status_html(
     http_session: Optional[_VneHttpSession] = None,
 ) -> str:
     """Login VNE + navigazione portale + lettura stato."""
-    origin = _origin_from_url(model.status_url)
+    origin = _model_origin(model)
     if http_session is not None:
         http_session.login(origin=origin, force=force_fresh_login)
         opener = http_session.opener
@@ -807,20 +1249,23 @@ def _authenticated_status_html(
 
 def _probe_model_status(model: VneModelConfig, http_session: _VneHttpSession) -> str:
     """Lettura rapida stato per healthcheck: login condiviso, budget per modello."""
-    origin = _origin_from_url(model.status_url)
+    origin = _model_origin(model)
     model_deadline = min(
         http_session.deadline,
         time.monotonic() + max(5.0, VNE_HEALTH_PER_MODEL_SEC),
     )
-    http_session.login(origin=origin)
+    html_text = ""
     try:
         html_text = _read_status_html(http_session.opener, model, deadline=model_deadline)
-        if not _is_machine_blocked(html_text):
+        if _status_html_ok(html_text):
             return html_text
     except TimeoutError:
         raise
     except Exception:
         pass
+    if not _credentials_configured():
+        return html_text if _status_html_ok(html_text) else ""
+    http_session.login(origin=origin)
     _navigate_machine_tunnel(http_session.opener, model, origin, deadline=model_deadline)
     return _read_status_html(http_session.opener, model, deadline=model_deadline)
 
@@ -851,11 +1296,12 @@ class _VneModelSession:
     def open(cls, model: VneModelConfig) -> "_VneModelSession":
         _ensure_vne_credentials()
         opener, cj = _build_opener()
-        origin = _origin_from_url(model.status_url)
+        origin = _model_origin(model)
         deadline = time.monotonic() + VNE_STATUS_MAX_TOTAL_SEC
         _maybe_login_vne(opener, cj, deadline=deadline, origin=origin)
-        _navigate_machine_tunnel(opener, model, origin, deadline=deadline)
-        return cls(opener=opener, cj=cj, deadline=deadline, model=model, origin=origin)
+        resolved = _resolve_model_config(model, opener, origin, deadline=deadline)
+        _navigate_machine_tunnel(opener, resolved, origin, deadline=deadline)
+        return cls(opener=opener, cj=cj, deadline=deadline, model=resolved, origin=origin)
 
     def fetch(self, url: str, *, referer: Optional[str] = None, data: Optional[bytes] = None) -> str:
         ref = referer or _referer_for_model_page(self.model)
@@ -880,7 +1326,6 @@ def _fetch_authenticated_model_page(
 def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSession] = None) -> str:
     if not model.status_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
-    _ensure_vne_credentials()
 
     started = time.monotonic()
     if http_session is not None:
@@ -893,16 +1338,21 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
     def _raise_timeout() -> None:
         raise HTTPException(status_code=504, detail="Timeout VNE: macchina non raggiungibile in tempo utile")
 
-    # Molti endpoint stato rispondono già in HTTP senza sessione: evita login lento prima della lettura.
+    # Molti endpoint stato rispondono in HTTP con referer ?param=NO, senza login Django.
     html_text = ""
     try:
         html_text = _read_status_html(opener, model, deadline=request_deadline)
-        if not _is_machine_blocked(html_text):
+        if _status_html_ok(html_text):
             return html_text
     except TimeoutError:
         _raise_timeout()
     except Exception:
         pass
+
+    if not _credentials_configured():
+        if _status_html_ok(html_text):
+            return html_text
+        raise HTTPException(status_code=503, detail=_missing_credentials_detail())
 
     html_text = _authenticated_status_html(
         model,
@@ -995,8 +1445,9 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
 
 def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = None) -> urllib.request.Request:
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     if referer:
         headers["Referer"] = referer
@@ -1114,6 +1565,7 @@ def list_models():
             contabilita_url=m.contabilita_url,
             configured=bool(
                 m.status_url
+                or m.machine_url
                 or m.sel_operazioni_url
                 or m.operazioni_url
                 or m.sel_chiusure_url
@@ -1129,16 +1581,16 @@ def list_models():
 def get_vne_health():
     credentials_ok = _credentials_configured()
     models_out: List[VneHealthModelOut] = []
-    configured_models = [m for m in _models() if m.status_url]
+    configured_models = [m for m in _models() if m.status_url or m.machine_url]
     session: Optional[_VneHttpSession] = None
-    if credentials_ok and configured_models:
+    if configured_models:
         health_budget = max(
             VNE_HEALTH_MAX_TOTAL_SEC,
             VNE_HEALTH_PER_MODEL_SEC * len(configured_models) + 20.0,
         )
         session = _VneHttpSession.create(max_seconds=health_budget)
     for model in _models():
-        is_configured = bool(model.status_url)
+        is_configured = bool(model.status_url or model.machine_url)
         if not is_configured:
             models_out.append(
                 VneHealthModelOut(
@@ -1150,27 +1602,24 @@ def get_vne_health():
                 )
             )
             continue
-        if not credentials_ok:
-            models_out.append(
-                VneHealthModelOut(
-                    model_id=model.id,
-                    model_label=model.label,
-                    configured=True,
-                    reachable=False,
-                    detail=_missing_credentials_detail(),
-                )
-            )
-            continue
         try:
             html = _probe_model_status(model, session) if session else _fetch_model_status(model)
-            blocked = _is_machine_blocked(html)
+            reachable = _status_html_ok(html)
+            if not reachable and _is_machine_blocked(html):
+                detail = "Portale VNE raggiungibile ma macchina non accessibile"
+            elif reachable and not credentials_ok:
+                detail = "OK (stato pubblico; credenziali non configurate per operazioni)"
+            elif reachable:
+                detail = "OK"
+            else:
+                detail = _missing_credentials_detail() if not credentials_ok else "Risposta stato non valida"
             models_out.append(
                 VneHealthModelOut(
                     model_id=model.id,
                     model_label=model.label,
                     configured=True,
-                    reachable=not blocked,
-                    detail="OK" if not blocked else "Portale VNE raggiungibile ma macchina non accessibile",
+                    reachable=reachable,
+                    detail=detail,
                 )
             )
         except TimeoutError:
@@ -1211,6 +1660,83 @@ def get_vne_health():
     )
 
 
+@router.get("/machines/overview", response_model=VneMachinesOverviewOut)
+def get_machines_overview():
+    configured_models = [m for m in _models() if m.status_url or m.machine_url]
+    session: Optional[_VneHttpSession] = None
+    if configured_models:
+        health_budget = max(
+            VNE_HEALTH_MAX_TOTAL_SEC,
+            VNE_HEALTH_PER_MODEL_SEC * len(configured_models) + 20.0,
+        )
+        session = _VneHttpSession.create(max_seconds=health_budget)
+    lista_by_virtuo: Dict[str, Dict[str, object]] = {}
+    lista_loaded = False
+    if session and _credentials_configured():
+        origin = _model_origin(configured_models[0])
+        if session.login(origin=origin):
+            try:
+                lista_by_virtuo = _fetch_vne_lista_map(
+                    session.opener,
+                    origin=origin,
+                    deadline=session.deadline,
+                )
+                lista_loaded = bool(lista_by_virtuo)
+            except Exception:
+                lista_by_virtuo = {}
+    rows: List[VneMachineOverviewRow] = []
+    updated_at: Optional[str] = None
+    for model in _models():
+        if not (model.status_url or model.machine_url):
+            rows.append(
+                VneMachineOverviewRow(
+                    model_id=model.id,
+                    machine_name=model.label,
+                    model_code=_model_code_for(model),
+                    sala=model.sala,
+                    city=model.city,
+                    region=model.region,
+                    alarm="Non configurata",
+                    levels="—",
+                    online="Offline",
+                    detail="URL macchina non configurato",
+                )
+            )
+            continue
+        html = ""
+        detail = ""
+        reachable = False
+        try:
+            html = _probe_model_status(model, session) if session else _fetch_model_status(model)
+            reachable = _status_html_ok(html)
+            if not reachable and _is_machine_blocked(html):
+                detail = "Macchina non accessibile sul portale remoto"
+            elif reachable:
+                detail = "OK"
+                updated_at = _extract_text(r"Sistema di controllo remoto<br/>\s*([^<]+)\s*</td>", html) or updated_at
+            else:
+                detail = "Risposta stato non valida"
+        except HTTPException as exc:
+            detail = str(exc.detail)
+        except TimeoutError:
+            detail = "Timeout lettura stato"
+        except Exception as exc:
+            detail = f"Errore: {exc}"
+        virtuo_code = (_model_code_for(model) or "").upper()
+        lista_entry = lista_by_virtuo.get(virtuo_code) if virtuo_code else None
+        rows.append(
+            _machine_overview_row(
+                model,
+                html,
+                reachable=reachable,
+                detail=detail,
+                lista_entry=lista_entry,
+                lista_loaded=lista_loaded,
+            )
+        )
+    return VneMachinesOverviewOut(rows=rows, updated_at=updated_at)
+
+
 @router.get("/models/{model_id}/status", response_model=VneStatusOut)
 def get_model_status(model_id: str):
     model = next((m for m in _models() if m.id == model_id), None)
@@ -1218,14 +1744,7 @@ def get_model_status(model_id: str):
         raise HTTPException(status_code=404, detail="Modello VNE non trovato")
     if not model.status_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: imposta URL stato nel backend .env")
-    html = ""
-    try:
-        session = _VneModelSession.open(model)
-        html = session.fetch(model.status_url, referer=_base_supervlt_referer(model))
-    except Exception:
-        html = ""
-    if not html or _is_machine_blocked(html):
-        html = _fetch_model_status(model)
+    html = _fetch_model_status(model)
     hopper = _parse_hopper(html)
     title = _extract_text(r"<h2 class=\"title\">([^<]+)</h2>", html) or "Stato"
     banconote = _extract_first_number(

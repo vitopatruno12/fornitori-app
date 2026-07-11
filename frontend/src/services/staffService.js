@@ -6,6 +6,35 @@ import { isOnline } from '../offline/offlineStatus'
 /** Fetch senza cache browser: dati condivisi tra PC. */
 const SYNC_FETCH = { cache: 'no-store' }
 
+const backupSummaryCache = new Map()
+const BACKUP_SUMMARY_CACHE_MS = 4000
+
+function invalidateStaffBackupSummaries(section) {
+  if (section) {
+    backupSummaryCache.delete(String(section || '').trim())
+    return
+  }
+  backupSummaryCache.clear()
+}
+
+async function getStaffBackupSummaries(section, { force = false } = {}) {
+  const sec = String(section || '').trim()
+  if (!sec) return []
+  const now = Date.now()
+  const cached = backupSummaryCache.get(sec)
+  if (!force && cached && now - cached.fetchedAt < BACKUP_SUMMARY_CACHE_MS) {
+    return cached.rows
+  }
+  const rows = await fetchStaffBackups(sec)
+  backupSummaryCache.set(sec, { fetchedAt: now, rows })
+  return rows
+}
+
+function staffBackupSummaryPath(section) {
+  const q = new URLSearchParams({ section: String(section || '').trim() })
+  return `/staff/backups?${q}`
+}
+
 export function fetchStaffMembers() {
   return apiFetch('/staff/members')
 }
@@ -125,17 +154,47 @@ export async function fetchStaffBackups(section) {
   return asArray(data, 'staff/backups')
 }
 
+/** Solo metadati (saved_at) senza GET /detail — evita 404 in console se il backup non c'è. */
+export async function fetchStaffBackupSavedAt(section, key) {
+  const sec = String(section || '').trim()
+  const k = String(key || '').trim()
+  if (!sec || !k) return null
+
+  if (!isOnline()) {
+    const cached = await getCachedResponse(staffBackupSummaryPath(sec))
+    const rows = asArray(cached, 'staff/backups')
+    return rows.find((row) => row?.backup_key === k)?.saved_at ?? null
+  }
+
+  try {
+    const summaries = await getStaffBackupSummaries(sec)
+    return summaries.find((row) => row?.backup_key === k)?.saved_at ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Backup assente sul server → null (404 atteso, non è un errore). */
 export async function fetchStaffBackupDetail(section, key) {
-  const q = new URLSearchParams({
-    section: String(section || '').trim(),
-    key: String(key || '').trim(),
-  })
+  const sec = String(section || '').trim()
+  const k = String(key || '').trim()
+  const q = new URLSearchParams({ section: sec, key: k })
   const path = `/staff/backups/detail?${q}`
+
+  if (!sec || !k) return null
 
   if (!isOnline()) {
     const cached = await getCachedResponse(path)
     return cached ?? null
+  }
+
+  try {
+    const summaries = await getStaffBackupSummaries(sec)
+    if (!summaries.some((row) => row?.backup_key === k)) {
+      return null
+    }
+  } catch {
+    // lista non disponibile: prova comunque il dettaglio
   }
 
   const response = await fetch(apiUrl(path), { cache: 'no-store' })
@@ -170,6 +229,7 @@ export function upsertStaffBackup(section, key, payload) {
       payload,
     }),
   }).then((result) => {
+    invalidateStaffBackupSummaries(section)
     if (result?.__offline) {
       throw new Error('Sei offline: il backup verrà inviato al server quando torna la connessione.')
     }

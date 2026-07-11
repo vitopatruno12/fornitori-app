@@ -13,6 +13,8 @@ from .payment_method import PaymentMethod  # noqa: F401
 from .category import Category  # noqa: F401
 from .attachment import Attachment  # noqa: F401
 from .supplier_order import SupplierOrder, SupplierOrderItem  # noqa: F401
+from .warehouse import WarehouseMovement  # noqa: F401
+from .supplier_payments_workbook import SupplierPaymentsWorkbook  # noqa: F401
 from .staff_member import StaffMember  # noqa: F401
 from .staff_shift_entry import StaffShiftEntry  # noqa: F401
 from .staff_payroll_month import StaffPayrollMonth  # noqa: F401

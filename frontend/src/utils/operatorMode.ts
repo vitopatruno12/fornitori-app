@@ -14,7 +14,7 @@ export const OPERATOR_STATION_PATH = '/operatore-postazione'
 const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
-export type OperatorDeliveryView = 'new-delivery' | 'history'
+export type OperatorDeliveryView = 'new-delivery' | 'history' | 'magazzino'
 export type OperatorStationView = 'overview' | 'staff' | 'orders' | 'prima-nota'
 
 import { ensureHttpsUrl } from './urlSecurity'
@@ -167,6 +167,7 @@ export function getOperatorDeliveryView(): OperatorDeliveryView {
   }
   const q = new URLSearchParams(window.location.search)
   if (q.get('pagina') === 'storico') return 'history'
+  if (q.get('pagina') === 'magazzino') return 'magazzino'
   return 'new-delivery'
 }
 
@@ -203,6 +204,8 @@ export function syncOperatorStationViewInUrl(view: OperatorStationView): void {
 export function syncOperatorDeliveryViewInUrl(view: OperatorDeliveryView): void {
   if (typeof window === 'undefined') return
   const base = getOperatorDeliveryPublicUrl()
-  const url = ensureHttpsUrl(view === 'history' ? `${base}?pagina=storico` : base)
+  const url = ensureHttpsUrl(
+    view === 'history' ? `${base}?pagina=storico` : view === 'magazzino' ? `${base}?pagina=magazzino` : base,
+  )
   window.history.replaceState(null, '', url)
 }

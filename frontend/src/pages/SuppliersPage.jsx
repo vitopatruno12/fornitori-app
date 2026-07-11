@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, deleteAllSuppliers } from '../services/suppliersService'
+import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, deleteAllSuppliers, parseSupplierInvoiceFile } from '../services/suppliersService'
 import { fetchInvoices } from '../services/invoicesService'
 import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
@@ -16,6 +16,13 @@ import {
   mergeSupplierFields,
   parseSupplierVoiceLocal,
 } from '../utils/supplierVoiceParse.js'
+import {
+  SUPPLIER_WORKBOOK_COLUMNS,
+  SUPPLIER_WORKBOOK_TITLE,
+  supplierWorkbookCellValue,
+  supplierWorkbookTotals,
+  supplierWorkbookTotalsLabel,
+} from '../utils/suppliersWorkbook.js'
 
 function formatEuro(n) {
   if (n == null || Number.isNaN(Number(n))) return '–'
@@ -89,6 +96,8 @@ export default function SuppliersPage() {
   const [aiMissing, setAiMissing] = useState([])
   const [aiSupplierAnomalies, setAiSupplierAnomalies] = useState([])
   const [ibanPanelOpen, setIbanPanelOpen] = useState(false)
+  const [invoiceUploadBusy, setInvoiceUploadBusy] = useState(false)
+  const invoiceUploadRef = useRef(null)
   const [quickEditSupplierId, setQuickEditSupplierId] = useState('')
   const localeOptions = useMemo(() => loadPrimaNotaLocales(), [])
 
@@ -104,12 +113,24 @@ export default function SuppliersPage() {
         s.email,
         s.phone,
         s.city,
+        s.address,
+        s.country,
+        s.contact_person,
+        s.payment_terms,
+        s.merchandise_category,
+        s.notes,
+        s.price_list_label,
         s.iban,
         formatSupplierLocales(s.locales, localeOptions),
       ].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
   }, [suppliers, search, localeOptions])
+
+  const workbookTotals = useMemo(
+    () => supplierWorkbookTotals(filteredSuppliers),
+    [filteredSuppliers],
+  )
 
   function toggleSupplierLocale(id) {
     if (!id) return
@@ -423,6 +444,39 @@ export default function SuppliersPage() {
     }
   }
 
+  async function handleSupplierInvoiceUpload(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setInvoiceUploadBusy(true)
+    setAiError('')
+    setAiSupplierSummary('')
+    setAiSupplierAnomalies([])
+    try {
+      const res = await parseSupplierInvoiceFile(file)
+      const fields = res?.suggested_fields || {}
+      const applied = applyAiSupplierSuggestion(fields)
+      setAiMissing(res?.missing_fields || [])
+      if (Array.isArray(res?.warnings) && res.warnings.length) {
+        setAiSupplierAnomalies(res.warnings)
+      }
+      if (applied.length) {
+        const kind = res.file_type === 'xml' ? 'XML FatturaPA' : 'PDF'
+        setAiSupplierSummary(`Da fattura (${kind}): ${applied.join(' · ')}`)
+        setEditingId(null)
+        window.requestAnimationFrame(() => {
+          supplierFormSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      } else {
+        setAiError('Nessun campo fornitore estratto dal file. Verifica il formato o compila manualmente.')
+      }
+    } catch (err) {
+      setAiError(err?.message || 'Upload fornitore non riuscito')
+    } finally {
+      setInvoiceUploadBusy(false)
+    }
+  }
+
   async function handleAiCheckSupplier() {
     try {
       const res = await checkAiAnomalies('supplier', {
@@ -442,9 +496,8 @@ export default function SuppliersPage() {
       <section className="staff-page-hero">
       <h1 className="page-header staff-page-title">Fornitori</h1>
       <p className="staff-page-lead">
-        Anagrafica completa con dati commerciali, pagamenti e collegamenti. <strong>Apri IBAN</strong> mostra solo gli IBAN da copiare;
-        accanto puoi scegliere un fornitore dall’elenco filtrato e aprire la modifica. Per ogni riga vedi totali fatture, saldi aperti,
-        ultime consegne/fatture e listino.
+        Anagrafica completa con dati commerciali, pagamenti e collegamenti. L&apos;elenco usa un foglio Excel con una colonna per ogni attributo;
+        in fondo compaiono i totali. <strong>Apri IBAN</strong> mostra solo gli IBAN da copiare.
       </p>
       </section>
 
@@ -454,6 +507,30 @@ export default function SuppliersPage() {
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           {editingId ? 'Modifica fornitore' : 'Nuovo fornitore'}
         </h2>
+        <div
+          className="supplier-invoice-upload-row"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={invoiceUploadBusy || aiSupplierLoading}
+            onClick={() => invoiceUploadRef.current?.click()}
+            title="Carica XML FatturaPA o PDF fattura: nome, P.IVA, IBAN, email, telefono e pagamento nel modulo sotto"
+          >
+            {invoiceUploadBusy ? 'Lettura…' : 'Upload fornitore'}
+          </button>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            Carica una fattura del fornitore (XML o PDF) per compilare l&apos;anagrafica in automatico.
+          </span>
+          <input
+            ref={invoiceUploadRef}
+            type="file"
+            accept=".xml,.pdf,.p7m,application/xml,application/pdf,text/xml"
+            className="pagamenti-upload-input"
+            onChange={(e) => void handleSupplierInvoiceUpload(e)}
+          />
+        </div>
         <GeminiVoiceAssistant
           label="Fornitore a voce (Atlas AI)"
           hint='Dì chiaramente «partita IVA» + 11 cifre e «codice fiscale» + codice (16 caratteri). Es: «Bar Roma partita IVA 12345678901 codice fiscale RSSMRA80A01H501U email info@bar.it tel 0801234567». Dopo Compila il testo si cancella.'
@@ -612,13 +689,18 @@ export default function SuppliersPage() {
         </form>
       </section>
 
-      <section className="card" ref={supplierListSectionRef}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-          <h2 className="page-subheader" style={{ marginTop: 0 }}>Elenco fornitori</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.65rem' }}>
+      <section className="card pagamenti-workbook-card suppliers-workbook-card" ref={supplierListSectionRef}>
+        <div className="pagamenti-workbook-toolbar suppliers-workbook-toolbar">
+          <div className="pagamenti-workbook-toolbar-left">
+            <span className="pagamenti-workbook-title">{SUPPLIER_WORKBOOK_TITLE}</span>
+            <span className="pagamenti-workbook-sheet-label">
+              {filteredSuppliers.length} fornitori{search.trim() ? ' (filtrati)' : ''}
+            </span>
+          </div>
+          <div className="pagamenti-workbook-actions suppliers-workbook-actions">
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={() => setIbanPanelOpen(true)}
               title="Mostra gli IBAN dei fornitori (rispetta il filtro di ricerca)"
             >
@@ -641,7 +723,7 @@ export default function SuppliersPage() {
             </select>
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
               disabled={!quickEditSupplierId}
               title="Apre il modulo Nuovo/Modifica fornitore in alto con i dati selezionati"
               onClick={() => {
@@ -658,76 +740,76 @@ export default function SuppliersPage() {
             <input
               type="search"
               className="sup-search"
-              placeholder="Cerca nome, P.IVA, email, telefono, città…"
+              placeholder="Cerca nome, P.IVA, email, categoria…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Cerca fornitore"
             />
           </div>
         </div>
-        {loading && <p className="loading">Caricamento...</p>}
+        {loading && <p className="loading pagamenti-loading">Caricamento anagrafica…</p>}
         {!loading && !error && (
-          <div className="table-wrap sup-table-wrap" style={{ fontSize: '0.88rem' }}>
-            <table className="app-table">
+          <div className="pagamenti-grid-wrap excel-wrap suppliers-grid-wrap">
+            <table className="app-table excel-table pagamenti-grid suppliers-grid">
+              <colgroup>
+                {SUPPLIER_WORKBOOK_COLUMNS.map((col) => (
+                  <col key={col.id} style={{ minWidth: col.width }} />
+                ))}
+                <col style={{ minWidth: 168 }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Ragione sociale</th>
-                  <th>Locali</th>
-                  <th>P.IVA / CF</th>
-                  <th>Contatti</th>
-                  <th>Referente</th>
-                  <th>Pagamenti</th>
-                  <th>Categoria</th>
-                  <th>Note</th>
-                  <th>Listino</th>
-                  <th>Stato</th>
-                  <th className="text-end">Tot. fatture</th>
-                  <th className="text-end" title="Somma residui (totale − pagato)">Saldo aperto</th>
-                  <th>Ult. consegna</th>
-                  <th>Ult. fattura</th>
-                  <th className="text-end">Scad. aperte</th>
+                  {SUPPLIER_WORKBOOK_COLUMNS.map((col) => (
+                    <th
+                      key={col.id}
+                      className={[
+                        col.numeric ? 'text-end' : '',
+                        col.sticky === 'left' ? 'suppliers-col-sticky-left' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
                   <th className="sup-actions-col">Azioni</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredSuppliers.map(s => (
+                {filteredSuppliers.map((s, rowIndex) => (
                   <tr
                     key={s.id}
-                    className="pn-row-click"
+                    className="suppliers-grid-row pn-row-click"
                     onClick={() => openSupplierDrawer(s)}
                     title="Apri scheda fornitore"
                   >
-                    <td style={{ fontWeight: 600 }}>{s.name}</td>
-                    <td className="sup-locales-cell" title={formatSupplierLocales(s.locales, localeOptions)}>
-                      {formatSupplierLocales(s.locales, localeOptions)}
-                    </td>
-                    <td>
-                      <div>{s.vat_number || '–'}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>{s.fiscal_code || ''}</div>
-                    </td>
-                    <td>
-                      <div>{s.email || '–'}</div>
-                      <div>{s.phone || '–'}</div>
-                    </td>
-                    <td>{s.contact_person || '–'}</td>
-                    <td style={{ maxWidth: 160, whiteSpace: 'pre-wrap' }}>{s.payment_terms || '–'}</td>
-                    <td>{s.merchandise_category || '–'}</td>
-                    <td style={{ maxWidth: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={s.notes || ''}>{s.notes || '–'}</td>
-                    <td>
-                      <div>{s.price_list_label || '–'}</div>
-                      {s.listino_righe > 0 && (
-                        <div style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}>{s.listino_righe} righe</div>
-                      )}
-                    </td>
-                    <td>
-                      {s.is_active ? <span style={{ color: 'var(--success)' }}>Attivo</span> : <span style={{ color: 'var(--text-muted)' }}>Non attivo</span>}
-                      {s.is_expired && <div style={{ color: 'var(--danger)', fontSize: '0.85em' }}>Scaduto</div>}
-                    </td>
-                    <td className="text-end amount">{formatEuro(s.totale_fatture)}</td>
-                    <td className="text-end amount pn-amount-cell" style={{ color: Number(s.saldo_aperto) > 0 ? 'var(--warning)' : undefined }}>{formatEuro(s.saldo_aperto)}</td>
-                    <td>{formatDateTime(s.ultima_consegna)}</td>
-                    <td>{formatDateTime(s.ultima_fattura)}</td>
-                    <td className="text-end">{s.scadenze_aperte ?? 0}</td>
+                    {SUPPLIER_WORKBOOK_COLUMNS.map((col) => {
+                      const value = supplierWorkbookCellValue(s, col, { rowIndex, localeOptions })
+                      const statusActive = col.id === 'is_active' && s.is_active
+                      const statusExpired = col.id === 'is_expired' && s.is_expired
+                      const saldoWarn = col.id === 'saldo_aperto' && Number(s.saldo_aperto) > 0
+                      return (
+                        <td
+                          key={col.id}
+                          className={col.sticky === 'left' ? 'suppliers-col-sticky-left' : ''}
+                        >
+                          <input
+                            className={[
+                              'excel-cell',
+                              'pagamenti-cell-readonly',
+                              col.numeric ? 'excel-cell-num' : '',
+                              col.emphasis ? 'suppliers-cell-emphasis' : '',
+                              col.mono ? 'suppliers-cell-mono' : '',
+                              statusActive ? 'suppliers-cell-yes' : '',
+                              statusExpired ? 'suppliers-cell-alert' : '',
+                              saldoWarn ? 'suppliers-cell-warning' : '',
+                            ].filter(Boolean).join(' ')}
+                            value={value}
+                            readOnly
+                            tabIndex={-1}
+                            aria-label={`${col.label} ${s.name}`}
+                          />
+                        </td>
+                      )
+                    })}
                     <td className="sup-actions-col" onClick={(e) => e.stopPropagation()}>
                       <div className="sup-actions-btns">
                         <button
@@ -758,9 +840,34 @@ export default function SuppliersPage() {
                     </td>
                   </tr>
                 ))}
-                {filteredSuppliers.length === 0 && (
+                {filteredSuppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={16} className="empty-state">{suppliers.length === 0 ? 'Nessun fornitore presente.' : 'Nessun risultato per la ricerca.'}</td>
+                    <td colSpan={SUPPLIER_WORKBOOK_COLUMNS.length + 1} className="empty-state">
+                      {suppliers.length === 0 ? 'Nessun fornitore presente.' : 'Nessun risultato per la ricerca.'}
+                    </td>
+                  </tr>
+                ) : (
+                  <tr className="suppliers-row-totals">
+                    {SUPPLIER_WORKBOOK_COLUMNS.map((col) => (
+                      <td
+                        key={`tot-${col.id}`}
+                        className={col.sticky === 'left' ? 'suppliers-col-sticky-left' : ''}
+                      >
+                        <input
+                          className={[
+                            'excel-cell',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'suppliers-cell-total',
+                          ].filter(Boolean).join(' ')}
+                          value={supplierWorkbookTotalsLabel(col.id, workbookTotals)}
+                          readOnly
+                          tabIndex={-1}
+                          aria-label={`Totale ${col.label}`}
+                        />
+                      </td>
+                    ))}
+                    <td className="sup-actions-col" />
                   </tr>
                 )}
               </tbody>

@@ -4,17 +4,27 @@ import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDa
 import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
-import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
 import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
 import StaffSectionBackupBar from '../components/StaffSectionBackupBar.jsx'
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import {
   formatPrimaNotaBackupLabel,
   getLatestPrimaNotaBackup,
   movementBackupKey,
   savePrimaNotaBackup,
 } from '../utils/primaNotaLocalBackup.js'
+import PrimaNotaExcelSummaryTable from '../components/PrimaNotaExcelSummaryTable.jsx'
+import {
+  buildPrimaNotaDailyCashRows,
+  buildPrimaNotaDailySalesRows,
+} from '../utils/primaNotaDailySalesWorkbook.js'
+import {
+  PRIMA_NOTA_MOVEMENTS_COLUMNS,
+  PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE,
+  primaNotaMovementCellValue,
+  primaNotaMovementTotalsLabel,
+} from '../utils/primaNotaMovementsWorkbook.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
-import { getOperatorPrimaNotaPublicUrl, getOperatorStationPublicUrl } from '../utils/operatorMode.ts'
 import {
   generateLocaleAccessCode,
   isValidLocaleAccessCode,
@@ -1120,12 +1130,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
-  function formatAmountClean(value) {
-    const n = Number(value || 0)
-    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return ''
-    return formatAmount(n)
-  }
-
   function isNonFiscale(entry) {
     return entry?.conto === CONTO_NON_FISCALE
   }
@@ -1249,11 +1253,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const movementPeriodTotals = useMemo(
     () => sumMovementRows(filteredMovementRows),
     [filteredMovementRows],
-  )
-
-  const movementPeriodTotalsAll = useMemo(
-    () => sumMovementRows(rowsWithLedger.rows),
-    [rowsWithLedger.rows],
   )
 
   function supplierName(id) {
@@ -1382,6 +1381,36 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed
   const saldoGiornalieroFiscale = summary?.saldo_giornaliero != null ? Number(summary.saldo_giornaliero) : cassaContantiGiornoComputed
 
+  const dailySalesRows = useMemo(
+    () =>
+      buildPrimaNotaDailySalesRows({
+        fiscale: fiscaleGiorno,
+        nonFiscale: nonFiscaleGiorno,
+        pos: posGiorno,
+        refill: refillGiorno,
+        totale: totaleVenditaGiorno,
+      }),
+    [fiscaleGiorno, nonFiscaleGiorno, posGiorno, refillGiorno, totaleVenditaGiorno],
+  )
+
+  const dailyCashRows = useMemo(
+    () =>
+      buildPrimaNotaDailyCashRows({
+        entrate: totaleEntrateGiorno,
+        uscite: totaleUsciteGiorno,
+        saldo: saldoGiornalieroFiscale,
+        cassaIniziale: rowsWithLedgerSelectedDay.cassaIniziale,
+        cassaFinale: cassaFinaleRiepilogo,
+      }),
+    [
+      totaleEntrateGiorno,
+      totaleUsciteGiorno,
+      saldoGiornalieroFiscale,
+      rowsWithLedgerSelectedDay.cassaIniziale,
+      cassaFinaleRiepilogo,
+    ],
+  )
+
   return (
     <div>
       <section className="staff-page-hero">
@@ -1400,17 +1429,6 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           )}
         </p>
       </section>
-
-      {!operatorMode && (
-        <OperatorLinkCard
-          title="Link operatore"
-          description="Condividi con le postazioni di lavoro: il link unificato include Panoramica, Personale, Ordini e Prima Nota; oppure solo la cassa con il link dedicato."
-          links={[
-            { label: 'Postazione operativa (Panoramica + Personale + Ordini + Prima Nota)', url: getOperatorStationPublicUrl() },
-            { label: 'Solo Prima Nota', url: getOperatorPrimaNotaPublicUrl() },
-          ]}
-        />
-      )}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -1754,8 +1772,26 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         </form>
       </section>
 
-      <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>{movementsSectionHeading}</h2>
+      <section className="card pagamenti-workbook-card suppliers-workbook-card">
+        <div className="pagamenti-workbook-toolbar">
+          <div className="pagamenti-workbook-toolbar-left">
+            <span className="pagamenti-workbook-title">{movementsSectionHeading}</span>
+            <span className="pagamenti-workbook-sheet-label">
+              {filteredMovementRows.length} movimenti visibili
+            </span>
+          </div>
+          <div className="pagamenti-workbook-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loading || pdfBusy || filteredMovementRows.length === 0}
+              onClick={handlePrintMovementsPdf}
+              title="Scarica PDF dell'elenco movimenti visibile (periodo e filtri correnti)"
+            >
+              {pdfBusy ? 'Generazione…' : 'Stampa PDF'}
+            </button>
+          </div>
+        </div>
         <StaffSectionBackupBar
           sectionTitle="movimenti"
           lastSavedAt={backupMeta}
@@ -1765,35 +1801,14 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           disabled={loading || saving || backupBusy || pdfBusy || deletingDay || deletingRange}
           busy={backupBusy}
         />
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.5rem',
-            marginBottom: '0.75rem',
-          }}
-        >
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0, flex: '1 1 200px' }}>
-            Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
-          </p>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={loading || pdfBusy || filteredMovementRows.length === 0}
-            onClick={handlePrintMovementsPdf}
-            title="Scarica PDF dell'elenco movimenti visibile (periodo e filtri correnti)"
-          >
-            {pdfBusy ? 'Generazione…' : 'Stampa PDF'}
-          </button>
-        </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 1rem 0.75rem' }}>
+          Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
+        </p>
         {focusEntryMessage && (
-          <div className="alert alert-danger" style={{ marginBottom: '0.75rem' }}>{focusEntryMessage}</div>
+          <div className="alert alert-danger" style={{ margin: '0 1rem 0.75rem' }}>{focusEntryMessage}</div>
         )}
-        {loading && <p className="loading">Caricamento...</p>}
         {!loading && !error && filteredMovementRows.length > 0 && (
-          <div className="pn-movement-totals" aria-label="Totali movimenti nel periodo">
+          <div className="pn-movement-totals" style={{ margin: '0 1rem 0.75rem' }} aria-label="Totali movimenti nel periodo">
             <span className="pn-movement-totals-label">
               Totali periodo ({movementPeriodTotals.count} movimenti)
             </span>
@@ -1814,170 +1829,52 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             </span>
           </div>
         )}
-        {!loading && !error && (
-          <div className="table-wrap pn-table-wrap">
-            <table className="app-table app-table--compact">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>N.</th>
-                  <th>Operazioni</th>
-                  <th className="text-end">Cassa entrata</th>
-                  <th className="text-end">Cassa uscita</th>
-                  <th className="text-end">Fiscale</th>
-                  <th className="text-end">Non fiscale</th>
-                  <th className="text-end">POS</th>
-                  <th className="text-end">Refill</th>
-                  <th className="text-end">Totale</th>
-                  <th className="text-end">Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMovementRows.map((entry, idx) => (
-                  <tr
-                    key={entry.id}
-                    id={`cash-entry-row-${entry.id}`}
-                    className="pn-row-click"
-                    onClick={() => setDrawerEntry(entry)}
-                    style={
-                      highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-                        ? { background: 'rgba(250, 204, 21, 0.22)', boxShadow: 'inset 0 0 0 2px #d97706' }
-                        : undefined
-                    }
-                  >
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(entry.entry_date)}</td>
-                    <td>{idx + 1}</td>
-                    <td style={{ maxWidth: 260 }}>
-                      {entry.description || '–'}
-                      {entry.riferimento_documento ? <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{entry.riferimento_documento}</div> : null}
-                    </td>
-                    <td className="text-end amount">{entry.entrata > 0 ? `€ ${formatAmount(entry.entrata)}` : '—'}</td>
-                    <td className="text-end amount">{entry.uscita > 0 ? `€ ${formatAmount(entry.uscita)}` : '—'}</td>
-                    <td className="text-end amount">{entry.affectsSaldo ? `€ ${formatAmount(entry.totaleMovimento)}` : '—'}</td>
-                    <td className="text-end amount">{entry.nonFiscale !== 0 ? `€ ${formatAmount(entry.nonFiscale)}` : '—'}</td>
-                    <td className="text-end amount">{entry.pos !== 0 ? `€ ${formatAmount(entry.pos)}` : '—'}</td>
-                    <td className="text-end amount">{entry.refill !== 0 ? `€ ${formatAmount(entry.refill)}` : '—'}</td>
-                    <td
-                      className="text-end pn-amount-cell"
-                      style={{
-                        color: isExtraCassa(entry) ? 'var(--text-muted)' : entry.type === 'entrata' ? 'var(--success)' : 'var(--danger)',
-                      }}
-                    >
-                      € {formatAmount(entry.incasso)}
-                    </td>
-                    <td className="text-end" style={{ whiteSpace: 'nowrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={(e) => { e.stopPropagation(); handleEdit(entry) }}
-                      >
-                        Modifica
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={(e) => { e.stopPropagation(); handleDelete(entry) }}
-                      >
-                        Elimina
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredMovementRows.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="empty-state">
-                      {rowsWithLedger.rows.length === 0 ? 'Nessun movimento nel periodo selezionato.' : 'Nessun movimento corrisponde ai filtri.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-              {filteredMovementRows.length > 0 && (
-                <tfoot>
-                  <tr className="pn-table-totals-row">
-                    <td colSpan={3}>
-                      <strong>Totali periodo</strong>
-                      <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.35rem' }}>
-                        ({movementPeriodTotals.count} mov.)
-                      </span>
-                    </td>
-                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.entrata)}</td>
-                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.uscita)}</td>
-                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.fiscale)}</td>
-                    <td className="text-end amount pn-table-totals-nf">€ {formatAmount(movementPeriodTotals.nonFiscale)}</td>
-                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.pos)}</td>
-                    <td className="text-end amount">€ {formatAmount(movementPeriodTotals.refill)}</td>
-                    <td className="text-end amount pn-amount-cell">€ {formatAmount(movementPeriodTotals.incasso)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        )}
-        {!loading && !error && rowsWithLedger.rows.length > 0 && (
-          <details style={{ marginTop: '1rem' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--text-heading)' }}>Vista foglio (stile Excel)</summary>
-            <div className="table-wrap excel-wrap" style={{ marginTop: '0.75rem' }}>
-              <table className="app-table excel-table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Descrizione</th>
-                    <th>Entrata</th>
-                    <th>Uscita</th>
-                    <th>Totale</th>
-                    <th>Non fiscale</th>
-                    <th>Fiscale</th>
-                    <th>POS</th>
-                    <th>Refill</th>
-                    <th>Saldo attuale cassa</th>
-                    <th>Cassa finale</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowsWithLedger.rows.map((entry) => (
-                    <tr
-                      key={`excel-${entry.id}`}
-                      id={`cash-entry-excel-row-${entry.id}`}
-                      style={
-                        highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-                          ? { background: 'rgba(250, 204, 21, 0.22)' }
-                          : undefined
-                      }
-                    >
-                      <td><input className="excel-cell" value={`${formatDate(entry.entry_date)} ${formatTime(entry.entry_date)}`} readOnly /></td>
-                      <td><input className="excel-cell" value={`${entry.description || ''}${isNonFiscale(entry) ? ' [Non fiscale]' : isPos(entry) ? ' [POS]' : isRefill(entry) ? ' [Refill]' : ''}`} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.entrata)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.uscita)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.totaleMovimento)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.nonFiscale) || formatAmount(entry.nonFiscale)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.affectsSaldo ? entry.totaleMovimento : 0)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.pos)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmountClean(entry.refill)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaMattina)} readOnly /></td>
-                      <td><input className="excel-cell excel-cell-num" value={formatAmount(entry.cassaSera)} readOnly /></td>
-                      <td><input className="excel-cell" value={entry.note || ''} readOnly /></td>
-                    </tr>
-                  ))}
-                  <tr className="pn-table-totals-row">
-                    <td colSpan={2}><strong>Totali periodo</strong></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.entrata)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.uscita)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.fiscale)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num pn-table-totals-nf" value={formatAmount(movementPeriodTotalsAll.nonFiscale)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.fiscale)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.pos)} readOnly /></td>
-                    <td><input className="excel-cell excel-cell-num" value={formatAmount(movementPeriodTotalsAll.refill)} readOnly /></td>
-                    <td colSpan={3} />
-                  </tr>
-                </tbody>
-              </table>
+        <WorkbookGrid
+          title={PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE}
+          sheetLabel={`${filteredMovementRows.length} righe`}
+          columns={PRIMA_NOTA_MOVEMENTS_COLUMNS}
+          rows={filteredMovementRows}
+          cellValue={primaNotaMovementCellValue}
+          totalsLabel={primaNotaMovementTotalsLabel}
+          totals={movementPeriodTotals}
+          gridClassName="prima-nota-movements-grid"
+          loading={loading}
+          emptyMessage={
+            rowsWithLedger.rows.length === 0
+              ? 'Nessun movimento nel periodo selezionato.'
+              : 'Nessun movimento corrisponde ai filtri.'
+          }
+          rowKey={(row) => String(row.id)}
+          getRowId={(row) => `cash-entry-row-${row.id}`}
+          onRowClick={(entry) => setDrawerEntry(entry)}
+          getRowClassName={(entry) =>
+            highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+              ? 'workbook-row-selected'
+              : ''
+          }
+          getTotalsCellClassName={(columnId) =>
+            columnId === 'non_fiscale' ? 'pn-table-totals-nf' : ''
+          }
+          actionsHeader="Azioni"
+          renderActions={(entry) => (
+            <div className="sup-actions-btns" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleEdit(entry)}
+              >
+                Modifica
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                onClick={() => handleDelete(entry)}
+              >
+                Elimina
+              </button>
             </div>
-          </details>
-        )}
+          )}
+        />
       </section>
 
       <section className="card">
@@ -2051,68 +1948,23 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         </div>
         )}
 
-        <div className="prima-nota-riepilogo-vendite" style={{ marginTop: '1rem' }}>
-          <h3 className="prima-nota-riepilogo-vendite-title">Vendite del giorno — {activeActivityLabel}</h3>
-          <p className="prima-nota-riepilogo-vendite-hint">
-            Fiscale, non fiscale, POS e Refill per il <strong>{formatDate(selectedDate)}</strong>. Il non fiscale entra in cassa entrata/uscita e nel totale vendita.
-          </p>
-          <div className="table-wrap">
-            <table className="app-table prima-nota-riepilogo-vendite-table">
-              <tbody>
-                <tr>
-                  <td><strong>Totale fiscale</strong></td>
-                  <td className="text-end amount">€ {formatAmount(fiscaleGiorno)}</td>
-                </tr>
-                <tr className="prima-nota-riepilogo-row-nf">
-                  <td>
-                    <strong>Totale non fiscale</strong>
-                    <span className="badge-pn badge-pn--nf" style={{ marginLeft: '0.45rem' }}>Non fiscale</span>
-                  </td>
-                  <td className="text-end amount prima-nota-riepilogo-nf-value">€ {formatAmount(nonFiscaleGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale POS</strong></td>
-                  <td className="text-end amount">€ {formatAmount(posGiorno)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Totale Refill</strong></td>
-                  <td className="text-end amount">€ {formatAmount(refillGiorno)}</td>
-                </tr>
-                <tr className="prima-nota-riepilogo-row-totale">
-                  <td><strong>Totale vendita (Fiscale + Non fiscale + POS + Refill)</strong></td>
-                  <td className="text-end amount">€ {formatAmount(totaleVenditaGiorno)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PrimaNotaExcelSummaryTable
+          title={`Vendite del giorno — ${activeActivityLabel}`}
+          hint={
+            <>
+              Fiscale, non fiscale, POS e Refill per il <strong>{formatDate(selectedDate)}</strong>.
+              Il non fiscale entra in cassa entrata/uscita e nel totale vendita.
+            </>
+          }
+          rows={dailySalesRows}
+        />
 
-        <div className="table-wrap" style={{ marginTop: '1rem' }}>
-          <table className="app-table">
-            <tbody>
-              <tr>
-                <td><strong>Totale entrate cassa</strong></td>
-                <td className="text-end amount" style={{ color: 'var(--success)' }}>€ {formatAmount(totaleEntrateGiorno)}</td>
-              </tr>
-              <tr>
-                <td><strong>Totale uscite cassa</strong></td>
-                <td className="text-end amount" style={{ color: 'var(--danger)' }}>€ {formatAmount(totaleUsciteGiorno)}</td>
-              </tr>
-              <tr>
-                <td><strong>Saldo giornaliero cassa</strong></td>
-                <td className="text-end amount">€ {formatAmount(saldoGiornalieroFiscale)}</td>
-              </tr>
-              <tr>
-                <td><strong>Saldo attuale cassa</strong></td>
-                <td className="text-end amount">€ {formatAmount(rowsWithLedgerSelectedDay.cassaIniziale)}</td>
-              </tr>
-              <tr>
-                <td><strong>Cassa finale (schema vendite)</strong></td>
-                <td className="text-end amount" style={{ fontWeight: 700 }}>€ {formatAmount(cassaFinaleRiepilogo)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <PrimaNotaExcelSummaryTable
+          title="Cassa del giorno"
+          hint={`Entrate, uscite e saldi per il ${formatDate(selectedDate)}.`}
+          rows={dailyCashRows}
+        />
+
         {!summary && (
           <p className="prima-nota-riepilogo-warn" role="status">
             Riepilogo cassa dal server non disponibile: i totali vendite sopra usano i movimenti caricati per il giorno selezionato.

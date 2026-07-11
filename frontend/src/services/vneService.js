@@ -37,3 +37,7 @@ export function queryVneCashClosings(modelId, payload) {
 export function fetchVneContabilita(modelId) {
   return apiFetch(`/vne/models/${encodeURIComponent(modelId)}/contabilita`)
 }
+
+export function fetchVneMachinesOverview() {
+  return apiFetch('/vne/machines/overview')
+}

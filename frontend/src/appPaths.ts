@@ -6,10 +6,13 @@ export const APP_PATHS = {
   'new-delivery': '/new-delivery',
   history: '/history',
   invoices: '/invoices',
+  pagamenti: '/pagamenti',
   'prima-nota': '/prima-nota',
   staff: '/staff',
+  'staff-report': '/staff/report',
+  'staff-operator-links': '/staff/link-operatori',
   'support-tech': '/support-tech',
-  vne: '/vne',
+  magazzino: '/magazzino',
 } as const
 
 export type PageKey = keyof typeof APP_PATHS

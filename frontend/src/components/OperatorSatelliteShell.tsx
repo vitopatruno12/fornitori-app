@@ -10,6 +10,77 @@ export type OperatorNavItem = {
   label: string
   active: boolean
   onClick: () => void
+  items?: {
+    id: string
+    label: string
+    active: boolean
+    onClick: () => void
+  }[]
+}
+
+function OperatorSatelliteNavDropdown({
+  item,
+}: {
+  item: OperatorNavItem & { items: NonNullable<OperatorNavItem['items']> }
+}) {
+  const [open, setOpen] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement>(null)
+  const groupActive = item.active || item.items.some((sub) => sub.active)
+
+  React.useEffect(() => {
+    function onDocClick(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  return (
+    <div
+      className={`operator-satellite-nav-dropdown${open ? ' is-open' : ''}${groupActive ? ' is-active' : ''}`}
+      ref={rootRef}
+    >
+      <button
+        type="button"
+        className={`operator-satellite-nav-btn operator-satellite-nav-btn-main${item.active ? ' is-active' : ''}`}
+        aria-current={item.active ? 'page' : undefined}
+        onClick={() => {
+          setOpen(false)
+          item.onClick()
+        }}
+      >
+        {item.label}
+      </button>
+      <button
+        type="button"
+        className="operator-satellite-nav-btn operator-satellite-nav-btn-caret"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Apri menu ${item.label}`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        ▾
+      </button>
+      {open ? (
+        <div className="operator-satellite-nav-dropdown-menu" role="menu">
+          {item.items.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              role="menuitem"
+              className={`operator-satellite-nav-dropdown-item${sub.active ? ' is-active' : ''}`}
+              onClick={() => {
+                setOpen(false)
+                sub.onClick()
+              }}
+            >
+              {sub.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 type OperatorSatelliteShellProps = {
@@ -148,17 +219,21 @@ export default function OperatorSatelliteShell({
       </header>
       {nav && nav.length > 0 ? (
         <nav className="operator-satellite-nav" aria-label="Sezioni operatore">
-          {nav.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`operator-satellite-nav-btn${item.active ? ' is-active' : ''}`}
-              onClick={item.onClick}
-              aria-current={item.active ? 'page' : undefined}
-            >
-              {item.label}
-            </button>
-          ))}
+          {nav.map((item) =>
+            item.items && item.items.length > 0 ? (
+              <OperatorSatelliteNavDropdown key={item.id} item={{ ...item, items: item.items }} />
+            ) : (
+              <button
+                key={item.id}
+                type="button"
+                className={`operator-satellite-nav-btn${item.active ? ' is-active' : ''}`}
+                onClick={item.onClick}
+                aria-current={item.active ? 'page' : undefined}
+              >
+                {item.label}
+              </button>
+            ),
+          )}
         </nav>
       ) : null}
       <main className="app-main operator-order-main">{children}</main>

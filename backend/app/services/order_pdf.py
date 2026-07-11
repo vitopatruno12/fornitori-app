@@ -44,6 +44,8 @@ def build_order_pdf_bytes(order: SupplierOrderRead) -> bytes:
       row += f" | {it.pieces} pz"
     if it.weight_kg is not None:
       row += f" | {it.weight_kg} kg"
+    if it.volume_liters is not None:
+      row += f" | {it.volume_liters} l"
     if it.note:
       row += f" | {it.note}"
     lines.append(row)

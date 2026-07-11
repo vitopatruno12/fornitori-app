@@ -25,6 +25,7 @@ def _merchandise_summary(items: list) -> str:
       continue
     pieces = getattr(it, "pieces", None) if not isinstance(it, dict) else it.get("pieces")
     wk = getattr(it, "weight_kg", None) if not isinstance(it, dict) else it.get("weight_kg")
+    vol = getattr(it, "volume_liters", None) if not isinstance(it, dict) else it.get("volume_liters")
     qty_bits = []
     if pieces is not None:
       qty_bits.append(f"{int(pieces)} pz")
@@ -34,6 +35,14 @@ def _merchandise_summary(items: list) -> str:
         if w > 0:
           txt = ("%.3f" % w).rstrip("0").rstrip(".")
           qty_bits.append(f"{txt} kg")
+      except (TypeError, ValueError):
+        pass
+    if vol is not None:
+      try:
+        v = float(vol)
+        if v > 0:
+          txt = ("%.3f" % v).rstrip("0").rstrip(".")
+          qty_bits.append(f"{txt} l")
       except (TypeError, ValueError):
         pass
     if qty_bits:
@@ -125,6 +134,7 @@ def create_order(db: Session, dto: SupplierOrderCreate) -> SupplierOrderRead:
               product_description=it.product_description.strip(),
               pieces=it.pieces,
               weight_kg=it.weight_kg,
+              volume_liters=it.volume_liters,
               note=it.note.strip() if it.note else None,
           )
       )
@@ -177,6 +187,7 @@ def update_order(db: Session, order_id: int, dto: SupplierOrderUpdate) -> Suppli
             product_description=it.product_description.strip(),
             pieces=it.pieces,
             weight_kg=it.weight_kg,
+            volume_liters=it.volume_liters,
             note=it.note.strip() if it.note else None,
         )
     )

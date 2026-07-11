@@ -143,6 +143,7 @@ export const ORDER_VOICE_FIELD_DEFS = [
   { id: 'product_description', label: 'Prodotto', keys: ['prodotto', 'merce', 'descrizione', 'articolo', 'nome prodotto'], row: true },
   { id: 'pieces', label: 'Pezzi', keys: ['pezzi', 'pezzo', 'quantita', 'quantità', 'numero pezzi', 'pz'], row: true },
   { id: 'weight_kg', label: 'Kg', keys: ['kg', 'kilo', 'chilogrammi', 'peso', 'quanti kg'], row: true },
+  { id: 'volume_liters', label: 'Litri', keys: ['litri', 'litro', 'lt', 'volume', 'quanti litri'], row: true },
   { id: 'line_note', label: 'Nota riga', keys: ['nota riga', 'note riga', 'note prodotto', 'nota prodotto'], row: true },
 ]
 
@@ -291,7 +292,7 @@ export function applyOrderVoiceField(parseResult, ctx) {
     let newIndex = rows.length
     setRows?.((prev) => {
       newIndex = prev.length
-      return [...prev, { product_description: '', pieces: '', weight_kg: '', note: '' }]
+      return [...prev, { product_description: '', pieces: '', weight_kg: '', volume_liters: '', note: '' }]
     })
     setVoiceRowIndex?.(newIndex)
     return {
@@ -357,7 +358,7 @@ export function applyOrderVoiceField(parseResult, ctx) {
     return { ok: true, message: `${label} aggiornate`, fieldId }
   }
 
-  const rowFields = ['product_description', 'pieces', 'weight_kg', 'line_note']
+  const rowFields = ['product_description', 'pieces', 'weight_kg', 'volume_liters', 'line_note']
   if (rowFields.includes(fieldId)) {
     const rowKey = fieldId === 'line_note' ? 'note' : fieldId
     let outIndex = resolveVoiceRowIndex(rows, voiceRowIndex)
@@ -377,7 +378,7 @@ export function applyOrderVoiceField(parseResult, ctx) {
 
       const next = list.map((r, i) => {
         if (i !== rowIndex) return r
-        if (rowKey === 'pieces' || rowKey === 'weight_kg') {
+        if (rowKey === 'pieces' || rowKey === 'weight_kg' || rowKey === 'volume_liters') {
           const n = extractNumber(val)
           const v =
             n != null ? String(rowKey === 'pieces' ? Math.round(n) : n) : val
@@ -399,7 +400,9 @@ export function applyOrderVoiceField(parseResult, ctx) {
           ? `order-line-prod-${outIndex}`
           : rowKey === 'pieces'
             ? `order-line-pcs-${outIndex}`
-            : `order-line-kg-${outIndex}`
+            : rowKey === 'volume_liters'
+              ? `order-line-lit-${outIndex}`
+              : `order-line-kg-${outIndex}`
 
     return {
       ok: true,

@@ -4,6 +4,7 @@ export const emptyOrderRow = () => ({
   product_description: '',
   pieces: '',
   weight_kg: '',
+  volume_liters: '',
   note: '',
 })
 
@@ -89,7 +90,8 @@ export function rowHasProduct(row) {
   return Boolean(
     String(row.product_description || '').trim() ||
       (row.pieces !== '' && row.pieces != null) ||
-      (row.weight_kg !== '' && row.weight_kg != null),
+      (row.weight_kg !== '' && row.weight_kg != null) ||
+      (row.volume_liters !== '' && row.volume_liters != null),
   )
 }
 
@@ -100,7 +102,9 @@ function rowsEquivalent(a, b) {
   const pb = String(b.pieces ?? '').trim()
   const wa = String(a.weight_kg ?? '').trim()
   const wb = String(b.weight_kg ?? '').trim()
-  return da === db && pa === pb && wa === wb
+  const la = String(a.volume_liters ?? '').trim()
+  const lb = String(b.volume_liters ?? '').trim()
+  return da === db && pa === pb && wa === wb && la === lb
 }
 
 /**

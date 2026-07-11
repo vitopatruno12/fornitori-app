@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, aruba, sdi
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, aruba, sdi, warehouse, supplier_payments
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -51,6 +51,9 @@ async def lifespan(app: FastAPI):
         _ensure_staff_locale_packs_table()
         ensure_prima_nota_locale_packs_table()
         _ensure_staff_backups_table()
+        _ensure_warehouse_movements_table()
+        _ensure_supplier_payments_workbook_table()
+        _ensure_supplier_order_items_volume_liters_column()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -181,6 +184,8 @@ app.include_router(customers.router)
 app.include_router(attachments.router)
 register_ai_module(app)
 app.include_router(supplier_orders.router)
+app.include_router(warehouse.router)
+app.include_router(supplier_payments.router)
 app.include_router(staff.router)
 app.include_router(support_technicians.router)
 app.include_router(vne.router)
@@ -498,6 +503,111 @@ def _ensure_staff_backups_table() -> None:
         )
 
 
+def _ensure_warehouse_movements_table() -> None:
+    """Registro entrata/uscita magazzino (migr. 20260710_warehouse_movements.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS warehouse_movements (
+                      id SERIAL PRIMARY KEY,
+                      movement_type VARCHAR(8) NOT NULL,
+                      movement_at TIMESTAMPTZ NOT NULL,
+                      operator_name VARCHAR(128) NOT NULL,
+                      signature VARCHAR(128) NOT NULL,
+                      product_description VARCHAR(255) NOT NULL,
+                      pieces INTEGER,
+                      weight_kg NUMERIC(10, 3),
+                      volume_liters NUMERIC(10, 3),
+                      merchandise_condition VARCHAR(128),
+                      location VARCHAR(128) NOT NULL DEFAULT 'Magazzino',
+                      note TEXT,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_warehouse_movements_movement_at
+                    ON warehouse_movements (movement_at)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_warehouse_movements_movement_type
+                    ON warehouse_movements (movement_type)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_warehouse_movements_location
+                    ON warehouse_movements (location)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare warehouse_movements: %s",
+            e,
+        )
+
+
+def _ensure_supplier_payments_workbook_table() -> None:
+    """Workbook pagamenti fornitori (migr. 20260710_supplier_payments_workbook.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS supplier_payments_workbooks (
+                      id SERIAL PRIMARY KEY,
+                      workbook_key VARCHAR(64) NOT NULL,
+                      title VARCHAR(255) NOT NULL DEFAULT '',
+                      payload_json TEXT NOT NULL DEFAULT '{}',
+                      updated_at TIMESTAMPTZ DEFAULT now(),
+                      CONSTRAINT uq_supplier_payments_workbook_key UNIQUE (workbook_key)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_supplier_payments_workbook_key
+                    ON supplier_payments_workbooks (workbook_key)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare supplier_payments_workbooks: %s",
+            e,
+        )
+
+
+def _ensure_supplier_order_items_volume_liters_column() -> None:
+    """Backward-compat: litri per riga ordine (migr. 20260710_supplier_order_items_volume_liters.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE supplier_order_items ADD COLUMN IF NOT EXISTS volume_liters NUMERIC(10, 3)"
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare supplier_order_items.volume_liters: %s",
+            e,
+        )
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
@@ -519,6 +629,7 @@ def _check_critical_schema_columns() -> None:
             ("deliveries", "order_signed_by", "20260507_order_delivery_signatures.sql"),
             ("deliveries", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
             ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
+            ("supplier_order_items", "volume_liters", "20260710_supplier_order_items_volume_liters.sql"),
         ]
         insp = inspect(engine)
         missing = []

@@ -5,6 +5,28 @@ export async function fetchSuppliers() {
   return asArray(data, 'fornitori')
 }
 
+export async function parseSupplierInvoiceFile(file) {
+  if (!file) throw new Error('Nessun file selezionato')
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await fetch(apiUrl('/suppliers/parse-invoice'), {
+    method: 'POST',
+    body: fd,
+  })
+  if (!res.ok) {
+    let detail = 'Lettura fattura non riuscita'
+    try {
+      const data = await res.json()
+      detail = data?.detail || detail
+    } catch {
+      const text = await res.text()
+      if (text) detail = text
+    }
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 export async function createSupplier(data) {
   return apiFetch('/suppliers', {
     method: 'POST',

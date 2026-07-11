@@ -1,8 +1,15 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryNotes, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
-import OperatorLinkCard from '../components/OperatorLinkCard.jsx'
-import { getOperatorDeliveryPublicUrl } from '../utils/operatorMode.ts'
+import {
+  DELIVERIES_HISTORY_WORKBOOK_COLUMNS,
+  DELIVERIES_HISTORY_WORKBOOK_TITLE,
+  deliveryHistoryDiffTone,
+  deliveryHistoryWorkbookCellValue,
+  deliveryHistoryWorkbookTotals,
+  deliveryHistoryWorkbookTotalsLabel,
+  splitDeliveryNote,
+} from '../utils/deliveriesHistoryWorkbook.js'
 
 function formatDate(value) {
   if (!value) return ''
@@ -14,34 +21,6 @@ function formatDate(value) {
 function formatAmount(value) {
   if (value == null) return ''
   return Number(value).toFixed(2)
-}
-
-function qtyCell(d) {
-  const w = d.weight_kg != null && Number(d.weight_kg) > 0
-  const p = d.pieces != null && Number(d.pieces) > 0
-  if (w && p) return `${Number(d.weight_kg)} kg + ${d.pieces} pz`
-  if (w) return `${Number(d.weight_kg)} kg`
-  if (p) return `${d.pieces} pz`
-  return '–'
-}
-
-function splitDeliveryNote(note) {
-  const text = String(note || '').trim()
-  if (!text) return { destination: '', documentNote: '' }
-  const m = text.match(/^Destinazione\s+scarico:\s*(.+)$/im)
-  const destination = m ? String(m[1] || '').trim() : ''
-  if (!destination) return { destination: '', documentNote: text }
-  const lines = text.split(/\r?\n/)
-  let skipping = true
-  const rest = []
-  for (const ln of lines) {
-    const t = ln.trim()
-    if (skipping && /^Destinazione\s+scarico:/i.test(t)) continue
-    if (skipping && t === '') continue
-    skipping = false
-    rest.push(ln)
-  }
-  return { destination, documentNote: rest.join('\n').trim() }
 }
 
 function PriceTrendChart({ series }) {
@@ -160,6 +139,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
   const [analyticsError, setAnalyticsError] = useState('')
 
   const deliveryList = Array.isArray(deliveries) ? deliveries : []
+  const deliveryTotals = useMemo(() => deliveryHistoryWorkbookTotals(deliveryList), [deliveryList])
 
   useEffect(() => {
     loadSuppliers()
@@ -346,20 +326,12 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           </>
         ) : (
           <>
-            Cerca per fornitore, prodotto (testo libero) e periodo. Confronta prezzi nel tempo nella sezione analisi: ultimo
-            prezzo, media, min/max e grafico.
+            Cerca per fornitore, prodotto (testo libero) e periodo. L&apos;elenco usa un foglio Excel con una colonna per ogni attributo;
+            in fondo compaiono i totali. Confronta prezzi nel tempo nella sezione analisi.
           </>
         )}
       </p>
       </section>
-
-      {!operatorMode && (
-        <OperatorLinkCard
-          title="Link operatore (consegne)"
-          description="Un solo indirizzo: Nuova consegna e Storico consegne nella stessa pagina (schede in alto). Stesso login e database del gestionale."
-          links={[{ label: 'Link consegne', url: getOperatorDeliveryPublicUrl() }]}
-        />
-      )}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -495,72 +467,115 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           </div>
         )}
 
-        {loading && <p className="loading">Caricamento...</p>}
+      </section>
+
+      <section className="card pagamenti-workbook-card suppliers-workbook-card">
+        <div className="pagamenti-workbook-toolbar">
+          <div className="pagamenti-workbook-toolbar-left">
+            <span className="pagamenti-workbook-title">{DELIVERIES_HISTORY_WORKBOOK_TITLE}</span>
+            <span className="pagamenti-workbook-sheet-label">
+              {deliveryList.length} righe
+            </span>
+          </div>
+        </div>
+        {loading && <p className="loading pagamenti-loading">Caricamento storico…</p>}
         {!loading && !error && (
-          <div className="table-wrap">
-            <table className="app-table">
+          <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap deliveries-grid-wrap">
+            <table className="app-table excel-table pagamenti-grid workbook-grid deliveries-grid">
+              <colgroup>
+                {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
+                  <col key={col.id} style={{ minWidth: col.width }} />
+                ))}
+                <col style={{ minWidth: 110 }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>DDT</th>
-                  <th>Fornitore</th>
-                  <th>Prodotto</th>
-                  <th>Firma scarico</th>
-                  <th>Quantità</th>
-                  <th className="text-end">Prezzo unit.</th>
-                  <th className="text-end">Listino</th>
-                  <th className="text-end">Diff.</th>
-                  <th className="text-end">Imponibile</th>
-                  <th className="text-end">IVA</th>
-                  <th className="text-end">Totale</th>
-                  <th>Destinazione</th>
-                  <th>Note doc.</th>
-                  <th>Anomalie</th>
-                  <th>Azioni</th>
+                  {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
+                    <th
+                      key={col.id}
+                      className={[
+                        col.numeric ? 'text-end' : '',
+                        col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th className="sup-actions-col">Stato</th>
                 </tr>
               </thead>
               <tbody>
-                {deliveryList.map((d) => {
-                  const parsed = splitDeliveryNote(d.note)
-                  return (
-                  <tr key={d.id}>
-                    <td>{formatDate(d.delivery_date)}</td>
-                    <td>{d.ddt_number || '–'}</td>
-                    <td>{d.supplier_name || d.supplier_id}</td>
-                    <td>{d.product_description || '–'}</td>
-                    <td>{d.unloading_signed_by || '–'}</td>
-                    <td>{qtyCell(d)}</td>
-                    <td className="text-end amount">{formatAmount(d.unit_price)}</td>
-                    <td className="text-end amount">{d.list_unit_price != null ? formatAmount(d.list_unit_price) : '–'}</td>
-                    <td
-                      className="text-end amount"
-                      style={{
-                        color:
-                          d.price_diff_vs_list != null && Number(d.price_diff_vs_list) > 0
-                            ? 'var(--danger, #c0392b)'
-                            : d.price_diff_vs_list != null && Number(d.price_diff_vs_list) < 0
-                              ? 'var(--success, #1e8449)'
-                              : undefined,
-                      }}
-                    >
-                      {d.price_diff_vs_list != null
-                        ? `${Number(d.price_diff_vs_list) > 0 ? '+' : ''}${formatAmount(d.price_diff_vs_list)}`
-                        : '–'}
+                {deliveryList.map((d, rowIndex) => (
+                  <tr
+                    key={d.id}
+                    className={[
+                      'workbook-grid-row',
+                      'pn-row-click',
+                      String(selectedDeliveryId) === String(d.id) ? 'workbook-row-selected' : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => setSelectedDeliveryId(String(d.id))}
+                    title="Seleziona riga consegna"
+                  >
+                    {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => {
+                      const diffTone = col.id === 'price_diff_vs_list' ? deliveryHistoryDiffTone(d) : ''
+                      return (
+                        <td
+                          key={col.id}
+                          className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                        >
+                          <input
+                            className={[
+                              'excel-cell',
+                              'pagamenti-cell-readonly',
+                              col.numeric ? 'excel-cell-num' : '',
+                              col.emphasis ? 'workbook-cell-emphasis' : '',
+                              diffTone,
+                            ].filter(Boolean).join(' ')}
+                            value={deliveryHistoryWorkbookCellValue(d, col, { rowIndex })}
+                            readOnly
+                            tabIndex={-1}
+                            aria-label={`${col.label} riga ${rowIndex + 1}`}
+                          />
+                        </td>
+                      )
+                    })}
+                    <td className="sup-actions-col">
+                      <input
+                        className="excel-cell pagamenti-cell-readonly"
+                        value={String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : ''}
+                        readOnly
+                        tabIndex={-1}
+                      />
                     </td>
-                    <td className="text-end amount">{formatAmount(d.imponibile)}</td>
-                    <td className="text-end amount">{formatAmount(d.vat_amount)}</td>
-                    <td className="text-end amount">{formatAmount(d.total)}</td>
-                    <td style={{ maxWidth: 150 }}>{parsed.destination || '–'}</td>
-                    <td style={{ maxWidth: 180 }}>{parsed.documentNote || '–'}</td>
-                    <td style={{ maxWidth: 160 }}>{d.anomaly_note || '–'}</td>
-                    <td>{String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : '—'}</td>
                   </tr>
-                )})}
-                {deliveryList.length === 0 && (
+                ))}
+                {deliveryList.length === 0 ? (
                   <tr>
-                    <td colSpan={16} className="empty-state">
+                    <td colSpan={DELIVERIES_HISTORY_WORKBOOK_COLUMNS.length + 1} className="empty-state">
                       Nessuna consegna registrata.
                     </td>
+                  </tr>
+                ) : (
+                  <tr className="workbook-row-totals">
+                    {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
+                      <td
+                        key={`tot-${col.id}`}
+                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      >
+                        <input
+                          className={[
+                            'excel-cell',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'workbook-cell-total',
+                          ].filter(Boolean).join(' ')}
+                          value={deliveryHistoryWorkbookTotalsLabel(col.id, deliveryTotals)}
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </td>
+                    ))}
+                    <td className="sup-actions-col" />
                   </tr>
                 )}
               </tbody>

@@ -1,0 +1,349 @@
+
+<!DOCTYPE html>
+<!--[if IE 8]> <html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    
+    
+    <title>VNE Accesso Remoto</title>
+    
+
+    
+    
+    <link rel="stylesheet" href="/static/foundation/css/normalize.css" />
+    <link rel="stylesheet" href="/static/foundation/css/foundation.min.css" />
+      
+    
+    
+    
+	<link rel="stylesheet" href="/static/foundation/css/custom.css" />
+	
+
+    
+    
+    <script src="/static/foundation/js/vendor/custom.modernizr.js"></script>
+    
+
+    
+    
+	
+	
+	<script type="text/javascript">
+	function sendText() {
+		stringa=document.body.innerHTML;
+		document.getElementById("input1").value=stringa;
+		document.getElementById("form1").submit();
+	};
+
+	function sendCSV() {
+		stringa=document.body.innerHTML;
+		document.getElementById("input2").value=stringa;
+		document.getElementById("form2").submit();
+	};
+	</script>
+
+</head>
+<body >
+    
+    
+<div class="wrapper">
+<nav class="top-bar" data-topbar>
+  <ul class="title-area">
+    <!-- Title Area -->
+    <li class="name">
+      <h1><a href="/vne/">VNE Accesso Remoto</a></h1>
+    </li>
+	<li class="toggle-topbar menu-icon"><a href="#"><span>Menu</span></a></li>
+  </ul>
+
+  <section class="top-bar-section">
+    <!-- Left Nav Section -->
+    <ul class="left">
+      <li class="divider"></li>
+      <li><a href="/vne/lista/">Tutte le macchine</a></li>
+      <li class="divider"></li>
+      <li><a href="/vne/lista_mod/">Per modello</a></li>
+      <li class="divider"></li>
+	  <li><a href="/vne/lista_reg/">Per regione</a></li>
+      <li class="divider"></li>
+      <li><a href="/vne/lista_cit/">Per citta</a></li>
+      <li class="divider"></li>
+	  <li><a href="/vne/lista_sal/">Per sala</a></li>
+      <li class="divider"></li>
+    </ul>
+
+    <!-- Right Nav Section -->
+    <ul class="right">
+      <li class="divider hide-for-small"></li>
+      <li class="has-dropdown"><a href="#"><svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="25px" height="25px" viewBox="0 0 100 100" enable-background="new 0 0 100 100" xml:space="preserve">
+					<g>
+						<path fill="#FFFFFF" d="M80.161,60.441l-15.66-7.47l-6.622-3.159c2.892-1.822,5.241-4.634,6.778-8.022c1.22-2.69,1.946-5.734,1.946-8.99
+							c0-1.827-0.29-3.562-0.694-5.236C63.94,19.453,57.605,13.477,50,13.477c-7.461,0-13.701,5.763-15.792,13.645
+							c-0.482,1.808-0.815,3.688-0.815,5.68c0,3.459,0.808,6.684,2.181,9.489c1.587,3.254,3.94,5.937,6.804,7.662l-6.342,2.953
+							l-16.168,7.53c-1.404,0.658-2.327,2.242-2.327,4.011v15.062v2.703c0,2.381,1.659,4.312,3.708,4.312h57.505
+							c2.048,0,3.708-1.93,3.708-4.312v-2.703V64.446C82.46,62.683,81.552,61.114,80.161,60.441z"/>
+					</g>
+					</svg> micgili</a>
+
+        <ul class="dropdown">
+          <li><label>Impostazioni account</label></li>
+          <li><a href="/vne/cambia_password/">Cambia password</a></li>
+		  <li><a href="/vne/cambia_email/">Cambia Email</a></li>
+          <li><a href="/vne/gestione_utenti/">Gestione utenti</a></li>
+		  <li><a href="/vne/gestione_ibutton/">Gestione iButton</a></li>
+		  <li><a href="/vne/attivazioneGrafici/scelta1/">Gestione grafici</a></li>
+          <li><a href="/vne/impostaLivelli/">Imposta livelli</a></li>
+		  <li><a href="/vne/notificheEmail/">Notifiche Email</a></li>
+          <li><a href="/vne/paginaReport/">Report</a></li>
+		  <li><a href="/vne/accessiSito/">Accessi al sito</a></li>
+		  <li><a href="/vne/servizioSms/">: </a></li>
+        </ul>
+      </li>
+      <li class="divider"></li>
+      <li class="divider show-for-small"></li>
+      <li class="has-form">
+        <a class="button" href="/log_out/">Logout</a>
+      </li>
+    </ul>
+  </section>
+</nav>
+<div class="strisciaBianca">
+	<div class="row">
+	<h5>Tutte le macchine</h5>
+	</div>
+	<div class="row">
+		<div class="large-12 columns">
+		
+			<table>
+			<thead>
+				<tr>
+					<th>
+					MACCHINA
+					</th>
+					<th class="show-for-medium-up">
+					MODELLO
+					</th>
+					<th>
+					SALA
+					</th>
+					<th class="show-for-medium-up">
+					CITTA
+					</th>
+					<th class="show-for-large-up">
+					REGIONE
+					</th>
+					<th class="show-for-medium-up">
+					ALLARME
+					</th>
+					<th class="show-for-medium-up">
+					LIVELLI
+					</th>
+					
+					<th>
+					ONLINE
+					</th>
+					<th>
+					Visualizza
+					</th>
+				    <th class="show-for-medium-up">
+					Modifica
+					</th>
+				</tr>
+			</thead>
+			<tbody>
+				
+				<tr>
+					<td>
+					VIRTUO20221707
+					</td>
+					<td class="show-for-medium-up">
+					
+					Virtuo
+					
+					</td>
+					<td>
+					None
+					</td>
+					<td class="show-for-medium-up">
+					None
+					</td>
+					<td class="show-for-large-up">
+					None
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					
+					<td>
+					
+					<img alt="on" src="/static/foundation/img/iconaONverticale.png" />
+					
+					</td>
+					<td>
+					
+						
+						<a href="/vne/VIRTUO20221707/">Visualizza</a>
+						
+					
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+					</td>
+				</tr>
+				
+				<tr>
+					<td>
+					VIRTUO20221720
+					</td>
+					<td class="show-for-medium-up">
+					
+					Virtuo
+					
+					</td>
+					<td>
+					None
+					</td>
+					<td class="show-for-medium-up">
+					None
+					</td>
+					<td class="show-for-large-up">
+					None
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					
+					<td>
+					
+					<img alt="on" src="/static/foundation/img/iconaONverticale.png" />
+					
+					</td>
+					<td>
+					
+						
+						<a href="/vne/VIRTUO20221720/">Visualizza</a>
+						
+					
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+					</td>
+				</tr>
+				
+				<tr>
+					<td>
+					VIRTUO20221721
+					</td>
+					<td class="show-for-medium-up">
+					
+					Virtuo
+					
+					</td>
+					<td>
+					None
+					</td>
+					<td class="show-for-medium-up">
+					lecce
+					</td>
+					<td class="show-for-large-up">
+					Puglia_
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+						Non disponibile
+					
+					</td>
+					
+					<td>
+					
+					<img alt="off" src="/static/foundation/img/iconaOFFverticale.png" />
+					
+					</td>
+					<td>
+					
+						
+						<a href="/vne/VIRTUO20221721/">Visualizza</a>
+						
+					
+					
+					</td>
+					<td class="show-for-medium-up">
+					
+					</td>
+				</tr>
+				
+			</tbody>
+			</table>
+			
+		</div>
+	</div>
+</div>
+<div class="push"></div>
+</div>
+<div class="footer">
+<div class="strisciaGrigia">
+	<div class="row collapse">
+	</br>
+		<div class="large-3 columns" style="padding:1em 1em 1em 1em;">
+			<img align="left" src="/static/foundation/img/logoGrigio.png"/>
+		</div>
+		<div class="large-9 columns" style="padding:1em 1em 1em 1em;">
+			<p align="left" style="font-size: 0.6em; color:#848484;">V.N.E. s.r.l. - via Biagioni 371, Querceta 55047 (LU) - Italia</br>Tel. 0584 742530 - Fax. 0584 768333 - Mail. amministrazione@vne.it - Web. www.vne.it</br><a href="http://www.vne.it/informativa_cookie.html">Informativa cookies</a></p>
+		</div>
+	</div>
+</div>
+</div>
+
+
+
+
+    
+    
+    <script src="/static/foundation/js/vendor/jquery.js"></script>
+    
+
+    
+    
+    <script src="/static/foundation/js/foundation.min.js"></script>
+	<script src="/static/foundation/js/foundation/foundation.topbar.js"></script>
+	<script src="/static/foundation/js/foundation/foundation.interchange.js"></script>
+    
+	
+    
+    
+
+
+<script src="/static/foundation/js/foundation/foundation.abide.js"></script>
+    
+
+    
+    
+    <script>
+        $(document).foundation();
+    </script>
+    
+</body>
+</html>

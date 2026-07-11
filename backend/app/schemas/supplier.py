@@ -99,3 +99,14 @@ class SupplierWithStats(SupplierRead):
 
   class Config:
     from_attributes = True
+
+
+class SupplierInvoiceParseOut(BaseModel):
+  suggested_fields: dict
+  missing_fields: list[str] = []
+  warnings: list[str] = []
+  source_text: str = ""
+  file_type: str = ""
+  invoice_number: Optional[str] = None
+  invoice_date: Optional[str] = None
+  confidence: float = 0.0

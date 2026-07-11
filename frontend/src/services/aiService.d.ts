@@ -6,6 +6,7 @@ export function suggestOrderLines(text: string): Promise<{
     product_description?: string;
     pieces?: number | null;
     weight_kg?: number | string | null;
+    volume_liters?: number | string | null;
     note?: string | null;
   }>;
   warnings?: string[];

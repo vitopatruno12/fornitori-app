@@ -28,7 +28,7 @@ function parseQuantityToken(tok) {
 /** Rimuove parole unità dal nome prodotto. */
 function cleanProductName(name) {
   return String(name || '')
-    .replace(/\b(?:pezzi?|pz\.?|kg|chilogrammi?|di|del|della|un|una)\b/gi, ' ')
+    .replace(/\b(?:pezzi?|pz\.?|kg|chilogrammi?|litri?|lt\.?|l\b|di|del|della|un|una)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, '')
@@ -62,12 +62,25 @@ function extractFromMixedPhrase(text) {
     .trim()
   let pieces = null
   let weight_kg = null
+  let volume_liters = null
 
   const pe = extractPiecesFromPhrase(remainder)
   pieces = pe.pieces
   remainder = pe.remainder
 
-  let m = remainder.match(/(\d+(?:[.,]\d+)?)\s*kg\b/i)
+  let m = remainder.match(/(\d+(?:[.,]\d+)?)\s*(?:litri?|lt\.?)\b/i)
+  if (m) {
+    volume_liters = Number(String(m[1]).replace(',', '.'))
+    remainder = (remainder.slice(0, m.index) + remainder.slice(m.index + m[0].length)).trim()
+  } else {
+    m = remainder.match(/\b(?:litri?|lt\.?)\s*(\d+(?:[.,]\d+)?)\b/i)
+    if (m) {
+      volume_liters = Number(String(m[1]).replace(',', '.'))
+      remainder = (remainder.slice(0, m.index) + remainder.slice(m.index + m[0].length)).trim()
+    }
+  }
+
+  m = remainder.match(/(\d+(?:[.,]\d+)?)\s*kg\b/i)
   if (m) {
     weight_kg = Number(String(m[1]).replace(',', '.'))
     remainder = (remainder.slice(0, m.index) + remainder.slice(m.index + m[0].length)).trim()
@@ -79,7 +92,7 @@ function extractFromMixedPhrase(text) {
     }
   }
 
-  remainder = remainder.replace(/\b(?:pezzi?|pz\.?|kg)\b/gi, ' ').replace(/\s+/g, ' ').trim()
+  remainder = remainder.replace(/\b(?:pezzi?|pz\.?|kg|litri?|lt\.?)\b/gi, ' ').replace(/\s+/g, ' ').trim()
 
   m = remainder.match(/^(\d+)\s*[x×]\s*(.+)$/i)
   if (m) {
@@ -103,6 +116,7 @@ function extractFromMixedPhrase(text) {
     product_description: cleanProductName(remainder),
     pieces,
     weight_kg,
+    volume_liters,
     note: null,
   }
 }
@@ -120,9 +134,19 @@ export function normalizeOrderLine(line) {
       ? Number(line.weight_kg)
       : null
   if (weight_kg != null && weight_kg <= 0) weight_kg = null
+  let volume_liters =
+    line?.volume_liters != null && line.volume_liters !== '' && !Number.isNaN(Number(line.volume_liters))
+      ? Number(line.volume_liters)
+      : null
+  if (volume_liters != null && volume_liters <= 0) volume_liters = null
   const note = line?.note
 
-  const combined = [desc, pieces != null ? `${pieces} pezzi` : '', weight_kg != null ? `${weight_kg} kg` : '']
+  const combined = [
+    desc,
+    pieces != null ? `${pieces} pezzi` : '',
+    weight_kg != null ? `${weight_kg} kg` : '',
+    volume_liters != null ? `${volume_liters} litri` : '',
+  ]
     .filter(Boolean)
     .join(' ')
     .trim()
@@ -132,6 +156,7 @@ export function normalizeOrderLine(line) {
     desc = parsed.product_description || desc
     pieces = parsed.pieces ?? pieces
     weight_kg = parsed.weight_kg ?? weight_kg
+    volume_liters = parsed.volume_liters ?? volume_liters
   } else {
     let m = desc.match(/^(\d+(?:[.,]\d+)?)\s*kg\s+(?:di\s+)?(.+)$/i)
     if (m) {
@@ -219,8 +244,28 @@ export function normalizeOrderLine(line) {
     desc = cleanProductName(pe.remainder)
   }
 
+  if (volume_liters == null) {
+    let lm = desc.match(/^(\d+(?:[.,]\d+)?)\s*(?:litri?|lt\.?)\s+(?:di\s+)?(.+)$/i)
+    if (lm) {
+      volume_liters = Number(String(lm[1]).replace(',', '.'))
+      desc = lm[2].trim()
+    } else {
+      lm = desc.match(/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(?:litri?|lt\.?)$/i)
+      if (lm && lm[1].trim().length >= 2) {
+        volume_liters = Number(String(lm[2]).replace(',', '.'))
+        desc = lm[1].trim()
+      } else {
+        lm = desc.match(/^(?:litri?|lt\.?)\s+(\d+(?:[.,]\d+)?)\s+(.+)$/i)
+        if (lm) {
+          volume_liters = Number(String(lm[1]).replace(',', '.'))
+          desc = lm[2].trim()
+        }
+      }
+    }
+  }
+
   desc = cleanProductName(desc)
-  return { product_description: desc, pieces, weight_kg, note }
+  return { product_description: desc, pieces, weight_kg, volume_liters, note }
 }
 
 const PRODUCT_ENTRY_PATTERNS = [
@@ -299,6 +344,7 @@ export function mapOrderLinesToRows(lines) {
       product_description: n.product_description || '',
       pieces: n.pieces != null ? String(n.pieces) : '',
       weight_kg: n.weight_kg != null && n.weight_kg !== '' ? String(n.weight_kg) : '',
+      volume_liters: n.volume_liters != null && n.volume_liters !== '' ? String(n.volume_liters) : '',
       note: n.note || '',
     }
   })
