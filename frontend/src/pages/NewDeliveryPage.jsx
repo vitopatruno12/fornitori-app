@@ -701,7 +701,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                                 onChange={(e) => updateItem(index, col.id, e.target.value)}
                                 placeholder={
                                   col.id === 'product_description'
-                                    ? 'es. carciofi, arance'
+                                    ? 'Descrizione prodotto'
                                     : col.id === 'note' || col.id === 'anomaly_note'
                                       ? 'opzionale'
                                       : undefined
@@ -799,7 +799,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                         className="form-control"
                         value={row.product_description}
                         onChange={(e) => updatePriceRow(index, 'product_description', e.target.value)}
-                        placeholder="es. carciofi"
+                        placeholder="Descrizione prodotto"
                       />
                     </div>
                     <div className="form-group" style={{ flex: '0 1 140px' }}>
