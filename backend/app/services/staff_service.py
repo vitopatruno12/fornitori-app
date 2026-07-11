@@ -105,6 +105,8 @@ def _verify_locale_access_code(
         return
     provided = _normalize_access_code(access_code)
     if provided != stored_code:
+        if not provided:
+            raise ValueError("Codice locale richiesto.")
         raise ValueError("Codice locale non valido.")
 
 

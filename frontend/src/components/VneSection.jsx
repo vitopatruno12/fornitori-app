@@ -45,6 +45,20 @@ function localInputToVneDate(value) {
   return `${d}-${m}-${y} 00:00`
 }
 
+function resolveModelDisplayName(modelId, models, machineRows, apiLabel) {
+  const fromApi = String(apiLabel || '').trim()
+  if (fromApi) return fromApi
+  const id = String(modelId || '').trim()
+  if (!id) return '—'
+  const fromOverview = (Array.isArray(machineRows) ? machineRows : []).find((row) => row?.model_id === id)
+  const overviewName = String(fromOverview?.machine_name || '').trim()
+  if (overviewName) return overviewName
+  const fromModels = (Array.isArray(models) ? models : []).find((model) => model?.id === id)
+  const modelLabel = String(fromModels?.label || '').trim()
+  if (modelLabel) return modelLabel
+  return id
+}
+
 export default function VneSection({ embedded = false }) {
   const SECTION_HOME = 'home'
   const SECTION_MACCHINE = 'macchine'
@@ -85,6 +99,10 @@ export default function VneSection({ embedded = false }) {
   const [machinesUpdatedAt, setMachinesUpdatedAt] = useState('')
 
   const selected = useMemo(() => models.find((m) => m.id === selectedId) || null, [models, selectedId])
+  const selectedDisplayName = useMemo(
+    () => resolveModelDisplayName(selectedId, models, machineRows),
+    [selectedId, models, machineRows],
+  )
   const contabilitaRows = useMemo(() => flattenVneContabilitaRows(contabilita), [contabilita])
   const statusRows = useMemo(() => flattenVneStatusRows(status), [status])
   const operationsTotals = useMemo(() => vneOperationsTotals(opsRows), [opsRows])
@@ -150,7 +168,9 @@ export default function VneSection({ embedded = false }) {
       if (blockedByPortal && !hasStatusData) {
         setStatus(null)
         setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
-        setError(`VNE: impossibile accedere alla macchina per ${selected?.label || mid}. Verifica disponibilità macchina/connessione sul portale remoto.`)
+        setError(
+          `VNE: impossibile accedere a ${resolveModelDisplayName(mid, models, machineRows, data?.model_label)}. Verifica disponibilità macchina/connessione sul portale remoto.`,
+        )
         return
       }
       setStatus(data)
@@ -158,11 +178,14 @@ export default function VneSection({ embedded = false }) {
     } catch (e) {
       setStatus(null)
       setModelConnectivity((prev) => ({ ...prev, [mid]: 'offline' }))
+      const machineName = resolveModelDisplayName(mid, models, machineRows)
       const msg = String(e?.message || '')
       if (msg.includes('504')) {
-        setError('VNE: timeout lettura stato (richiesta troppo lenta). Riprova tra qualche secondo.')
+        setError(`VNE: timeout lettura stato per ${machineName} (richiesta troppo lenta). Riprova tra qualche secondo.`)
+      } else if (msg.includes('macchina non accessibile') || msg.includes('impossibile accedere')) {
+        setError(`VNE: impossibile accedere a ${machineName}. Verifica disponibilità macchina/connessione sul portale remoto.`)
       } else {
-        setError(msg || 'Errore lettura stato VNE')
+        setError(msg || `Errore lettura stato VNE per ${machineName}`)
       }
     } finally {
       setLoadingStatus(false)
@@ -481,7 +504,7 @@ export default function VneSection({ embedded = false }) {
           </div>
           {activeSection === SECTION_HOME && (
             <p className="vne-chiusure-hint" style={{ marginTop: '0.45rem' }}>
-              Modello attivo: <strong>{selected?.label || selectedId}</strong>. Clicca una sezione per aprire la relativa scheda.
+              Macchina attiva: <strong>{selectedDisplayName}</strong>. Clicca una sezione per aprire la relativa scheda.
             </p>
           )}
         </div>
@@ -561,7 +584,7 @@ export default function VneSection({ embedded = false }) {
           {!selected?.contabilita_url ? null : !loadingContabilita && contabilita && (
             <VneWorkbookGrid
               title="Contabilità"
-              sheetLabel={`${contabilitaRows.length} righe · ${selected?.label || selectedId}`}
+              sheetLabel={`${contabilitaRows.length} righe · ${selectedDisplayName}`}
               columns={VNE_KEY_VALUE_COLUMNS}
               rows={contabilitaRows}
               cellValue={vneKeyValueCellValue}
@@ -596,7 +619,7 @@ export default function VneSection({ embedded = false }) {
             </button>
           </div>
           <p className="vne-chiusure-hint" style={{ marginTop: '0.35rem' }}>
-            Modello: <strong>{selected?.label || selectedId}</strong>
+            Macchina: <strong>{selectedDisplayName}</strong>
           </p>
           {!status && !loadingStatus && <p className="empty-state">Nessun dato disponibile.</p>}
           {loadingStatus && <p className="loading">Lettura stato da VNE…</p>}
@@ -604,7 +627,7 @@ export default function VneSection({ embedded = false }) {
           {status && (
             <VneWorkbookGrid
               title={status.title || 'Stato'}
-              sheetLabel={`${statusRows.length} attributi · ${selected?.label || selectedId}`}
+              sheetLabel={`${statusRows.length} attributi · ${selectedDisplayName}`}
               columns={VNE_KEY_VALUE_COLUMNS}
               rows={statusRows}
               cellValue={vneKeyValueCellValue}
@@ -632,7 +655,7 @@ export default function VneSection({ embedded = false }) {
         <div className="vne-legacy-shell">
           <VneFilterWorkbook
             title="Filtri operazioni"
-            sheetLabel={`Modello: ${selected?.label || selectedId || '—'} · formato dd-mm-yyyy hh:mm`}
+            sheetLabel={`Macchina: ${selectedDisplayName} · formato dd-mm-yyyy hh:mm`}
             gridClassName="vne-operations-filter-grid"
             fields={[
               {
@@ -794,7 +817,7 @@ export default function VneSection({ embedded = false }) {
         <div className="vne-legacy-shell">
           <VneFilterWorkbook
             title="Filtri chiusure di cassa"
-            sheetLabel={`Modello: ${selected?.label || selectedId || '—'} · formato dd-mm-yyyy hh:mm`}
+            sheetLabel={`Macchina: ${selectedDisplayName} · formato dd-mm-yyyy hh:mm`}
             gridClassName="vne-closings-filter-grid"
             fields={[
               {

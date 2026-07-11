@@ -44,8 +44,9 @@ def _verify_activity_access(
 ) -> None:
     try:
         _verify_prima_nota_activity_access(db, activity, access_code)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Codice locale non valido.")
+    except ValueError as exc:
+        detail = str(exc) or "Codice locale non valido."
+        raise HTTPException(status_code=403, detail=detail)
     except SQLAlchemyError:
         db.rollback()
         raise HTTPException(

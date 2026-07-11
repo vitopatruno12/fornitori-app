@@ -154,6 +154,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [unlockBusy, setUnlockBusy] = useState(false)
   const [saveCodeBusy, setSaveCodeBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [localeAccessMetaReady, setLocaleAccessMetaReady] = useState(false)
 
   const protectedSlugs = useMemo(() => {
     const slugs = new Set()
@@ -183,7 +184,21 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return isValidLocaleAccessCode(resolveActiveAccessCode())
   }
 
+  function canQueryCashData() {
+    if (!localeAccessMetaReady) return false
+    return hasActiveLocaleAccess()
+  }
+
+  async function refreshLocaleAccessMeta() {
+    try {
+      await Promise.all([refreshStaffLocaleSummaries(), refreshProtectedLocaleSummaries()])
+    } finally {
+      setLocaleAccessMetaReady(true)
+    }
+  }
+
   function isRegisterClosed() {
+    if (!localeAccessMetaReady) return false
     return activeLocaleNeedsCode() && !hasActiveLocaleAccess()
   }
 
@@ -371,8 +386,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   useEffect(() => {
     loadSuppliers()
     loadPrimaNotaReference()
-    void refreshStaffLocaleSummaries()
-    void refreshProtectedLocaleSummaries()
+    void refreshLocaleAccessMeta()
   }, [])
 
   useEffect(() => {
@@ -598,11 +612,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadSummary()
-  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode])
+  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
 
   useEffect(() => {
     let cancelled = false
     async function ensureSelectedDayEntries() {
+      if (!canQueryCashData()) return
       const from = movementPeriodFrom
       const to = movementPeriodTo
       if (from && to && from <= selectedDate && selectedDate <= to) return
@@ -631,11 +646,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return () => {
       cancelled = true
     }
-  }, [selectedDate, activeActivity, movementPeriodFrom, movementPeriodTo])
+  }, [selectedDate, activeActivity, movementPeriodFrom, movementPeriodTo, localeAccessMetaReady, unlockedSlugs, localeAccessCode, protectedSlugs])
 
   useEffect(() => {
     loadEntries()
-  }, [movementPeriodFrom, movementPeriodTo, activeActivity, unlockedSlugs, localeAccessCode])
+  }, [movementPeriodFrom, movementPeriodTo, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
 
   function selectActivity(activityId) {
     if (activityId === activeActivity) return
@@ -661,6 +676,10 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadEntries() {
+    if (!localeAccessMetaReady) {
+      setLoading(true)
+      return
+    }
     if (!hasActiveLocaleAccess()) {
       setEntries([])
       setLoading(false)
@@ -691,7 +710,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function loadSummary() {
-    if (!hasActiveLocaleAccess()) {
+    if (!canQueryCashData()) {
       setSummary(null)
       return
     }

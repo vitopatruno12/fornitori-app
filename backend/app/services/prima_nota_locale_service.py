@@ -192,6 +192,8 @@ def verify_activity_access(db: Session, activity: Optional[str], access_code: Op
         return
     provided = _normalize_access_code(access_code)
     if provided != stored_code:
+        if not provided:
+            raise ValueError("Codice locale richiesto.")
         raise ValueError("Codice locale non valido.")
 
 
