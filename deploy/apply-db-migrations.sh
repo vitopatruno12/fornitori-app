@@ -38,6 +38,9 @@ fi
 SAFE_MIGRATIONS=(
   20260616_staff_locale_access_code.sql
   20260617_prima_nota_locale_access_code.sql
+  20260710_warehouse_movements.sql
+  20260710_supplier_payments_workbook.sql
+  20260710_supplier_order_items_volume_liters.sql
 )
 
 log "Migrazioni SQL su database $DB_NAME"

@@ -83,8 +83,14 @@ if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/nu
   else
     warn "Script migrazione assente: esegui manualmente deploy/ensure-prima-nota-locale-table.sh"
   fi
+  if [[ -f "$APP_DIR/deploy/ensure-warehouse-payments-tables.sh" ]]; then
+    log "Tabelle magazzino / pagamenti fornitori / volume_liters ordini"
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-warehouse-payments-tables.sh"
+  else
+    warn "Script ensure-warehouse-payments-tables.sh assente: le API magazzino/pagamenti possono restituire 500."
+  fi
 else
-  warn "PostgreSQL non attivo: salto creazione tabella codici Prima Nota."
+  warn "PostgreSQL non attivo: salto migrazioni database."
 fi
 
 API_DIR="${API_DIR:-/opt/fornitori-app}"

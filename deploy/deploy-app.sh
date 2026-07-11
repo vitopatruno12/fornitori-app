@@ -208,6 +208,13 @@ elif [[ -f "$APP_DIR/deploy/backup-db.sh" ]] && systemctl is-active --quiet post
     }
 fi
 
+if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+    if [[ -f "$APP_DIR/deploy/ensure-warehouse-payments-tables.sh" ]]; then
+        log "Migrazioni magazzino / pagamenti fornitori / volume_liters ordini"
+        APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-warehouse-payments-tables.sh"
+    fi
+fi
+
 if systemctl is-active --quiet fornitori-api; then
     log "Restart fornitori-api"
     systemctl restart fornitori-api

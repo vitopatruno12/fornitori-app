@@ -157,7 +157,20 @@ async def _operational_error_handler(request: Request, exc: OperationalError):
 @app.exception_handler(SQLAlchemyError)
 async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     logger.error("SQLAlchemyError su %s (%s): %s", request.url.path, type(exc).__name__, exc)
-    payload = {"detail": "Errore database.", "error": "sqlalchemy_error"}
+    detail = "Errore database."
+    err_text = str(exc).lower()
+    if "warehouse_movements" in err_text or "supplier_payments_workbooks" in err_text or "volume_liters" in err_text:
+        detail = (
+            "Schema database incompleto (magazzino, pagamenti fornitori o ordini). "
+            "Sul server esegui: sudo RESTART_API=1 bash deploy/release-safe.sh "
+            "oppure deploy/ensure-warehouse-payments-tables.sh"
+        )
+    elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
+        detail = (
+            "Tabella o colonna mancante nel database. "
+            "Applicare le migrazioni in backend/migrations o deploy/ensure-warehouse-payments-tables.sh"
+        )
+    payload = {"detail": detail, "error": "sqlalchemy_error"}
     if EXPOSE_ERROR_DETAILS:
         payload["debug"] = f"{type(exc).__name__}: {exc}"
     return JSONResponse(status_code=500, content=payload)
@@ -631,6 +644,10 @@ def _check_critical_schema_columns() -> None:
             ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
             ("supplier_order_items", "volume_liters", "20260710_supplier_order_items_volume_liters.sql"),
         ]
+        required_tables = [
+            ("warehouse_movements", "20260710_warehouse_movements.sql"),
+            ("supplier_payments_workbooks", "20260710_supplier_payments_workbook.sql"),
+        ]
         insp = inspect(engine)
         missing = []
         for table, column, migration in required:
@@ -641,6 +658,12 @@ def _check_critical_schema_columns() -> None:
                 continue
             if column not in cols:
                 missing.append((table, column, migration))
+        for table, migration in required_tables:
+            try:
+                if not insp.has_table(table):
+                    missing.append((table, "(tabella)", migration))
+            except Exception:
+                missing.append((table, "(tabella)", migration))
 
         if not missing:
             logger.info("Schema check OK: critical migration columns found")
