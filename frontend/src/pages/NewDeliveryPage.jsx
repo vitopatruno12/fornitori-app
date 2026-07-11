@@ -312,8 +312,10 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   }
 
   function removeItem(index) {
-    if (items.length <= 1) return
-    setItems((prev) => prev.filter((_, i) => i !== index))
+    setItems((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      return next.length === 0 ? [emptyItem()] : next
+    })
   }
 
   async function loadFromPurchasedOrder() {
@@ -717,7 +719,6 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                               type="button"
                               className="btn btn-outline-danger btn-sm"
                               onClick={() => removeItem(index)}
-                              disabled={items.length <= 1}
                             >
                               Rimuovi
                             </button>
