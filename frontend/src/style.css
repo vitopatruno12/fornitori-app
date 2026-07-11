@@ -1471,6 +1471,143 @@ select.form-control {
   white-space: nowrap;
 }
 
+.pagamenti-col-header-deletable {
+  padding-right: 0.15rem;
+}
+
+.pagamenti-col-header-label {
+  display: inline-block;
+  max-width: calc(100% - 1.35rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.pagamenti-col-header-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-left: 0.15rem;
+  padding: 0;
+  border: 1px solid rgba(185, 28, 28, 0.35);
+  border-radius: 3px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.pagamenti-col-header-delete:hover {
+  background: #fef2f2;
+  border-color: #b91c1c;
+}
+
+.pagamenti-highlight-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.pagamenti-highlight-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 40;
+  min-width: 15rem;
+  padding: 0.45rem;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius, 8px);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+.pagamenti-highlight-menu-group {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.pagamenti-highlight-menu-group:last-of-type {
+  border-bottom: none;
+}
+
+.pagamenti-highlight-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.6rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.pagamenti-highlight-menu-actions,
+.pagamenti-highlight-menu-clear {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.pagamenti-highlight-menu-clear {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid #eef2f7;
+}
+
+.pagamenti-highlight-menu-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+
+.pagamenti-highlight-menu-btn:hover {
+  background: #eef2ff;
+  border-color: #93c5fd;
+}
+
+.pagamenti-grid td.pagamenti-hl-green,
+.pagamenti-grid th.pagamenti-hl-green {
+  background: #dcfce7 !important;
+}
+
+.pagamenti-grid td.pagamenti-hl-red,
+.pagamenti-grid th.pagamenti-hl-red {
+  background: #fee2e2 !important;
+}
+
+.pagamenti-grid td.pagamenti-hl-yellow,
+.pagamenti-grid th.pagamenti-hl-yellow {
+  background: #fef9c3 !important;
+}
+
+.pagamenti-grid td.pagamenti-hl-blue,
+.pagamenti-grid th.pagamenti-hl-blue {
+  background: #dbeafe !important;
+}
+
+.pagamenti-grid td.pagamenti-hl-green .excel-cell,
+.pagamenti-grid td.pagamenti-hl-red .excel-cell,
+.pagamenti-grid td.pagamenti-hl-yellow .excel-cell,
+.pagamenti-grid td.pagamenti-hl-blue .excel-cell {
+  background: transparent;
+}
+
+.pagamenti-grid td.pagamenti-cell-selected {
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
+
 .pagamenti-grid .pagamenti-row-subtotal .excel-cell,
 .pagamenti-grid .pagamenti-row-totals .excel-cell,
 .pagamenti-grid .pagamenti-cell-emphasis {

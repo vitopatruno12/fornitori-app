@@ -45,7 +45,8 @@ def _payload_from_row(row: SupplierPaymentsWorkbook) -> SupplierPaymentsWorkbook
         continue
       sheets.append(SupplierPaymentsSheet(name=name, rows=rows))
   title = str(raw.get("title") or row.title or "").strip()
-  return SupplierPaymentsWorkbookPayload(title=title or row.title or "", sheets=sheets)
+  highlights = raw.get("highlights") if isinstance(raw.get("highlights"), dict) else {}
+  return SupplierPaymentsWorkbookPayload(title=title or row.title or "", sheets=sheets, highlights=highlights)
 
 
 def workbook_to_read(row: SupplierPaymentsWorkbook, *, seeded: bool = False) -> SupplierPaymentsWorkbookRead:
@@ -54,6 +55,7 @@ def workbook_to_read(row: SupplierPaymentsWorkbook, *, seeded: bool = False) -> 
       workbook_key=row.workbook_key,
       title=payload.title,
       sheets=payload.sheets,
+      highlights=payload.highlights,
       updated_at=row.updated_at,
       seeded=seeded,
   )
@@ -81,6 +83,8 @@ def upsert_workbook(db: Session, payload: SupplierPaymentsWorkbookUpsert) -> Sup
       "title": (payload.title or "FILE FORNITORI_RISACCA_2026").strip(),
       "sheets": [sheet.model_dump() for sheet in payload.sheets],
   }
+  if isinstance(payload.highlights, dict):
+    body["highlights"] = payload.highlights
   payload_json = json.dumps(body, ensure_ascii=False)
   row = db.query(SupplierPaymentsWorkbook).filter(SupplierPaymentsWorkbook.workbook_key == key).first()
   if row:

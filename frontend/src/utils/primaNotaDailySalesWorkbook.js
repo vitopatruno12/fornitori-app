@@ -21,7 +21,7 @@ export function buildPrimaNotaDailySalesRows(totals) {
     { id: 'fiscale', label: 'Totale fiscale', amount: amountCell(totals.fiscale) },
     {
       id: 'non_fiscale',
-      label: 'Totale non fiscale [Non fiscale]',
+      label: 'Totale NC (non contabilizzato)',
       amount: amountCell(totals.nonFiscale),
       rowClass: 'prima-nota-row-nf',
     },
@@ -29,7 +29,7 @@ export function buildPrimaNotaDailySalesRows(totals) {
     { id: 'refill', label: 'Totale Refill', amount: amountCell(totals.refill) },
     {
       id: 'totale',
-      label: 'Totale vendita (Fiscale + Non fiscale + POS + Refill)',
+      label: 'Totale vendita (Fiscale + NC + POS + Refill)',
       amount: amountCell(totals.totale),
       rowClass: 'pagamenti-row-totals',
     },

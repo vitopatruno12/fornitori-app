@@ -63,7 +63,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
 
   autoTable(doc, {
     startY: 32,
-    head: [['Data', 'N.', 'Operazioni', 'Entrata', 'Uscita', 'Fiscale', 'Non fisc.', 'POS', 'Refill', 'Totale']],
+    head: [['Data', 'N.', 'Operazioni', 'Entrata', 'Uscita', 'Fiscale', 'NC', 'POS', 'Refill', 'Totale']],
     body,
     styles: { fontSize: 8, cellPadding: 1.8 },
     headStyles: { fillColor: [17, 76, 95], textColor: 255 },

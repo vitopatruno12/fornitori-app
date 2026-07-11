@@ -1527,7 +1527,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             <option value="fiscale">Fiscale</option>
             <option value="entrata">Solo entrate</option>
             <option value="uscita">Solo uscite</option>
-            <option value="nf">Non fiscale</option>
+            <option value="nf">NC</option>
             <option value="pos">POS</option>
             <option value="refill">Refill</option>
           </select>
@@ -1600,9 +1600,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
                   type="button"
                   className={formFlowTag === 'non_fiscale' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
                   onClick={() => setFormFlowTag('non_fiscale')}
-                  title="Movimento NON fiscale: compare in cassa entrata/uscita e nel riepilogo vendite (escluso dal totale fiscale)."
+                  title="Movimento NC (non contabilizzato): compare in cassa entrata/uscita e nel riepilogo vendite (escluso dal totale fiscale)."
                 >
-                  Non fiscale
+                  NC
                 </button>
                 <button
                   type="button"
@@ -1816,7 +1816,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
               Fiscale: <strong>€ {formatAmount(movementPeriodTotals.fiscale)}</strong>
             </span>
             <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-              Non fiscale: <strong>€ {formatAmount(movementPeriodTotals.nonFiscale)}</strong>
+              NC: <strong>€ {formatAmount(movementPeriodTotals.nonFiscale)}</strong>
             </span>
             <span className="pn-movement-totals-item">
               POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
@@ -1880,7 +1880,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, non fiscale, POS e Refill calcolati dal server per quel giorno. Il saldo cassa usa movimenti fiscali e non fiscali (esclusi POS e Refill).
+          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, NC, POS e Refill calcolati dal server per quel giorno. Il saldo cassa usa movimenti fiscali e NC (esclusi POS e Refill).
         </p>
         <div className="form-row">
           <div className="form-group">
@@ -1952,8 +1952,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           title={`Vendite del giorno — ${activeActivityLabel}`}
           hint={
             <>
-              Fiscale, non fiscale, POS e Refill per il <strong>{formatDate(selectedDate)}</strong>.
-              Il non fiscale entra in cassa entrata/uscita e nel totale vendita.
+              Fiscale, NC, POS e Refill per il <strong>{formatDate(selectedDate)}</strong>.
+              Il NC entra in cassa entrata/uscita e nel totale vendita.
             </>
           }
           rows={dailySalesRows}
@@ -2012,7 +2012,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             <div className="ui-drawer-body">
               <p style={{ marginTop: 0 }}>
                 {isNonFiscale(drawerEntry) ? (
-                  <span className="badge-pn badge-pn--nf">Non fiscale</span>
+                  <span className="badge-pn badge-pn--nf">NC</span>
                 ) : isPos(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">POS</span>
                 ) : isRefill(drawerEntry) ? (

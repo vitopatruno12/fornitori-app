@@ -11,7 +11,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'entrata', label: 'Cassa entrata', numeric: true, width: 110 },
   { id: 'uscita', label: 'Cassa uscita', numeric: true, width: 110 },
   { id: 'fiscale', label: 'Fiscale', numeric: true, width: 100 },
-  { id: 'non_fiscale', label: 'Non fiscale', numeric: true, width: 110 },
+  { id: 'non_fiscale', label: 'NC', numeric: true, width: 110 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
@@ -68,7 +68,7 @@ function movementDescription(entry) {
   if (entry.riferimento_documento) {
     text = text ? `${text} · ${entry.riferimento_documento}` : String(entry.riferimento_documento)
   }
-  if (isNonFiscaleEntry(entry)) text = text ? `${text} [Non fiscale]` : '[Non fiscale]'
+  if (isNonFiscaleEntry(entry)) text = text ? `${text} [NC]` : '[NC]'
   else if (isPosEntry(entry)) text = text ? `${text} [POS]` : '[POS]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   return text

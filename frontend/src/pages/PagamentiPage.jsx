@@ -21,9 +21,15 @@ import {
   parseCellInput,
   recalculateWorkbook,
   removeWorkbookSheet,
+  removeWorkbookColumn,
+  canDeleteWorkbookColumn,
   sheetColumnCount,
   sheetHeaders,
   suggestNewSheetName,
+  PAGAMENTI_HIGHLIGHT_COLORS,
+  getSheetHighlights,
+  resolveHighlightClass,
+  applyWorkbookHighlight,
 } from '../utils/pagamentiWorkbook.js'
 import { downloadWorkbookAsExcel, parseExcelFileToWorkbook } from '../utils/pagamentiExcel.js'
 
@@ -31,6 +37,7 @@ function workbookFromApi(data) {
   return {
     title: data?.title || seedWorkbook.title,
     sheets: Array.isArray(data?.sheets) ? data.sheets : seedWorkbook.sheets,
+    highlights: data?.highlights && typeof data.highlights === 'object' ? data.highlights : {},
   }
 }
 
@@ -46,7 +53,10 @@ export default function PagamentiPage() {
   const [importing, setImporting] = useState(false)
   const [newSheetOpen, setNewSheetOpen] = useState(false)
   const [newSheetName, setNewSheetName] = useState('')
+  const [selectedCell, setSelectedCell] = useState(null)
+  const [highlightMenuOpen, setHighlightMenuOpen] = useState(false)
   const uploadInputRef = useRef(null)
+  const highlightMenuRef = useRef(null)
 
   const refreshWorkbook = useCallback(async () => {
     setLoading(true)
@@ -72,6 +82,22 @@ export default function PagamentiPage() {
     void refreshWorkbook()
   }, [refreshWorkbook])
 
+  useEffect(() => {
+    setSelectedCell(null)
+    setHighlightMenuOpen(false)
+  }, [activeSheet])
+
+  useEffect(() => {
+    if (!highlightMenuOpen) return undefined
+    function onDocClick(event) {
+      if (highlightMenuRef.current && !highlightMenuRef.current.contains(event.target)) {
+        setHighlightMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [highlightMenuOpen])
+
   const currentSheet = useMemo(
     () => workbook.sheets.find((sheet) => sheet.name === activeSheet) || workbook.sheets[0],
     [workbook.sheets, activeSheet],
@@ -81,6 +107,16 @@ export default function PagamentiPage() {
   const headers = currentSheet ? sheetHeaders(currentSheet) : MONTHLY_HEADERS
   const rowOffset = currentSheet ? bodyRowOffset(currentSheet.name) : 1
   const canDeleteActiveSheet = currentSheet ? canDeleteWorkbookSheet(currentSheet.name) : false
+  const canDeleteLastColumn = currentSheet ? canDeleteWorkbookColumn(currentSheet) : false
+  const sheetHighlights = useMemo(
+    () => (currentSheet ? getSheetHighlights(workbook, currentSheet.name) : { cells: {}, rows: {}, cols: {} }),
+    [workbook, currentSheet],
+  )
+  const hasSelectedCell =
+    selectedCell &&
+    selectedCell.sheetName === activeSheet &&
+    selectedCell.bodyRowIndex != null &&
+    selectedCell.colIndex != null
 
   const bodyRows = useMemo(() => {
     if (!currentSheet) return []
@@ -122,6 +158,7 @@ export default function PagamentiPage() {
       const saved = await saveSupplierPaymentsWorkbook({
         title: payload.title,
         sheets: payload.sheets,
+        highlights: payload.highlights || {},
       })
       setWorkbook(recalculateWorkbook(workbookFromApi(saved)))
       setUpdatedAt(saved?.updated_at || '')
@@ -208,6 +245,48 @@ export default function PagamentiPage() {
       closeNewSheetModal()
     } catch (err) {
       setError(err?.message || 'Impossibile creare il foglio')
+    }
+  }
+
+  function selectCell(bodyRowIndex, colIndex) {
+    setSelectedCell({
+      sheetName: activeSheet,
+      bodyRowIndex,
+      colIndex,
+      sheetRowIndex: bodyRowIndex + rowOffset,
+    })
+  }
+
+  function applyHighlight(scope, color) {
+    if (!hasSelectedCell) return
+    const next = applyWorkbookHighlight(
+      workbook,
+      activeSheet,
+      scope,
+      selectedCell.sheetRowIndex,
+      selectedCell.colIndex,
+      color,
+    )
+    applyWorkbook(next)
+    setHighlightMenuOpen(false)
+  }
+
+  function handleDeleteColumn(colIndex = null) {
+    if (!currentSheet || !canDeleteWorkbookColumn(currentSheet, colIndex ?? columnCount - 1)) return
+    const index = colIndex ?? columnCount - 1
+    const headerLabel = formatCellDisplay(headers[index]) || `Colonna ${index + 1}`
+    if (
+      !window.confirm(
+        `Eliminare la colonna "${headerLabel}" dal foglio "${currentSheet.name}"?`,
+      )
+    ) {
+      return
+    }
+    setError('')
+    try {
+      applyWorkbook(removeWorkbookColumn(workbook, currentSheet.name, index), 'Colonna eliminata. Clicca Salva per aggiornare il database.')
+    } catch (err) {
+      setError(err?.message || 'Eliminazione colonna non riuscita')
     }
   }
 
@@ -307,6 +386,67 @@ export default function PagamentiPage() {
                 </button>
               </>
             ) : null}
+            <div className="pagamenti-highlight-dropdown" ref={highlightMenuRef}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm pagamenti-highlight-trigger"
+                disabled={loading || importing || !hasSelectedCell}
+                title={
+                  hasSelectedCell
+                    ? 'Evidenzia cella, riga o colonna con un colore'
+                    : 'Seleziona una cella nella tabella'
+                }
+                aria-expanded={highlightMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setHighlightMenuOpen((open) => !open)}
+              >
+                Evidenzia ▾
+              </button>
+              {highlightMenuOpen && hasSelectedCell ? (
+                <div className="pagamenti-highlight-menu" role="menu">
+                  {PAGAMENTI_HIGHLIGHT_COLORS.map((color) => (
+                    <div key={color.id} className="pagamenti-highlight-menu-group">
+                      <span className={`pagamenti-highlight-swatch pagamenti-hl-${color.id}`}>{color.label}</span>
+                      <div className="pagamenti-highlight-menu-actions">
+                        <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('cell', color.id)}>
+                          Cella
+                        </button>
+                        <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('row', color.id)}>
+                          Riga
+                        </button>
+                        <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('col', color.id)}>
+                          Colonna
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="pagamenti-highlight-menu-clear">
+                    <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('cell', null)}>
+                      Rimuovi cella
+                    </button>
+                    <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('row', null)}>
+                      Rimuovi riga
+                    </button>
+                    <button type="button" className="pagamenti-highlight-menu-btn" onClick={() => applyHighlight('col', null)}>
+                      Rimuovi colonna
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              disabled={loading || importing || !canDeleteLastColumn}
+              title={
+                canDeleteLastColumn
+                  ? 'Elimina l\'ultima colonna del foglio'
+                  : 'Struttura minima del foglio raggiunta'
+              }
+              onClick={() => handleDeleteColumn()}
+            >
+              − Colonna
+            </button>
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -325,26 +465,61 @@ export default function PagamentiPage() {
             <table className="app-table excel-table pagamenti-grid">
               <thead>
                 <tr>
-                  {Array.from({ length: columnCount }, (_, colIndex) => (
-                    <th key={`h-${colIndex}`}>{formatCellDisplay(headers[colIndex])}</th>
-                  ))}
+                  {Array.from({ length: columnCount }, (_, colIndex) => {
+                    const deletable = currentSheet ? canDeleteWorkbookColumn(currentSheet, colIndex) : false
+                    const headerHighlight = resolveHighlightClass(sheetHighlights, 0, colIndex)
+                    return (
+                      <th
+                        key={`h-${colIndex}`}
+                        className={[
+                          deletable ? 'pagamenti-col-header-deletable' : '',
+                          headerHighlight,
+                          sheetHighlights.cols[String(colIndex)] ? 'pagamenti-col-highlighted' : '',
+                        ].filter(Boolean).join(' ')}
+                      >
+                        <span className="pagamenti-col-header-label">{formatCellDisplay(headers[colIndex])}</span>
+                        {deletable ? (
+                          <button
+                            type="button"
+                            className="pagamenti-col-header-delete"
+                            title={`Elimina colonna ${formatCellDisplay(headers[colIndex]) || colIndex + 1}`}
+                            aria-label={`Elimina colonna ${formatCellDisplay(headers[colIndex]) || colIndex + 1}`}
+                            onClick={() => handleDeleteColumn(colIndex)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {bodyRows.map((row, rowIndex) => {
                   const kind = classifyRow(row, rowIndex + rowOffset, currentSheet?.name)
+                  const sheetRowIndex = rowIndex + rowOffset
                   if (kind === 'empty') {
                     return (
                       <tr key={`r-${rowIndex}`} className="pagamenti-row-empty">
                         {Array.from({ length: columnCount }, (_, colIndex) => {
                           const editable = isCellEditable('empty', colIndex, currentSheet?.name)
+                          const highlightClass = resolveHighlightClass(sheetHighlights, sheetRowIndex, colIndex)
+                          const selected =
+                            hasSelectedCell &&
+                            selectedCell.bodyRowIndex === rowIndex &&
+                            selectedCell.colIndex === colIndex
                           return (
-                            <td key={`c-${colIndex}`}>
+                            <td
+                              key={`c-${colIndex}`}
+                              className={[highlightClass, selected ? 'pagamenti-cell-selected' : ''].filter(Boolean).join(' ')}
+                            >
                               {editable ? (
                                 <input
                                   className="excel-cell"
                                   value=""
                                   placeholder=" "
+                                  onFocus={() => selectCell(rowIndex, colIndex)}
+                                  onClick={() => selectCell(rowIndex, colIndex)}
                                   onChange={(e) => updateCell(rowIndex, colIndex, e.target.value)}
                                 />
                               ) : (
@@ -357,19 +532,35 @@ export default function PagamentiPage() {
                     )
                   }
                   return (
-                    <tr key={`r-${rowIndex}`} className={`pagamenti-row-${kind}`}>
+                    <tr
+                      key={`r-${rowIndex}`}
+                      className={[
+                        `pagamenti-row-${kind}`,
+                        sheetHighlights.rows[String(sheetRowIndex)] ? 'pagamenti-row-highlighted' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
                       {Array.from({ length: columnCount }, (_, colIndex) => {
                         const value = row[colIndex]
                         const display = formatCellDisplay(value)
                         const numeric = isNumericColumn(colIndex, currentSheet?.name)
                         const editable = isCellEditable(kind, colIndex, currentSheet?.name)
                         const emphasis = kind === 'subtotal' || kind === 'totals'
+                        const highlightClass = resolveHighlightClass(sheetHighlights, sheetRowIndex, colIndex)
+                        const selected =
+                          hasSelectedCell &&
+                          selectedCell.bodyRowIndex === rowIndex &&
+                          selectedCell.colIndex === colIndex
                         return (
-                          <td key={`c-${colIndex}`}>
+                          <td
+                            key={`c-${colIndex}`}
+                            className={[highlightClass, selected ? 'pagamenti-cell-selected' : ''].filter(Boolean).join(' ')}
+                          >
                             <input
                               className={`excel-cell${numeric ? ' excel-cell-num' : ''}${emphasis ? ' pagamenti-cell-emphasis' : ''}${editable ? '' : ' pagamenti-cell-readonly'}`}
                               value={display}
                               readOnly={!editable}
+                              onFocus={() => selectCell(rowIndex, colIndex)}
+                              onClick={() => selectCell(rowIndex, colIndex)}
                               onChange={(e) => updateCell(rowIndex, colIndex, e.target.value)}
                               aria-label={display || `Riga ${rowIndex + 1} colonna ${colIndex + 1}`}
                             />

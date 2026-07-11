@@ -181,6 +181,130 @@ export function sheetColumnCount(sheet) {
   return Math.max(max, MONTHLY_HEADERS.length)
 }
 
+export function minSheetColumnCount(sheetName) {
+  if (sheetName === 'TOTALI') return 9
+  if (sheetName === 'DELEGHE F24') return 5
+  if (sheetName === 'VERSAMENTO CONTANTI') return 3
+  return MONTHLY_HEADERS.length
+}
+
+export function canDeleteWorkbookColumn(sheet, colIndex = null) {
+  if (!sheet) return false
+  const count = sheetColumnCount(sheet)
+  if (count <= minSheetColumnCount(sheet.name)) return false
+  const target = colIndex == null ? count - 1 : colIndex
+  return target === count - 1 && target >= 0
+}
+
+export function removeWorkbookColumn(workbook, sheetName, colIndex = null) {
+  const sheet = (workbook.sheets || []).find((item) => item.name === sheetName)
+  if (!sheet) throw new Error('Foglio non trovato')
+  const count = sheetColumnCount(sheet)
+  const index = colIndex == null ? count - 1 : colIndex
+  if (!canDeleteWorkbookColumn(sheet, index)) {
+    throw new Error('Puoi eliminare solo l\'ultima colonna del foglio, fino alla struttura minima.')
+  }
+  const sheets = (workbook.sheets || []).map((item) => {
+    if (item.name !== sheetName) return item
+    const rows = item.rows.map((row) => {
+      const copy = [...padRow(row, count)]
+      copy.splice(index, 1)
+      return copy
+    })
+    return { ...item, rows }
+  })
+  const highlights = normalizeWorkbookHighlights(workbook.highlights)
+  const sheetHl = highlights[sheetName]
+  if (sheetHl) {
+    highlights[sheetName] = shiftHighlightsAfterColumnDelete(sheetHl, index)
+    if (isEmptySheetHighlights(highlights[sheetName])) delete highlights[sheetName]
+  }
+  return recalculateWorkbook({ ...workbook, sheets, highlights })
+}
+
+export const PAGAMENTI_HIGHLIGHT_COLORS = [
+  { id: 'green', label: 'Verde', className: 'pagamenti-hl-green' },
+  { id: 'red', label: 'Rosso', className: 'pagamenti-hl-red' },
+  { id: 'yellow', label: 'Giallo', className: 'pagamenti-hl-yellow' },
+  { id: 'blue', label: 'Blu', className: 'pagamenti-hl-blue' },
+]
+
+export function normalizeWorkbookHighlights(highlights) {
+  if (!highlights || typeof highlights !== 'object') return {}
+  return { ...highlights }
+}
+
+function isEmptySheetHighlights(sheetHl) {
+  if (!sheetHl) return true
+  return (
+    !Object.keys(sheetHl.cells || {}).length &&
+    !Object.keys(sheetHl.rows || {}).length &&
+    !Object.keys(sheetHl.cols || {}).length
+  )
+}
+
+function shiftHighlightsAfterColumnDelete(sheetHl, deletedColIndex) {
+  const cells = {}
+  Object.entries(sheetHl.cells || {}).forEach(([key, color]) => {
+    const [row, col] = key.split(':').map(Number)
+    if (col === deletedColIndex) return
+    if (col > deletedColIndex) cells[`${row}:${col - 1}`] = color
+    else cells[key] = color
+  })
+  const cols = {}
+  Object.entries(sheetHl.cols || {}).forEach(([colKey, color]) => {
+    const col = Number(colKey)
+    if (col === deletedColIndex) return
+    if (col > deletedColIndex) cols[String(col - 1)] = color
+    else cols[colKey] = color
+  })
+  return { cells, rows: { ...(sheetHl.rows || {}) }, cols }
+}
+
+export function getSheetHighlights(workbook, sheetName) {
+  const sheet = normalizeWorkbookHighlights(workbook.highlights)[sheetName]
+  if (!sheet) return { cells: {}, rows: {}, cols: {} }
+  return {
+    cells: { ...(sheet.cells || {}) },
+    rows: { ...(sheet.rows || {}) },
+    cols: { ...(sheet.cols || {}) },
+  }
+}
+
+export function resolveHighlightClass(highlights, sheetRowIndex, colIndex) {
+  const cellKey = `${sheetRowIndex}:${colIndex}`
+  const rowKey = String(sheetRowIndex)
+  const colKey = String(colIndex)
+  const color = highlights.cells[cellKey] || highlights.rows[rowKey] || highlights.cols[colKey]
+  if (!color) return ''
+  return PAGAMENTI_HIGHLIGHT_COLORS.find((item) => item.id === color)?.className || ''
+}
+
+export function applyWorkbookHighlight(workbook, sheetName, scope, sheetRowIndex, colIndex, color) {
+  const highlights = normalizeWorkbookHighlights(workbook.highlights)
+  const sheetHl = getSheetHighlights(workbook, sheetName)
+  const cellKey = `${sheetRowIndex}:${colIndex}`
+  const rowKey = String(sheetRowIndex)
+  const colKey = String(colIndex)
+
+  if (!color) {
+    if (scope === 'cell') delete sheetHl.cells[cellKey]
+    else if (scope === 'row') delete sheetHl.rows[rowKey]
+    else if (scope === 'col') delete sheetHl.cols[colKey]
+  } else if (scope === 'cell') {
+    sheetHl.cells[cellKey] = color
+  } else if (scope === 'row') {
+    sheetHl.rows[rowKey] = color
+  } else if (scope === 'col') {
+    sheetHl.cols[colKey] = color
+  }
+
+  if (isEmptySheetHighlights(sheetHl)) delete highlights[sheetName]
+  else highlights[sheetName] = sheetHl
+
+  return { ...workbook, highlights }
+}
+
 export function sheetHeaders(sheet) {
   if (sheet.name === 'TOTALI') return sheet.rows[0] || []
   if (sheet.name === 'DELEGHE F24') return sheet.rows[3] || []
