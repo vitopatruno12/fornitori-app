@@ -67,6 +67,27 @@ def list_movements(
   return [movement_to_read(r) for r in rows]
 
 
+def update_movement(db: Session, movement_id: int, payload: WarehouseMovementCreate) -> WarehouseMovementRead:
+  _validate_quantities(payload)
+  row = db.query(WarehouseMovement).filter(WarehouseMovement.id == movement_id).first()
+  if not row:
+    raise HTTPException(status_code=404, detail="Movimento magazzino non trovato")
+  row.movement_type = payload.movement_type
+  row.movement_at = payload.movement_at
+  row.operator_name = payload.operator_name.strip()
+  row.signature = payload.signature.strip()
+  row.product_description = payload.product_description.strip()
+  row.pieces = payload.pieces
+  row.weight_kg = payload.weight_kg
+  row.volume_liters = payload.volume_liters
+  row.merchandise_condition = (payload.merchandise_condition or "").strip() or None
+  row.location = (payload.location or "Magazzino").strip() or "Magazzino"
+  row.note = (payload.note or "").strip() or None
+  db.commit()
+  db.refresh(row)
+  return movement_to_read(row)
+
+
 def delete_movement(db: Session, movement_id: int) -> None:
   row = db.query(WarehouseMovement).filter(WarehouseMovement.id == movement_id).first()
   if not row:

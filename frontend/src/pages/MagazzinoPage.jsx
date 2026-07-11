@@ -10,6 +10,7 @@ import {
   createWarehouseMovement,
   deleteWarehouseMovement,
   fetchWarehouseMovements,
+  updateWarehouseMovement,
 } from '../services/warehouseService.js'
 import {
   WAREHOUSE_MOVEMENTS_COLUMNS,
@@ -81,6 +82,61 @@ function writeStored(key, value) {
   }
 }
 
+function isoToLocalDatetimeInput(iso) {
+  if (!iso) return localDatetimeInputValue()
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return localDatetimeInputValue()
+  return localDatetimeInputValue(d)
+}
+
+function movementRowToEditor(row) {
+  const isIn = row.movement_type === 'in'
+  return {
+    editingId: row.id,
+    product: row.product_description || '',
+    movementType: isIn ? 'in' : 'out',
+    destination: isIn ? WAREHOUSE_SOURCE_LABEL : row.location || WAREHOUSE_DESTINATION_OPTIONS[0]?.value || '',
+    movementAt: isoToLocalDatetimeInput(row.movement_at),
+    pieces: row.pieces != null && row.pieces !== '' ? String(row.pieces) : '',
+    weight_kg: row.weight_kg != null && row.weight_kg !== '' ? String(row.weight_kg) : '',
+    volume_liters: row.volume_liters != null && row.volume_liters !== '' ? String(row.volume_liters) : '',
+    merchandiseCondition: row.merchandise_condition || MERCHANDISE_CONDITIONS[0],
+    note: row.note || '',
+  }
+}
+
+function buildMovementPayload(movementEditor, operatorName, signature) {
+  const product = (movementEditor.product || '').trim()
+  const isOut = movementEditor.movementType !== 'in'
+  const destination = (movementEditor.destination || '').trim()
+  const hasPieces =
+    movementEditor.pieces !== '' &&
+    movementEditor.pieces != null &&
+    !Number.isNaN(Number(movementEditor.pieces))
+  const hasKg =
+    movementEditor.weight_kg !== '' &&
+    movementEditor.weight_kg != null &&
+    !Number.isNaN(Number(movementEditor.weight_kg))
+  const hasLiters =
+    movementEditor.volume_liters !== '' &&
+    movementEditor.volume_liters != null &&
+    !Number.isNaN(Number(movementEditor.volume_liters))
+  const note = String(movementEditor.note || '').trim()
+  return {
+    movement_type: movementEditor.movementType === 'in' ? 'in' : 'out',
+    movement_at: localDatetimeInputToIso(movementEditor.movementAt),
+    operator_name: operatorName.trim(),
+    signature: signature.trim(),
+    product_description: product,
+    pieces: hasPieces ? Number(movementEditor.pieces) : null,
+    weight_kg: hasKg ? Number(movementEditor.weight_kg) : null,
+    volume_liters: hasLiters ? Number(movementEditor.volume_liters) : null,
+    merchandise_condition: movementEditor.merchandiseCondition || null,
+    location: isOut ? destination : WAREHOUSE_SOURCE_LABEL,
+    note: note || null,
+  }
+}
+
 export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }) {
   const navigate = useNavigate()
   const [operatorName, setOperatorName] = useState(() => readStored(WAREHOUSE_OPERATOR_LS))
@@ -139,6 +195,7 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
     }
     setError('')
     setMovementEditor({
+      editingId: null,
       product,
       movementType: 'out',
       destination: WAREHOUSE_DESTINATION_OPTIONS[0]?.value || '',
@@ -149,6 +206,15 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
       merchandiseCondition: MERCHANDISE_CONDITIONS[0],
       note: '',
     })
+  }
+
+  function openMovementEditorForEdit(row) {
+    if (!canRegister) {
+      setError('Inserisci nome operatore e firma prima di modificare un movimento')
+      return
+    }
+    setError('')
+    setMovementEditor(movementRowToEditor(row))
   }
 
   function closeMovementEditor() {
@@ -198,28 +264,24 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
     setError('')
     setSuccess('')
     try {
-      await createWarehouseMovement({
-        movement_type: movementEditor.movementType === 'in' ? 'in' : 'out',
-        movement_at: localDatetimeInputToIso(movementEditor.movementAt),
-        operator_name: operatorName.trim(),
-        signature: signature.trim(),
-        product_description: product,
-        pieces: hasPieces ? Number(movementEditor.pieces) : null,
-        weight_kg: hasKg ? Number(movementEditor.weight_kg) : null,
-        volume_liters: hasLiters ? Number(movementEditor.volume_liters) : null,
-        merchandise_condition: movementEditor.merchandiseCondition || null,
-        location: isOut ? destination : WAREHOUSE_SOURCE_LABEL,
-        note: note || null,
-      })
+      const payload = buildMovementPayload(movementEditor, operatorName, signature)
+      const isEdit = movementEditor.editingId != null
+      if (isEdit) {
+        await updateWarehouseMovement(movementEditor.editingId, payload)
+      } else {
+        await createWarehouseMovement(payload)
+      }
       closeMovementEditor()
       setSuccess(
-        movementEditor.movementType === 'in'
-          ? `Entrata magazzino registrata: ${product}`
-          : `Uscita verso ${destination}: ${product}`,
+        isEdit
+          ? `Movimento aggiornato: ${product}`
+          : movementEditor.movementType === 'in'
+            ? `Entrata magazzino registrata: ${product}`
+            : `Uscita verso ${destination}: ${product}`,
       )
       await refreshMovements()
     } catch (err) {
-      setError(err?.message || 'Registrazione movimento non riuscita')
+      setError(err?.message || (movementEditor.editingId ? 'Modifica movimento non riuscita' : 'Registrazione movimento non riuscita'))
     } finally {
       setSaving(false)
     }
@@ -360,7 +422,7 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
                 {WAREHOUSE_MOVEMENTS_COLUMNS.map((col) => (
                   <col key={col.id} style={{ minWidth: col.width }} />
                 ))}
-                <col style={{ minWidth: 110 }} />
+                <col style={{ minWidth: 170 }} />
               </colgroup>
               <thead>
                 <tr>
@@ -403,6 +465,13 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
                     ))}
                     <td className="sup-actions-col">
                       <div className="sup-actions-btns">
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => openMovementEditorForEdit(row)}
+                        >
+                          Modifica
+                        </button>
                         <button
                           type="button"
                           className="btn btn-outline-danger btn-sm"
@@ -459,8 +528,24 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="warehouse-movement-title" className="page-subheader" style={{ marginTop: 0 }}>
-              {movementEditor.movementType === 'in' ? 'Entrata' : 'Uscita'}: {movementEditor.product}
+              {movementEditor.editingId
+                ? 'Modifica movimento'
+                : movementEditor.movementType === 'in'
+                  ? 'Entrata'
+                  : 'Uscita'}
+              {!movementEditor.editingId ? `: ${movementEditor.product}` : ''}
             </h3>
+            {movementEditor.editingId ? (
+              <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                <label htmlFor="warehouse-move-product">Prodotto *</label>
+                <input
+                  id="warehouse-move-product"
+                  className="form-control"
+                  value={movementEditor.product}
+                  onChange={(e) => updateMovementEditorField('product', e.target.value)}
+                />
+              </div>
+            ) : null}
             <div className="form-row" style={{ marginBottom: '0.75rem' }}>
               <div className="form-group" style={{ flex: '1 1 140px', marginBottom: 0 }}>
                 <label htmlFor="warehouse-move-type">Movimento</label>
@@ -589,7 +674,7 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
             </p>
             <div className="btn-group" style={{ flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void saveMovementEditor()}>
-                {saving ? 'Salvataggio…' : 'Registra movimento'}
+                {saving ? 'Salvataggio…' : movementEditor.editingId ? 'Salva modifiche' : 'Registra movimento'}
               </button>
               <button type="button" className="btn btn-secondary" onClick={closeMovementEditor}>
                 Annulla

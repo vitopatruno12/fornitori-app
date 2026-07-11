@@ -18,6 +18,13 @@ export async function fetchWarehouseMovements({ movementType, location, dateFrom
   return apiFetch(`/warehouse/movements${qs ? `?${qs}` : ''}`)
 }
 
+export async function updateWarehouseMovement(id, payload) {
+  return apiFetch(`/warehouse/movements/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function deleteWarehouseMovement(id) {
   return apiFetch(`/warehouse/movements/${id}`, { method: 'DELETE' })
 }

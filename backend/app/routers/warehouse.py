@@ -37,6 +37,15 @@ def list_warehouse_movements(
   )
 
 
+@router.put("/{movement_id}", response_model=WarehouseMovementRead)
+def update_warehouse_movement(
+    movement_id: int,
+    payload: WarehouseMovementCreate,
+    db: Session = Depends(get_db),
+):
+  return warehouse_service.update_movement(db, movement_id, payload)
+
+
 @router.delete("/{movement_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_warehouse_movement(movement_id: int, db: Session = Depends(get_db)):
   warehouse_service.delete_movement(db, movement_id)
