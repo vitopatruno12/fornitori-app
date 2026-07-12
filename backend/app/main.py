@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
         _ensure_order_delivery_signature_columns()
         _ensure_cash_entries_activity_column()
         _ensure_supplier_locales_column()
+        _ensure_supplier_multi_contact_columns()
         _ensure_staff_member_hourly_rate_column()
         _ensure_staff_payroll_months_table()
         _ensure_staff_locale_packs_table()
@@ -375,6 +376,31 @@ def _ensure_supplier_locales_column() -> None:
     except Exception as e:
         logger.warning(
             "Impossibile verificare/aggiornare suppliers.locales: %s",
+            e,
+        )
+
+
+def _ensure_supplier_multi_contact_columns() -> None:
+    """Telefoni, email, città e categorie merceologiche multiple (JSON)."""
+    try:
+        with engine.begin() as conn:
+            for col in (
+                "phones_json TEXT",
+                "emails_json TEXT",
+                "cities_json TEXT",
+                "merchandise_categories_json TEXT",
+            ):
+                conn.execute(
+                    text(
+                        f"""
+                        ALTER TABLE suppliers
+                        ADD COLUMN IF NOT EXISTS {col}
+                        """
+                    )
+                )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare suppliers multi-contact: %s",
             e,
         )
 

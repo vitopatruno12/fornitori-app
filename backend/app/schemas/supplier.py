@@ -39,6 +39,10 @@ class SupplierBase(BaseModel):
   iban: Optional[str] = None
   payment_terms: Optional[str] = None
   merchandise_category: Optional[str] = None
+  phones_json: Optional[str] = None
+  emails_json: Optional[str] = None
+  cities_json: Optional[str] = None
+  merchandise_categories_json: Optional[str] = None
   notes: Optional[str] = None
   price_list_label: Optional[str] = None
   locales: Optional[str] = None
@@ -68,6 +72,10 @@ class SupplierUpdate(BaseModel):
   iban: Optional[str] = None
   payment_terms: Optional[str] = None
   merchandise_category: Optional[str] = None
+  phones_json: Optional[str] = None
+  emails_json: Optional[str] = None
+  cities_json: Optional[str] = None
+  merchandise_categories_json: Optional[str] = None
   notes: Optional[str] = None
   price_list_label: Optional[str] = None
   locales: Optional[str] = None

@@ -1,4 +1,5 @@
 import { ORDER_QUICK_PRODUCTS } from '../constants/orderQuickProducts.js'
+import { parseMerchandiseCategoriesFromSupplier } from './supplierContactLists.js'
 
 function normalizeKey(value) {
   return String(value || '')
@@ -157,6 +158,10 @@ const MERCHANDISE_CATEGORY_LABELS = {
   terzaluna: TERZA_LUNA_ALLOWED_PRODUCT_LABELS,
 }
 
+export function getSupplierMerchandiseCategoryLabels(supplier) {
+  return parseMerchandiseCategoriesFromSupplier(supplier)
+}
+
 /**
  * Etichette pulsanti rapidi consentite per il fornitore, o `null` = tutte.
  * @param {{ name?: string, merchandise_category?: string } | null | undefined} supplier
@@ -172,6 +177,22 @@ export function getSupplierAllowedProductLabels(supplier) {
   if (isCalabreseSupplier(supplier)) return CALABRESE_ALLOWED_PRODUCT_LABELS
   if (isLeporeSupplier(supplier)) return LEPORE_ALLOWED_PRODUCT_LABELS
   if (isTerzaLunaSupplier(supplier)) return TERZA_LUNA_ALLOWED_PRODUCT_LABELS
+
+  const categoryLabels = getSupplierMerchandiseCategoryLabels(supplier)
+  if (categoryLabels.length > 0) {
+    const merged = new Set()
+    for (const label of categoryLabels) {
+      const key = normalizeKey(label)
+      if (MERCHANDISE_CATEGORY_LABELS[key]) {
+        MERCHANDISE_CATEGORY_LABELS[key].forEach((entry) => merged.add(entry))
+        continue
+      }
+      const direct = ORDER_QUICK_PRODUCTS.find((item) => normalizeKey(item.label) === key)
+      if (direct) merged.add(direct.label)
+      else merged.add(label)
+    }
+    return merged.size ? [...merged] : null
+  }
 
   const cat = normalizeKey(supplier.merchandise_category)
   if (!cat) return null

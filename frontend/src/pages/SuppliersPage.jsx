@@ -23,6 +23,14 @@ import {
   supplierWorkbookTotals,
   supplierWorkbookTotalsLabel,
 } from '../utils/suppliersWorkbook.js'
+import SupplierMultiContactEditor from '../components/SupplierMultiContactEditor.jsx'
+import {
+  buildSupplierMultiContactPayload,
+  emptyContactItem,
+  mergeContactValue,
+  parseContactListFromSupplier,
+  parseMerchandiseCategoriesFromSupplier,
+} from '../utils/supplierContactLists.js'
 
 function formatEuro(n) {
   if (n == null || Number.isNaN(Number(n))) return '–'
@@ -63,15 +71,15 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
   const [vatNumber, setVatNumber] = useState('')
   const [fiscalCode, setFiscalCode] = useState('')
-  const [phone, setPhone] = useState('')
-  const [city, setCity] = useState('')
+  const [phones, setPhones] = useState([emptyContactItem()])
+  const [emails, setEmails] = useState([emptyContactItem()])
+  const [cities, setCities] = useState([emptyContactItem()])
+  const [merchandiseCategories, setMerchandiseCategories] = useState([])
   const [contactPerson, setContactPerson] = useState('')
   const [iban, setIban] = useState('')
   const [paymentTerms, setPaymentTerms] = useState('')
-  const [merchandiseCategory, setMerchandiseCategory] = useState('')
   const [notes, setNotes] = useState('')
   const [priceListLabel, setPriceListLabel] = useState('')
   const [supplierLocales, setSupplierLocales] = useState([])
@@ -113,6 +121,10 @@ export default function SuppliersPage() {
         s.email,
         s.phone,
         s.city,
+        s.emails_json,
+        s.phones_json,
+        s.cities_json,
+        s.merchandise_categories_json,
         s.address,
         s.country,
         s.contact_person,
@@ -160,12 +172,18 @@ export default function SuppliersPage() {
       const s = ev?.detail || {}
       if (s.name) setName(String(s.name))
       if (s.vat_number) setVatNumber(String(s.vat_number))
-      if (s.email) setEmail(String(s.email))
-      if (s.phone) setPhone(String(s.phone))
-      if (s.city) setCity(String(s.city))
+      if (s.email) mergeContactValue(emails, setEmails, s.email)
+      if (s.phone) mergeContactValue(phones, setPhones, s.phone)
+      if (s.city) mergeContactValue(cities, setCities, s.city)
       if (s.contact_person) setContactPerson(String(s.contact_person))
       if (s.payment_terms) setPaymentTerms(String(s.payment_terms))
-      if (s.merchandise_category) setMerchandiseCategory(String(s.merchandise_category))
+      if (s.merchandise_category) {
+        const parts = String(s.merchandise_category)
+          .split(',')
+          .map((part) => part.trim())
+          .filter(Boolean)
+        if (parts.length) setMerchandiseCategories((prev) => [...new Set([...prev, ...parts])])
+      }
     }
     window.addEventListener('ai-apply-supplier', onApply)
     return () => window.removeEventListener('ai-apply-supplier', onApply)
@@ -192,20 +210,17 @@ export default function SuppliersPage() {
     try {
       const payload = {
         name: name.trim(),
-        email: email.trim() || undefined,
         vat_number: vatNumber.trim() || undefined,
         fiscal_code: fiscalCode.trim() || undefined,
-        phone: phone.trim() || undefined,
-        city: city.trim() || undefined,
         contact_person: contactPerson.trim() || undefined,
         iban: iban.trim() || undefined,
         payment_terms: paymentTerms.trim() || undefined,
-        merchandise_category: merchandiseCategory.trim() || undefined,
         notes: notes.trim() || undefined,
         price_list_label: priceListLabel.trim() || undefined,
         locales: serializeSupplierLocales(supplierLocales),
         is_active: isActive,
         is_expired: isExpired,
+        ...buildSupplierMultiContactPayload({ phones, emails, cities, merchandiseCategories }),
       }
       if (editingId) {
         await updateSupplier(editingId, payload)
@@ -228,15 +243,15 @@ export default function SuppliersPage() {
 
   function resetForm() {
     setName('')
-    setEmail('')
     setVatNumber('')
     setFiscalCode('')
-    setPhone('')
-    setCity('')
+    setPhones([emptyContactItem()])
+    setEmails([emptyContactItem()])
+    setCities([emptyContactItem()])
+    setMerchandiseCategories([])
     setContactPerson('')
     setIban('')
     setPaymentTerms('')
-    setMerchandiseCategory('')
     setNotes('')
     setPriceListLabel('')
     setSupplierLocales([])
@@ -248,15 +263,15 @@ export default function SuppliersPage() {
   function handleEdit(s) {
     setEditingId(s.id)
     setName(s.name || '')
-    setEmail(s.email || '')
     setVatNumber(s.vat_number || '')
     setFiscalCode(s.fiscal_code || '')
-    setPhone(s.phone || '')
-    setCity(s.city || '')
+    setPhones(parseContactListFromSupplier(s, 'phones_json', 'phone'))
+    setEmails(parseContactListFromSupplier(s, 'emails_json', 'email'))
+    setCities(parseContactListFromSupplier(s, 'cities_json', 'city'))
+    setMerchandiseCategories(parseMerchandiseCategoriesFromSupplier(s))
     setContactPerson(s.contact_person || '')
     setIban(s.iban || '')
     setPaymentTerms(s.payment_terms || '')
-    setMerchandiseCategory(s.merchandise_category || '')
     setNotes(s.notes || '')
     setPriceListLabel(s.price_list_label || '')
     setSupplierLocales(parseSupplierLocales(s.locales))
@@ -331,13 +346,22 @@ export default function SuppliersPage() {
     if (s.name) { setName(String(s.name)); applied.push(`Ragione sociale: ${s.name}`) }
     if (s.vat_number) { setVatNumber(String(s.vat_number)); applied.push(`P.IVA: ${s.vat_number}`) }
     if (s.fiscal_code) { setFiscalCode(String(s.fiscal_code)); applied.push(`CF: ${s.fiscal_code}`) }
-    if (s.email) { setEmail(String(s.email)); applied.push(`Email: ${s.email}`) }
-    if (s.phone) { setPhone(String(s.phone)); applied.push(`Telefono: ${s.phone}`) }
-    if (s.city) { setCity(String(s.city)); applied.push(`Citta\': ${s.city}`) }
+    if (s.email) { mergeContactValue(emails, setEmails, s.email); applied.push(`Email: ${s.email}`) }
+    if (s.phone) { mergeContactValue(phones, setPhones, s.phone); applied.push(`Telefono: ${s.phone}`) }
+    if (s.city) { mergeContactValue(cities, setCities, s.city); applied.push(`Città: ${s.city}`) }
     if (s.contact_person) { setContactPerson(String(s.contact_person)); applied.push(`Referente: ${s.contact_person}`) }
     if (s.iban) { setIban(String(s.iban).toUpperCase()); applied.push(`IBAN: ${s.iban}`) }
     if (s.payment_terms) { setPaymentTerms(String(s.payment_terms)); applied.push(`Pagamento: ${s.payment_terms}`) }
-    if (s.merchandise_category) { setMerchandiseCategory(String(s.merchandise_category)); applied.push(`Categoria: ${s.merchandise_category}`) }
+    if (s.merchandise_category) {
+      const parts = String(s.merchandise_category)
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+      if (parts.length) {
+        setMerchandiseCategories((prev) => [...new Set([...prev, ...parts])])
+        applied.push(`Categorie: ${parts.join(', ')}`)
+      }
+    }
     if (s.price_list_label) { setPriceListLabel(String(s.price_list_label)); applied.push(`Listino: ${s.price_list_label}`) }
     if (s.notes) { setNotes(String(s.notes)); applied.push('Note aggiornate') }
     return applied
@@ -370,20 +394,20 @@ export default function SuppliersPage() {
     setAiError('')
     setAiSupplierSummary('')
 
+    const multiContact = buildSupplierMultiContactPayload({ phones, emails, cities, merchandiseCategories })
     const existingPayload = {
       name,
       vat_number: vatNumber,
-      email,
-      phone,
-      city,
+      email: multiContact.email,
+      phone: multiContact.phone,
+      city: multiContact.city,
       contact_person: contactPerson,
       payment_terms: paymentTerms,
       iban,
       notes,
       fiscal_code: fiscalCode,
-      merchandise_category: merchandiseCategory,
+      merchandise_category: multiContact.merchandise_category,
       price_list_label: priceListLabel,
-      notes,
     }
 
     const local = parseSupplierVoiceLocal(text)
@@ -479,10 +503,11 @@ export default function SuppliersPage() {
 
   async function handleAiCheckSupplier() {
     try {
+      const multiContact = buildSupplierMultiContactPayload({ phones, emails, cities, merchandiseCategories })
       const res = await checkAiAnomalies('supplier', {
         name,
         vat_number: vatNumber,
-        email,
+        email: multiContact.email,
         payment_terms: paymentTerms,
       })
       setAiSupplierAnomalies(res?.anomalies || [])
@@ -572,32 +597,24 @@ export default function SuppliersPage() {
               <input className="form-control" value={fiscalCode} onChange={e => setFiscalCode(e.target.value)} placeholder="CF" />
             </div>
           </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Email</label>
-              <input type="email" className="form-control" value={email} onChange={e => setEmail(e.target.value)} placeholder="info@fornitore.it" />
-            </div>
-            <div className="form-group">
-              <label>Telefono</label>
-              <input type="tel" className="form-control" value={phone} onChange={e => setPhone(e.target.value)} placeholder="080 1234567" />
-            </div>
-            <div className="form-group">
-              <label>Referente</label>
-              <input className="form-control" value={contactPerson} onChange={e => setContactPerson(e.target.value)} placeholder="Nome referente" />
-            </div>
-            <div className="form-group">
-              <label>Città</label>
-              <input className="form-control" value={city} onChange={e => setCity(e.target.value)} placeholder="Lecce" />
-            </div>
-          </div>
+          <SupplierMultiContactEditor
+            phones={phones}
+            setPhones={setPhones}
+            emails={emails}
+            setEmails={setEmails}
+            cities={cities}
+            setCities={setCities}
+            merchandiseCategories={merchandiseCategories}
+            setMerchandiseCategories={setMerchandiseCategories}
+          />
           <div className="form-row">
             <div className="form-group" style={{ flex: '1 1 320px' }}>
               <label>IBAN</label>
               <input className="form-control" value={iban} onChange={e => setIban(e.target.value)} placeholder="IT..." />
             </div>
             <div className="form-group" style={{ flex: '1 1 220px' }}>
-              <label>Categoria merceologica</label>
-              <input className="form-control" value={merchandiseCategory} onChange={e => setMerchandiseCategory(e.target.value)} placeholder="Es. Ortofrutta" />
+              <label>Referente</label>
+              <input className="form-control" value={contactPerson} onChange={e => setContactPerson(e.target.value)} placeholder="Nome referente" />
             </div>
             <div className="form-group" style={{ flex: '1 1 220px' }}>
               <label>Listino associato (etichetta)</label>

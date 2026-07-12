@@ -39,6 +39,7 @@ import {
 } from '../utils/orderMerchandiseWorkbook.js'
 import {
   buildCourierPickupMessage,
+  hasSavedCourierPhone,
   loadOrderCourierContact,
   saveOrderCourierContact,
 } from '../utils/orderCourierContact.js'
@@ -223,10 +224,14 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [copyFromOrderId, setCopyFromOrderId] = useState('')
   const [deletingAllOrders, setDeletingAllOrders] = useState(false)
   const [aiSummary, setAiSummary] = useState('')
-  const [sendCopyToCourier, setSendCopyToCourier] = useState(() => loadOrderCourierContact().sendCopyToCourier)
-  const [courierName, setCourierName] = useState(() => loadOrderCourierContact().name)
-  const [courierPhone, setCourierPhone] = useState(() => loadOrderCourierContact().phone)
-  const [courierEmail, setCourierEmail] = useState(() => loadOrderCourierContact().email)
+  const initialCourier = loadOrderCourierContact()
+  const [sendCopyToCourier, setSendCopyToCourier] = useState(
+    () => initialCourier.sendCopyToCourier || Boolean(initialCourier.phone),
+  )
+  const [courierName, setCourierName] = useState(() => initialCourier.name)
+  const [courierPhone, setCourierPhone] = useState(() => initialCourier.phone)
+  const [courierEmail, setCourierEmail] = useState(() => initialCourier.email)
+  const [courierSaved, setCourierSaved] = useState(() => hasSavedCourierPhone())
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -361,14 +366,44 @@ export default function NewOrderPage({ operatorMode = false }) {
     return w
   }, [supplierId, selectedSupplier, sendCopyToCourier, courierPhone, courierEmail, expectedDeliveryDate, orderDate, filledRows, dupDescriptions])
 
-  useEffect(() => {
-    saveOrderCourierContact({
+  function persistTransporterContact() {
+    const ok = saveOrderCourierContact({
       sendCopyToCourier,
       name: courierName,
       phone: courierPhone,
       email: courierEmail,
     })
-  }, [sendCopyToCourier, courierName, courierPhone, courierEmail])
+    setCourierSaved(ok && Boolean(normalizeWhatsAppNumber(courierPhone)))
+    return ok
+  }
+
+  function handleSaveTransporter() {
+    setError('')
+    setSuccess('')
+    setSuccessDetail(null)
+    if (!normalizeWhatsAppNumber(courierPhone)) {
+      setError('Inserisci un cellulare trasportatore valido da salvare (es. 3331234567)')
+      return
+    }
+    if (!persistTransporterContact()) {
+      setError('Impossibile salvare il trasportatore in questo browser')
+      return
+    }
+    setSuccess('Trasportatore salvato: il numero resterà disponibile nei prossimi ordini')
+  }
+
+  function validateOrderDraftForSend() {
+    if (!supplierId) {
+      setError('Seleziona un fornitore')
+      return false
+    }
+    const payload = buildPayload()
+    if (payload.items.length === 0) {
+      setError('Aggiungi almeno un prodotto con descrizione')
+      return false
+    }
+    return true
+  }
 
   useEffect(() => {
     loadSuppliers()
@@ -970,27 +1005,28 @@ export default function NewOrderPage({ operatorMode = false }) {
     setError('')
     setSuccess('')
     setSuccessDetail(null)
-    if (!supplierId) {
-      setError('Seleziona un fornitore')
+    if (!validateOrderDraftForSend()) return
+    openWhatsAppWithMessage(selectedSupplier?.phone, buildWhatsAppMessage())
+  }
+
+  function handleWhatsAppWithCourier() {
+    setError('')
+    setSuccess('')
+    setSuccessDetail(null)
+    if (!validateOrderDraftForSend()) return
+    if (!normalizeWhatsAppNumber(courierPhone)) {
+      setError('Salva o inserisci il cellulare del trasportatore prima di inviare la copia')
       return
     }
-    const payload = buildPayload()
-    if (payload.items.length === 0) {
-      setError('Aggiungi almeno un prodotto con descrizione')
-      return
-    }
-    const supplierMessage = buildWhatsAppMessage()
-    const courierMessage = sendCopyToCourier ? buildCourierMessageFromDraft() : ''
+    persistTransporterContact()
     openOrderWhatsAppMessages({
       supplierPhone: selectedSupplier?.phone,
       courierPhone,
-      supplierMessage,
-      courierMessage,
-      sendCopyToCourier,
+      supplierMessage: buildWhatsAppMessage(),
+      courierMessage: buildCourierMessageFromDraft(),
+      sendCopyToCourier: true,
     })
-    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
-      setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
-    }
+    setSuccess('WhatsApp: ordine al fornitore e avviso ritiro al trasportatore')
   }
 
   function handleEmail() {
@@ -1052,18 +1088,34 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    const supplierMessage = buildWhatsAppTextFromOrder(full)
-    const courierMessage = sendCopyToCourier ? buildCourierMessageFromOrder(full, sup) : ''
+    openWhatsAppWithMessage(sup?.phone, buildWhatsAppTextFromOrder(full))
+  }
+
+  async function handleWhatsAppSavedOrderWithCourier(order) {
+    setError('')
+    if (!normalizeWhatsAppNumber(courierPhone)) {
+      setError('Salva o inserisci il cellulare del trasportatore prima di inviare la copia')
+      return
+    }
+    let full = order
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await fetchSupplierOrder(order.id)
+      } catch {
+        setError('Impossibile caricare l’ordine per WhatsApp')
+        return
+      }
+    }
+    const sup = supplierById[full.supplier_id]
+    persistTransporterContact()
     openOrderWhatsAppMessages({
       supplierPhone: sup?.phone,
       courierPhone,
-      supplierMessage,
-      courierMessage,
-      sendCopyToCourier,
+      supplierMessage: buildWhatsAppTextFromOrder(full),
+      courierMessage: buildCourierMessageFromOrder(full, sup),
+      sendCopyToCourier: true,
     })
-    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
-      setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
-    }
+    setSuccess('WhatsApp: ordine al fornitore e avviso ritiro al trasportatore')
   }
 
   async function handleEmailSavedOrder(order) {
@@ -1110,6 +1162,17 @@ export default function NewOrderPage({ operatorMode = false }) {
       await handleWhatsAppSavedOrder(full)
     } catch {
       setError('Impossibile aprire WhatsApp per questo ordine')
+    }
+  }
+
+  async function handleWhatsAppAfterSaveWithCourier(orderId) {
+    if (!orderId) return
+    setError('')
+    try {
+      const full = await fetchSupplierOrder(orderId)
+      await handleWhatsAppSavedOrderWithCourier(full)
+    } catch {
+      setError('Impossibile aprire WhatsApp con copia trasportatore')
     }
   }
 
@@ -1336,7 +1399,9 @@ export default function NewOrderPage({ operatorMode = false }) {
   }
 
   const waPreview = buildWhatsAppMessage()
-  const courierPreview = sendCopyToCourier ? buildCourierMessageFromDraft() : ''
+  const courierPreview =
+    normalizeWhatsAppNumber(courierPhone) || sendCopyToCourier ? buildCourierMessageFromDraft() : ''
+  const canWhatsAppWithCourier = Boolean(normalizeWhatsAppNumber(courierPhone))
 
   return (
     <div>
@@ -1397,7 +1462,17 @@ export default function NewOrderPage({ operatorMode = false }) {
                     style={{ marginLeft: '0.35rem' }}
                     onClick={() => handleWhatsAppAfterSave(successDetail.id)}
                   >
-                    Invia su WhatsApp
+                    WhatsApp fornitore
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-whatsapp btn-sm"
+                    style={{ marginLeft: '0.35rem' }}
+                    disabled={!canWhatsAppWithCourier}
+                    onClick={() => handleWhatsAppAfterSaveWithCourier(successDetail.id)}
+                    title={canWhatsAppWithCourier ? 'Ordine al fornitore e avviso ritiro al trasportatore' : 'Salva prima il cellulare del trasportatore'}
+                  >
+                    WhatsApp + trasportatore
                   </button>
                   <button
                     type="button"
@@ -1820,51 +1895,65 @@ export default function NewOrderPage({ operatorMode = false }) {
               border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))',
             }}
           >
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', marginBottom: sendCopyToCourier ? '0.75rem' : 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.65rem' }}>
+              <strong>Trasportatore / corriere</strong>
+              {courierSaved && normalizeWhatsAppNumber(courierPhone) ? (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                  Numero memorizzato in questo browser
+                </span>
+              ) : null}
+            </div>
+            <div className="form-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.65rem' }}>
+              <div className="form-group" style={{ flex: '1 1 180px', minWidth: 160, marginBottom: 0 }}>
+                <label>Nome trasportatore</label>
+                <input
+                  className="form-control"
+                  value={courierName}
+                  onChange={(e) => {
+                    setCourierName(e.target.value)
+                    setCourierSaved(false)
+                  }}
+                  placeholder="es. Mario Trasporti"
+                />
+              </div>
+              <div className="form-group" style={{ flex: '1 1 160px', minWidth: 140, marginBottom: 0 }}>
+                <label>Cellulare trasportatore *</label>
+                <input
+                  className="form-control"
+                  value={courierPhone}
+                  onChange={(e) => {
+                    setCourierPhone(e.target.value)
+                    setCourierSaved(false)
+                  }}
+                  placeholder="3331234567"
+                />
+              </div>
+              <div className="form-group" style={{ flex: '1 1 220px', minWidth: 180, marginBottom: 0 }}>
+                <label>Email trasportatore</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={courierEmail}
+                  onChange={(e) => setCourierEmail(e.target.value)}
+                  placeholder="copia in CC (email)"
+                />
+              </div>
+              <div className="form-group" style={{ flex: '0 0 auto', marginBottom: 0 }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={handleSaveTransporter}>
+                  Salva trasportatore
+                </button>
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', marginBottom: 0 }}>
               <input
                 type="checkbox"
                 checked={sendCopyToCourier}
                 onChange={(e) => setSendCopyToCourier(e.target.checked)}
               />
-              <span>
-                <strong>Invia copia al trasportatore / corriere</strong>
-                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 400, marginTop: '0.15rem' }}>
-                  Al corriere va un messaggio dedicato con i dati del fornitore per il ritiro; WhatsApp ed email usano testi distinti.
-                </span>
+              <span style={{ fontSize: '0.9rem' }}>
+                Includi trasportatore anche nelle email (CC + messaggio ritiro)
               </span>
             </label>
-            {sendCopyToCourier && (
-              <div className="form-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: '0.65rem', marginBottom: 0 }}>
-                <div className="form-group" style={{ flex: '1 1 180px', minWidth: 160, marginBottom: 0 }}>
-                  <label>Nome corriere</label>
-                  <input
-                    className="form-control"
-                    value={courierName}
-                    onChange={(e) => setCourierName(e.target.value)}
-                    placeholder="es. Mario Trasporti"
-                  />
-                </div>
-                <div className="form-group" style={{ flex: '1 1 160px', minWidth: 140, marginBottom: 0 }}>
-                  <label>Cellulare corriere</label>
-                  <input
-                    className="form-control"
-                    value={courierPhone}
-                    onChange={(e) => setCourierPhone(e.target.value)}
-                    placeholder="per WhatsApp"
-                  />
-                </div>
-                <div className="form-group" style={{ flex: '1 1 220px', minWidth: 180, marginBottom: 0 }}>
-                  <label>Email corriere</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={courierEmail}
-                    onChange={(e) => setCourierEmail(e.target.value)}
-                    placeholder="copia in CC"
-                  />
-                </div>
-              </div>
-            )}
           </div>
           <div className="form-group">
             <label>Note interne (solo archivio / PDF, non inviate al fornitore)</label>
@@ -1936,9 +2025,9 @@ export default function NewOrderPage({ operatorMode = false }) {
             >
               {waPreview}
             </pre>
-            {sendCopyToCourier ? (
+            {courierPreview ? (
               <>
-                <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>Messaggio al corriere (ritiro)</p>
+                <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>Messaggio al trasportatore (ritiro)</p>
                 <pre
                   style={{
                     marginTop: 0,
@@ -1982,7 +2071,20 @@ export default function NewOrderPage({ operatorMode = false }) {
               {saving ? 'Salvataggio...' : editingOrderId != null ? 'Aggiorna con destinazione' : 'Salva ordine con destinazione'}
             </button>
             <button type="button" className="btn btn-whatsapp" onClick={handleWhatsApp} disabled={!supplierId}>
-              Invia ordine via WhatsApp
+              WhatsApp al fornitore
+            </button>
+            <button
+              type="button"
+              className="btn btn-whatsapp"
+              onClick={handleWhatsAppWithCourier}
+              disabled={!supplierId || !canWhatsAppWithCourier}
+              title={
+                canWhatsAppWithCourier
+                  ? 'Invia ordine al fornitore e avviso ritiro al trasportatore salvato'
+                  : 'Salva prima il cellulare del trasportatore'
+              }
+            >
+              WhatsApp fornitore + trasportatore
             </button>
             <button type="button" className="btn btn-secondary" onClick={handleEmail} disabled={!supplierId}>
               Invia ordine via email
@@ -2013,9 +2115,9 @@ export default function NewOrderPage({ operatorMode = false }) {
               Aggiungi il cellulare al fornitore in <strong>Fornitori</strong> per aprire WhatsApp direttamente sul suo numero.
             </p>
           )}
-          {sendCopyToCourier && (
+          {canWhatsAppWithCourier && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
-              WhatsApp apre due chat: ordine al fornitore e avviso ritiro al corriere. In email il corriere è in CC con il messaggio dedicato in fondo.
+              Usa <strong>WhatsApp fornitore + trasportatore</strong> per aprire due chat: ordine al fornitore e avviso ritiro al numero salvato.
             </p>
           )}
         </form>
@@ -2110,9 +2212,22 @@ export default function NewOrderPage({ operatorMode = false }) {
                     type="button"
                     className="btn btn-whatsapp btn-sm"
                     onClick={() => handleWhatsAppSavedOrder(order)}
-                    title="Invia testo ordine su WhatsApp (e copia corriere se attiva)"
+                    title="Invia testo ordine su WhatsApp al fornitore"
                   >
-                    Ordine WA
+                    WA fornitore
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-whatsapp btn-sm"
+                    onClick={() => handleWhatsAppSavedOrderWithCourier(order)}
+                    disabled={!canWhatsAppWithCourier}
+                    title={
+                      canWhatsAppWithCourier
+                        ? 'Ordine al fornitore e avviso ritiro al trasportatore'
+                        : 'Salva prima il cellulare del trasportatore'
+                    }
+                  >
+                    WA + trasport.
                   </button>
                   <button
                     type="button"

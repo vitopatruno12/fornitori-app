@@ -1,4 +1,5 @@
 import { formatSupplierLocales } from './supplierLocales.js'
+import { formatContactListDisplay, parseMerchandiseCategoriesFromSupplier } from './supplierContactLists.js'
 
 export const SUPPLIER_WORKBOOK_TITLE = 'Anagrafica fornitori'
 
@@ -76,13 +77,13 @@ export function supplierWorkbookCellValue(supplier, column, ctx = {}) {
     case 'fiscal_code':
       return text(supplier.fiscal_code)
     case 'email':
-      return text(supplier.email)
+      return formatContactListDisplay(supplier.emails_json, supplier.email)
     case 'phone':
-      return text(supplier.phone)
+      return formatContactListDisplay(supplier.phones_json, supplier.phone)
     case 'contact_person':
       return text(supplier.contact_person)
     case 'city':
-      return text(supplier.city)
+      return formatContactListDisplay(supplier.cities_json, supplier.city)
     case 'address':
       return text(supplier.address)
     case 'country':
@@ -91,8 +92,10 @@ export function supplierWorkbookCellValue(supplier, column, ctx = {}) {
       return text(supplier.iban)
     case 'payment_terms':
       return text(supplier.payment_terms)
-    case 'merchandise_category':
-      return text(supplier.merchandise_category)
+    case 'merchandise_category': {
+      const cats = parseMerchandiseCategoriesFromSupplier(supplier)
+      return cats.length ? cats.join(', ') : text(supplier.merchandise_category)
+    }
     case 'price_list_label':
       return text(supplier.price_list_label)
     case 'listino_righe':

@@ -56,9 +56,16 @@ export function saveOrderCourierContact(contact) {
         email: String(contact?.email || '').trim(),
       }),
     )
+    return true
   } catch {
-    // ignore
+    return false
   }
+}
+
+export function hasSavedCourierPhone() {
+  const data = loadOrderCourierContact()
+  const phone = String(data?.phone || '').trim()
+  return Boolean(phone)
 }
 
 /**
