@@ -144,6 +144,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [editingId, setEditingId] = useState(null)
   const [deletingDay, setDeletingDay] = useState(false)
   const [deletingRange, setDeletingRange] = useState(false)
+  const [refreshingRiepilogo, setRefreshingRiepilogo] = useState(false)
   const [highlightEntryId, setHighlightEntryId] = useState(null)
   const [focusEntryMessage, setFocusEntryMessage] = useState('')
   const highlightScrollDoneRef = useRef(null)
@@ -743,9 +744,17 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   async function refreshRiepilogo() {
     setError('')
-    await loadEntries()
-    await loadSummary()
-    setSuccess('Riepilogo aggiornato')
+    setSuccess('')
+    try {
+      setRefreshingRiepilogo(true)
+      await loadEntries()
+      await loadSummary()
+      setSuccess('Riepilogo aggiornato')
+    } catch {
+      setError('Errore nell\'aggiornamento del riepilogo')
+    } finally {
+      setRefreshingRiepilogo(false)
+    }
   }
 
   function handleAzzeraCassaIniziale() {
@@ -1587,8 +1596,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           </select>
         </div>
         <div className="form-group">
-          <button type="button" className="btn btn-secondary" onClick={refreshRiepilogo}>
-            Aggiorna
+          <button type="button" className="btn btn-secondary" onClick={refreshRiepilogo} disabled={refreshingRiepilogo || loading}>
+            {refreshingRiepilogo ? 'Aggiornamento...' : 'Aggiorna'}
           </button>
         </div>
         {!operatorMode && dashboardFilterActive && (
@@ -1936,20 +1945,35 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
             {summaryScope === 'interval' ? 'Riepilogo periodo' : 'Riepilogo giornaliero'}
           </h2>
-          <div className="btn-group" role="group" aria-label="Ambito riepilogo">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <div className="btn-group" role="group" aria-label="Ambito riepilogo">
+              <button
+                type="button"
+                className={`btn btn-sm ${summaryScope === 'day' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setSummaryScope('day')}
+              >
+                Giorno
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${summaryScope === 'interval' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setSummaryScope('interval')}
+              >
+                Intervallo
+              </button>
+            </div>
             <button
               type="button"
-              className={`btn btn-sm ${summaryScope === 'day' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSummaryScope('day')}
+              className="btn btn-secondary btn-sm"
+              onClick={refreshRiepilogo}
+              disabled={refreshingRiepilogo || loading}
+              title={
+                summaryScope === 'interval'
+                  ? 'Ricarica movimenti e riepilogo del periodo dal server'
+                  : 'Ricarica movimenti e riepilogo del giorno dal server'
+              }
             >
-              Giorno
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${summaryScope === 'interval' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSummaryScope('interval')}
-            >
-              Intervallo
+              {refreshingRiepilogo ? 'Aggiornamento...' : 'Aggiorna'}
             </button>
           </div>
         </div>
