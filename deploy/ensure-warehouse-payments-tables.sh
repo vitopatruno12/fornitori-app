@@ -91,7 +91,8 @@ log "Migrazioni magazzino / pagamenti / ordini su $DB_NAME (owner $DB_USER)"
 for mig in \
   20260710_warehouse_movements.sql \
   20260710_supplier_payments_workbook.sql \
-  20260710_supplier_order_items_volume_liters.sql
+  20260710_supplier_order_items_volume_liters.sql \
+  20260712_supplier_multi_contacts.sql
 do
   _apply_sql_file "$mig"
 done
@@ -129,4 +130,13 @@ if ! sudo -u postgres psql -tAc \
   exit 1
 fi
 
-log "OK: warehouse_movements, supplier_payments_workbooks e volume_liters presenti."
+for col in phones_json emails_json cities_json merchandise_categories_json; do
+  if ! sudo -u postgres psql -tAc \
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'suppliers' AND column_name = '$col'" \
+    -d "$DB_NAME" | grep -q 1; then
+    err "Colonna suppliers.$col ancora assente."
+    exit 1
+  fi
+done
+
+log "OK: warehouse_movements, supplier_payments_workbooks, volume_liters e suppliers multi-contact presenti."

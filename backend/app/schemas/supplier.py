@@ -92,6 +92,22 @@ class SupplierRead(SupplierBase):
   id: int
   created_at: Optional[datetime] = None
 
+  @field_validator("email", mode="before")
+  @classmethod
+  def _sanitize_legacy_email(cls, value):
+    if value is None:
+      return None
+    text = str(value).strip()
+    if not text:
+      return None
+    try:
+      from pydantic import TypeAdapter, EmailStr
+
+      TypeAdapter(EmailStr).validate_python(text)
+      return text
+    except Exception:
+      return None
+
   class Config:
     from_attributes = True
 

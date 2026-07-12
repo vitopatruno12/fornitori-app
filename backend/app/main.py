@@ -669,6 +669,10 @@ def _check_critical_schema_columns() -> None:
             ("deliveries", "unloading_signed_by", "20260507_order_delivery_signatures.sql"),
             ("supplier_order_items", "weight_kg", "20260411_supplier_order_items_weight_kg.sql"),
             ("supplier_order_items", "volume_liters", "20260710_supplier_order_items_volume_liters.sql"),
+            ("suppliers", "phones_json", "20260712_supplier_multi_contacts.sql"),
+            ("suppliers", "emails_json", "20260712_supplier_multi_contacts.sql"),
+            ("suppliers", "cities_json", "20260712_supplier_multi_contacts.sql"),
+            ("suppliers", "merchandise_categories_json", "20260712_supplier_multi_contacts.sql"),
         ]
         required_tables = [
             ("warehouse_movements", "20260710_warehouse_movements.sql"),
