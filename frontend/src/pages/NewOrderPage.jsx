@@ -37,6 +37,11 @@ import {
   orderMerchandiseTotals,
   orderMerchandiseTotalsLabel,
 } from '../utils/orderMerchandiseWorkbook.js'
+import {
+  buildCourierCopyPrefix,
+  loadOrderCourierContact,
+  saveOrderCourierContact,
+} from '../utils/orderCourierContact.js'
 
 const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', volume_liters: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'
@@ -59,6 +64,40 @@ function normalizeWhatsAppNumber(raw) {
   if (d.length === 11 && d.startsWith('39')) return d
   if (d.length === 10 && d.startsWith('0')) d = `39${d.slice(1)}`
   return d.length >= 8 ? d : null
+}
+
+function openWhatsAppWithMessage(phone, message) {
+  const encoded = encodeURIComponent(message)
+  const waNum = normalizeWhatsAppNumber(phone)
+  const url = waNum ? `https://wa.me/${waNum}?text=${encoded}` : `https://wa.me/?text=${encoded}`
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function openOrderWhatsAppMessages({
+  supplierPhone,
+  courierPhone,
+  message,
+  sendCopyToCourier,
+  courierName,
+}) {
+  openWhatsAppWithMessage(supplierPhone, message)
+  if (!sendCopyToCourier) return
+  const courierWa = normalizeWhatsAppNumber(courierPhone)
+  if (!courierWa) return
+  window.setTimeout(() => {
+    openWhatsAppWithMessage(courierPhone, `${buildCourierCopyPrefix(courierName)}${message}`)
+  }, 700)
+}
+
+function openOrderEmailClient({ supplierEmail, courierEmail, sendCopyToCourier, subject, body }) {
+  const to = String(supplierEmail || '').trim()
+  if (!to) throw new Error('Email fornitore mancante in anagrafica')
+  const params = new URLSearchParams()
+  params.set('subject', subject)
+  params.set('body', body)
+  const cc = sendCopyToCourier ? String(courierEmail || '').trim() : ''
+  if (cc) params.set('cc', cc)
+  window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString()}`
 }
 
 function formatDateIt(iso) {
@@ -182,6 +221,10 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [copyFromOrderId, setCopyFromOrderId] = useState('')
   const [deletingAllOrders, setDeletingAllOrders] = useState(false)
   const [aiSummary, setAiSummary] = useState('')
+  const [sendCopyToCourier, setSendCopyToCourier] = useState(() => loadOrderCourierContact().sendCopyToCourier)
+  const [courierName, setCourierName] = useState(() => loadOrderCourierContact().name)
+  const [courierPhone, setCourierPhone] = useState(() => loadOrderCourierContact().phone)
+  const [courierEmail, setCourierEmail] = useState(() => loadOrderCourierContact().email)
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -291,6 +334,14 @@ export default function NewOrderPage({ operatorMode = false }) {
     if (supplierId && !(selectedSupplier?.email || '').trim()) {
       w.push('Email fornitore assente: il pulsante email potrebbe non essere utile.')
     }
+    if (sendCopyToCourier) {
+      if (!normalizeWhatsAppNumber(courierPhone)) {
+        w.push('Cellulare corriere assente o non valido: WhatsApp andrà solo al fornitore.')
+      }
+      if (!(courierEmail || '').trim()) {
+        w.push('Email corriere assente: l’email andrà solo al fornitore (senza copia).')
+      }
+    }
     if (expectedDeliveryDate && orderDate && expectedDeliveryDate < orderDate) {
       w.push('La consegna prevista è precedente alla data ordine.')
     }
@@ -306,7 +357,16 @@ export default function NewOrderPage({ operatorMode = false }) {
       w.push(`Descrizione duplicata nell’ordine: «${k}».`)
     })
     return w
-  }, [supplierId, selectedSupplier, expectedDeliveryDate, orderDate, filledRows, dupDescriptions])
+  }, [supplierId, selectedSupplier, sendCopyToCourier, courierPhone, courierEmail, expectedDeliveryDate, orderDate, filledRows, dupDescriptions])
+
+  useEffect(() => {
+    saveOrderCourierContact({
+      sendCopyToCourier,
+      name: courierName,
+      phone: courierPhone,
+      email: courierEmail,
+    })
+  }, [sendCopyToCourier, courierName, courierPhone, courierEmail])
 
   useEffect(() => {
     loadSuppliers()
@@ -889,10 +949,17 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Aggiungi almeno un prodotto con descrizione')
       return
     }
-    const encoded = encodeURIComponent(buildWhatsAppMessage())
-    const waNum = normalizeWhatsAppNumber(selectedSupplier?.phone)
-    const url = waNum ? `https://wa.me/${waNum}?text=${encoded}` : `https://wa.me/?text=${encoded}`
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const message = buildWhatsAppMessage()
+    openOrderWhatsAppMessages({
+      supplierPhone: selectedSupplier?.phone,
+      courierPhone,
+      message,
+      sendCopyToCourier,
+      courierName,
+    })
+    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
+      setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
+    }
   }
 
   function handleEmail() {
@@ -907,9 +974,20 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Aggiungi almeno un prodotto con descrizione')
       return
     }
-    const sub = encodeURIComponent(`Ordine merce — ${supplierLabel || 'Fornitore'} — ${formatDateIt(orderDate)}`)
-    const body = encodeURIComponent(buildWhatsAppMessage())
-    window.location.href = `mailto:${em}?subject=${sub}&body=${body}`
+    try {
+      openOrderEmailClient({
+        supplierEmail: em,
+        courierEmail,
+        sendCopyToCourier,
+        subject: `Ordine merce — ${supplierLabel || 'Fornitore'} — ${formatDateIt(orderDate)}`,
+        body: buildWhatsAppMessage(),
+      })
+      if (sendCopyToCourier && !(courierEmail || '').trim()) {
+        setSuccess('Email aperta per il fornitore. Aggiungi l’email del corriere per inviare anche la copia.')
+      }
+    } catch (err) {
+      setError(err?.message || 'Impossibile aprire l’email')
+    }
   }
 
   function handleOpenPdf(id) {
@@ -940,10 +1018,50 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    const waNum = normalizeWhatsAppNumber(sup?.phone)
-    const encoded = encodeURIComponent(buildWhatsAppTextFromOrder(full))
-    const url = waNum ? `https://wa.me/${waNum}?text=${encoded}` : `https://wa.me/?text=${encoded}`
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const message = buildWhatsAppTextFromOrder(full)
+    openOrderWhatsAppMessages({
+      supplierPhone: sup?.phone,
+      courierPhone,
+      message,
+      sendCopyToCourier,
+      courierName,
+    })
+    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
+      setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
+    }
+  }
+
+  async function handleEmailSavedOrder(order) {
+    setError('')
+    let full = order
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await fetchSupplierOrder(order.id)
+      } catch {
+        setError('Impossibile caricare l’ordine per email')
+        return
+      }
+    }
+    const sup = supplierById[full.supplier_id]
+    const em = (sup?.email || '').trim()
+    if (!em) {
+      setError('Email fornitore mancante in anagrafica')
+      return
+    }
+    try {
+      openOrderEmailClient({
+        supplierEmail: em,
+        courierEmail,
+        sendCopyToCourier,
+        subject: `Ordine merce — ${full.supplier_name || sup?.name || 'Fornitore'} — ${formatDateIt(full.order_date)}`,
+        body: buildWhatsAppTextFromOrder(full),
+      })
+      if (sendCopyToCourier && !(courierEmail || '').trim()) {
+        setSuccess('Email aperta per il fornitore. Aggiungi l’email del corriere per inviare anche la copia.')
+      }
+    } catch (err) {
+      setError(err?.message || 'Impossibile aprire l’email')
+    }
   }
 
   async function handleWhatsAppAfterSave(orderId) {
@@ -954,6 +1072,17 @@ export default function NewOrderPage({ operatorMode = false }) {
       await handleWhatsAppSavedOrder(full)
     } catch {
       setError('Impossibile aprire WhatsApp per questo ordine')
+    }
+  }
+
+  async function handleEmailAfterSave(orderId) {
+    if (!orderId) return
+    setError('')
+    try {
+      const full = await fetchSupplierOrder(orderId)
+      await handleEmailSavedOrder(full)
+    } catch {
+      setError('Impossibile aprire l’email per questo ordine')
     }
   }
 
@@ -1230,6 +1359,14 @@ export default function NewOrderPage({ operatorMode = false }) {
                     onClick={() => handleWhatsAppAfterSave(successDetail.id)}
                   >
                     Invia su WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: '0.35rem' }}
+                    onClick={() => handleEmailAfterSave(successDetail.id)}
+                  >
+                    Invia via email
                   </button>
                 </li>
               )}
@@ -1634,6 +1771,62 @@ export default function NewOrderPage({ operatorMode = false }) {
               </p>
             </div>
           </div>
+          <div
+            className="form-group"
+            style={{
+              marginBottom: '1rem',
+              padding: '0.75rem',
+              background: 'var(--surface-2, rgba(0,0,0,0.04))',
+              borderRadius: 8,
+              border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', marginBottom: sendCopyToCourier ? '0.75rem' : 0 }}>
+              <input
+                type="checkbox"
+                checked={sendCopyToCourier}
+                onChange={(e) => setSendCopyToCourier(e.target.checked)}
+              />
+              <span>
+                <strong>Invia copia al trasportatore / corriere</strong>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 400, marginTop: '0.15rem' }}>
+                  Con WhatsApp ed email invia lo stesso ordine anche al corriere (contatti salvati in questo browser).
+                </span>
+              </span>
+            </label>
+            {sendCopyToCourier && (
+              <div className="form-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: '0.65rem', marginBottom: 0 }}>
+                <div className="form-group" style={{ flex: '1 1 180px', minWidth: 160, marginBottom: 0 }}>
+                  <label>Nome corriere</label>
+                  <input
+                    className="form-control"
+                    value={courierName}
+                    onChange={(e) => setCourierName(e.target.value)}
+                    placeholder="es. Mario Trasporti"
+                  />
+                </div>
+                <div className="form-group" style={{ flex: '1 1 160px', minWidth: 140, marginBottom: 0 }}>
+                  <label>Cellulare corriere</label>
+                  <input
+                    className="form-control"
+                    value={courierPhone}
+                    onChange={(e) => setCourierPhone(e.target.value)}
+                    placeholder="per WhatsApp"
+                  />
+                </div>
+                <div className="form-group" style={{ flex: '1 1 220px', minWidth: 180, marginBottom: 0 }}>
+                  <label>Email corriere</label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    value={courierEmail}
+                    onChange={(e) => setCourierEmail(e.target.value)}
+                    placeholder="copia in CC"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
           <div className="form-group">
             <label>Note interne (solo archivio / PDF, non inviate al fornitore)</label>
             <textarea
@@ -1733,7 +1926,7 @@ export default function NewOrderPage({ operatorMode = false }) {
               Invia ordine via WhatsApp
             </button>
             <button type="button" className="btn btn-secondary" onClick={handleEmail} disabled={!supplierId}>
-              Email al fornitore
+              Invia ordine via email
             </button>
             {!operatorMode && (
               <button type="button" className="btn btn-secondary" onClick={() => handleRegisterDelivery()} disabled={!supplierId}>
@@ -1759,6 +1952,11 @@ export default function NewOrderPage({ operatorMode = false }) {
           {!selectedSupplier?.phone && supplierId && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.75rem', marginBottom: 0 }}>
               Aggiungi il cellulare al fornitore in <strong>Fornitori</strong> per aprire WhatsApp direttamente sul suo numero.
+            </p>
+          )}
+          {sendCopyToCourier && (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
+              Con la copia corriere attiva, WhatsApp apre prima il fornitore e poi il corriere; l’email mette il corriere in CC.
             </p>
           )}
         </form>
@@ -1853,9 +2051,17 @@ export default function NewOrderPage({ operatorMode = false }) {
                     type="button"
                     className="btn btn-whatsapp btn-sm"
                     onClick={() => handleWhatsAppSavedOrder(order)}
-                    title="Invia testo ordine su WhatsApp"
+                    title="Invia testo ordine su WhatsApp (e copia corriere se attiva)"
                   >
                     Ordine WA
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleEmailSavedOrder(order)}
+                    title="Invia ordine via email (copia corriere in CC se attiva)"
+                  >
+                    Email
                   </button>
                   <button
                     type="button"

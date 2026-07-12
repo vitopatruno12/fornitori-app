@@ -15,6 +15,7 @@ export default function WorkbookGrid({
   loading = false,
   emptyMessage = 'Nessun dato disponibile.',
   hideToolbar = false,
+  toolbarActions = null,
   rowKey,
   actionsHeader = '',
   renderActions,
@@ -42,6 +43,7 @@ export default function WorkbookGrid({
             <span className="pagamenti-workbook-title">{title}</span>
             {sheetLabel ? <span className="pagamenti-workbook-sheet-label">{sheetLabel}</span> : null}
           </div>
+          {toolbarActions}
         </div>
       ) : null}
       {loading && <p className="loading pagamenti-loading">Caricamento…</p>}
