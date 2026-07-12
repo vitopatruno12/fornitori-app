@@ -31,13 +31,7 @@ export function normalizeCourierCarrier(raw, index = 0) {
 export function normalizeCourierCarriers(raw) {
   const list = Array.isArray(raw) ? raw : []
   const normalized = list.map((item, index) => normalizeCourierCarrier(item, index))
-  if (!normalized.length) return [emptyCourierCarrier()]
-  const hasInService = normalized.some((c) => c.inService && c.enabled !== false)
-  if (!hasInService) {
-    const firstEnabled = normalized.find((c) => c.enabled !== false) || normalized[0]
-    if (firstEnabled) firstEnabled.inService = true
-  }
-  return normalized
+  return normalized.length ? normalized : [emptyCourierCarrier()]
 }
 
 function defaultContact() {
@@ -147,9 +141,12 @@ export function hasSavedCourierPhone(carriers) {
 }
 
 export function setCourierInService(carriers, index) {
-  return normalizeCourierCarriers(carriers).map((c, i) => ({
+  const list = normalizeCourierCarriers(carriers)
+  const current = list[index]
+  const turnOff = current?.inService
+  return list.map((c, i) => ({
     ...c,
-    inService: i === index,
+    inService: turnOff ? false : i === index,
   }))
 }
 

@@ -2022,7 +2022,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                 onChange={(e) => setSendCopyToCourier(e.target.checked)}
               />
               <span style={{ fontSize: '0.9rem' }}>
-                Includi trasportatore su WhatsApp ed email (usa quello «In servizio», altrimenti il prossimo attivo)
+                Includi trasportatore su WhatsApp ed email (usa quello «In servizio», altrimenti il primo attivo con cellulare)
               </span>
             </label>
           </div>

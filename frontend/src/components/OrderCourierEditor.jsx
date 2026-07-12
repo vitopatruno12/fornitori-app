@@ -8,43 +8,51 @@ export default function OrderCourierEditor({ carriers, setCarriers, onDirty }) {
     onDirty?.()
   }
 
-  function updateCarrier(index, patch) {
+  function updateCarriers(updater) {
     setCarriers((prev) => {
       const base = Array.isArray(prev) && prev.length ? prev : [emptyCourierCarrier()]
-      return base.map((item, i) => (i === index ? { ...item, ...patch } : item))
+      return updater(base)
     })
     markDirty()
   }
 
-  function setInService(index) {
-    setCarriers((prev) => setCourierInService(prev, index))
-    markDirty()
+  function updateCarrier(index, patch) {
+    updateCarriers((base) => base.map((item, i) => (i === index ? { ...item, ...patch } : item)))
+  }
+
+  function toggleInService(index) {
+    updateCarriers((prev) => setCourierInService(prev, index))
+  }
+
+  function toggleEnabled(index, checked) {
+    updateCarriers((base) =>
+      base.map((item, i) => {
+        if (i !== index) return item
+        return {
+          ...item,
+          enabled: checked,
+          inService: checked ? item.inService : false,
+        }
+      }),
+    )
   }
 
   function addCarrier() {
-    setCarriers((prev) => {
-      const base = Array.isArray(prev) ? [...prev] : []
-      const next = [...base, emptyCourierCarrier()]
-      if (!next.some((c) => c.inService)) next[0].inService = true
-      return next
-    })
-    markDirty()
+    updateCarriers((prev) => [...prev, emptyCourierCarrier()])
   }
 
   function removeCarrier(index) {
-    setCarriers((prev) => {
-      const base = Array.isArray(prev) ? prev : []
-      const next = base.filter((_, i) => i !== index)
-      return next.length ? setCourierInService(next, 0) : [emptyCourierCarrier()]
+    updateCarriers((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      return next.length ? next : [emptyCourierCarrier()]
     })
-    markDirty()
   }
 
   return (
     <div className="order-courier-editor">
       <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 0, marginBottom: '0.65rem' }}>
-        Aggiungi più trasportatori con relativi numeri. Seleziona <strong>In servizio</strong> per l&apos;ordine corrente;
-        se il numero non è valido o non risponde, viene usato il prossimo trasportatore attivo.
+        Aggiungi più trasportatori con relativi numeri. Spunta <strong>In servizio</strong> per l&apos;ordine corrente
+        (clic di nuovo per togliere). Se nessuno è in servizio, viene usato il primo trasportatore attivo con cellulare valido.
       </p>
       {list.map((carrier, index) => (
         <div
@@ -55,7 +63,8 @@ export default function OrderCourierEditor({ carriers, setCarriers, onDirty }) {
             borderRadius: 8,
             padding: '0.65rem 0.75rem',
             marginBottom: '0.55rem',
-            background: carrier.inService ? 'var(--surface-2, rgba(0,0,0,0.03))' : 'transparent',
+            background: carrier.inService && carrier.enabled !== false ? 'var(--surface-2, rgba(0,0,0,0.03))' : 'transparent',
+            opacity: carrier.enabled === false ? 0.72 : 1,
           }}
         >
           <div
@@ -64,24 +73,24 @@ export default function OrderCourierEditor({ carriers, setCarriers, onDirty }) {
           >
             <label
               style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0, cursor: 'pointer', flex: '0 0 auto' }}
-              title="Trasportatore usato per WhatsApp ed email di questo ordine"
+              title="Trasportatore usato per WhatsApp ed email (clic per attivare/disattivare)"
             >
               <input
-                type="radio"
-                name="order-courier-in-service"
+                type="checkbox"
                 checked={Boolean(carrier.inService)}
-                onChange={() => setInService(index)}
+                disabled={carrier.enabled === false}
+                onChange={() => toggleInService(index)}
               />
               <span style={{ fontSize: '0.88rem', fontWeight: carrier.inService ? 600 : 400 }}>In servizio</span>
             </label>
             <label
               style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0, cursor: 'pointer', flex: '0 0 auto' }}
-              title="Disponibile come alternativa se il trasportatore in servizio non ha un numero valido"
+              title="Disponibile nell'elenco trasportatori"
             >
               <input
                 type="checkbox"
                 checked={carrier.enabled !== false}
-                onChange={(e) => updateCarrier(index, { enabled: e.target.checked })}
+                onChange={(e) => toggleEnabled(index, e.target.checked)}
               />
               <span style={{ fontSize: '0.88rem' }}>Attivo</span>
             </label>
