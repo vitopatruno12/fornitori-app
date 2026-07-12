@@ -67,11 +67,16 @@ function normalizeWhatsAppNumber(raw) {
   return d.length >= 8 ? d : null
 }
 
-function openWhatsAppWithMessage(phone, message) {
+function buildWhatsAppUrl(phone, message) {
   const encoded = encodeURIComponent(message)
   const waNum = normalizeWhatsAppNumber(phone)
-  const url = waNum ? `https://wa.me/${waNum}?text=${encoded}` : `https://wa.me/?text=${encoded}`
-  window.open(url, '_blank', 'noopener,noreferrer')
+  return waNum ? `https://wa.me/${waNum}?text=${encoded}` : `https://wa.me/?text=${encoded}`
+}
+
+function openWhatsAppWithMessage(phone, message) {
+  const url = buildWhatsAppUrl(phone, message)
+  const win = window.open(url, '_blank', 'noopener,noreferrer')
+  return { url, opened: win != null }
 }
 
 function openOrderWhatsAppMessages({
@@ -81,13 +86,16 @@ function openOrderWhatsAppMessages({
   courierMessage,
   sendCopyToCourier,
 }) {
+  const result = { pendingCourierUrl: null }
   openWhatsAppWithMessage(supplierPhone, supplierMessage)
-  if (!sendCopyToCourier) return
+  if (!sendCopyToCourier) return result
+
   const courierWa = normalizeWhatsAppNumber(courierPhone)
-  if (!courierWa || !courierMessage) return
-  window.setTimeout(() => {
-    openWhatsAppWithMessage(courierPhone, courierMessage)
-  }, 700)
+  if (!courierWa || !courierMessage) return result
+
+  const courier = openWhatsAppWithMessage(courierPhone, courierMessage)
+  if (!courier.opened) result.pendingCourierUrl = courier.url
+  return result
 }
 
 function openOrderEmailClient({ supplierEmail, courierEmail, sendCopyToCourier, subject, body, courierBody }) {
@@ -232,6 +240,7 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [courierPhone, setCourierPhone] = useState(() => initialCourier.phone)
   const [courierEmail, setCourierEmail] = useState(() => initialCourier.email)
   const [courierSaved, setCourierSaved] = useState(() => hasSavedCourierPhone())
+  const [pendingCourierWhatsAppUrl, setPendingCourierWhatsAppUrl] = useState(null)
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -1005,28 +1014,56 @@ export default function NewOrderPage({ operatorMode = false }) {
     setError('')
     setSuccess('')
     setSuccessDetail(null)
+    setPendingCourierWhatsAppUrl(null)
     if (!validateOrderDraftForSend()) return
-    openWhatsAppWithMessage(selectedSupplier?.phone, buildWhatsAppMessage())
+    const supplierMessage = buildWhatsAppMessage()
+    if (sendCopyToCourier && normalizeWhatsAppNumber(courierPhone)) {
+      persistTransporterContact()
+      const { pendingCourierUrl } = openOrderWhatsAppMessages({
+        supplierPhone: selectedSupplier?.phone,
+        courierPhone,
+        supplierMessage,
+        courierMessage: buildCourierMessageFromDraft(),
+        sendCopyToCourier: true,
+      })
+      if (pendingCourierUrl) setPendingCourierWhatsAppUrl(pendingCourierUrl)
+      setSuccess(
+        pendingCourierUrl
+          ? 'WhatsApp fornitore aperto. Se la chat trasportatore non si è aperta, usa il pulsante sotto.'
+          : 'WhatsApp: ordine al fornitore e avviso ritiro al trasportatore',
+      )
+      return
+    }
+    openWhatsAppWithMessage(selectedSupplier?.phone, supplierMessage)
+    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
+      setSuccess('WhatsApp aperto per il fornitore. Inserisci il cellulare trasportatore per inviare anche la copia.')
+    }
   }
 
   function handleWhatsAppWithCourier() {
     setError('')
     setSuccess('')
     setSuccessDetail(null)
+    setPendingCourierWhatsAppUrl(null)
     if (!validateOrderDraftForSend()) return
     if (!normalizeWhatsAppNumber(courierPhone)) {
-      setError('Salva o inserisci il cellulare del trasportatore prima di inviare la copia')
+      setError('Inserisci il cellulare trasportatore prima di inviare la copia')
       return
     }
     persistTransporterContact()
-    openOrderWhatsAppMessages({
+    const { pendingCourierUrl } = openOrderWhatsAppMessages({
       supplierPhone: selectedSupplier?.phone,
       courierPhone,
       supplierMessage: buildWhatsAppMessage(),
       courierMessage: buildCourierMessageFromDraft(),
       sendCopyToCourier: true,
     })
-    setSuccess('WhatsApp: ordine al fornitore e avviso ritiro al trasportatore')
+    if (pendingCourierUrl) setPendingCourierWhatsAppUrl(pendingCourierUrl)
+    setSuccess(
+      pendingCourierUrl
+        ? 'WhatsApp fornitore aperto. Se la chat trasportatore non si è aperta, usa il pulsante sotto.'
+        : 'WhatsApp: ordine al fornitore e avviso ritiro al trasportatore',
+    )
   }
 
   function handleEmail() {
@@ -1078,6 +1115,7 @@ export default function NewOrderPage({ operatorMode = false }) {
 
   async function handleWhatsAppSavedOrder(order) {
     setError('')
+    setPendingCourierWhatsAppUrl(null)
     let full = order
     if (!order.items || order.items.length === 0) {
       try {
@@ -1088,13 +1126,35 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    openWhatsAppWithMessage(sup?.phone, buildWhatsAppTextFromOrder(full))
+    const supplierMessage = buildWhatsAppTextFromOrder(full)
+    if (sendCopyToCourier && normalizeWhatsAppNumber(courierPhone)) {
+      persistTransporterContact()
+      const { pendingCourierUrl } = openOrderWhatsAppMessages({
+        supplierPhone: sup?.phone,
+        courierPhone,
+        supplierMessage,
+        courierMessage: buildCourierMessageFromOrder(full, sup),
+        sendCopyToCourier: true,
+      })
+      if (pendingCourierUrl) setPendingCourierWhatsAppUrl(pendingCourierUrl)
+      setSuccess(
+        pendingCourierUrl
+          ? 'WhatsApp fornitore aperto. Se la chat trasportatore non si è aperta, usa il pulsante sotto.'
+          : 'WhatsApp: ordine al fornitore e avviso ritiro al trasportatore',
+      )
+      return
+    }
+    openWhatsAppWithMessage(sup?.phone, supplierMessage)
+    if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
+      setSuccess('WhatsApp aperto per il fornitore. Inserisci il cellulare trasportatore per inviare anche la copia.')
+    }
   }
 
   async function handleWhatsAppSavedOrderWithCourier(order) {
     setError('')
+    setPendingCourierWhatsAppUrl(null)
     if (!normalizeWhatsAppNumber(courierPhone)) {
-      setError('Salva o inserisci il cellulare del trasportatore prima di inviare la copia')
+      setError('Inserisci il cellulare trasportatore prima di inviare la copia')
       return
     }
     let full = order
@@ -1108,14 +1168,19 @@ export default function NewOrderPage({ operatorMode = false }) {
     }
     const sup = supplierById[full.supplier_id]
     persistTransporterContact()
-    openOrderWhatsAppMessages({
+    const { pendingCourierUrl } = openOrderWhatsAppMessages({
       supplierPhone: sup?.phone,
       courierPhone,
       supplierMessage: buildWhatsAppTextFromOrder(full),
       courierMessage: buildCourierMessageFromOrder(full, sup),
       sendCopyToCourier: true,
     })
-    setSuccess('WhatsApp: ordine al fornitore e avviso ritiro al trasportatore')
+    if (pendingCourierUrl) setPendingCourierWhatsAppUrl(pendingCourierUrl)
+    setSuccess(
+      pendingCourierUrl
+        ? 'WhatsApp fornitore aperto. Se la chat trasportatore non si è aperta, usa il pulsante sotto.'
+        : 'WhatsApp: ordine al fornitore e avviso ritiro al trasportatore',
+    )
   }
 
   async function handleEmailSavedOrder(order) {
@@ -1431,6 +1496,17 @@ export default function NewOrderPage({ operatorMode = false }) {
       {success && (
         <div className="alert alert-success">
           <div>{success}</div>
+          {pendingCourierWhatsAppUrl ? (
+            <p style={{ margin: '0.65rem 0 0' }}>
+              <button
+                type="button"
+                className="btn btn-whatsapp btn-sm"
+                onClick={() => window.open(pendingCourierWhatsAppUrl, '_blank', 'noopener,noreferrer')}
+              >
+                Apri WhatsApp trasportatore ({courierPhone || 'numero salvato'})
+              </button>
+            </p>
+          ) : null}
           {successDetail && (
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.2rem', fontSize: '0.9rem' }}>
               <li>
@@ -1951,7 +2027,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                 onChange={(e) => setSendCopyToCourier(e.target.checked)}
               />
               <span style={{ fontSize: '0.9rem' }}>
-                Includi trasportatore anche nelle email (CC + messaggio ritiro)
+                Includi trasportatore su WhatsApp ed email (numero da «Cellulare trasportatore»)
               </span>
             </label>
           </div>
@@ -2117,7 +2193,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           )}
           {canWhatsAppWithCourier && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
-              Usa <strong>WhatsApp fornitore + trasportatore</strong> per aprire due chat: ordine al fornitore e avviso ritiro al numero salvato.
+              Con la spunta «Includi trasportatore» oppure <strong>WhatsApp fornitore + trasportatore</strong> si aprono due chat: il numero usato è quello in «Cellulare trasportatore».
             </p>
           )}
         </form>
