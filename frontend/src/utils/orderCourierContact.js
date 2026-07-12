@@ -6,8 +6,16 @@ function text(value) {
   return t || null
 }
 
+let courierKeySeq = 0
+
 export function emptyCourierCarrier() {
+  return createCourierCarrier()
+}
+
+export function createCourierCarrier() {
+  courierKeySeq += 1
   return {
+    _key: `courier-${courierKeySeq}-${Date.now()}`,
     name: '',
     phone: '',
     email: '',
@@ -141,12 +149,14 @@ export function hasSavedCourierPhone(carriers) {
 }
 
 export function setCourierInService(carriers, index) {
-  const list = normalizeCourierCarriers(carriers)
+  const list = Array.isArray(carriers) ? carriers.map((item) => ({ ...item })) : []
+  if (!list.length) return [createCourierCarrier()]
   const current = list[index]
-  const turnOff = current?.inService
-  return list.map((c, i) => ({
-    ...c,
-    inService: turnOff ? false : i === index,
+  if (!current) return list
+  const turnOff = Boolean(current.inService)
+  return list.map((item, itemIndex) => ({
+    ...item,
+    inService: turnOff ? false : itemIndex === index,
   }))
 }
 

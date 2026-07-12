@@ -1,58 +1,73 @@
-import React from 'react'
-import { emptyCourierCarrier, setCourierInService } from '../utils/orderCourierContact.js'
+import React, { useCallback } from 'react'
+import { createCourierCarrier, setCourierInService } from '../utils/orderCourierContact.js'
 
-function applyCarriersChange(onCarriersChange, updater) {
-  if (typeof onCarriersChange !== 'function') return
-  onCarriersChange((prevState) => {
-    const base = Array.isArray(prevState) && prevState.length ? prevState : [emptyCourierCarrier()]
-    return updater(base)
-  })
-}
+export default function OrderCourierEditor({ carriers, onCarriersChange, onDirty }) {
+  const list = Array.isArray(carriers) && carriers.length ? carriers : [createCourierCarrier()]
 
-export default function OrderCourierEditor({ carriers, onCarriersChange, setCarriers, onDirty }) {
-  const changeCarriers = onCarriersChange || setCarriers
-  const list = Array.isArray(carriers) && carriers.length ? carriers : [emptyCourierCarrier()]
-
-  function markDirty() {
+  const markDirty = useCallback(() => {
     if (typeof onDirty === 'function') onDirty()
-  }
+  }, [onDirty])
 
-  function updateCarriers(updater) {
-    applyCarriersChange(changeCarriers, updater)
-    markDirty()
-  }
+  const updateCarriers = useCallback(
+    (updater) => {
+      if (typeof onCarriersChange !== 'function') return
+      onCarriersChange((previousCarriers) => {
+        const currentList =
+          Array.isArray(previousCarriers) && previousCarriers.length
+            ? previousCarriers
+            : [createCourierCarrier()]
+        return updater(currentList)
+      })
+      markDirty()
+    },
+    [onCarriersChange, markDirty],
+  )
 
-  function updateCarrier(index, patch) {
-    updateCarriers((base) => base.map((item, i) => (i === index ? { ...item, ...patch } : item)))
-  }
+  const updateCarrier = useCallback(
+    (index, patch) => {
+      updateCarriers((currentList) =>
+        currentList.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+      )
+    },
+    [updateCarriers],
+  )
 
-  function toggleInService(index) {
-    updateCarriers((prev) => setCourierInService(prev, index))
-  }
+  const toggleInService = useCallback(
+    (index) => {
+      updateCarriers((currentList) => setCourierInService(currentList, index))
+    },
+    [updateCarriers],
+  )
 
-  function toggleEnabled(index, checked) {
-    updateCarriers((base) =>
-      base.map((item, i) => {
-        if (i !== index) return item
-        return {
-          ...item,
-          enabled: checked,
-          inService: checked ? item.inService : false,
-        }
-      }),
-    )
-  }
+  const toggleEnabled = useCallback(
+    (index, checked) => {
+      updateCarriers((currentList) =>
+        currentList.map((item, itemIndex) => {
+          if (itemIndex !== index) return item
+          return {
+            ...item,
+            enabled: checked,
+            inService: checked ? item.inService : false,
+          }
+        }),
+      )
+    },
+    [updateCarriers],
+  )
 
-  function addCarrier() {
-    updateCarriers((prev) => [...prev, emptyCourierCarrier()])
-  }
+  const addCarrier = useCallback(() => {
+    updateCarriers((currentList) => [...currentList, createCourierCarrier()])
+  }, [updateCarriers])
 
-  function removeCarrier(index) {
-    updateCarriers((prev) => {
-      const next = prev.filter((_, i) => i !== index)
-      return next.length ? next : [emptyCourierCarrier()]
-    })
-  }
+  const removeCarrier = useCallback(
+    (index) => {
+      updateCarriers((currentList) => {
+        const next = currentList.filter((_, itemIndex) => itemIndex !== index)
+        return next.length ? next : [createCourierCarrier()]
+      })
+    },
+    [updateCarriers],
+  )
 
   return (
     <div className="order-courier-editor">
@@ -96,7 +111,7 @@ export default function OrderCourierEditor({ carriers, onCarriersChange, setCarr
               <input
                 type="checkbox"
                 checked={carrier.enabled !== false}
-                onChange={(e) => toggleEnabled(index, e.target.checked)}
+                onChange={(event) => toggleEnabled(index, event.target.checked)}
               />
               <span style={{ fontSize: '0.88rem' }}>Attivo</span>
             </label>
@@ -112,7 +127,7 @@ export default function OrderCourierEditor({ carriers, onCarriersChange, setCarr
               <input
                 className="form-control"
                 value={carrier.name || ''}
-                onChange={(e) => updateCarrier(index, { name: e.target.value })}
+                onChange={(event) => updateCarrier(index, { name: event.target.value })}
                 placeholder="es. Mario Trasporti"
               />
             </div>
@@ -121,7 +136,7 @@ export default function OrderCourierEditor({ carriers, onCarriersChange, setCarr
               <input
                 className="form-control"
                 value={carrier.phone || ''}
-                onChange={(e) => updateCarrier(index, { phone: e.target.value })}
+                onChange={(event) => updateCarrier(index, { phone: event.target.value })}
                 placeholder="3331234567"
               />
             </div>
@@ -131,7 +146,7 @@ export default function OrderCourierEditor({ carriers, onCarriersChange, setCarr
                 type="email"
                 className="form-control"
                 value={carrier.email || ''}
-                onChange={(e) => updateCarrier(index, { email: e.target.value })}
+                onChange={(event) => updateCarrier(index, { email: event.target.value })}
                 placeholder="copia in CC (email)"
               />
             </div>

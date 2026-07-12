@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestOrderFull } from '../services/aiService'
@@ -248,6 +248,10 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [couriers, setCouriers] = useState(() => initialCourier.carriers)
   const [courierSaved, setCourierSaved] = useState(() => hasSavedCourierPhone(initialCourier.carriers))
   const [pendingCourierWhatsAppUrls, setPendingCourierWhatsAppUrls] = useState([])
+
+  const handleCouriersChange = useCallback((nextOrUpdater) => {
+    setCouriers(nextOrUpdater)
+  }, [])
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -2009,7 +2013,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                 </span>
               ) : null}
             </div>
-            <OrderCourierEditor carriers={couriers} setCouriers={setCouriers} onDirty={markCouriersDirty} />
+            <OrderCourierEditor carriers={couriers} onCarriersChange={handleCouriersChange} onDirty={markCouriersDirty} />
             <div style={{ marginTop: '0.65rem', marginBottom: '0.65rem' }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={handleSaveTransporter}>
                 Salva trasportatori
