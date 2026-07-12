@@ -1,18 +1,24 @@
 import React from 'react'
 import { emptyCourierCarrier, setCourierInService } from '../utils/orderCourierContact.js'
 
-export default function OrderCourierEditor({ carriers, setCarriers, onDirty }) {
+function applyCarriersChange(onCarriersChange, updater) {
+  if (typeof onCarriersChange !== 'function') return
+  onCarriersChange((prevState) => {
+    const base = Array.isArray(prevState) && prevState.length ? prevState : [emptyCourierCarrier()]
+    return updater(base)
+  })
+}
+
+export default function OrderCourierEditor({ carriers, onCarriersChange, setCarriers, onDirty }) {
+  const changeCarriers = onCarriersChange || setCarriers
   const list = Array.isArray(carriers) && carriers.length ? carriers : [emptyCourierCarrier()]
 
   function markDirty() {
-    onDirty?.()
+    if (typeof onDirty === 'function') onDirty()
   }
 
   function updateCarriers(updater) {
-    setCarriers((prev) => {
-      const base = Array.isArray(prev) && prev.length ? prev : [emptyCourierCarrier()]
-      return updater(base)
-    })
+    applyCarriersChange(changeCarriers, updater)
     markDirty()
   }
 

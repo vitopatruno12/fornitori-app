@@ -1,17 +1,27 @@
 import React from 'react'
 import { SUPPLIER_MERCHANDISE_CATEGORY_OPTIONS, emptyContactItem } from '../utils/supplierContactLists.js'
 
-function ContactListEditor({ title, hint, items, setItems, inputType = 'text', placeholder, addLabel }) {
+function ContactListEditor({ title, hint, items, onItemsChange, setItems, inputType = 'text', placeholder, addLabel }) {
+  const changeItems = onItemsChange || setItems
+
+  function applyItemsChange(updater) {
+    if (typeof changeItems !== 'function') return
+    changeItems((prevState) => {
+      const base = Array.isArray(prevState) ? prevState : []
+      return updater(base)
+    })
+  }
+
   function updateItem(index, patch) {
-    setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
+    applyItemsChange((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
   }
 
   function addItem() {
-    setItems((prev) => [...(Array.isArray(prev) ? prev : []), emptyContactItem()])
+    applyItemsChange((prev) => [...(Array.isArray(prev) ? prev : []), emptyContactItem()])
   }
 
   function removeItem(index) {
-    setItems((prev) => {
+    applyItemsChange((prev) => {
       const list = Array.isArray(prev) ? prev : []
       const next = list.filter((_, i) => i !== index)
       return next.length ? next : [emptyContactItem()]
