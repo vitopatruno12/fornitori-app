@@ -1,17 +1,156 @@
-const LS_KEY = 'fornitori_app_order_courier_contact_v1'
-
-function defaultContact() {
-  return {
-    sendCopyToCourier: false,
-    name: '',
-    phone: '',
-    email: '',
-  }
-}
+const LS_KEY_V2 = 'fornitori_app_order_courier_contact_v2'
+const LS_KEY_V1 = 'fornitori_app_order_courier_contact_v1'
 
 function text(value) {
   const t = String(value ?? '').trim()
   return t || null
+}
+
+export function emptyCourierCarrier() {
+  return {
+    name: '',
+    phone: '',
+    email: '',
+    enabled: true,
+    inService: false,
+  }
+}
+
+export function normalizeCourierCarrier(raw, index = 0) {
+  const item = raw && typeof raw === 'object' ? raw : {}
+  return {
+    name: String(item.name || '').trim(),
+    phone: String(item.phone || '').trim(),
+    email: String(item.email || '').trim(),
+    enabled: item.enabled !== false,
+    inService: Boolean(item.inService),
+    _key: item._key || `c-${index}-${Date.now()}`,
+  }
+}
+
+export function normalizeCourierCarriers(raw) {
+  const list = Array.isArray(raw) ? raw : []
+  const normalized = list.map((item, index) => normalizeCourierCarrier(item, index))
+  if (!normalized.length) return [emptyCourierCarrier()]
+  const hasInService = normalized.some((c) => c.inService && c.enabled !== false)
+  if (!hasInService) {
+    const firstEnabled = normalized.find((c) => c.enabled !== false) || normalized[0]
+    if (firstEnabled) firstEnabled.inService = true
+  }
+  return normalized
+}
+
+function defaultContact() {
+  return {
+    sendCopyToCourier: false,
+    carriers: [emptyCourierCarrier()],
+  }
+}
+
+function migrateV1(parsed) {
+  const phone = String(parsed?.phone || '').trim()
+  const name = String(parsed?.name || '').trim()
+  const email = String(parsed?.email || '').trim()
+  if (!phone && !name && !email) return defaultContact()
+  return {
+    sendCopyToCourier: Boolean(parsed?.sendCopyToCourier),
+    carriers: normalizeCourierCarriers([
+      {
+        name,
+        phone,
+        email,
+        enabled: true,
+        inService: true,
+      },
+    ]),
+  }
+}
+
+export function loadOrderCourierContact() {
+  try {
+    const rawV2 = localStorage.getItem(LS_KEY_V2)
+    if (rawV2) {
+      const parsed = JSON.parse(rawV2)
+      return {
+        ...defaultContact(),
+        sendCopyToCourier: Boolean(parsed?.sendCopyToCourier),
+        carriers: normalizeCourierCarriers(parsed?.carriers),
+      }
+    }
+    const rawV1 = localStorage.getItem(LS_KEY_V1)
+    if (rawV1) {
+      return migrateV1(JSON.parse(rawV1))
+    }
+  } catch {
+    // ignore
+  }
+  return defaultContact()
+}
+
+export function saveOrderCourierContact(contact) {
+  try {
+    const carriers = normalizeCourierCarriers(contact?.carriers).map(({ _key, ...rest }) => rest)
+    localStorage.setItem(
+      LS_KEY_V2,
+      JSON.stringify({
+        sendCopyToCourier: Boolean(contact?.sendCopyToCourier),
+        carriers,
+      }),
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function isCourierPhoneValid(phone, normalizeWhatsAppNumber) {
+  return Boolean(normalizeWhatsAppNumber?.(phone))
+}
+
+export function resolveCouriersForWhatsApp(carriers, normalizeWhatsAppNumber) {
+  const list = normalizeCourierCarriers(carriers)
+  const inService = list.filter(
+    (c) => c.inService && c.enabled !== false && isCourierPhoneValid(c.phone, normalizeWhatsAppNumber),
+  )
+  if (inService.length) return inService
+  const fallback = list.find(
+    (c) => c.enabled !== false && isCourierPhoneValid(c.phone, normalizeWhatsAppNumber),
+  )
+  return fallback ? [fallback] : []
+}
+
+export function resolveCourierEmailsForSend(carriers) {
+  const list = normalizeCourierCarriers(carriers)
+  const inService = list.filter((c) => c.inService && c.enabled !== false && text(c.email))
+  const source = inService.length ? inService : list.filter((c) => c.enabled !== false && text(c.email))
+  const emails = []
+  for (const c of source) {
+    const em = text(c.email)
+    if (em && !emails.includes(em)) emails.push(em)
+  }
+  return emails
+}
+
+export function getPrimaryCourier(carriers) {
+  return resolveCouriersForWhatsApp(carriers, (p) => {
+    const d = String(p || '').replace(/\D/g, '')
+    return d.length >= 8 ? d : null
+  })[0] || null
+}
+
+export function hasSavedCourierPhone(carriers) {
+  const data = Array.isArray(carriers) ? carriers : loadOrderCourierContact().carriers
+  return resolveCouriersForWhatsApp(data, (p) => {
+    const d = String(p || '').replace(/\D/g, '')
+    return d.length >= 8 ? d : null
+  }).length > 0
+}
+
+export function setCourierInService(carriers, index) {
+  return normalizeCourierCarriers(carriers).map((c, i) => ({
+    ...c,
+    inService: i === index,
+  }))
 }
 
 function formatSupplierAddress(supplier) {
@@ -28,54 +167,17 @@ function appendOrderLineQtyBits(bits, item) {
   }
 }
 
-export function loadOrderCourierContact() {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return defaultContact()
-    const parsed = JSON.parse(raw)
-    return {
-      ...defaultContact(),
-      sendCopyToCourier: Boolean(parsed?.sendCopyToCourier),
-      name: String(parsed?.name || '').trim(),
-      phone: String(parsed?.phone || '').trim(),
-      email: String(parsed?.email || '').trim(),
-    }
-  } catch {
-    return defaultContact()
-  }
-}
-
-export function saveOrderCourierContact(contact) {
-  try {
-    localStorage.setItem(
-      LS_KEY,
-      JSON.stringify({
-        sendCopyToCourier: Boolean(contact?.sendCopyToCourier),
-        name: String(contact?.name || '').trim(),
-        phone: String(contact?.phone || '').trim(),
-        email: String(contact?.email || '').trim(),
-      }),
-    )
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function hasSavedCourierPhone() {
-  const data = loadOrderCourierContact()
-  const phone = String(data?.phone || '').trim()
-  return Boolean(phone)
-}
-
 /**
  * Messaggio WhatsApp/email dedicato al corriere: ritiro presso il fornitore.
- * @param {{ name?: string, address?: string, city?: string, phone?: string, contact_person?: string, email?: string } | null} supplier
- * @param {{ courierName?: string, orderNumber?: string, orderDate?: string, expectedDeliveryDate?: string, deliveryLocation?: string, items?: Array, note?: string, supplierName?: string }} order
  */
 export function buildCourierPickupMessage(supplier, order = {}) {
   const supplierName = text(supplier?.name) || text(order?.supplierName) || 'Fornitore'
-  const lines = ['Buongiorno corriere,', '', "l'ordine attende di essere prelevato da:", '']
+  const lines = ['Buongiorno corriere,', '']
+
+  const courierName = text(order?.courierName)
+  if (courierName) lines.push(`${courierName},`)
+
+  lines.push("l'ordine attende di essere prelevato da:", '')
 
   lines.push(`Fornitore: ${supplierName}`)
 
