@@ -118,6 +118,12 @@ export async function fetchDailySummary(dateStr, activity, accessCode) {
   return apiFetch(`/cash/summary?${params.toString()}`)
 }
 
+export async function fetchRangeSummary(dateFrom, dateTo, activity, accessCode) {
+  const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
+  appendActivityAndCode(params, activity, accessCode)
+  return apiFetch(`/cash/summary/range?${params.toString()}`)
+}
+
 export function getExportUrl(dateFrom, dateTo, activity, accessCode) {
   const params = new URLSearchParams()
   if (dateFrom) params.append('date_from', dateFrom)

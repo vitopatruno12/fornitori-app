@@ -13,6 +13,7 @@ from ..schemas.cash import (
     CashEntryRead,
     CashEntryWithBalance,
     DailySummary,
+    PeriodSummary,
     PrimaNotaLinkOptions,
     PrimaNotaLocalePackRead,
     PrimaNotaLocalePackSummary,
@@ -246,6 +247,24 @@ def get_daily_summary(
     act = _validate_activity(activity)
     _verify_activity_access(db, act, code)
     return cash_service.get_daily_summary(db, d, activity=act)
+
+
+@router.get("/summary/range", response_model=PeriodSummary)
+def get_range_summary(
+    date_from: str = Query(..., description="Data inizio (YYYY-MM-DD)"),
+    date_to: str = Query(..., description="Data fine (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Attività: risacca, via_lattea, via_abba, via_zanardelli"),
+    code: Optional[str] = Query(None, min_length=6, max_length=6, description="Codice locale a 6 cifre"),
+    db: Session = Depends(get_db),
+):
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data non valida")
+    act = _validate_activity(activity)
+    _verify_activity_access(db, act, code)
+    return cash_service.get_range_summary(db, d_from, d_to, activity=act)
 
 
 @router.get("/export/csv")

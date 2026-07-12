@@ -57,6 +57,20 @@ class DailySummary(BaseModel):
     totale_vendita: Decimal = Decimal("0")
 
 
+class PeriodSummary(BaseModel):
+    date_from: str
+    date_to: str
+    totale_entrate: Decimal
+    totale_uscite: Decimal
+    saldo_giornaliero: Decimal  # netto cassa contanti nel periodo
+    saldo_cumulativo: Decimal  # a fine periodo (solo fiscale)
+    totale_fiscale: Decimal = Decimal("0")
+    totale_non_fiscale: Decimal = Decimal("0")
+    totale_pos: Decimal = Decimal("0")
+    totale_refill: Decimal = Decimal("0")
+    totale_vendita: Decimal = Decimal("0")
+
+
 class PrimaNotaLinkInvoice(BaseModel):
     id: int
     invoice_number: str

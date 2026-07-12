@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
+import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
 import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
@@ -68,6 +68,14 @@ function flowTagFromConto(conto) {
   return 'fiscale'
 }
 
+function normalizeDateRange(from, to) {
+  if (!from && !to) return { from: '', to: '' }
+  const a = from || to
+  const b = to || from
+  if (a <= b) return { from: a, to: b }
+  return { from: b, to: a }
+}
+
 export default function PrimaNotaPage({ operatorMode = false }) {
   const formatLocalIsoDate = (d) => {
     const y = d.getFullYear()
@@ -108,6 +116,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const [exportDateTo, setExportDateTo] = useState('')
   const [resetRangeFrom, setResetRangeFrom] = useState(currentMonthFrom)
   const [resetRangeTo, setResetRangeTo] = useState(currentMonthTo)
+  const [summaryScope, setSummaryScope] = useState('day')
   const [openingCashInput, setOpeningCashInput] = useState('')
 
   const [formType, setFormType] = useState('entrata')
@@ -612,7 +621,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadSummary()
-  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
+  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs, summaryScope, movementPeriodFrom, movementPeriodTo])
 
   useEffect(() => {
     let cancelled = false
@@ -715,8 +724,18 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       return
     }
     try {
-      const data = await fetchDailySummary(selectedDate, activeActivity, resolveActiveAccessCode())
-      setSummary(data)
+      if (summaryScope === 'interval') {
+        const { from, to } = normalizeDateRange(movementPeriodFrom, movementPeriodTo)
+        if (!from || !to) {
+          setSummary(null)
+          return
+        }
+        const data = await fetchRangeSummary(from, to, activeActivity, resolveActiveAccessCode())
+        setSummary(data)
+      } else {
+        const data = await fetchDailySummary(selectedDate, activeActivity, resolveActiveAccessCode())
+        setSummary(data)
+      }
     } catch {
       setSummary(null)
     }
@@ -1194,8 +1213,9 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }
   }
 
-  function mapEntriesWithLedger(entryList, openingDefault) {
-    const cassaIniziale = openingCashInput === '' ? openingDefault : Number(openingCashInput || 0)
+  function mapEntriesWithLedger(entryList, openingDefault, openingInputOverride) {
+    const openingField = openingInputOverride !== undefined ? openingInputOverride : openingCashInput
+    const cassaIniziale = openingField === '' ? openingDefault : Number(openingField || 0)
     let running = cassaIniziale
     const rows = entryList.map((entry) => {
       const ledger = buildLedgerFields(entry)
@@ -1220,23 +1240,30 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return mapEntriesWithLedger(entries, defaultOpening)
   }, [entries, openingCashInput])
 
-  const entriesForSelectedDay = useMemo(() => {
+  const entriesForSummary = useMemo(() => {
     if (!entries?.length) return []
-    const day = selectedDate
-    return entries.filter((e) => (e.entry_date ? String(e.entry_date).slice(0, 10) : '') === day)
-  }, [entries, selectedDate])
+    if (summaryScope === 'day') {
+      return entries.filter((e) => (e.entry_date ? String(e.entry_date).slice(0, 10) : '') === selectedDate)
+    }
+    const { from, to } = normalizeDateRange(movementPeriodFrom, movementPeriodTo)
+    if (!from || !to) return []
+    return entries.filter((e) => {
+      const d = e.entry_date ? String(e.entry_date).slice(0, 10) : ''
+      return d >= from && d <= to
+    })
+  }, [entries, summaryScope, selectedDate, movementPeriodFrom, movementPeriodTo])
 
-  const rowsWithLedgerSelectedDay = React.useMemo(() => {
-    if (!entriesForSelectedDay || entriesForSelectedDay.length === 0) {
+  const rowsWithLedgerSummary = React.useMemo(() => {
+    if (!entriesForSummary || entriesForSummary.length === 0) {
       return { rows: [], cassaIniziale: 0, cassaFinale: 0 }
     }
 
-    const firstCash = entriesForSelectedDay.find((e) => !isExtraCassa(e))
+    const firstCash = entriesForSummary.find((e) => !isExtraCassa(e))
     const defaultOpening = firstCash
       ? Number(firstCash.saldo_progressivo) - (firstCash.type === 'entrata' ? Number(firstCash.amount) : -Number(firstCash.amount))
-      : Number(entriesForSelectedDay[0].saldo_progressivo || 0)
-    return mapEntriesWithLedger(entriesForSelectedDay, defaultOpening)
-  }, [entriesForSelectedDay, openingCashInput])
+      : Number(entriesForSummary[0].saldo_progressivo || 0)
+    return mapEntriesWithLedger(entriesForSummary, defaultOpening, summaryScope === 'day' ? undefined : '')
+  }, [entriesForSummary, openingCashInput, summaryScope])
 
   const filteredMovementRows = useMemo(() => {
     const q = movementSearch.trim().toLowerCase()
@@ -1333,57 +1360,57 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   const cassaContantiGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (isExtraCassaConto(e.conto)) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const entrateCassaGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (isExtraCassaConto(e.conto) || e.type !== 'entrata') return acc
       return acc + Number(e.amount || 0)
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const usciteCassaGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (isExtraCassaConto(e.conto) || e.type !== 'uscita') return acc
       return acc + Number(e.amount || 0)
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const nonFiscaleGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (e.conto !== CONTO_NON_FISCALE) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const posGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (e.conto !== CONTO_POS || e.type !== 'entrata') return acc
       return acc + Number(e.amount || 0)
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const refillGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (e.conto !== CONTO_REFILL) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const fiscaleGiornoComputed = React.useMemo(() => {
-    return entriesForSelectedDay.reduce((acc, e) => {
+    return entriesForSummary.reduce((acc, e) => {
       if (e.conto === CONTO_NON_FISCALE || isExtraCassaConto(e.conto)) return acc
       const delta = e.type === 'entrata' ? Number(e.amount || 0) : -Number(e.amount || 0)
       return acc + delta
     }, 0)
-  }, [entriesForSelectedDay])
+  }, [entriesForSummary])
 
   const nonFiscaleGiorno = summary?.totale_non_fiscale != null ? Number(summary.totale_non_fiscale) : nonFiscaleGiornoComputed
   const posGiorno = summary?.totale_pos != null ? Number(summary.totale_pos) : posGiornoComputed
@@ -1418,17 +1445,25 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         entrate: totaleEntrateGiorno,
         uscite: totaleUsciteGiorno,
         saldo: saldoGiornalieroFiscale,
-        cassaIniziale: rowsWithLedgerSelectedDay.cassaIniziale,
+        cassaIniziale: rowsWithLedgerSummary.cassaIniziale,
         cassaFinale: cassaFinaleRiepilogo,
+        scope: summaryScope === 'interval' ? 'interval' : 'day',
       }),
     [
       totaleEntrateGiorno,
       totaleUsciteGiorno,
       saldoGiornalieroFiscale,
-      rowsWithLedgerSelectedDay.cassaIniziale,
+      rowsWithLedgerSummary.cassaIniziale,
       cassaFinaleRiepilogo,
+      summaryScope,
     ],
   )
+
+  const summaryPeriodLabel = useMemo(() => {
+    if (summaryScope === 'day') return formatDate(selectedDate)
+    const { from, to } = normalizeDateRange(movementPeriodFrom, movementPeriodTo)
+    return `${formatDate(from)} – ${formatDate(to)}`
+  }, [summaryScope, selectedDate, movementPeriodFrom, movementPeriodTo])
 
   return (
     <div>
@@ -1443,7 +1478,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
           ) : (
             <>
               Registro separato per locale: <strong>{activeActivityLabel}</strong>.
-              Riepilogo sulla giornata selezionata; l’elenco movimenti può essere filtrato per intervallo di date insieme alla ricerca testuale.
+              Riepilogo per giornata o per intervallo; l’elenco movimenti usa lo stesso periodo impostato in alto.
             </>
           )}
         </p>
@@ -1897,10 +1932,40 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       </section>
 
       <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>Riepilogo giornaliero</h2>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
+            {summaryScope === 'interval' ? 'Riepilogo periodo' : 'Riepilogo giornaliero'}
+          </h2>
+          <div className="btn-group" role="group" aria-label="Ambito riepilogo">
+            <button
+              type="button"
+              className={`btn btn-sm ${summaryScope === 'day' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSummaryScope('day')}
+            >
+              Giorno
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${summaryScope === 'interval' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSummaryScope('interval')}
+            >
+              Intervallo
+            </button>
+          </div>
+        </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
-          Riferito al giorno <strong>{formatDate(selectedDate)}</strong>. I totali «(giorno)» includono fiscale, NC, POS e Refill calcolati dal server per quel giorno. Il saldo cassa usa movimenti fiscali e NC (esclusi POS e Refill).
+          {summaryScope === 'day' ? (
+            <>
+              Riferito al giorno <strong>{formatDate(selectedDate)}</strong> (calendario in alto). I totali includono fiscale, NC, POS e Refill calcolati dal server per quel giorno.
+            </>
+          ) : (
+            <>
+              Riferito al periodo <strong>{summaryPeriodLabel}</strong> (date «Periodo elenco movimenti» in alto). Totali aggregati su tutte le giornate dell’intervallo.
+            </>
+          )}{' '}
+          Il saldo cassa usa movimenti fiscali e NC (esclusi POS e Refill).
         </p>
+        {summaryScope === 'day' ? (
         <div className="form-row">
           <div className="form-group">
             <label>Saldo attuale cassa/rimanente</label>
@@ -1915,7 +1980,10 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             />
           </div>
         </div>
+        ) : null}
         <div className="btn-group" style={{ marginBottom: '0.75rem' }}>
+          {summaryScope === 'day' ? (
+          <>
           <button type="button" className="btn btn-secondary" onClick={handleAzzeraCassaIniziale}>
             Azzera cassa iniziale
           </button>
@@ -1928,6 +1996,17 @@ export default function PrimaNotaPage({ operatorMode = false }) {
             title="Elimina tutti i movimenti della data selezionata nel calendario. Aggiorna il saldo giornaliero."
           >
             {deletingDay ? 'Eliminazione...' : 'Elimina tutti i movimenti del giorno'}
+          </button>
+          )}
+          </>
+          ) : (
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={() => applyMovementPeriodPreset('month')}
+            title="Imposta periodo movimenti = mese corrente"
+          >
+            Periodo: mese corrente
           </button>
           )}
         </div>
@@ -1968,10 +2047,10 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         )}
 
         <PrimaNotaExcelSummaryTable
-          title={`Vendite del giorno — ${activeActivityLabel}`}
+          title={summaryScope === 'interval' ? `Vendite del periodo — ${activeActivityLabel}` : `Vendite del giorno — ${activeActivityLabel}`}
           hint={
             <>
-              Fiscale, NC, POS e Refill per il <strong>{formatDate(selectedDate)}</strong>.
+              Fiscale, NC, POS e Refill per <strong>{summaryPeriodLabel}</strong>.
               Il NC entra in cassa entrata/uscita e nel totale vendita.
             </>
           }
@@ -1979,14 +2058,14 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         />
 
         <PrimaNotaExcelSummaryTable
-          title="Cassa del giorno"
-          hint={`Entrate, uscite e saldi per il ${formatDate(selectedDate)}.`}
+          title={summaryScope === 'interval' ? 'Cassa del periodo' : 'Cassa del giorno'}
+          hint={`Entrate, uscite e saldi per ${summaryPeriodLabel}.`}
           rows={dailyCashRows}
         />
 
         {!summary && (
           <p className="prima-nota-riepilogo-warn" role="status">
-            Riepilogo cassa dal server non disponibile: i totali vendite sopra usano i movimenti caricati per il giorno selezionato.
+            Riepilogo cassa dal server non disponibile: i totali vendite sopra usano i movimenti caricati per {summaryScope === 'interval' ? 'il periodo impostato' : 'il giorno selezionato'}.
           </p>
         )}
       </section>

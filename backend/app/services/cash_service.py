@@ -316,10 +316,12 @@ def delete_entries_for_range(
     return int(n)
 
 
-def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = None) -> dict:
-    """Ritorna totale entrate, uscite, saldo giornaliero e cumulativo per una data."""
-    start = datetime.combine(target_date, datetime.min.time())
-    end = datetime.combine(target_date, datetime.max.time())
+def _get_period_summary_metrics(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    activity: Optional[str] = None,
+) -> dict:
     act_clause = _activity_filter(activity)
 
     totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
@@ -357,7 +359,6 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
     uscite = Decimal(str(uscite or 0)).quantize(Decimal("0.01"))
     saldo_giorno = _net_amount_for_day(db, start, end, activity, cassa_contanti_only=True)
 
-    # Saldo cumulativo = somma di (entrate - uscite) in cassa contanti fino a fine giornata
     entrate_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
         .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_cassa_contanti_filter(), act_clause)
@@ -373,7 +374,6 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
     ).quantize(Decimal("0.01"))
 
     return {
-        "date": target_date.isoformat(),
         "totale_entrate": entrate,
         "totale_uscite": uscite,
         "saldo_giornaliero": saldo_giorno,
@@ -383,6 +383,31 @@ def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = 
         "totale_pos": totale_pos,
         "totale_refill": totale_refill,
         "totale_vendita": totale_vendita,
+    }
+
+
+def get_daily_summary(db: Session, target_date: date, activity: Optional[str] = None) -> dict:
+    """Ritorna totale entrate, uscite, saldo giornaliero e cumulativo per una data."""
+    start = datetime.combine(target_date, datetime.min.time())
+    end = datetime.combine(target_date, datetime.max.time())
+    return {
+        "date": target_date.isoformat(),
+        **_get_period_summary_metrics(db, start, end, activity),
+    }
+
+
+def get_range_summary(
+    db: Session, date_from: date, date_to: date, activity: Optional[str] = None
+) -> dict:
+    """Ritorna totali aggregati su un intervallo di date (inclusivo)."""
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+    start = datetime.combine(date_from, datetime.min.time())
+    end = datetime.combine(date_to, datetime.max.time())
+    return {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        **_get_period_summary_metrics(db, start, end, activity),
     }
 
 

@@ -42,25 +42,27 @@ export function buildPrimaNotaDailyCashRows({
   saldo,
   cassaIniziale,
   cassaFinale,
+  scope = 'day',
 }) {
+  const period = scope === 'interval' ? 'periodo' : 'giorno'
   return [
     {
       id: 'entrate',
-      label: 'Totale entrate cassa',
+      label: `Totale entrate cassa (${period})`,
       amount: amountCell(entrate),
       rowClass: 'prima-nota-row-cash-in',
     },
     {
       id: 'uscite',
-      label: 'Totale uscite cassa',
+      label: `Totale uscite cassa (${period})`,
       amount: amountCell(uscite),
       rowClass: 'prima-nota-row-cash-out',
     },
-    { id: 'saldo', label: 'Saldo giornaliero cassa', amount: amountCell(saldo) },
-    { id: 'cassa_iniziale', label: 'Saldo attuale cassa', amount: amountCell(cassaIniziale) },
+    { id: 'saldo', label: scope === 'interval' ? 'Saldo netto cassa (periodo)' : 'Saldo giornaliero cassa', amount: amountCell(saldo) },
+    { id: 'cassa_iniziale', label: scope === 'interval' ? 'Cassa iniziale periodo' : 'Saldo attuale cassa', amount: amountCell(cassaIniziale) },
     {
       id: 'cassa_finale',
-      label: 'Cassa finale (schema vendite)',
+      label: scope === 'interval' ? 'Cassa finale periodo (schema vendite)' : 'Cassa finale (schema vendite)',
       amount: amountCell(cassaFinale),
       rowClass: 'pagamenti-row-totals',
     },
