@@ -38,7 +38,7 @@ import {
   orderMerchandiseTotalsLabel,
 } from '../utils/orderMerchandiseWorkbook.js'
 import {
-  buildCourierCopyPrefix,
+  buildCourierPickupMessage,
   loadOrderCourierContact,
   saveOrderCourierContact,
 } from '../utils/orderCourierContact.js'
@@ -76,25 +76,27 @@ function openWhatsAppWithMessage(phone, message) {
 function openOrderWhatsAppMessages({
   supplierPhone,
   courierPhone,
-  message,
+  supplierMessage,
+  courierMessage,
   sendCopyToCourier,
-  courierName,
 }) {
-  openWhatsAppWithMessage(supplierPhone, message)
+  openWhatsAppWithMessage(supplierPhone, supplierMessage)
   if (!sendCopyToCourier) return
   const courierWa = normalizeWhatsAppNumber(courierPhone)
-  if (!courierWa) return
+  if (!courierWa || !courierMessage) return
   window.setTimeout(() => {
-    openWhatsAppWithMessage(courierPhone, `${buildCourierCopyPrefix(courierName)}${message}`)
+    openWhatsAppWithMessage(courierPhone, courierMessage)
   }, 700)
 }
 
-function openOrderEmailClient({ supplierEmail, courierEmail, sendCopyToCourier, subject, body }) {
+function openOrderEmailClient({ supplierEmail, courierEmail, sendCopyToCourier, subject, body, courierBody }) {
   const to = String(supplierEmail || '').trim()
   if (!to) throw new Error('Email fornitore mancante in anagrafica')
   const params = new URLSearchParams()
   params.set('subject', subject)
-  params.set('body', body)
+  const emailBody =
+    sendCopyToCourier && courierBody ? `${body}\n\n---\n\n${courierBody}` : body
+  params.set('body', emailBody)
   const cc = sendCopyToCourier ? String(courierEmail || '').trim() : ''
   if (cc) params.set('cc', cc)
   window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString()}`
@@ -702,6 +704,34 @@ export default function NewOrderPage({ operatorMode = false }) {
     return lines.join('\n')
   }
 
+  function buildCourierMessageMetaFromDraft() {
+    const payload = buildPayload()
+    return {
+      orderDate: formatDateIt(orderDate),
+      expectedDeliveryDate: expectedDeliveryDate ? formatDateIt(expectedDeliveryDate) : null,
+      deliveryLocation: deliveryLocation.trim() || null,
+      items: payload.items,
+      note: orderNote.trim() || null,
+      supplierName: supplierLabel || null,
+    }
+  }
+
+  function buildCourierMessageFromDraft() {
+    return buildCourierPickupMessage(selectedSupplier, buildCourierMessageMetaFromDraft())
+  }
+
+  function buildCourierMessageFromOrder(order, supplier) {
+    return buildCourierPickupMessage(supplier, {
+      orderNumber: orderDisplayNum(order),
+      orderDate: formatDateIt(order.order_date),
+      expectedDeliveryDate: order.expected_delivery_date ? formatDateIt(order.expected_delivery_date) : null,
+      deliveryLocation: (order.delivery_location || '').trim() || null,
+      items: order.items || [],
+      note: (order.note || '').trim() || null,
+      supplierName: order.supplier_name || supplier?.name || null,
+    })
+  }
+
   function saveTemplate() {
     try {
       const snap = rows.map((r) => ({
@@ -949,13 +979,14 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Aggiungi almeno un prodotto con descrizione')
       return
     }
-    const message = buildWhatsAppMessage()
+    const supplierMessage = buildWhatsAppMessage()
+    const courierMessage = sendCopyToCourier ? buildCourierMessageFromDraft() : ''
     openOrderWhatsAppMessages({
       supplierPhone: selectedSupplier?.phone,
       courierPhone,
-      message,
+      supplierMessage,
+      courierMessage,
       sendCopyToCourier,
-      courierName,
     })
     if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
       setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
@@ -975,12 +1006,15 @@ export default function NewOrderPage({ operatorMode = false }) {
       return
     }
     try {
+      const supplierMessage = buildWhatsAppMessage()
+      const courierMessage = sendCopyToCourier ? buildCourierMessageFromDraft() : ''
       openOrderEmailClient({
         supplierEmail: em,
         courierEmail,
         sendCopyToCourier,
         subject: `Ordine merce — ${supplierLabel || 'Fornitore'} — ${formatDateIt(orderDate)}`,
-        body: buildWhatsAppMessage(),
+        body: supplierMessage,
+        courierBody: courierMessage,
       })
       if (sendCopyToCourier && !(courierEmail || '').trim()) {
         setSuccess('Email aperta per il fornitore. Aggiungi l’email del corriere per inviare anche la copia.')
@@ -1018,13 +1052,14 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    const message = buildWhatsAppTextFromOrder(full)
+    const supplierMessage = buildWhatsAppTextFromOrder(full)
+    const courierMessage = sendCopyToCourier ? buildCourierMessageFromOrder(full, sup) : ''
     openOrderWhatsAppMessages({
       supplierPhone: sup?.phone,
       courierPhone,
-      message,
+      supplierMessage,
+      courierMessage,
       sendCopyToCourier,
-      courierName,
     })
     if (sendCopyToCourier && !normalizeWhatsAppNumber(courierPhone)) {
       setSuccess('WhatsApp aperto per il fornitore. Aggiungi il cellulare del corriere per inviare anche la copia.')
@@ -1049,12 +1084,15 @@ export default function NewOrderPage({ operatorMode = false }) {
       return
     }
     try {
+      const supplierMessage = buildWhatsAppTextFromOrder(full)
+      const courierMessage = sendCopyToCourier ? buildCourierMessageFromOrder(full, sup) : ''
       openOrderEmailClient({
         supplierEmail: em,
         courierEmail,
         sendCopyToCourier,
         subject: `Ordine merce — ${full.supplier_name || sup?.name || 'Fornitore'} — ${formatDateIt(full.order_date)}`,
-        body: buildWhatsAppTextFromOrder(full),
+        body: supplierMessage,
+        courierBody: courierMessage,
       })
       if (sendCopyToCourier && !(courierEmail || '').trim()) {
         setSuccess('Email aperta per il fornitore. Aggiungi l’email del corriere per inviare anche la copia.')
@@ -1298,6 +1336,7 @@ export default function NewOrderPage({ operatorMode = false }) {
   }
 
   const waPreview = buildWhatsAppMessage()
+  const courierPreview = sendCopyToCourier ? buildCourierMessageFromDraft() : ''
 
   return (
     <div>
@@ -1790,7 +1829,7 @@ export default function NewOrderPage({ operatorMode = false }) {
               <span>
                 <strong>Invia copia al trasportatore / corriere</strong>
                 <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 400, marginTop: '0.15rem' }}>
-                  Con WhatsApp ed email invia lo stesso ordine anche al corriere (contatti salvati in questo browser).
+                  Al corriere va un messaggio dedicato con i dati del fornitore per il ritiro; WhatsApp ed email usano testi distinti.
                 </span>
               </span>
             </label>
@@ -1882,9 +1921,10 @@ export default function NewOrderPage({ operatorMode = false }) {
 
           <details className="card" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
             <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Anteprima messaggio WhatsApp / email</summary>
+            <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>Messaggio al fornitore</p>
             <pre
               style={{
-                marginTop: '0.75rem',
+                marginTop: 0,
                 whiteSpace: 'pre-wrap',
                 fontSize: '0.88rem',
                 maxHeight: 220,
@@ -1896,6 +1936,25 @@ export default function NewOrderPage({ operatorMode = false }) {
             >
               {waPreview}
             </pre>
+            {sendCopyToCourier ? (
+              <>
+                <p style={{ margin: '0.75rem 0 0.35rem', fontSize: '0.85rem', fontWeight: 600 }}>Messaggio al corriere (ritiro)</p>
+                <pre
+                  style={{
+                    marginTop: 0,
+                    whiteSpace: 'pre-wrap',
+                    fontSize: '0.88rem',
+                    maxHeight: 220,
+                    overflow: 'auto',
+                    background: 'var(--surface-2, #f5f5f5)',
+                    padding: '0.6rem',
+                    borderRadius: 6,
+                  }}
+                >
+                  {courierPreview}
+                </pre>
+              </>
+            ) : null}
           </details>
 
           <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '0.75rem' }}>
@@ -1956,7 +2015,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           )}
           {sendCopyToCourier && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
-              Con la copia corriere attiva, WhatsApp apre prima il fornitore e poi il corriere; l’email mette il corriere in CC.
+              WhatsApp apre due chat: ordine al fornitore e avviso ritiro al corriere. In email il corriere è in CC con il messaggio dedicato in fondo.
             </p>
           )}
         </form>
