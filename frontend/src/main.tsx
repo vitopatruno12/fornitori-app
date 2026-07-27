@@ -17,6 +17,7 @@ import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
 import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
 import OperatorLinksPage from './pages/OperatorLinksPage.jsx'
+import LocaleCodesPage from './pages/LocaleCodesPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
@@ -211,6 +212,7 @@ function App() {
     staff: 'personale',
     'staff-report': 'report personale',
     'staff-operator-links': 'link operatori',
+    'staff-locale-codes': 'link codici',
     'support-tech': 'assistenza-tecnici',
   }
 
@@ -374,6 +376,10 @@ function App() {
       'staff-operator-links': [
         'Quale link devo dare all’operatore per gli ordini?',
         'Differenza tra postazione operativa e solo Prima Nota',
+      ],
+      'staff-locale-codes': [
+        'Come recupero il codice di Bar-momento?',
+        'Che codice ha il registro Risacca?',
       ],
       'support-tech': [
         'Come registro un intervento completato assistenza?',
@@ -654,6 +660,7 @@ function App() {
               items={[
                 { to: '/staff/report', label: 'Report personale' },
                 { to: '/staff/link-operatori', label: 'Link operatori' },
+                { to: '/staff/link-codici', label: 'Link codici' },
               ]}
               onNavigate={() => setNavOpen(false)}
             />
@@ -720,6 +727,7 @@ function App() {
           <Route path="/prima-nota" element={<PrimaNotaPage />} />
           <Route path="/staff/report" element={<ReportPersonalePage />} />
           <Route path="/staff/link-operatori" element={<OperatorLinksPage />} />
+          <Route path="/staff/link-codici" element={<LocaleCodesPage />} />
           <Route path="/staff" element={<StaffPage />} />
           <Route path="/support-tech" element={<SupportTechniciansPage />} />
           <Route path="/vne" element={<VnePage />} />

@@ -11,6 +11,7 @@ export const APP_PATHS = {
   staff: '/staff',
   'staff-report': '/staff/report',
   'staff-operator-links': '/staff/link-operatori',
+  'staff-locale-codes': '/staff/link-codici',
   'support-tech': '/support-tech',
   magazzino: '/magazzino',
 } as const

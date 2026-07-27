@@ -126,6 +126,9 @@ export function upsertStaffLocalePack(localeName, members, accessCode, options =
     locale_name: String(localeName || '').trim(),
     members,
   }
+  if (Array.isArray(options.sections)) {
+    body.sections = options.sections
+  }
   const code = String(accessCode || '').replace(/\D/g, '')
   if (code.length === 6) body.access_code = code
   if (options.regenerateAccessCode) body.regenerate_access_code = true
@@ -146,6 +149,14 @@ export function deleteStaffLocalePack(localeName, accessCode) {
   const code = String(accessCode || '').replace(/\D/g, '')
   if (code.length === 6) q.set('code', code)
   return apiFetch(`/staff/locale-packs?${q}`, { ...SYNC_FETCH, method: 'DELETE' })
+}
+
+export async function lookupLocaleAccessCodes(query) {
+  return apiFetch('/staff/access-codes/lookup', {
+    ...SYNC_FETCH,
+    method: 'POST',
+    body: JSON.stringify({ query: String(query || '').trim() }),
+  })
 }
 
 export async function fetchStaffBackups(section) {

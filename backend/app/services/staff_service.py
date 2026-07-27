@@ -40,6 +40,7 @@ def create_member(db: Session, payload: staff_schema.StaffMemberCreate) -> Staff
         email=payload.email,
         phone=payload.phone,
         city=payload.city,
+        section=payload.section,
         birth_date=payload.birth_date,
         sort_order=_next_member_sort_order(db),
         hourly_rate=payload.hourly_rate,
@@ -68,6 +69,8 @@ def update_member(db: Session, member_id: int, payload: staff_schema.StaffMember
         row.phone = data["phone"]
     if "city" in data:
         row.city = data["city"]
+    if "section" in data:
+        row.section = data["section"]
     if "birth_date" in data:
         row.birth_date = data["birth_date"]
     if "first_name" in data:
@@ -434,6 +437,42 @@ def _locale_members_from_json(raw: str) -> List[staff_schema.StaffLocaleMemberSn
         return []
 
 
+def _locale_sections_to_json(sections: List[str]) -> str:
+    cleaned: List[str] = []
+    seen = set()
+    for raw in sections or []:
+        name = (raw or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(name[:120])
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
+def _locale_sections_from_json(raw: str) -> List[str]:
+    try:
+        data = json.loads(raw or "[]")
+        if not isinstance(data, list):
+            return []
+        out: List[str] = []
+        seen = set()
+        for item in data:
+            name = str(item or "").strip()
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(name[:120])
+        return out
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return []
+
+
 def _normalize_access_code(code: Optional[str]) -> str:
     digits = re.sub(r"\D", "", str(code or ""))
     return digits if len(digits) == 6 else ""
@@ -478,12 +517,19 @@ def locale_pack_to_read(
     include_access_code: bool = False,
 ) -> staff_schema.StaffLocalePackRead:
     members = _locale_members_from_json(row.members_json)
+    sections = _locale_sections_from_json(getattr(row, "sections_json", None) or "[]")
+    if not sections:
+        for m in members:
+            name = (m.section or "").strip()
+            if name and name not in sections:
+                sections.append(name)
     saved_at = row.updated_at.isoformat() if row.updated_at else None
     code = _normalize_access_code(row.access_code) or None
     return staff_schema.StaffLocalePackRead(
         locale_name=row.locale_name,
         saved_at=saved_at,
         members=members,
+        sections=sections,
         access_code=code if include_access_code else None,
     )
 
@@ -495,6 +541,105 @@ def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
         .all()
     )
     return [locale_pack_to_summary(r) for r in rows]
+
+
+def lookup_access_codes(db: Session, query: str) -> staff_schema.AccessCodeLookupOut:
+    """Recupera i codici a 6 cifre da nome locale Personale o registro Prima Nota."""
+    from ..constants.prima_nota_staff_locale import (
+        DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS,
+        _locale_name_key,
+    )
+    from ..services import prima_nota_locale_service
+
+    raw = str(query or "").strip()
+    qkey = _locale_name_key(raw)
+    if len(qkey) < 2:
+        raise ValueError("Inserisci almeno 2 caratteri del nome locale o registro.")
+
+    hits: List[staff_schema.AccessCodeLookupHit] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(
+        *,
+        source: str,
+        name: str,
+        access_code: str,
+        activity_slug: Optional[str] = None,
+        linked_name: Optional[str] = None,
+    ) -> None:
+        code = _normalize_access_code(access_code)
+        if not code:
+            return
+        key = (source, _locale_name_key(name) or (activity_slug or ""))
+        if key in seen:
+            return
+        seen.add(key)
+        hits.append(
+            staff_schema.AccessCodeLookupHit(
+                source=source,  # type: ignore[arg-type]
+                name=name,
+                access_code=code,
+                activity_slug=activity_slug,
+                linked_name=linked_name,
+            )
+        )
+
+    def _matches(*candidates: Optional[str]) -> bool:
+        for cand in candidates:
+            ckey = _locale_name_key(cand)
+            if not ckey:
+                continue
+            if ckey == qkey or qkey in ckey or ckey in qkey:
+                return True
+        return False
+
+    # Invert map staff name -> activity slug
+    staff_to_activity = {
+        _locale_name_key(staff_name): slug
+        for slug, staff_name in DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.items()
+    }
+
+    staff_rows = db.query(StaffLocalePack).order_by(StaffLocalePack.locale_name.asc()).all()
+    for row in staff_rows:
+        name = row.locale_name or ""
+        linked_slug = staff_to_activity.get(_locale_name_key(name))
+        linked_label = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.get(linked_slug or "", "") if linked_slug else ""
+        if _matches(name, linked_slug, linked_label):
+            _add(
+                source="personale",
+                name=name,
+                access_code=row.access_code or "",
+                linked_name=linked_label or None,
+                activity_slug=linked_slug,
+            )
+
+    try:
+        from ..models.prima_nota_locale_pack import PrimaNotaLocalePack
+
+        if prima_nota_locale_service.ensure_prima_nota_locale_packs_table():
+            for row in (
+                db.query(PrimaNotaLocalePack)
+                .order_by(PrimaNotaLocalePack.activity_slug.asc())
+                .all()
+            ):
+                slug = row.activity_slug or ""
+                label = row.label or slug
+                linked_staff = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.get(slug, "")
+                if _matches(slug, label, linked_staff):
+                    _add(
+                        source="prima_nota",
+                        name=label or slug,
+                        access_code=row.access_code or "",
+                        activity_slug=slug,
+                        linked_name=linked_staff or None,
+                    )
+    except Exception:
+        pass
+
+    if not hits:
+        raise ValueError("Nessun locale o registro trovato con questo nome.")
+
+    return staff_schema.AccessCodeLookupOut(query=raw, hits=hits)
 
 
 def get_locale_pack(
@@ -539,9 +684,11 @@ def upsert_locale_pack(
                 )
 
     members_json = _locale_members_to_json(payload.members)
+    sections_json = _locale_sections_to_json(payload.sections)
     access_code = _resolve_locale_access_code(payload, target.access_code if target else None)
     if target:
         target.members_json = members_json
+        target.sections_json = sections_json
         target.access_code = access_code
         _touch_updated_at(target)
         row = target
@@ -549,6 +696,7 @@ def upsert_locale_pack(
         row = StaffLocalePack(
             locale_name=key,
             members_json=members_json,
+            sections_json=sections_json,
             access_code=access_code,
         )
         db.add(row)

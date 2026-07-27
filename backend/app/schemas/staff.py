@@ -3,7 +3,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-EntryKind = Literal["shift", "permission", "absence", "sick"]
+EntryKind = Literal["shift", "permission", "absence", "sick", "ferie"]
 
 
 def _strip_opt(v: Optional[str]) -> Optional[str]:
@@ -20,6 +20,7 @@ class StaffMemberCreate(BaseModel):
     email: Optional[str] = Field(None, max_length=255)
     phone: Optional[str] = Field(None, max_length=64)
     city: Optional[str] = Field(None, max_length=128)
+    section: Optional[str] = Field(None, max_length=120)
     birth_date: Optional[date] = None
     sort_order: int = 0
     hourly_rate: Optional[float] = Field(None, ge=0)
@@ -42,6 +43,7 @@ class StaffMemberCreate(BaseModel):
         self.email = _strip_opt(self.email)
         self.phone = _strip_opt(self.phone)
         self.city = _strip_opt(self.city)
+        self.section = _strip_opt(self.section)
         return self
 
 
@@ -52,12 +54,13 @@ class StaffMemberUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     city: Optional[str] = None
+    section: Optional[str] = None
     birth_date: Optional[date] = None
     sort_order: Optional[int] = None
     hourly_rate: Optional[float] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
-    @field_validator("email", "phone", "city", "first_name", "last_name", mode="before")
+    @field_validator("email", "phone", "city", "first_name", "last_name", "section", mode="before")
     @classmethod
     def empty_to_none(cls, v):
         if v is None:
@@ -75,6 +78,7 @@ class StaffMemberRead(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     city: Optional[str] = None
+    section: Optional[str] = None
     birth_date: Optional[date] = None
     sort_order: int
     hourly_rate: Optional[float] = None
@@ -187,6 +191,7 @@ class StaffLocaleMemberSnapshot(BaseModel):
     email: Optional[str] = Field(None, max_length=255)
     phone: Optional[str] = Field(None, max_length=64)
     city: Optional[str] = Field(None, max_length=128)
+    section: Optional[str] = Field(None, max_length=120)
     birth_date: Optional[date] = None
     sort_order: int = 0
     hourly_rate: Optional[float] = Field(None, ge=0)
@@ -204,14 +209,32 @@ class StaffLocalePackRead(BaseModel):
     locale_name: str
     saved_at: Optional[str] = None
     members: List[StaffLocaleMemberSnapshot]
+    sections: List[str] = Field(default_factory=list)
     access_code: Optional[str] = None
 
 
 class StaffLocalePackUpsert(BaseModel):
     locale_name: str = Field(..., min_length=1, max_length=255)
     members: List[StaffLocaleMemberSnapshot]
+    sections: List[str] = Field(default_factory=list)
     access_code: Optional[str] = Field(None, min_length=6, max_length=6, pattern=r"^\d{6}$")
     regenerate_access_code: bool = False
+
+    @model_validator(mode="after")
+    def normalize_sections(self):
+        cleaned: List[str] = []
+        seen = set()
+        for raw in self.sections or []:
+            name = _strip_opt(raw)
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name[:120])
+        self.sections = cleaned
+        return self
 
 
 class StaffBackupSummary(BaseModel):
@@ -231,3 +254,20 @@ class StaffBackupUpsert(BaseModel):
     section: str = Field(..., pattern=r"^(planning|payroll)$")
     backup_key: str = Field(..., min_length=1, max_length=255)
     payload: dict
+
+
+class AccessCodeLookupIn(BaseModel):
+    query: str = Field(..., min_length=2, max_length=255)
+
+
+class AccessCodeLookupHit(BaseModel):
+    source: Literal["personale", "prima_nota"]
+    name: str
+    access_code: str
+    activity_slug: Optional[str] = None
+    linked_name: Optional[str] = None
+
+
+class AccessCodeLookupOut(BaseModel):
+    query: str
+    hits: List[AccessCodeLookupHit] = Field(default_factory=list)

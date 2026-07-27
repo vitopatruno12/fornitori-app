@@ -199,6 +199,14 @@ def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session 
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/access-codes/lookup", response_model=staff_schema.AccessCodeLookupOut)
+def lookup_access_codes(payload: staff_schema.AccessCodeLookupIn, db: Session = Depends(get_db)):
+    try:
+        return staff_service.lookup_access_codes(db, payload.query)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.delete("/locale-packs", status_code=status.HTTP_204_NO_CONTENT)
 def delete_locale_pack(
     name: str = Query(..., min_length=1, max_length=255),
