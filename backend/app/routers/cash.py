@@ -77,8 +77,13 @@ def _verify_prima_nota_activity_access(
                 staff_name = row.locale_name
                 break
         if hit and hit.requires_access_code:
-            staff_service._verify_locale_access_code(db, staff_name, access_code)
-            return
+            try:
+                staff_service._verify_locale_access_code(db, staff_name, access_code)
+                return
+            except ValueError:
+                # If the Staff locale rejects the code, fallback to Prima Nota custom pack.
+                # This allows locales linked to Staff to still be opened with their Prima Nota code.
+                pass
     prima_nota_locale_service.verify_activity_access(db, activity, access_code)
 
 
