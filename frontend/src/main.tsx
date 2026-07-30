@@ -16,10 +16,39 @@ import PagamentiPage from './pages/PagamentiPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
 import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
+import StipendiPage from './pages/StipendiPage.jsx'
 import OperatorLinksPage from './pages/OperatorLinksPage.jsx'
 import LocaleCodesPage from './pages/LocaleCodesPage.jsx'
+import MastriniContabiliPage from './pages/MastriniContabiliPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import VnePage from './pages/VnePage.jsx'
+import {
+  AnalisiDashboardPage,
+  AnalisiGiornalieroPage,
+  AnalisiMensilePage,
+  AnalisiOrariaPage,
+  AnalisiPianificazionePage,
+  AnalisiSettimanalePage,
+} from './pages/AnalisiPages.jsx'
+import {
+  AmministrazioneDashboardPage,
+  AmministrazioneImpostazioniPage,
+  BancaContiPage,
+  BancaDashboardPage,
+  BancaMovimentiPage,
+  BancaRiconciliazionePage,
+} from './pages/BancaPages.jsx'
+import {
+  FattureConservazionePage,
+  FattureDaRegistrarePage,
+  FattureDashboardPage,
+  FattureImportXmlPage,
+  FattureImpostazioniPage,
+  FattureLogPage,
+  FattureRicevutePage,
+  FattureScadenziarioPage,
+  FattureSincronizzazionePage,
+} from './pages/FatturePages.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
@@ -201,16 +230,40 @@ function App() {
 
   const pageLabel: Record<PageKey, string> = {
     home: 'dashboard',
+    analisi: 'analisi',
+    'analisi-giornaliero': 'analisi giornaliero',
+    'analisi-settimanale': 'analisi settimanale',
+    'analisi-mensile': 'analisi mensile',
+    'analisi-oraria': 'analisi oraria',
+    'analisi-pianificazione': 'pianificazione personale',
     suppliers: 'fornitori',
     'new-order': 'ordini',
     'new-delivery': 'consegne',
     magazzino: 'magazzino',
     history: 'consegne',
+    amministrazione: 'amministrazione',
+    'amministrazione-mastrini': 'mastrini contabili',
+    'amministrazione-impostazioni': 'impostazioni amministrazione',
+    banca: 'banca',
+    'banca-conti': 'conti correnti',
+    'banca-movimenti': 'movimenti bancari',
+    'banca-riconciliazione': 'riconciliazione bancaria',
+    fatture: 'fatture dashboard',
+    'fatture-ricevute': 'fatture ricevute',
+    'fatture-da-registrare': 'fatture da registrare',
+    'fatture-registrate': 'fatture registrate',
+    'fatture-scadenziario': 'scadenziario fatture',
+    'fatture-sincronizzazione': 'sincronizzazione fatture',
+    'fatture-conservazione': 'conservazione fatture',
+    'fatture-importa-xml': 'importa xml fatture',
+    'fatture-log': 'log sincronizzazioni fatture',
+    'fatture-impostazioni': 'impostazioni fatture',
     invoices: 'fatture',
     pagamenti: 'pagamenti',
     'prima-nota': 'prima-nota',
     staff: 'personale',
     'staff-report': 'report personale',
+    'staff-stipendi': 'stipendi',
     'staff-operator-links': 'link operatori',
     'staff-locale-codes': 'link codici',
     'support-tech': 'assistenza-tecnici',
@@ -250,7 +303,7 @@ function App() {
         setAiHistory((prev) => [{ id: `${Date.now()}-${Math.random()}`, page, prompt, title, lines: lines as string[], actions: [], at: Date.now() }, ...prev].slice(0, 12))
         return
       }
-      if (page === 'invoices') {
+      if (page === 'invoices' || page === 'fatture-registrate') {
         const r = await suggestInvoiceFields(prompt, {})
         const title = 'Suggerimento fattura'
         setAiTitle(title)
@@ -339,6 +392,30 @@ function App() {
         'Mostrami le priorita operative di oggi',
         'Quale grafico devo controllare per capire i costi?',
       ],
+      analisi: [
+        'Qual è il picco orario previsto per oggi?',
+        'Quanti operatori servono nelle fasce di punta?',
+      ],
+      'analisi-giornaliero': [
+        'Quali giorni della settimana incassano di più?',
+        'C’è un giorno anomalo negli ultimi 30 giorni?',
+      ],
+      'analisi-settimanale': [
+        'Confronta le ultime settimane di incasso',
+        'Quale settimana è stata la più debole?',
+      ],
+      'analisi-mensile': [
+        'Come sta andando l’incasso mensile?',
+        'Quali mesi sono i più forti?',
+      ],
+      'analisi-oraria': [
+        'Quali fasce orarie hanno più traffico?',
+        'Dove posso ridurre il personale senza rischi?',
+      ],
+      'analisi-pianificazione': [
+        'Dammi un piano operatori per venerdì',
+        'Quanti operatori in fascia pranzo?',
+      ],
       suppliers: [
         'Compila fornitore da questo testo libero',
         'Controlla campi mancanti anagrafica fornitore',
@@ -360,6 +437,50 @@ function App() {
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
       ],
+      fatture: [
+        'Riassumimi i KPI fatture del mese',
+        'Quante fatture ho da registrare?',
+      ],
+      amministrazione: [
+        'Cosa trovo in Amministrazione?',
+        'Apri la dashboard banca',
+      ],
+      'amministrazione-mastrini': [
+        'Mostra i conti con saldo anomalo',
+        'Apri il dettaglio mastro banca',
+      ],
+      'amministrazione-impostazioni': ['Quali moduli amministrazione sono attivi?'],
+      banca: [
+        'Qual è il saldo banca attuale?',
+        'Quante entrate e uscite ho oggi?',
+      ],
+      'banca-conti': ['Come collego un conto corrente?', 'Come sincronizzo i movimenti?'],
+      'banca-movimenti': ['Filtra i movimenti bancari del mese'],
+      'banca-riconciliazione': ['Ci sono differenze da riconciliare?'],
+      'fatture-ricevute': [
+        'Come aggiorno l’inbox fatture SDI?',
+        'Come assegno una fattura a Via Abba?',
+      ],
+      'fatture-da-registrare': [
+        'Come collego una fattura alla Prima Nota?',
+        'Quali fatture mancano di movimento cassa?',
+      ],
+      'fatture-registrate': [
+        'Mostrami subito le fatture scadute',
+        'Mostra fatture ignorate da rivedere',
+      ],
+      'fatture-scadenziario': [
+        'Quali scadenze ho nei prossimi 7 giorni?',
+        'Come ignoro una fattura scaduta?',
+      ],
+      'fatture-sincronizzazione': [
+        'Come funziona la sync Agenzia Entrate / SDI?',
+        'Dove importo gli XML da Fatture e Corrispettivi?',
+      ],
+      'fatture-conservazione': ['Quando arriva la conservazione a norma?'],
+      'fatture-importa-xml': ['Come importo un XML FatturaPA?'],
+      'fatture-log': ['Dove trovo lo storico sync di questa sessione?'],
+      'fatture-impostazioni': ['Quali variabili SDI / AdE sono configurate?'],
       pagamenti: [
         'Come leggo il foglio pagamenti fornitori?',
         'Dove trovo i totali mensili da pagare?',
@@ -372,6 +493,10 @@ function App() {
       'staff-report': [
         'Come stampo il report personale del mese?',
         'Dove trovo il riepilogo ore per dipendente?',
+      ],
+      'staff-stipendi': [
+        'Come salvo il foglio stipendi di gennaio?',
+        'Dove inserisco Busta, Acconto TFR e Fuori?',
       ],
       'staff-operator-links': [
         'Quale link devo dare all’operatore per gli ordini?',
@@ -637,7 +762,20 @@ function App() {
             </Link>
           </div>
           <div id="app-nav-menu" className={`app-nav-links${navOpen ? ' is-open' : ''}`}>
-            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Home</NavLink>
+            <AppNavDropdown
+              label="Home"
+              to="/"
+              end
+              items={[
+                { to: '/analisi', label: 'Analisi' },
+                { to: '/analisi/giornaliero', label: 'Giornaliero' },
+                { to: '/analisi/settimanale', label: 'Settimanale' },
+                { to: '/analisi/mensile', label: 'Mensile' },
+                { to: '/analisi/oraria', label: 'Analisi oraria' },
+                { to: '/analisi/pianificazione', label: 'Pianificazione personale' },
+              ]}
+              onNavigate={() => setNavOpen(false)}
+            />
             <NavLink to="/suppliers" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Fornitori</NavLink>
             <NavLink to="/new-order" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Nuovo ordine</NavLink>
             <AppNavDropdown
@@ -648,17 +786,24 @@ function App() {
             />
             <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
             <AppNavDropdown
-              label="Fatture fornitori"
-              to="/invoices"
-              items={[{ to: '/pagamenti', label: 'Pagamenti' }]}
+              label="Amministrazione"
+              to="/amministrazione"
+              items={[
+                { to: '/amministrazione', label: 'Dashboard' },
+                { to: '/amministrazione/mastrini', label: 'Mastrini contabili' },
+                { to: '/banca', label: 'Banca' },
+                { to: '/fatture', label: 'Fatture Fornitori' },
+                { to: '/prima-nota', label: 'Prima Nota' },
+                { to: '/amministrazione/impostazioni', label: 'Impostazioni' },
+              ]}
               onNavigate={() => setNavOpen(false)}
             />
-            <NavLink to="/prima-nota" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Prima Nota Cassa</NavLink>
             <AppNavDropdown
               label="Personale"
               to="/staff"
               items={[
                 { to: '/staff/report', label: 'Report personale' },
+                { to: '/staff/stipendi', label: 'Stipendi' },
                 { to: '/staff/link-operatori', label: 'Link operatori' },
                 { to: '/staff/link-codici', label: 'Link codici' },
               ]}
@@ -717,15 +862,39 @@ function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/analisi" element={<AnalisiDashboardPage />} />
+          <Route path="/analisi/giornaliero" element={<AnalisiGiornalieroPage />} />
+          <Route path="/analisi/settimanale" element={<AnalisiSettimanalePage />} />
+          <Route path="/analisi/mensile" element={<AnalisiMensilePage />} />
+          <Route path="/analisi/oraria" element={<AnalisiOrariaPage />} />
+          <Route path="/analisi/pianificazione" element={<AnalisiPianificazionePage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/new-order" element={<NewOrderPage />} />
           <Route path="/new-delivery" element={<NewDeliveryPage />} />
           <Route path="/magazzino" element={<MagazzinoPage />} />
           <Route path="/history" element={<DeliveriesHistoryPage />} />
-          <Route path="/invoices" element={<InvoicesPage />} />
+          <Route path="/amministrazione" element={<AmministrazioneDashboardPage />} />
+          <Route path="/amministrazione/mastrini" element={<MastriniContabiliPage />} />
+          <Route path="/amministrazione/impostazioni" element={<AmministrazioneImpostazioniPage />} />
+          <Route path="/banca" element={<BancaDashboardPage />} />
+          <Route path="/banca/conti" element={<BancaContiPage />} />
+          <Route path="/banca/movimenti" element={<BancaMovimentiPage />} />
+          <Route path="/banca/riconciliazione" element={<BancaRiconciliazionePage />} />
+          <Route path="/fatture" element={<FattureDashboardPage />} />
+          <Route path="/fatture/ricevute" element={<FattureRicevutePage />} />
+          <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
+          <Route path="/fatture/registrate" element={<InvoicesPage />} />
+          <Route path="/fatture/scadenziario" element={<FattureScadenziarioPage />} />
+          <Route path="/fatture/sincronizzazione" element={<FattureSincronizzazionePage />} />
+          <Route path="/fatture/conservazione" element={<FattureConservazionePage />} />
+          <Route path="/fatture/importa-xml" element={<FattureImportXmlPage />} />
+          <Route path="/fatture/log" element={<FattureLogPage />} />
+          <Route path="/fatture/impostazioni" element={<FattureImpostazioniPage />} />
+          <Route path="/invoices" element={<Navigate to="/fatture/registrate" replace />} />
           <Route path="/pagamenti" element={<PagamentiPage />} />
           <Route path="/prima-nota" element={<PrimaNotaPage />} />
           <Route path="/staff/report" element={<ReportPersonalePage />} />
+          <Route path="/staff/stipendi" element={<StipendiPage />} />
           <Route path="/staff/link-operatori" element={<OperatorLinksPage />} />
           <Route path="/staff/link-codici" element={<LocaleCodesPage />} />
           <Route path="/staff" element={<StaffPage />} />

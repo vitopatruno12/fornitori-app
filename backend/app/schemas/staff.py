@@ -184,6 +184,64 @@ class StaffPayrollMonthRead(BaseModel):
         from_attributes = True
 
 
+class StaffStipendiMonthLine(BaseModel):
+    staff_member_id: Optional[int] = None
+    name: str = Field(..., max_length=255)
+    busta: float = Field(0, ge=0)
+    acconto_tfr: float = Field(0, ge=0)
+    fuori: float = Field(0, ge=0)
+    tfr_attuale: float = Field(0, ge=0)
+    tfr_anticipato: float = Field(0, ge=0)
+    nuovo_tfr: Optional[float] = None
+
+    @model_validator(mode="after")
+    def compute_nuovo_tfr(self):
+        self.nuovo_tfr = round(float(self.tfr_attuale or 0) - float(self.acconto_tfr or 0), 2)
+        return self
+
+    @property
+    def totale(self) -> float:
+        """Totale busta paga: busta + fuori − acconto TFR."""
+        return float(self.busta or 0) + float(self.fuori or 0) - float(self.acconto_tfr or 0)
+
+
+class StaffStipendiMonthCreate(BaseModel):
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    period_from: date
+    period_to: date
+    lines: List[StaffStipendiMonthLine]
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def period_order(self):
+        if self.period_to < self.period_from:
+            raise ValueError("period_to deve essere >= period_from")
+        return self
+
+
+class StaffStipendiMonthUpdate(BaseModel):
+    lines: List[StaffStipendiMonthLine]
+    notes: Optional[str] = None
+    period_from: Optional[date] = None
+    period_to: Optional[date] = None
+
+
+class StaffStipendiMonthRead(BaseModel):
+    id: int
+    year_month: str
+    period_from: date
+    period_to: date
+    lines: List[StaffStipendiMonthLine]
+    total_busta: float
+    total_tfr: float
+    total_fuori: float
+    total_amount: float
+    notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class StaffLocaleMemberSnapshot(BaseModel):
     name: str = Field(..., max_length=255)
     first_name: Optional[str] = Field(None, max_length=120)
@@ -258,6 +316,20 @@ class StaffBackupUpsert(BaseModel):
 
 class AccessCodeLookupIn(BaseModel):
     query: str = Field(..., min_length=2, max_length=255)
+    otp: str = Field(..., min_length=6, max_length=6)
+
+
+class AccessCodeOtpRequestIn(BaseModel):
+    query: str = Field(..., min_length=2, max_length=255)
+
+
+class AccessCodeOtpRequestOut(BaseModel):
+    ok: bool = True
+    phone_hint: str
+    expires_in_sec: int
+    sent: bool = False
+    debug_otp: Optional[str] = None
+    debug_send_error: Optional[str] = None
 
 
 class AccessCodeLookupHit(BaseModel):

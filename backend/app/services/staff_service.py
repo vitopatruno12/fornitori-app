@@ -11,6 +11,7 @@ from ..models.staff_backup import StaffBackup
 from ..models.staff_locale_pack import StaffLocalePack
 from ..models.staff_member import StaffMember
 from ..models.staff_payroll_month import StaffPayrollMonth
+from ..models.staff_stipendi_month import StaffStipendiMonth
 from ..models.staff_shift_entry import StaffShiftEntry
 from ..schemas import staff as staff_schema
 
@@ -388,6 +389,134 @@ def delete_payroll_month(db: Session, month_id: int) -> bool:
     return True
 
 
+def _stipendi_lines_to_json(lines: List[staff_schema.StaffStipendiMonthLine]) -> str:
+    return json.dumps([line.model_dump() for line in lines], ensure_ascii=False)
+
+
+def _stipendi_lines_from_json(raw: str) -> List[staff_schema.StaffStipendiMonthLine]:
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: List[staff_schema.StaffStipendiMonthLine] = []
+    for item in data:
+        try:
+            out.append(staff_schema.StaffStipendiMonthLine.model_validate(item))
+        except Exception:
+            continue
+    return out
+
+
+def _stipendi_totals(lines: List[staff_schema.StaffStipendiMonthLine]) -> dict:
+    busta = round(sum(float(l.busta or 0) for l in lines), 2)
+    tfr = round(sum(float(l.acconto_tfr or 0) for l in lines), 2)
+    fuori = round(sum(float(l.fuori or 0) for l in lines), 2)
+    # Totale busta paga: busta + fuori − acconto TFR
+    return {
+        "total_busta": busta,
+        "total_tfr": tfr,
+        "total_fuori": fuori,
+        "total_amount": round(busta + fuori - tfr, 2),
+    }
+
+
+def stipendi_month_to_read(row: StaffStipendiMonth) -> staff_schema.StaffStipendiMonthRead:
+    lines = _stipendi_lines_from_json(row.lines_json)
+    totals = _stipendi_totals(lines)
+    return staff_schema.StaffStipendiMonthRead(
+        id=row.id,
+        year_month=row.year_month,
+        period_from=row.period_from,
+        period_to=row.period_to,
+        lines=lines,
+        total_busta=float(row.total_busta if row.total_busta is not None else totals["total_busta"]),
+        total_tfr=float(row.total_tfr if row.total_tfr is not None else totals["total_tfr"]),
+        total_fuori=float(row.total_fuori if row.total_fuori is not None else totals["total_fuori"]),
+        total_amount=float(row.total_amount if row.total_amount is not None else totals["total_amount"]),
+        notes=row.notes,
+    )
+
+
+def list_stipendi_months(db: Session) -> List[staff_schema.StaffStipendiMonthRead]:
+    rows = (
+        db.query(StaffStipendiMonth)
+        .order_by(StaffStipendiMonth.year_month.desc())
+        .all()
+    )
+    return [stipendi_month_to_read(r) for r in rows]
+
+
+def get_stipendi_month(db: Session, month_id: int) -> Optional[staff_schema.StaffStipendiMonthRead]:
+    row = db.query(StaffStipendiMonth).filter(StaffStipendiMonth.id == month_id).first()
+    if not row:
+        return None
+    return stipendi_month_to_read(row)
+
+
+def create_stipendi_month(
+    db: Session, payload: staff_schema.StaffStipendiMonthCreate
+) -> staff_schema.StaffStipendiMonthRead:
+    existing = (
+        db.query(StaffStipendiMonth)
+        .filter(StaffStipendiMonth.year_month == payload.year_month)
+        .first()
+    )
+    if existing:
+        raise ValueError(f"Esiste già un archivio stipendi per {payload.year_month}")
+    totals = _stipendi_totals(payload.lines)
+    row = StaffStipendiMonth(
+        year_month=payload.year_month,
+        period_from=payload.period_from,
+        period_to=payload.period_to,
+        lines_json=_stipendi_lines_to_json(payload.lines),
+        total_busta=totals["total_busta"],
+        total_tfr=totals["total_tfr"],
+        total_fuori=totals["total_fuori"],
+        total_amount=totals["total_amount"],
+        notes=payload.notes,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return stipendi_month_to_read(row)
+
+
+def update_stipendi_month(
+    db: Session, month_id: int, payload: staff_schema.StaffStipendiMonthUpdate
+) -> Optional[staff_schema.StaffStipendiMonthRead]:
+    row = db.query(StaffStipendiMonth).filter(StaffStipendiMonth.id == month_id).first()
+    if not row:
+        return None
+    if payload.period_from is not None:
+        row.period_from = payload.period_from
+    if payload.period_to is not None:
+        row.period_to = payload.period_to
+    if payload.period_from and payload.period_to and payload.period_to < payload.period_from:
+        raise ValueError("period_to deve essere >= period_from")
+    totals = _stipendi_totals(payload.lines)
+    row.lines_json = _stipendi_lines_to_json(payload.lines)
+    row.total_busta = totals["total_busta"]
+    row.total_tfr = totals["total_tfr"]
+    row.total_fuori = totals["total_fuori"]
+    row.total_amount = totals["total_amount"]
+    if payload.notes is not None:
+        row.notes = payload.notes.strip() or None
+    db.commit()
+    db.refresh(row)
+    return stipendi_month_to_read(row)
+
+
+def delete_stipendi_month(db: Session, month_id: int) -> bool:
+    row = db.query(StaffStipendiMonth).filter(StaffStipendiMonth.id == month_id).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+
+
 def _normalize_locale_name(name: str) -> str:
     return (name or "").strip()
 
@@ -543,18 +672,22 @@ def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
     return [locale_pack_to_summary(r) for r in rows]
 
 
-def lookup_access_codes(db: Session, query: str) -> staff_schema.AccessCodeLookupOut:
-    """Recupera i codici a 6 cifre da nome locale Personale o registro Prima Nota."""
+def lookup_access_codes(
+    db: Session, query: str, otp: Optional[str] = None
+) -> staff_schema.AccessCodeLookupOut:
+    """Recupera i codici a 6 cifre da nome locale/registro solo dopo OTP monouso."""
     from ..constants.prima_nota_staff_locale import (
         DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS,
         _locale_name_key,
     )
-    from ..services import prima_nota_locale_service
+    from ..services import access_code_otp_service, prima_nota_locale_service
 
     raw = str(query or "").strip()
     qkey = _locale_name_key(raw)
     if len(qkey) < 2:
         raise ValueError("Inserisci almeno 2 caratteri del nome locale o registro.")
+
+    access_code_otp_service.verify_and_consume_otp(qkey, otp)
 
     hits: List[staff_schema.AccessCodeLookupHit] = []
     seen: set[tuple[str, str]] = set()
@@ -642,6 +775,63 @@ def lookup_access_codes(db: Session, query: str) -> staff_schema.AccessCodeLooku
     return staff_schema.AccessCodeLookupOut(query=raw, hits=hits)
 
 
+def request_access_code_otp(db: Session, query: str) -> staff_schema.AccessCodeOtpRequestOut:
+    """Verifica che il nome esista, poi invia OTP monouso sul telefono configurato."""
+    from ..constants.prima_nota_staff_locale import (
+        DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS,
+        _locale_name_key,
+    )
+    from ..services import access_code_otp_service, prima_nota_locale_service
+
+    raw = str(query or "").strip()
+    qkey = _locale_name_key(raw)
+    if len(qkey) < 2:
+        raise ValueError("Inserisci almeno 2 caratteri del nome locale o registro.")
+
+    def _matches(*candidates: Optional[str]) -> bool:
+        for cand in candidates:
+            ckey = _locale_name_key(cand)
+            if not ckey:
+                continue
+            if ckey == qkey or qkey in ckey or ckey in qkey:
+                return True
+        return False
+
+    found = False
+    staff_to_activity = {
+        _locale_name_key(staff_name): slug
+        for slug, staff_name in DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.items()
+    }
+    for row in db.query(StaffLocalePack).all():
+        name = row.locale_name or ""
+        linked_slug = staff_to_activity.get(_locale_name_key(name))
+        linked_label = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.get(linked_slug or "", "") if linked_slug else ""
+        if _matches(name, linked_slug, linked_label) and _normalize_access_code(row.access_code or ""):
+            found = True
+            break
+
+    if not found:
+        try:
+            from ..models.prima_nota_locale_pack import PrimaNotaLocalePack
+
+            if prima_nota_locale_service.ensure_prima_nota_locale_packs_table():
+                for row in db.query(PrimaNotaLocalePack).all():
+                    slug = row.activity_slug or ""
+                    label = row.label or slug
+                    linked_staff = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.get(slug, "")
+                    if _matches(slug, label, linked_staff) and _normalize_access_code(row.access_code or ""):
+                        found = True
+                        break
+        except Exception:
+            pass
+
+    if not found:
+        raise ValueError("Nessun locale o registro trovato con questo nome.")
+
+    payload = access_code_otp_service.request_otp(qkey)
+    return staff_schema.AccessCodeOtpRequestOut(**payload)
+
+
 def get_locale_pack(
     db: Session,
     locale_name: str,
@@ -664,8 +854,6 @@ def upsert_locale_pack(
     key = _normalize_locale_name(payload.locale_name)
     if not key:
         raise ValueError("Nome locale non valido")
-    if not payload.members:
-        raise ValueError("Aggiungi almeno un dipendente prima di salvare il locale.")
 
     new_fp = _members_fingerprint(payload.members)
     rows = db.query(StaffLocalePack).all()

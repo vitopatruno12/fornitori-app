@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, aruba, sdi, warehouse, supplier_payments
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, sdi, banca, warehouse, supplier_payments
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -48,7 +48,9 @@ async def lifespan(app: FastAPI):
         _ensure_supplier_locales_column()
         _ensure_supplier_multi_contact_columns()
         _ensure_staff_member_hourly_rate_column()
+        _ensure_staff_member_section_column()
         _ensure_staff_payroll_months_table()
+        _ensure_staff_stipendi_months_table()
         _ensure_staff_locale_packs_table()
         ensure_prima_nota_locale_packs_table()
         _ensure_staff_backups_table()
@@ -193,6 +195,7 @@ app.include_router(invoices.router)
 app.include_router(cash.router)
 app.include_router(price_list.router)
 app.include_router(dashboard.router)
+app.include_router(analytics.router)
 app.include_router(reference.router)
 app.include_router(customers.router)
 app.include_router(attachments.router)
@@ -203,8 +206,8 @@ app.include_router(supplier_payments.router)
 app.include_router(staff.router)
 app.include_router(support_technicians.router)
 app.include_router(vne.router)
-app.include_router(aruba.router)
 app.include_router(sdi.router)
+app.include_router(banca.router)
 
 
 def _ensure_support_technicians_columns() -> None:
@@ -424,8 +427,35 @@ def _ensure_staff_member_hourly_rate_column() -> None:
         )
 
 
+def _ensure_staff_member_section_column() -> None:
+    """Sezione operativa dipendente + sezioni pack locale (migr. 20260723_staff_member_section.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE staff_members
+                    ADD COLUMN IF NOT EXISTS section VARCHAR(120)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE staff_locale_packs
+                    ADD COLUMN IF NOT EXISTS sections_json TEXT NOT NULL DEFAULT '[]'
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/aggiornare staff section columns: %s",
+            e,
+        )
+
+
 def _ensure_staff_payroll_months_table() -> None:
-    """Archivio stipendi mensili (migr. 20260524_staff_payroll_months.sql)."""
+    """Archivio stipendi mensili ore/costo (migr. 20260524_staff_payroll_months.sql)."""
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -461,6 +491,46 @@ def _ensure_staff_payroll_months_table() -> None:
         )
 
 
+def _ensure_staff_stipendi_months_table() -> None:
+    """Archivio stipendi mensili Busta/TFR/Fuori (migr. 20260729_staff_stipendi_months.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS staff_stipendi_months (
+                      id SERIAL PRIMARY KEY,
+                      year_month VARCHAR(7) NOT NULL,
+                      period_from DATE NOT NULL,
+                      period_to DATE NOT NULL,
+                      lines_json TEXT NOT NULL DEFAULT '[]',
+                      total_busta NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                      total_tfr NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                      total_fuori NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                      total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                      notes TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_staff_stipendi_months_year_month UNIQUE (year_month)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_staff_stipendi_months_year_month
+                    ON staff_stipendi_months (year_month DESC)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning(
+            "Impossibile verificare/creare staff_stipendi_months: %s",
+            e,
+        )
+
+
 def _ensure_staff_locale_packs_table() -> None:
     """Liste dipendenti per locale (condivise tra PC/browser)."""
     try:
@@ -491,6 +561,14 @@ def _ensure_staff_locale_packs_table() -> None:
                     """
                     ALTER TABLE staff_locale_packs
                     ADD COLUMN IF NOT EXISTS access_code VARCHAR(6)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE staff_locale_packs
+                    ADD COLUMN IF NOT EXISTS sections_json TEXT NOT NULL DEFAULT '[]'
                     """
                 )
             )
@@ -652,7 +730,10 @@ def _check_critical_schema_columns() -> None:
     try:
         required = [
             ("staff_members", "hourly_rate", "20260519_staff_hourly_rate.sql"),
+            ("staff_members", "section", "20260723_staff_member_section.sql"),
+            ("staff_locale_packs", "sections_json", "20260723_staff_member_section.sql"),
             ("staff_payroll_months", "year_month", "20260524_staff_payroll_months.sql"),
+            ("staff_stipendi_months", "year_month", "20260729_staff_stipendi_months.sql"),
             ("invoices", "ignored", "20260406_invoices_ignored_flag.sql"),
             ("cash_entries", "activity", "20260519_cash_entries_activity.sql"),
             ("cash_entries", "invoice_id", "20260208_core_entities_prima_nota_links.sql"),

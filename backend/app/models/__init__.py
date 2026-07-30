@@ -18,9 +18,12 @@ from .supplier_payments_workbook import SupplierPaymentsWorkbook  # noqa: F401
 from .staff_member import StaffMember  # noqa: F401
 from .staff_shift_entry import StaffShiftEntry  # noqa: F401
 from .staff_payroll_month import StaffPayrollMonth  # noqa: F401
+from .staff_stipendi_month import StaffStipendiMonth  # noqa: F401
 from .staff_locale_pack import StaffLocalePack  # noqa: F401
 from .prima_nota_locale_pack import PrimaNotaLocalePack  # noqa: F401
 from .staff_backup import StaffBackup  # noqa: F401
 from .support_technician import SupportTechnician, TechnicianActivity, TechnicianInvoiceFile  # noqa: F401
 from .sdi_invoice import SdiInvoice  # noqa: F401
+from .bank_account import BankAccount  # noqa: F401
+from .bank_movement import BankMovement  # noqa: F401
 

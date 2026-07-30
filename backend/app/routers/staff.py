@@ -171,6 +171,53 @@ def delete_payroll_month(month_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese non trovato")
 
 
+@router.get("/stipendi-months", response_model=List[staff_schema.StaffStipendiMonthRead])
+def list_stipendi_months(db: Session = Depends(get_db)):
+    return staff_service.list_stipendi_months(db)
+
+
+@router.get("/stipendi-months/{month_id}", response_model=staff_schema.StaffStipendiMonthRead)
+def get_stipendi_month(month_id: int, db: Session = Depends(get_db)):
+    row = staff_service.get_stipendi_month(db, month_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese stipendi non trovato")
+    return row
+
+
+@router.post(
+    "/stipendi-months",
+    response_model=staff_schema.StaffStipendiMonthRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_stipendi_month(payload: staff_schema.StaffStipendiMonthCreate, db: Session = Depends(get_db)):
+    try:
+        return staff_service.create_stipendi_month(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/stipendi-months/{month_id}", response_model=staff_schema.StaffStipendiMonthRead)
+def update_stipendi_month(
+    month_id: int,
+    payload: staff_schema.StaffStipendiMonthUpdate,
+    db: Session = Depends(get_db),
+):
+    try:
+        row = staff_service.update_stipendi_month(db, month_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese stipendi non trovato")
+    return row
+
+
+@router.delete("/stipendi-months/{month_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_stipendi_month(month_id: int, db: Session = Depends(get_db)):
+    ok = staff_service.delete_stipendi_month(db, month_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mese stipendi non trovato")
+
+
 @router.get("/locale-packs", response_model=List[staff_schema.StaffLocalePackSummary])
 def list_locale_packs(db: Session = Depends(get_db)):
     return staff_service.list_locale_packs(db)
@@ -199,12 +246,30 @@ def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session 
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/access-codes/otp/request", response_model=staff_schema.AccessCodeOtpRequestOut)
+def request_access_code_otp(payload: staff_schema.AccessCodeOtpRequestIn, db: Session = Depends(get_db)):
+    try:
+        return staff_service.request_access_code_otp(db, payload.query)
+    except ValueError as e:
+        msg = str(e)
+        if "Attendi" in msg:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg)
+        if "non trovato" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+
 @router.post("/access-codes/lookup", response_model=staff_schema.AccessCodeLookupOut)
 def lookup_access_codes(payload: staff_schema.AccessCodeLookupIn, db: Session = Depends(get_db)):
     try:
-        return staff_service.lookup_access_codes(db, payload.query)
+        return staff_service.lookup_access_codes(db, payload.query, otp=payload.otp)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        msg = str(e)
+        if "OTP" in msg or "otp" in msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
+        if "non trovato" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
 
 @router.delete("/locale-packs", status_code=status.HTTP_204_NO_CONTENT)

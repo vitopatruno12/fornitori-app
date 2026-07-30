@@ -367,8 +367,8 @@ a:hover {
 
 .app-nav-actions-toggle:focus-visible {
   outline: 2px solid #fff;
-  outline-offset: 2px;
-}
+    outline-offset: 2px;
+  }
 
 .app-nav-actions-toggle.is-open .app-nav-toggle-bar:nth-child(1) {
   transform: translateY(7px) rotate(45deg);
@@ -536,7 +536,7 @@ a:hover {
 .app-version-strip {
   width: 100%;
   max-width: 1440px;
-  margin: 0 auto;
+    margin: 0 auto;
   padding: 0.22rem 0.65rem 0.3rem;
   text-align: right;
   font-size: 0.78rem;
@@ -642,7 +642,7 @@ a:hover {
 
 .app-nav-toggle {
   display: none;
-  position: relative;
+    position: relative;
   flex-shrink: 0;
   flex-direction: column;
   justify-content: center;
@@ -669,7 +669,7 @@ a:hover {
 }
 
 .app-nav-toggle-label {
-  position: absolute;
+    position: absolute;
   width: 1px;
   height: 1px;
   padding: 0;
@@ -712,7 +712,7 @@ a:hover {
   }
 
   .app-nav-inner {
-    max-width: 100%;
+  max-width: 100%;
     padding: 0 0.5rem;
     gap: 0.2rem;
   }
@@ -824,7 +824,7 @@ a:hover {
     width: min(320px, 88vw);
     margin: 0;
     padding: 0.75rem;
-    flex-direction: column;
+  flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
     gap: 0.2rem;
@@ -848,13 +848,13 @@ a:hover {
   .app-nav-links > a {
     width: 100%;
     padding: 0.65rem 0.85rem;
-    box-sizing: border-box;
+  box-sizing: border-box;
     font-size: 0.9rem;
-  }
+}
 
   .app-nav-dropdown {
     width: 100%;
-    display: flex;
+  display: flex;
   }
 
   .app-nav-dropdown-trigger {
@@ -1375,11 +1375,11 @@ select.form-control {
 
 /* === Empty state === */
 .empty-state {
-  text-align: center;
+    text-align: center;
   padding: 2rem;
   color: var(--text-muted);
   font-size: 0.95rem;
-}
+  }
 
 /* === Excel-like grid === */
 .excel-wrap {
@@ -1399,7 +1399,7 @@ select.form-control {
 
 .excel-table tr td:last-child,
 .excel-table tr th:last-child {
-  border-right: none;
+    border-right: none;
 }
 
 .excel-cell {
@@ -1551,7 +1551,7 @@ select.form-control {
 
 .pagamenti-highlight-menu-actions,
 .pagamenti-highlight-menu-clear {
-  display: flex;
+    display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
 }
@@ -1931,7 +1931,7 @@ select.form-control {
   position: relative;
   isolation: isolate;
   display: flex;
-  align-items: center;
+    align-items: center;
   justify-content: center;
   min-height: 3rem;
   padding: 0.55rem 0.65rem;
@@ -2349,7 +2349,7 @@ select.form-control {
 
 .delivery-hero-row {
   display: flex;
-  flex-wrap: wrap;
+    flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
@@ -2523,7 +2523,7 @@ select.form-control {
 .staff-workbook-checkbox-cell {
   display: flex;
   align-items: center;
-  justify-content: center;
+    justify-content: center;
   min-height: 2rem;
   padding: 0 0.35rem;
   background: #fff;
@@ -2680,7 +2680,7 @@ select.form-control {
 
 .staff-report-page .staff-report-grid.workbook-grid {
   min-width: 0;
-  width: 100%;
+      width: 100%;
   table-layout: fixed;
 }
 
@@ -2985,7 +2985,7 @@ select.form-control {
   height: 170px;
   display: flex;
   align-items: flex-end;
-  justify-content: center;
+      justify-content: center;
   gap: 3px;
 }
 
@@ -3323,7 +3323,7 @@ select.form-control {
 .vne-legacy-skin .vne-filter-input {
   width: 100%;
   min-width: 0;
-  box-sizing: border-box;
+      box-sizing: border-box;
   border: 1px solid #cbd5e1;
   border-radius: 0;
   background: #fff;
@@ -3528,8 +3528,8 @@ select.form-control {
 }
 
 .vne-legacy-skin .support-tech-card::after {
-  content: '';
-  position: absolute;
+    content: '';
+    position: absolute;
   left: 12%;
   right: 12%;
   bottom: -16px;
@@ -3686,7 +3686,7 @@ select.form-control {
 .vne-legacy-skin .vne-nav-dropdown-panel {
   position: absolute;
   top: calc(100% + 0.35rem);
-  left: 0;
+    left: 0;
   z-index: 540;
   min-width: min(100vw - 2rem, 980px);
   max-width: min(100vw - 2rem, 980px);
@@ -3793,7 +3793,7 @@ select.form-control {
 .ui-drawer {
   position: fixed;
   top: 0;
-  right: 0;
+    right: 0;
   width: min(420px, 100vw);
   height: 100vh;
   background: var(--bg-card);
@@ -4779,6 +4779,23 @@ select.form-control {
   color: #334155;
 }
 
+.prima-nota-locale-btn-delete {
+  border-style: solid;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  background: #fff;
+}
+
+.prima-nota-locale-btn-delete:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+.prima-nota-locale-btn-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .prima-nota-locale-panel {
   margin-top: 0.85rem;
   padding: 0.85rem 1rem 1rem;
@@ -4835,6 +4852,21 @@ select.form-control {
 
 .prima-nota-locale-btn.is-protected:not(.is-active) {
   border-style: dashed;
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.prima-nota-locale-btn.is-active.is-locked {
+  border-style: dashed;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22), 0 4px 12px rgba(13, 148, 136, 0.18);
+}
+
+.prima-nota-locale-btn.is-pending:not(.is-active) {
+  border-style: dashed;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2);
 }
 
 .prima-nota-locale-code-prompt {
@@ -5959,4 +5991,658 @@ select.form-control {
     flex-wrap: wrap;
     justify-content: center;
   }
+}
+
+/* === Analisi (BI) === */
+.analisi-page {
+  max-width: 1100px;
+}
+
+.analisi-kicker {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+}
+
+.analisi-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.analisi-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 1.1rem;
+}
+
+.analisi-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-muted, #6b7280);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid transparent;
+}
+
+.analisi-subnav-link:hover {
+  color: var(--accent, #2563eb);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.analisi-subnav-link.is-active {
+  color: var(--accent, #2563eb);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.analisi-panel {
+  margin-bottom: 1rem;
+}
+
+.analisi-panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.analisi-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.analisi-total {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.analisi-note {
+  margin: 0 0 1rem;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.92rem;
+}
+
+.analisi-warning-buttons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  max-width: 620px;
+}
+
+.analisi-warning-btn {
+  border: 1px solid #ca8a04;
+  background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
+  color: #78350f;
+  font-weight: 600;
+  font-size: 0.86rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  text-align: left;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 5px rgba(146, 64, 14, 0.12);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  animation: analisi-warning-blink 1.5s ease-in-out infinite;
+  min-height: 33px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.analisi-warning-btn:hover {
+  background: linear-gradient(180deg, #fde68a 0%, #fcd34d 100%);
+  border-color: #92400e;
+  box-shadow: 0 4px 12px rgba(146, 64, 14, 0.22);
+  transform: translateY(-1px);
+}
+
+.analisi-warning-btn.is-active {
+  background: linear-gradient(180deg, #facc15 0%, #f59e0b 100%);
+  border-color: #7c2d12;
+  color: #431407;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 4px 14px rgba(146, 64, 14, 0.28);
+}
+
+.analisi-warning-detail {
+  margin-top: 0.6rem;
+  max-width: 620px;
+  border: 1px solid #fbbf24;
+  border-left: 5px solid #d97706;
+  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+  color: #7c2d12;
+  border-radius: 0.58rem;
+  padding: 0.52rem 0.62rem;
+  font-size: 0.84rem;
+  box-shadow: 0 1px 6px rgba(120, 53, 15, 0.1);
+}
+
+.analisi-warning-detail-title {
+  font-weight: 700;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+}
+
+@keyframes analisi-warning-blink {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.015);
+  }
+}
+
+.analisi-suggestions {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.analisi-bars {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.analisi-bar-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 110px) 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.analisi-bar-label {
+  font-size: 0.8rem;
+  color: var(--text-muted, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.analisi-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.analisi-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1d4ed8, #38bdf8);
+  min-width: 2px;
+}
+
+.analisi-bar-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5rem;
+  text-align: right;
+}
+
+.analisi-heatmap-wrap {
+  overflow-x: auto;
+}
+
+.analisi-heatmap {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 0.72rem;
+}
+
+.analisi-heatmap th,
+.analisi-heatmap td {
+  text-align: center;
+  padding: 0.28rem 0.15rem;
+  min-width: 1.7rem;
+}
+
+.analisi-heatmap th {
+  color: var(--text-muted, #6b7280);
+  font-weight: 600;
+}
+
+.analisi-heat-cell {
+  border-radius: 4px;
+  font-weight: 700;
+  color: #0f172a;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.analisi-heat-cell.level-nullo {
+  background: rgba(148, 163, 184, 0.12);
+  color: transparent;
+}
+
+.analisi-heat-cell.level-basso {
+  background: #bfdbfe;
+}
+
+.analisi-heat-cell.level-medio {
+  background: #60a5fa;
+  color: #fff;
+}
+
+.analisi-heat-cell.level-alto {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.analisi-heat-legend {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.analisi-heat-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  margin-right: 0.3rem;
+  vertical-align: -1px;
+}
+
+.analisi-heat-legend .level-basso::before {
+  background: #bfdbfe;
+}
+.analisi-heat-legend .level-medio::before {
+  background: #60a5fa;
+}
+.analisi-heat-legend .level-alto::before {
+  background: #1d4ed8;
+}
+
+.analisi-staffing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.analisi-machine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.analisi-machine-card {
+  border-top: 3px solid var(--accent, #2563eb);
+}
+
+.analisi-machine-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.analisi-machine-subtitle {
+  margin: 0.85rem 0 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-muted, #6b7280);
+}
+
+.analisi-peak-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--accent, #2563eb);
+}
+
+.analisi-home-card {
+  margin: 0 0 1rem;
+  border-left: 4px solid var(--accent, #2563eb);
+}
+
+.analisi-home-card-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.analisi-home-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.analisi-home-peak {
+  margin: 0;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.92rem;
+}
+
+.analisi-home-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.analisi-home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+@media (max-width: 900px) {
+  .analisi-home-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .analisi-home-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .analisi-bar-row {
+    grid-template-columns: 72px 1fr;
+  }
+  .analisi-bar-value {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
+.fatture-page {
+  max-width: 1100px;
+}
+
+.fatture-kicker {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+}
+
+.fatture-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.fatture-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 1.1rem;
+}
+
+.fatture-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-muted, #6b7280);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid transparent;
+}
+
+.fatture-subnav-link:hover {
+  color: var(--accent, #2563eb);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.fatture-subnav-link.is-active {
+  color: var(--accent, #2563eb);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.fatture-panel {
+  margin-bottom: 1rem;
+}
+
+.fatture-panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.fatture-note {
+  margin: 0 0 1rem;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.92rem;
+}
+
+.fatture-suggestions {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+/* === Stipendi (Personale) === */
+.stipendi-page {
+  width: 100%;
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.stipendi-page .staff-page-hero {
+  max-width: 100%;
+}
+
+.stipendi-toolbar-card,
+.stipendi-edit-card,
+.stipendi-excel-card {
+  margin-bottom: 1rem;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.stipendi-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.stipendi-month-field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.stipendi-month-field .form-control {
+  width: auto;
+  min-width: 10rem;
+}
+
+.stipendi-month-tabs {
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.stipendi-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.stipendi-edit-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.stipendi-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(6, minmax(0, 0.8fr)) auto;
+  gap: 0.4rem;
+  align-items: end;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.55rem;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+}
+
+.stipendi-nuovo-tfr strong {
+  display: block;
+  padding: 0.45rem 0.5rem;
+  border-radius: 0.4rem;
+  background: #ecfdf8;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  color: #0f766e;
+}
+
+.stipendi-draft-row {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: linear-gradient(180deg, #f0fdfa 0%, #fff 100%);
+}
+
+.stipendi-edit-hint {
+  margin: -0.35rem 0 0.75rem;
+  font-size: 0.88rem;
+}
+
+.stipendi-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.workbook-grid.stipendi-excel-grid tr.stipendi-excel-row-selected td {
+  background: #ecfdf8 !important;
+  box-shadow: inset 3px 0 0 #0d9488;
+}
+
+.workbook-grid.stipendi-excel-grid tr.stipendi-excel-row-editing td {
+  background: #f0f9ff !important;
+  box-shadow: inset 3px 0 0 #0369a1;
+}
+
+.workbook-grid.stipendi-excel-grid tr.pn-row-click {
+  cursor: pointer;
+}
+
+.stipendi-edit-name {
+  min-width: 0;
+}
+
+.stipendi-edit-field {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.stipendi-edit-field > span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}
+
+.stipendi-edit-total {
+  min-width: 5.5rem;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 0.45rem;
+}
+
+.stipendi-edit-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+}
+
+.stipendi-edit-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.stipendi-notes {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.85rem;
+}
+
+.stipendi-excel-card .workbook-card-nested {
+  border: 1px solid #c5d6b8;
+  border-radius: 0.65rem;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+
+.stipendi-excel-card .workbook-grid-wrap {
+  overflow-x: hidden !important;
+  max-height: none;
+}
+
+.workbook-grid.stipendi-excel-grid {
+  min-width: 100% !important;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.workbook-grid.stipendi-excel-grid th,
+.workbook-grid.stipendi-excel-grid td {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.workbook-grid.stipendi-excel-grid .excel-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .stipendi-edit-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stipendi-edit-name {
+    grid-column: 1 / -1;
+  }
+
+  .stipendi-edit-total {
+    text-align: left;
+    padding-bottom: 0;
+  }
+}
+
+.stipendi-excel-card .pagamenti-grid-wrap.excel-wrap {
+  overflow-x: hidden !important;
+  overflow-y: auto;
 }

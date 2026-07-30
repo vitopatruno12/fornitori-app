@@ -20,6 +20,7 @@ import {
   upsertStaffBackup,
   deleteStaffLocalePack,
 } from '../services/staffService'
+import { fetchPrimaNotaLocalePacks } from '../services/cashService'
 import WeeklyStaffReportModal from '../components/WeeklyStaffReportModal.jsx'
 import StaffMemberInfoModal from '../components/StaffMemberInfoModal.jsx'
 import StaffPayrollDaysModal from '../components/StaffPayrollDaysModal.jsx'
@@ -48,11 +49,19 @@ import {
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import {
+  defaultSectionsForLocale,
+  memberMatchesSection,
+  normalizeSectionName,
+  resolveLocaleSections,
+  sectionCompareKey,
+} from '../utils/staffLocaleSections.js'
+import {
   generateLocaleAccessCode,
   isValidLocaleAccessCode,
   normalizeLocaleAccessCode,
   verifyLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
+import { DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS } from '../utils/primaNotaStaffLocaleLink.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
 import {
@@ -96,6 +105,7 @@ const KIND_LABELS = {
   permission: 'Permesso',
   absence: 'Assenza',
   sick: 'Malattia',
+  ferie: 'Ferie',
 }
 
 /** Giorni della settimana (lun–dom) rispetto a weekAnchor (lunedì). */
@@ -536,7 +546,7 @@ function buildShiftApiPayload(staffId, workDate, entryKind, timeStart, timeEnd, 
       payload.time_end = null
     }
   }
-  if (entryKind === 'absence' || entryKind === 'sick') {
+  if (entryKind === 'absence' || entryKind === 'sick' || entryKind === 'ferie') {
     payload.time_start = timeStart ? `${timeStart}:00` : null
     payload.time_end = timeEnd ? `${timeEnd}:00` : null
   }
@@ -786,7 +796,7 @@ function resolveOneShiftSuggestion(item, members, spoken, defaultDate) {
   }
 
   const entryKind =
-    item.entry_kind && ['shift', 'permission', 'absence', 'sick'].includes(String(item.entry_kind))
+    item.entry_kind && ['shift', 'permission', 'absence', 'sick', 'ferie'].includes(String(item.entry_kind))
       ? String(item.entry_kind)
       : 'shift'
 
@@ -1014,6 +1024,10 @@ export default function StaffPage({ operatorMode = false }) {
   const [newMemberPhone, setNewMemberPhone] = useState('')
   const [newMemberCity, setNewMemberCity] = useState('')
   const [newMemberBirthDate, setNewMemberBirthDate] = useState('')
+  const [newMemberSection, setNewMemberSection] = useState('')
+  const [localeSections, setLocaleSections] = useState(() => defaultSectionsForLocale(''))
+  const [activeSection, setActiveSection] = useState(() => defaultSectionsForLocale('')[0] || 'Generale')
+  const [newSectionName, setNewSectionName] = useState('')
   const [editingMemberId, setEditingMemberId] = useState(null)
   const memberFormSectionRef = React.useRef(null)
   const [memberInfoId, setMemberInfoId] = useState(null)
@@ -1640,6 +1654,67 @@ export default function StaffPage({ operatorMode = false }) {
   }, [localeStaffName])
 
   useEffect(() => {
+    setLocaleSections((prev) =>
+      resolveLocaleSections({
+        localeName: localeStaffName,
+        savedSections: prev,
+        members,
+      }),
+    )
+  }, [localeStaffName, members])
+
+  useEffect(() => {
+    if (!localeSections.length) return
+    if (!localeSections.some((s) => sectionCompareKey(s) === sectionCompareKey(activeSection))) {
+      setActiveSection(localeSections[0])
+    }
+    if (!newMemberSection || !localeSections.some((s) => sectionCompareKey(s) === sectionCompareKey(newMemberSection))) {
+      setNewMemberSection(localeSections[0])
+    }
+  }, [localeSections, activeSection, newMemberSection])
+
+  const membersInActiveSection = useMemo(
+    () => members.filter((m) => memberMatchesSection(m, activeSection, localeSections)),
+    [members, activeSection, localeSections],
+  )
+
+  function handleAddLocaleSection() {
+    const name = normalizeSectionName(newSectionName)
+    if (!name) {
+      setError('Inserisci il nome della nuova sezione')
+      return
+    }
+    if (localeSections.some((s) => sectionCompareKey(s) === sectionCompareKey(name))) {
+      setError(`La sezione "${name}" esiste già`)
+      return
+    }
+    setError('')
+    setLocaleSections((prev) => [...prev, name])
+    setActiveSection(name)
+    setNewMemberSection(name)
+    setNewSectionName('')
+    setSuccess(`Sezione "${name}" aggiunta`)
+  }
+
+  function handleRemoveActiveSection() {
+    const name = normalizeSectionName(activeSection)
+    if (!name || localeSections.length <= 1) {
+      setError('Serve almeno una sezione')
+      return
+    }
+    const hasMembers = members.some((m) => memberMatchesSection(m, name, localeSections) && normalizeSectionName(m.section))
+    if (hasMembers) {
+      setError(`Non puoi eliminare "${name}": ci sono dipendenti assegnati. Spostali prima in un’altra sezione.`)
+      return
+    }
+    const next = localeSections.filter((s) => sectionCompareKey(s) !== sectionCompareKey(name))
+    setLocaleSections(next)
+    setActiveSection(next[0] || 'Generale')
+    setNewMemberSection(next[0] || 'Generale')
+    setSuccess(`Sezione "${name}" rimossa`)
+  }
+
+  useEffect(() => {
     if (membersBackupLocale) return
     const first = membersBackupLocaleOptions.find((o) => o.value)?.value
     if (!first) return
@@ -1941,6 +2016,7 @@ export default function StaffPage({ operatorMode = false }) {
     setNewMemberPhone('')
     setNewMemberCity('')
     setNewMemberBirthDate('')
+    setNewMemberSection(activeSection || localeSections[0] || '')
   }
 
   function handleEditMember(m) {
@@ -1956,6 +2032,9 @@ export default function StaffPage({ operatorMode = false }) {
     setNewMemberPhone(m.phone || '')
     setNewMemberCity(m.city || '')
     setNewMemberBirthDate(m.birth_date ? String(m.birth_date).slice(0, 10) : '')
+    const section = normalizeSectionName(m.section) || activeSection || localeSections[0] || ''
+    setNewMemberSection(section)
+    if (section) setActiveSection(section)
     setError('')
     setSuccess('')
     window.requestAnimationFrame(() => {
@@ -1971,6 +2050,7 @@ export default function StaffPage({ operatorMode = false }) {
       setError('Indica almeno nome o cognome')
       return
     }
+    const section = normalizeSectionName(newMemberSection) || normalizeSectionName(activeSection) || null
     const payload = {
       name: `${fn} ${ln}`.trim(),
       first_name: fn || null,
@@ -1978,10 +2058,15 @@ export default function StaffPage({ operatorMode = false }) {
       email: newMemberEmail.trim() || null,
       phone: newMemberPhone.trim() || null,
       city: newMemberCity.trim() || null,
+      section,
       birth_date: newMemberBirthDate.trim() || null,
     }
     try {
       setError('')
+      if (section && !localeSections.some((s) => sectionCompareKey(s) === sectionCompareKey(section))) {
+        setLocaleSections((prev) => resolveLocaleSections({ localeName: localeStaffName, savedSections: [...prev, section], members }))
+      }
+      if (section) setActiveSection(section)
       if (editingMemberId) {
         await updateStaffMember(editingMemberId, payload)
         setSuccess('Dipendente aggiornato')
@@ -2291,9 +2376,9 @@ export default function StaffPage({ operatorMode = false }) {
   }
 
   function isUserDeletableLocaleName(localeName) {
-    const target = normalizeLocaleName(localeName).toLocaleLowerCase('it')
+    const target = localeNameCompareKey(localeName)
     if (!target) return false
-    return userDeletableLocaleNames.some((name) => normalizeLocaleName(name).toLocaleLowerCase('it') === target)
+    return userDeletableLocaleNames.some((name) => localeNameCompareKey(name) === target)
   }
 
   function memberSnapshotFromRow(m) {
@@ -2304,10 +2389,31 @@ export default function StaffPage({ operatorMode = false }) {
       email: m.email || null,
       phone: m.phone || null,
       city: m.city || null,
+      section: m.section || null,
       birth_date: m.birth_date || null,
       sort_order: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : 0,
       hourly_rate: m.hourly_rate != null ? Number(m.hourly_rate) : null,
       is_active: Boolean(m.is_active),
+    }
+  }
+
+  function applyLocaleSections(nextSections, preferredActive = '', membersOverride = null) {
+    const memberList = Array.isArray(membersOverride) ? membersOverride : members
+    const list = resolveLocaleSections({
+      localeName: localeStaffName,
+      savedSections: nextSections,
+      members: memberList,
+    })
+    setLocaleSections(list)
+    const preferred = normalizeSectionName(preferredActive)
+    const preferredKey = sectionCompareKey(preferred)
+    const hit = preferredKey
+      ? list.find((s) => sectionCompareKey(s) === preferredKey)
+      : null
+    const nextActive = hit || list.find((s) => sectionCompareKey(s) === sectionCompareKey(activeSection)) || list[0] || 'Generale'
+    setActiveSection(nextActive)
+    if (!newMemberSection || !list.some((s) => sectionCompareKey(s) === sectionCompareKey(newMemberSection))) {
+      setNewMemberSection(nextActive)
     }
   }
 
@@ -2324,6 +2430,44 @@ export default function StaffPage({ operatorMode = false }) {
     const stored = await readStoredLocaleAccessCode(localeName)
     if (isValidLocaleAccessCode(stored)) return stored
     return generateLocaleAccessCode()
+  }
+
+  async function localeExistsInPrimaNota(localeName) {
+    const target = localeNameCompareKey(localeName)
+    if (!target) return false
+    try {
+      const packs = await fetchPrimaNotaLocalePacks()
+      const rows = Array.isArray(packs) ? packs : []
+      return rows.some((row) => {
+        const slug = String(row?.activity_slug || '').trim().toLowerCase()
+        const linkedStaffName = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS[slug] || ''
+        return (
+          localeNameCompareKey(row?.label) === target ||
+          localeNameCompareKey(slug) === target ||
+          localeNameCompareKey(linkedStaffName) === target
+        )
+      })
+    } catch {
+      return false
+    }
+  }
+
+  async function handleGenerateLocaleCode() {
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setLocaleAccessCode(generateLocaleAccessCode())
+      return
+    }
+    const target = localeNameCompareKey(localeName)
+    const existsInStaff = savedLocaleNames.some((n) => localeNameCompareKey(n) === target)
+    const existsInPrimaNota = await localeExistsInPrimaNota(localeName)
+    if (existsInStaff || existsInPrimaNota) {
+      const ok = window.confirm(
+        `Per "${localeName}" esiste già un locale/registro protetto.\n\nVuoi cambiare codice?`,
+      )
+      if (!ok) return
+    }
+    setLocaleAccessCode(generateLocaleAccessCode())
   }
 
   async function collectExistingLocalePacks() {
@@ -2548,6 +2692,7 @@ export default function StaffPage({ operatorMode = false }) {
       return {
         saved_at: local.saved_at,
         members: local.members,
+        sections: Array.isArray(local.sections) ? local.sections : [],
         access_code: localCode || code || null,
       }
     }
@@ -2562,6 +2707,7 @@ export default function StaffPage({ operatorMode = false }) {
         const pack = {
           saved_at: remote.saved_at || new Date().toISOString(),
           members: remote.members,
+          sections: Array.isArray(remote.sections) ? remote.sections : [],
           access_code: normalizeLocaleAccessCode(remote.access_code) || code || null,
         }
         const previousKey = findLocaleStoreKey(store, key)
@@ -2587,6 +2733,7 @@ export default function StaffPage({ operatorMode = false }) {
         return {
           saved_at: backup.savedAt,
           members: backup.payload.members,
+          sections: Array.isArray(backup.payload.sections) ? backup.payload.sections : [],
           access_code: backupCode || code || null,
         }
       }
@@ -2623,11 +2770,12 @@ export default function StaffPage({ operatorMode = false }) {
       for (const [rawKey, pack] of Object.entries(store)) {
         const n = normalizeLocaleName(rawKey)
         if (!n) continue
-        userNames.add(n)
-        if (!meta[n] && pack?.saved_at) meta[n] = pack.saved_at
-        if (!serverNames.has(n) && Array.isArray(pack?.members) && pack.members.length > 0) {
+        // Includi anche locali vuoti (creati con «Aggiungi locale»).
+        if (pack && typeof pack === 'object') {
           names.add(n)
+          userNames.add(n)
         }
+        if (!meta[n] && pack?.saved_at) meta[n] = pack.saved_at
       }
       for (const backupName of listMembersLocaleBackupNames()) {
         const n = normalizeLocaleName(backupName)
@@ -2696,6 +2844,11 @@ export default function StaffPage({ operatorMode = false }) {
     try {
       setError('')
       const snapshot = members.map(memberSnapshotFromRow)
+      const sectionsForPack = resolveLocaleSections({
+        localeName: localeName,
+        savedSections: localeSections,
+        members: snapshot,
+      })
       const check = await assertLocalePackCanSave(localeName, snapshot)
       if (!check.ok) {
         setError(check.message)
@@ -2708,6 +2861,7 @@ export default function StaffPage({ operatorMode = false }) {
       store[saveName] = {
         saved_at: new Date().toISOString(),
         members: snapshot,
+        sections: sectionsForPack,
         access_code: accessCode,
       }
       if (previousKey && previousKey !== saveName) {
@@ -2717,9 +2871,9 @@ export default function StaffPage({ operatorMode = false }) {
         setLocaleStaffName(saveName)
       }
       await writeStaffLocaleStore(store)
-      saveMembersLocaleBackup(saveName, { members: snapshot, access_code: accessCode })
+      saveMembersLocaleBackup(saveName, { members: snapshot, sections: sectionsForPack, access_code: accessCode })
       try {
-        await upsertStaffLocalePack(saveName, snapshot, accessCode)
+        await upsertStaffLocalePack(saveName, snapshot, accessCode, { sections: sectionsForPack })
       } catch (err) {
         const msg = err?.message || ''
         await refreshSavedLocaleNames()
@@ -2743,13 +2897,70 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }
 
+  async function handleCreateEmptyLocale() {
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Inserisci il nome del locale prima di creare il locale vuoto')
+      return
+    }
+    const storeBefore = await readStaffLocaleStore()
+    const alreadyLocal = Boolean(findLocaleStoreKey(storeBefore, localeName))
+    const alreadyListed = savedLocaleNames.some((n) => localeNameCompareKey(n) === localeNameCompareKey(localeName))
+    if (alreadyLocal || alreadyListed) {
+      setError(`"${localeName}" esiste già: selezionalo dall'elenco Locali salvati.`)
+      return
+    }
+    try {
+      setError('')
+      const sectionsForPack = resolveLocaleSections({
+        localeName,
+        savedSections: defaultSectionsForLocale(localeName),
+        members: [],
+      })
+      const accessCode = await resolveLocaleAccessCodeForSave(localeName)
+      const store = await readStaffLocaleStore()
+      store[localeName] = {
+        saved_at: new Date().toISOString(),
+        members: [],
+        sections: sectionsForPack,
+        access_code: accessCode,
+      }
+      await writeStaffLocaleStore(store)
+      saveMembersLocaleBackup(localeName, { members: [], sections: sectionsForPack, access_code: accessCode })
+      setLocaleStaffName(localeName)
+      setLocaleAccessCode(accessCode)
+      try {
+        await upsertStaffLocalePack(localeName, [], accessCode, { sections: sectionsForPack })
+        setSuccess(`Locale vuoto "${localeName}" creato. Codice zona: ${accessCode}.`)
+      } catch (err) {
+        const msg = String(err?.message || '')
+        if (isOfflineQueuedMessage(msg)) {
+          setSuccess(
+            `Locale vuoto "${localeName}" salvato su questo browser (codice ${accessCode}). Si sincronizza quando torna la connessione.`,
+          )
+        } else {
+          setSuccess(
+            `Locale vuoto "${localeName}" creato su questo browser (codice ${accessCode}). Sync server non riuscita: ${msg || 'riprova più tardi'}.`,
+          )
+        }
+      }
+      await refreshSavedLocaleNames()
+      await refreshBackupMeta()
+    } catch (err) {
+      setError(err?.message || 'Creazione locale vuoto non riuscita')
+      await refreshSavedLocaleNames()
+    }
+  }
+
   async function handleDeleteLocaleName() {
     const localeName = resolveCanonicalLocaleName(localeStaffName)
     if (!localeName) {
       setError('Inserisci o seleziona il locale da eliminare.')
       return
     }
-    if (!isUserDeletableLocaleName(localeName)) {
+    const storeProbe = await readStaffLocaleStore()
+    const existsLocally = Boolean(findLocaleStoreKey(storeProbe, localeName))
+    if (!isUserDeletableLocaleName(localeName) && !existsLocally) {
       setError(`"${localeName}" non può essere eliminato da qui (locale di sistema o non ancora salvato).`)
       return
     }
@@ -2841,6 +3052,7 @@ export default function StaffPage({ operatorMode = false }) {
         email: pm.email || null,
         phone: pm.phone || null,
         city: pm.city || null,
+        section: pm.section || null,
         birth_date: pm.birth_date || null,
         is_active: pm.is_active !== false,
         hourly_rate: pm.hourly_rate != null ? Number(pm.hourly_rate) : null,
@@ -2918,6 +3130,11 @@ export default function StaffPage({ operatorMode = false }) {
         pack.members,
         localeName,
         isValidLocaleAccessCode(code) ? code : undefined,
+      )
+      applyLocaleSections(
+        Array.isArray(pack.sections) ? pack.sections : [],
+        Array.isArray(pack.sections) && pack.sections[0] ? pack.sections[0] : '',
+        mem,
       )
       markPlanningStale()
       setMemberInfoId(null)
@@ -3154,7 +3371,7 @@ export default function StaffPage({ operatorMode = false }) {
         payload.time_end = null
       }
     }
-    if (formKind === 'absence' || formKind === 'sick') {
+    if (formKind === 'absence' || formKind === 'sick' || formKind === 'ferie') {
       payload.time_start = formStart ? `${formStart}:00` : null
       payload.time_end = formEnd ? `${formEnd}:00` : null
     }
@@ -3546,6 +3763,11 @@ export default function StaffPage({ operatorMode = false }) {
     setError('')
     try {
       const snapshot = members.map(memberSnapshotFromRow)
+      const sectionsForPack = resolveLocaleSections({
+        localeName,
+        savedSections: localeSections,
+        members: snapshot,
+      })
       const check = await assertLocalePackCanSave(localeName, snapshot)
       if (!check.ok) {
         setError(check.message)
@@ -3553,8 +3775,8 @@ export default function StaffPage({ operatorMode = false }) {
       }
       const saveName = check.canonicalName
       const accessCode = await resolveLocaleAccessCodeForSave(localeName)
-      saveMembersLocaleBackup(saveName, { members: snapshot, access_code: accessCode })
-      const saved = await upsertStaffLocalePack(saveName, snapshot, accessCode)
+      saveMembersLocaleBackup(saveName, { members: snapshot, sections: sectionsForPack, access_code: accessCode })
+      const saved = await upsertStaffLocalePack(saveName, snapshot, accessCode, { sections: sectionsForPack })
       setMembersBackupLocale(saveName)
       if (saveName !== localeName) {
         setLocaleStaffName(saveName)
@@ -3640,6 +3862,7 @@ export default function StaffPage({ operatorMode = false }) {
           email: m.email || null,
           phone: m.phone || null,
           city: m.city || null,
+          section: m.section || null,
           birth_date: m.birth_date || null,
           sort_order: m.sort_order,
           hourly_rate: m.hourly_rate,
@@ -3649,6 +3872,7 @@ export default function StaffPage({ operatorMode = false }) {
         added += 1
       }
       await refreshMembers()
+      applyLocaleSections(Array.isArray(pack.sections) ? pack.sections : [], '', rows)
       await applyPayrollFromShifts()
       await refreshBackupMeta(planningBackupSlot, localeName)
       setSuccess(
@@ -3662,6 +3886,17 @@ export default function StaffPage({ operatorMode = false }) {
     } finally {
       setBackupBusy(false)
     }
+  }
+
+  async function handleSelectSavedLocale(value) {
+    const name = normalizeLocaleName(value)
+    setLocaleStaffName(name)
+    if (!name) {
+      setLocaleAccessCode('')
+      return
+    }
+    const stored = await readStoredLocaleAccessCode(name)
+    setLocaleAccessCode(isValidLocaleAccessCode(stored) ? stored : '')
   }
 
   function handleMembersBackupLocaleChange(value) {
@@ -4039,7 +4274,7 @@ export default function StaffPage({ operatorMode = false }) {
           {editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem', maxWidth: 720, lineHeight: 1.45 }}>
-          La colonna <strong>Ordine</strong> viene assegnata automaticamente all’aggiunta di ogni dipendente e definisce la sequenza negli elenchi e nel menu a tendina della pianificazione.
+          Organizza i dipendenti per <strong>sezione</strong> (Banco, Cucina, Forno…). La colonna <strong>Ordine</strong> viene assegnata automaticamente e definisce la sequenza negli elenchi e nel menu a tendina della pianificazione.
         </p>
         <StaffSectionBackupBar
           sectionTitle="dipendenti"
@@ -4062,6 +4297,23 @@ export default function StaffPage({ operatorMode = false }) {
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 140px' }}>
             <label>Cognome</label>
             <input className="form-control" value={newMemberLastName} onChange={(e) => setNewMemberLastName(e.target.value)} placeholder="Cognome" />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0, flex: '0 1 160px' }}>
+            <label>Sezione</label>
+            <select
+              className="form-control"
+              value={newMemberSection || activeSection || ''}
+              onChange={(e) => {
+                setNewMemberSection(e.target.value)
+                setActiveSection(e.target.value)
+              }}
+            >
+              {localeSections.map((section) => (
+                <option key={section} value={section}>
+                  {section}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 180px' }}>
             <label>Email</label>
@@ -4130,7 +4382,7 @@ export default function StaffPage({ operatorMode = false }) {
                   (n) => localeNameCompareKey(n) === localeNameCompareKey(localeStaffName),
                 ) || ''
               }
-              onChange={(e) => setLocaleStaffName(e.target.value)}
+              onChange={(e) => void handleSelectSavedLocale(e.target.value)}
               disabled={shiftBusy || loading || demoLoading || reportLoading || savedLocaleNames.length === 0}
             >
               <option value="">{savedLocaleNames.length === 0 ? 'Nessun locale salvato' : 'Seleziona locale salvato'}</option>
@@ -4158,7 +4410,7 @@ export default function StaffPage({ operatorMode = false }) {
           <button
             type="button"
             className="btn btn-outline-secondary"
-            onClick={() => setLocaleAccessCode(generateLocaleAccessCode())}
+            onClick={() => void handleGenerateLocaleCode()}
             disabled={shiftBusy || loading || demoLoading || reportLoading}
             title="Genera un nuovo codice da usare al prossimo salvataggio"
           >
@@ -4184,6 +4436,15 @@ export default function StaffPage({ operatorMode = false }) {
           </button>
           <button
             type="button"
+            className="btn btn-outline-primary"
+            onClick={() => void handleCreateEmptyLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Crea un locale anche senza elenco dipendenti"
+          >
+            Aggiungi locale
+          </button>
+          <button
+            type="button"
             className="btn btn-outline-danger"
             onClick={() => void handleDeleteLocaleName()}
             disabled={
@@ -4191,7 +4452,7 @@ export default function StaffPage({ operatorMode = false }) {
               loading ||
               demoLoading ||
               reportLoading ||
-              !isUserDeletableLocaleName(localeStaffName)
+              !normalizeLocaleName(localeStaffName)
             }
             title="Rimuove il locale selezionato: serve il codice zona a 6 cifre se il locale è protetto"
           >
@@ -4202,11 +4463,67 @@ export default function StaffPage({ operatorMode = false }) {
             Al primo salvataggio compare il codice da comunicare al team; senza codice corretto non si accede agli elenchi degli altri locali.
           </p>
         </div>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            alignItems: 'center',
+            marginBottom: '0.75rem',
+          }}
+        >
+          <div className="btn-group" role="tablist" aria-label="Sezioni personale">
+            {localeSections.map((section) => {
+              const count = members.filter((m) => memberMatchesSection(m, section, localeSections)).length
+              const active = sectionCompareKey(section) === sectionCompareKey(activeSection)
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    setActiveSection(section)
+                    setNewMemberSection(section)
+                  }}
+                >
+                  {section}
+                  {count ? ` (${count})` : ''}
+                </button>
+              )
+            })}
+          </div>
+          <div className="form-group" style={{ marginBottom: 0, display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+            <input
+              className="form-control form-control-sm"
+              style={{ minWidth: 140, maxWidth: 200 }}
+              value={newSectionName}
+              onChange={(e) => setNewSectionName(e.target.value)}
+              placeholder="Nuova sezione"
+              aria-label="Nome nuova sezione"
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleAddLocaleSection}>
+              + Aggiungi sezione
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              onClick={handleRemoveActiveSection}
+              disabled={localeSections.length <= 1}
+              title="Elimina la sezione attiva se non ha dipendenti assegnati"
+            >
+              Elimina sezione
+            </button>
+          </div>
+        </div>
         <div className="workbook-card-nested">
           <div className="pagamenti-workbook-toolbar">
             <div className="pagamenti-workbook-toolbar-left">
               <span className="pagamenti-workbook-title">{STAFF_MEMBERS_WORKBOOK_TITLE}</span>
-              <span className="pagamenti-workbook-sheet-label">{members.length} dipendenti</span>
+              <span className="pagamenti-workbook-sheet-label">
+                {activeSection}: {membersInActiveSection.length} / {members.length} dipendenti
+              </span>
             </div>
           </div>
           <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
@@ -4234,7 +4551,7 @@ export default function StaffPage({ operatorMode = false }) {
                 </tr>
               </thead>
               <tbody>
-                {members.map((m, idx) => (
+                {membersInActiveSection.map((m, idx) => (
                   <tr key={m.id} className="workbook-grid-row">
                     {STAFF_MEMBERS_COLUMNS.map((col) => (
                       <td
@@ -4309,10 +4626,12 @@ export default function StaffPage({ operatorMode = false }) {
                     </td>
                   </tr>
                 ))}
-                {members.length === 0 ? (
+                {membersInActiveSection.length === 0 ? (
                   <tr>
                     <td colSpan={STAFF_MEMBERS_COLUMNS.length + 1} className="empty-state">
-                      Nessun dipendente: aggiungi almeno un nome per pianificare i turni.
+                      {members.length === 0
+                        ? 'Nessun dipendente: aggiungi almeno un nome per pianificare i turni.'
+                        : `Nessun dipendente in «${activeSection}». Aggiungi qualcuno in questa sezione o scegli un’altra tab.`}
                     </td>
                   </tr>
                 ) : (
@@ -4329,7 +4648,7 @@ export default function StaffPage({ operatorMode = false }) {
                             col.numeric ? 'excel-cell-num' : '',
                             'workbook-cell-total',
                           ].filter(Boolean).join(' ')}
-                          value={staffMembersTotalsLabel(col.id, members.length)}
+                          value={staffMembersTotalsLabel(col.id, membersInActiveSection.length)}
                           readOnly
                           tabIndex={-1}
                         />
@@ -5069,7 +5388,10 @@ export default function StaffPage({ operatorMode = false }) {
                     disabled={shiftBusy || (Boolean(editingShiftId) && !formMemberIds.has(m.id))}
                     onChange={() => toggleFormMemberSelection(m.id)}
                   />
-                  <span>{m.name}</span>
+                  <span>
+                    {m.name}
+                    {m.section ? ` (${m.section})` : ''}
+                  </span>
                 </label>
               ))}
             </StaffCheckboxDropdown>
@@ -5112,6 +5434,7 @@ export default function StaffPage({ operatorMode = false }) {
               <option value="permission">Permesso</option>
               <option value="absence">Assenza</option>
               <option value="sick">Malattia</option>
+              <option value="ferie">Ferie</option>
             </select>
           </div>
           {(formKind === 'shift' || formKind === 'permission') && (
@@ -5126,7 +5449,7 @@ export default function StaffPage({ operatorMode = false }) {
               </div>
             </>
           )}
-          {(formKind === 'absence' || formKind === 'sick') && (
+          {(formKind === 'absence' || formKind === 'sick' || formKind === 'ferie') && (
             <>
               <div className="form-group" style={{ flex: '0 1 100px' }}>
                 <label>Inizio (opz.)</label>

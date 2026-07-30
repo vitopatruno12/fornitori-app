@@ -109,6 +109,26 @@ export function deleteStaffPayrollMonth(id) {
   return apiFetch(`/staff/payroll-months/${id}`, { method: 'DELETE' })
 }
 
+export function fetchStaffStipendiMonths() {
+  return apiFetch('/staff/stipendi-months')
+}
+
+export function fetchStaffStipendiMonth(id) {
+  return apiFetch(`/staff/stipendi-months/${id}`)
+}
+
+export function createStaffStipendiMonth(data) {
+  return apiFetch('/staff/stipendi-months', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateStaffStipendiMonth(id, data) {
+  return apiFetch(`/staff/stipendi-months/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export function deleteStaffStipendiMonth(id) {
+  return apiFetch(`/staff/stipendi-months/${id}`, { method: 'DELETE' })
+}
+
 export async function fetchStaffLocalePacks() {
   const data = await apiFetch('/staff/locale-packs', SYNC_FETCH)
   return asArray(data, 'staff/locale-packs')
@@ -151,11 +171,22 @@ export function deleteStaffLocalePack(localeName, accessCode) {
   return apiFetch(`/staff/locale-packs?${q}`, { ...SYNC_FETCH, method: 'DELETE' })
 }
 
-export async function lookupLocaleAccessCodes(query) {
-  return apiFetch('/staff/access-codes/lookup', {
+export async function requestLocaleAccessCodesOtp(query) {
+  return apiFetch('/staff/access-codes/otp/request', {
     ...SYNC_FETCH,
     method: 'POST',
     body: JSON.stringify({ query: String(query || '').trim() }),
+  })
+}
+
+export async function lookupLocaleAccessCodes(query, otp) {
+  return apiFetch('/staff/access-codes/lookup', {
+    ...SYNC_FETCH,
+    method: 'POST',
+    body: JSON.stringify({
+      query: String(query || '').trim(),
+      otp: String(otp || '').replace(/\D/g, '').slice(0, 6),
+    }),
   })
 }
 

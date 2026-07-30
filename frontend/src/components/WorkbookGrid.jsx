@@ -22,6 +22,7 @@ export default function WorkbookGrid({
   getRowClassName,
   getCellTitle,
   onRowClick,
+  rowClickTitle = 'Apri dettaglio',
   getRowId,
   getTotalsCellClassName,
 }) {
@@ -92,7 +93,7 @@ export default function WorkbookGrid({
                     typeof getRowClassName === 'function' ? getRowClassName(row, rowIndex) : '',
                   ].filter(Boolean).join(' ')}
                   onClick={typeof onRowClick === 'function' ? () => onRowClick(row, rowIndex) : undefined}
-                  title={typeof onRowClick === 'function' ? 'Apri dettaglio movimento' : undefined}
+                  title={typeof onRowClick === 'function' ? rowClickTitle : undefined}
                 >
                   {columns.map((col) => {
                     const tone =

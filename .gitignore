@@ -16,6 +16,8 @@ backend/.env.production
 backend/.env.staging
 frontend/.env.local
 frontend/.env.production.local
+backend/.access_code_otp_store.json
+backend/.bank_connect_otp_store.json
 
 # Backup DB / dump
 *.sql.gz
