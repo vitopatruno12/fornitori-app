@@ -765,7 +765,6 @@ function App() {
             <AppNavDropdown
               label="Home"
               to="/"
-              end
               items={[
                 { to: '/analisi', label: 'Analisi' },
                 { to: '/analisi/giornaliero', label: 'Giornaliero' },
