@@ -30,8 +30,7 @@ MONTH_LABELS_IT = [
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 _CACHE_TTL_SEC = float(__import__("os").getenv("ANALYTICS_CACHE_TTL_SEC", "1200"))
 DATA_NOTE = (
-    "Dati da macchine VNE: operazioni (traffico orario) e chiusure cassa (incasso giornaliero). "
-    "Aggiornamento live dal portale remoto; risultati in cache ~20 minuti."
+    "Dati da macchine VNE: operazioni (traffico orario) e chiusure cassa (incasso giornaliero)."
 )
 
 
