@@ -47,7 +47,7 @@ import {
   loadPrimaNotaLocales,
   localeLabel,
   normalizePrimaNotaActivity,
-  removeCustomLocaleById,
+  removeLocaleById,
 } from '../constants/primaNotaLocales'
 
 const CONTO_NON_FISCALE = 'NON_FISCALE'
@@ -169,28 +169,33 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   const protectedSlugs = useMemo(() => {
     const slugs = new Set()
     for (const loc of locales) {
-      if (staffLocaleRequiresCode(loc.id, staffLocaleSummaries)) {
-        slugs.add(loc.id)
+      const id = String(loc?.id || '').trim().toLowerCase()
+      if (!id) continue
+      if (staffLocaleRequiresCode(id, staffLocaleSummaries)) {
+        slugs.add(id)
       }
     }
     for (const row of protectedLocaleSummaries) {
       if (row?.requires_access_code && row?.activity_slug) {
-        slugs.add(row.activity_slug)
+        slugs.add(String(row.activity_slug).trim().toLowerCase())
       }
     }
     return [...slugs]
   }, [locales, staffLocaleSummaries, protectedLocaleSummaries])
 
+  const unlockedSlugsList = useMemo(() => [...unlockedSlugs], [unlockedSlugs])
+
   const activeStaffLocaleHint = staffLocaleHint(activeActivity, staffLocaleSummaries)
   const activeUsesStaffCode = Boolean(getStaffLocaleLinkForActivity(activeActivity))
 
   function activeLocaleNeedsCode() {
-    return protectedSlugs.includes(activeActivity)
+    return protectedSlugs.includes(String(activeActivity || '').trim().toLowerCase())
   }
 
   function hasActiveLocaleAccess() {
     if (!activeLocaleNeedsCode()) return true
-    if (!unlockedSlugs.has(activeActivity)) return false
+    const slug = String(activeActivity || '').trim().toLowerCase()
+    if (![...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)) return false
     return isValidLocaleAccessCode(resolveActiveAccessCode())
   }
 
@@ -246,12 +251,15 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function verifyLocaleAccess(activityId, code) {
-    const slug = String(activityId || '').trim()
+    const slug = String(activityId || '').trim().toLowerCase()
     if (!slug) return { ok: false, needsCode: true }
     const normalized = normalizeLocaleAccessCode(code)
     if (!isValidLocaleAccessCode(normalized)) return { ok: false, needsCode: true }
     const stored = readStoredPrimaNotaAccessCode(slug)
-    if (stored && stored === normalized) return { ok: true }
+    if (stored && stored === normalized) {
+      setUnlockedSlugs((prev) => new Set([...prev, slug]))
+      return { ok: true }
+    }
 
     if (staffLocaleRequiresCode(slug, staffLocaleSummaries)) {
       const staffName = resolveStaffLocaleName(slug, staffLocaleSummaries)
@@ -267,7 +275,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     }
 
     const primaNotaProtected = protectedLocaleSummaries.some(
-      (row) => row?.activity_slug === slug && row?.requires_access_code,
+      (row) => String(row?.activity_slug || '').trim().toLowerCase() === slug && row?.requires_access_code,
     )
     if (!primaNotaProtected) return { ok: true }
     try {
@@ -293,6 +301,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
       }
       selectActivity(activityId)
       setLocaleAccessCode(normalizeLocaleAccessCode(code))
+      setUnlockedSlugs((prev) => new Set([...prev, String(activityId || '').trim().toLowerCase()]))
       setSuccess(`Locale «${localeLabel(activityId, locales)}» aperto.`)
       return true
     } finally {
@@ -302,10 +311,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
 
   function handleCloseLocaleAccess() {
     if (!activeLocaleNeedsCode() || !hasActiveLocaleAccess()) return
-    clearStoredPrimaNotaAccessCode(activeActivity)
+    const slug = String(activeActivity || '').trim().toLowerCase()
+    clearStoredPrimaNotaAccessCode(slug)
     setUnlockedSlugs((prev) => {
-      const next = new Set(prev)
-      next.delete(activeActivity)
+      const next = new Set([...prev].map((s) => String(s || '').trim().toLowerCase()))
+      next.delete(slug)
       return next
     })
     setLocaleAccessCode('')
@@ -315,24 +325,26 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function handleDeleteCustomLocale(loc) {
-    if (!loc?.id || loc.builtin) return false
+    if (!loc?.id) return false
     const label = loc.label || loc.id
+    const slug = String(loc.id || '').trim().toLowerCase()
     let code = ''
-    if (protectedSlugs.includes(loc.id)) {
-      if (activeActivity === loc.id) {
+    const needsCode = protectedSlugs.some((s) => String(s || '').trim().toLowerCase() === slug)
+    if (needsCode) {
+      if (String(activeActivity || '').trim().toLowerCase() === slug) {
         code = normalizeLocaleAccessCode(localeAccessCode)
       }
       if (!isValidLocaleAccessCode(code)) {
-        code = readStoredPrimaNotaAccessCode(loc.id)
+        code = readStoredPrimaNotaAccessCode(slug)
       }
       if (!isValidLocaleAccessCode(code)) {
-        setError(`Per eliminare «${label}» inserisci prima il codice a 6 cifre (seleziona il locale e salva/usa il codice).`)
+        setError(`Per eliminare «${label}» seleziona il registro e inserisci il codice a 6 cifre.`)
         return false
       }
     }
     if (
       !window.confirm(
-        `Eliminare il locale personalizzato «${label}»?\n\nSparisce dall’elenco su questo browser. I movimenti cassa già salvati sul server non vengono cancellati.`,
+        `Eliminare il registro «${label}» dall’elenco?\n\nSparisce da questo browser. I movimenti cassa già salvati sul server non vengono cancellati.`,
       )
     ) {
       return false
@@ -341,26 +353,27 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     setError('')
     try {
       try {
-        await deletePrimaNotaLocalePack(loc.id, code || undefined)
+        await deletePrimaNotaLocalePack(slug, code || undefined)
       } catch {
         // nessun pack sul server
       }
-      clearStoredPrimaNotaAccessCode(loc.id)
-      const next = removeCustomLocaleById(loc.id)
+      clearStoredPrimaNotaAccessCode(slug)
+      const next = removeLocaleById(slug)
       setLocales(next)
       setUnlockedSlugs((prev) => {
-        const s = new Set(prev)
-        s.delete(loc.id)
+        const s = new Set([...prev].map((x) => String(x || '').trim().toLowerCase()))
+        s.delete(slug)
         return s
       })
       await refreshProtectedLocaleSummaries()
-      if (activeActivity === loc.id) {
-        selectActivity(DEFAULT_PRIMA_NOTA_ACTIVITY)
+      if (String(activeActivity || '').trim().toLowerCase() === slug) {
+        const fallback = next[0]?.id || DEFAULT_PRIMA_NOTA_ACTIVITY
+        selectActivity(fallback)
       }
-      setSuccess(`Locale «${label}» eliminato.`)
+      setSuccess(`Registro «${label}» eliminato.`)
       return true
     } catch (e) {
-      setError(e?.message || 'Impossibile eliminare il locale.')
+      setError(e?.message || 'Impossibile eliminare il registro.')
       return false
     } finally {
       setDeleteBusy(false)
@@ -663,10 +676,11 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }, [movementPeriodFrom, movementPeriodTo, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
 
   function selectActivity(activityId) {
-    if (activityId === activeActivity) return
-    setActiveActivity(activityId)
+    const next = normalizePrimaNotaActivity(activityId, locales)
+    if (next === activeActivity) return
+    setActiveActivity(next)
     try {
-      sessionStorage.setItem('primaNotaActivity', activityId)
+      sessionStorage.setItem('primaNotaActivity', next)
     } catch {
       // ignore
     }
@@ -1481,7 +1495,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         <p className="staff-page-lead">
           {operatorMode ? (
             <>
-              Registra entrate e uscite per il locale scelto in <strong>Locali prima nota</strong>. Stessi dati e salvataggio del
+              Registra entrate e uscite per il registro scelto in <strong>Registri prima nota</strong>. Stessi dati e salvataggio del
               gestionale ATLAS.
             </>
           ) : (
@@ -1511,6 +1525,7 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         onSaveLocaleAccessCode={handleSaveLocaleAccessCode}
         onDeleteCustomLocale={handleDeleteCustomLocale}
         protectedSlugs={protectedSlugs}
+        unlockedSlugs={unlockedSlugsList}
         staffLocaleHintFor={(id) => staffLocaleHint(id, staffLocaleSummaries)}
         activeUsesStaffCode={activeUsesStaffCode}
         activeStaffLocaleHint={activeStaffLocaleHint}

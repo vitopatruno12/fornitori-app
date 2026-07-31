@@ -15,6 +15,7 @@ class StaffMember(Base):
     email = Column(String(255), nullable=True)
     phone = Column(String(64), nullable=True)
     city = Column(String(128), nullable=True)
+    section = Column(String(120), nullable=True)
     birth_date = Column(Date, nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0")
     hourly_rate = Column(Numeric(10, 2), nullable=True)

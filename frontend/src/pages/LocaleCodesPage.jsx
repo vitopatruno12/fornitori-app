@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { lookupLocaleAccessCodes } from '../services/staffService'
+import { lookupLocaleAccessCodes, requestLocaleAccessCodesOtp } from '../services/staffService'
 
 async function copyText(value) {
   try {
@@ -28,18 +28,63 @@ function sourceLabel(source) {
 
 export default function LocaleCodesPage() {
   const [query, setQuery] = useState('')
+  const [otp, setOtp] = useState('')
   const [hits, setHits] = useState([])
   const [loading, setLoading] = useState(false)
+  const [otpBusy, setOtpBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [unlocked, setUnlocked] = useState(false)
   const [copiedCode, setCopiedCode] = useState('')
+  const [otpSentHint, setOtpSentHint] = useState('')
+  const [debugOtp, setDebugOtp] = useState('')
 
-  async function handleLookup(e) {
+  async function handleRequestOtp(e) {
     e?.preventDefault?.()
     const q = String(query || '').trim()
     if (q.length < 2) {
       setError('Inserisci almeno 2 caratteri (nome locale Personale o registro Prima Nota).')
+      return
+    }
+    setOtpBusy(true)
+    setError('')
+    setSuccess('')
+    setHits([])
+    setUnlocked(false)
+    setDebugOtp('')
+    try {
+      const data = await requestLocaleAccessCodesOtp(q)
+      const hint = data?.phone_hint || 'il telefono configurato'
+      setOtpSentHint(hint)
+      setOtp('')
+      if (data?.debug_otp) {
+        setDebugOtp(String(data.debug_otp))
+        setSuccess(
+          `OTP inviato (modalità debug). Codice: ${data.debug_otp}. Inseriscilo sotto e apri i codici locale.`,
+        )
+      } else {
+        setSuccess(`OTP monouso inviato a ${hint}. Inseriscilo per visualizzare i codici.`)
+      }
+    } catch (err) {
+      setOtpSentHint('')
+      setError(err?.message || 'Impossibile inviare l’OTP.')
+    } finally {
+      setOtpBusy(false)
+    }
+  }
+
+  async function handleLookup(e) {
+    e?.preventDefault?.()
+    const q = String(query || '').trim()
+    const code = String(otp || '').replace(/\D/g, '').slice(0, 6)
+    if (q.length < 2) {
+      setError('Inserisci almeno 2 caratteri (nome locale Personale o registro Prima Nota).')
+      setHits([])
+      setUnlocked(false)
+      return
+    }
+    if (code.length !== 6) {
+      setError('Inserisci il codice OTP a 6 cifre ricevuto sul telefono.')
       setHits([])
       setUnlocked(false)
       return
@@ -48,14 +93,16 @@ export default function LocaleCodesPage() {
     setError('')
     setSuccess('')
     try {
-      const data = await lookupLocaleAccessCodes(q)
+      const data = await lookupLocaleAccessCodes(q, code)
       const rows = Array.isArray(data?.hits) ? data.hits : []
       setHits(rows)
       setUnlocked(rows.length > 0)
+      setOtp('')
+      setDebugOtp('')
       if (!rows.length) {
         setError('Nessuna credenziale trovata per questo nome.')
       } else {
-        setSuccess(`Trovate ${rows.length} credenziali per «${q}».`)
+        setSuccess(`Trovate ${rows.length} credenziali per «${q}». L’OTP è stato consumato.`)
       }
     } catch (err) {
       setHits([])
@@ -79,6 +126,9 @@ export default function LocaleCodesPage() {
     setError('')
     setSuccess('')
     setQuery('')
+    setOtp('')
+    setOtpSentHint('')
+    setDebugOtp('')
   }
 
   return (
@@ -86,8 +136,9 @@ export default function LocaleCodesPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link codici</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Recupera le credenziali di accesso inserendo il <strong>nome locale Personale</strong> (es. Bar-momento)
-          oppure il <strong>nome/registro Prima Nota</strong> (es. Risacca).
+          Per vedere i codici: inserisci il <strong>nome locale</strong> o <strong>registro</strong>, richiedi l’
+          <strong>OTP monouso</strong> sul telefono, poi inserisci le 6 cifre. Senza nome o senza OTP i codici non
+          sono visibili.
         </p>
       </section>
 
@@ -96,31 +147,79 @@ export default function LocaleCodesPage() {
 
       <section className="card" style={{ padding: '1rem 1.15rem', marginBottom: '1rem' }}>
         <form onSubmit={handleLookup} className="form-row" style={{ alignItems: 'end', gap: '0.75rem' }}>
-          <div className="form-group" style={{ flex: '1 1 280px', marginBottom: 0 }}>
+          <div className="form-group" style={{ flex: '1 1 240px', marginBottom: 0 }}>
             <label htmlFor="locale-code-query">Nome locale o registro</label>
             <input
               id="locale-code-query"
               className="form-control"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setUnlocked(false)
+                setHits([])
+              }}
               placeholder="Es. Bar-momento oppure Risacca"
               autoComplete="off"
-              disabled={loading}
+              disabled={loading || otpBusy}
+            />
+          </div>
+          <div className="form-group" style={{ flex: '0 1 140px', marginBottom: 0 }}>
+            <label htmlFor="locale-code-otp">OTP (6 cifre)</label>
+            <input
+              id="locale-code-otp"
+              className="form-control"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="123456"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              disabled={loading || otpBusy}
             />
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Ricerca…' : 'Mostra codice'}
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              disabled={loading || otpBusy || String(query || '').trim().length < 2}
+              onClick={() => void handleRequestOtp()}
+            >
+              {otpBusy ? 'Invio OTP…' : 'Invia OTP'}
+            </button>
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading || otpBusy || String(otp || '').replace(/\D/g, '').length !== 6}
+            >
+              {loading ? 'Verifica…' : 'Mostra codice'}
             </button>
           </div>
           {unlocked ? (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <button type="button" className="btn btn-secondary" onClick={handleReset} disabled={loading}>
+              <button type="button" className="btn btn-secondary" onClick={handleReset} disabled={loading || otpBusy}>
                 Chiudi
               </button>
             </div>
           ) : null}
         </form>
+        {otpSentHint ? (
+          <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+            OTP inviato a <strong>{otpSentHint}</strong>
+            {debugOtp ? (
+              <>
+                {' '}
+                · debug: <code>{debugOtp}</code>
+              </>
+            ) : null}
+            . Il codice è monouso e scade in pochi minuti.
+          </p>
+        ) : (
+          <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+            Prima clicca <strong>Invia OTP</strong>, poi inserisci il codice ricevuto e premi <strong>Mostra codice</strong>.
+          </p>
+        )}
       </section>
 
       {unlocked ? (
@@ -147,15 +246,18 @@ export default function LocaleCodesPage() {
                     {hit.activity_slug ? ` · slug ${hit.activity_slug}` : ''}
                     {hit.linked_name ? ` · collegato a «${hit.linked_name}»` : ''}
                   </div>
-                  <div style={{ marginTop: '0.35rem', fontFamily: 'ui-monospace, monospace', fontSize: '1.25rem', letterSpacing: '0.08em' }}>
+                  <div
+                    style={{
+                      marginTop: '0.35rem',
+                      fontFamily: 'ui-monospace, monospace',
+                      fontSize: '1.25rem',
+                      letterSpacing: '0.08em',
+                    }}
+                  >
                     {hit.access_code}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => handleCopy(hit.access_code)}
-                >
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCopy(hit.access_code)}>
                   {copiedCode === hit.access_code ? 'Copiato' : 'Copia codice'}
                 </button>
               </div>

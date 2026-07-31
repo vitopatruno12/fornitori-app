@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_PRIMA_NOTA_LOCALES,
   listCustomPrimaNotaLocales,
   loadPrimaNotaLocales,
   localeLabel,
   persistCustomLocales,
+  restoreHiddenLocaleById,
   slugifyLocaleLabel,
 } from '../constants/primaNotaLocales'
 import {
@@ -28,6 +29,7 @@ export default function PrimaNotaLocalePicker({
   onSaveLocaleAccessCode,
   onDeleteCustomLocale,
   protectedSlugs = [],
+  unlockedSlugs = [],
   staffLocaleHintFor,
   activeUsesStaffCode = false,
   activeStaffLocaleHint = '',
@@ -44,8 +46,29 @@ export default function PrimaNotaLocalePicker({
   const rootRef = useRef(null)
 
   const currentLabel = localeLabel(activeActivity, locales)
-  const activeRequiresCode = protectedSlugs.includes(activeActivity)
+  const protectedSet = useMemo(
+    () => new Set((protectedSlugs || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)),
+    [protectedSlugs],
+  )
+  const unlockedSet = useMemo(
+    () => new Set((unlockedSlugs || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)),
+    [unlockedSlugs],
+  )
+  const activeId = String(activeActivity || '').trim().toLowerCase()
+  const activeRequiresCode = protectedSet.has(activeId)
   const customLocales = listCustomPrimaNotaLocales(locales)
+
+  function isProtectedLocale(id) {
+    return protectedSet.has(String(id || '').trim().toLowerCase())
+  }
+
+  function isUnlockedLocale(id) {
+    return unlockedSet.has(String(id || '').trim().toLowerCase())
+  }
+
+  function isActiveLocale(id) {
+    return activeId === String(id || '').trim().toLowerCase()
+  }
 
   useEffect(() => {
     if (!open) return undefined
@@ -59,7 +82,7 @@ export default function PrimaNotaLocalePicker({
   }, [open])
 
   function requiresCodeBeforeOpen(id) {
-    return protectedSlugs.includes(id)
+    return isProtectedLocale(id) && !isUnlockedLocale(id)
   }
 
   useEffect(() => {
@@ -68,17 +91,18 @@ export default function PrimaNotaLocalePicker({
     setPendingLocaleId(id)
     setPendingCode('')
     setCodePromptError('')
-  }, [autoPromptLocaleId, protectedSlugs])
+  }, [autoPromptLocaleId, protectedSlugs, unlockedSlugs])
 
   function handlePick(id) {
+    // Seleziona subito (verde), poi chiedi il codice se il registro è ancora chiuso.
+    if (!isActiveLocale(id)) onSelect(id)
     if (requiresCodeBeforeOpen(id)) {
       setPendingLocaleId(id)
       setPendingCode('')
       setCodePromptError('')
       return
     }
-    if (id === activeActivity) return
-    onSelect(id)
+    setPendingLocaleId('')
     setOpen(false)
   }
 
@@ -110,21 +134,43 @@ export default function PrimaNotaLocalePicker({
   function handleReload() {
     const fresh = loadPrimaNotaLocales()
     onLocalesChange(fresh)
-    onNotify?.('Elenco locali ricaricato')
+    onNotify?.('Elenco registri ricaricato')
+  }
+
+  function handleGenerateCode() {
+    const current = normalizeLocaleAccessCode(localeAccessCode)
+    const alreadyHasCode = isValidLocaleAccessCode(current) || isProtectedLocale(activeActivity)
+    if (alreadyHasCode) {
+      const ok = window.confirm(
+        `Per il registro «${currentLabel}» esiste già un codice.\n\nSei sicuro di voler cambiare codice?`,
+      )
+      if (!ok) return
+    }
+    onLocaleAccessCodeChange?.(generateLocaleAccessCode())
   }
 
   function handleAddLocale(e) {
     e.preventDefault()
     const label = newLocaleName.trim()
     if (!label) {
-      onNotify?.('Inserisci il nome del locale')
+      onNotify?.('Inserisci il nome del registro')
       return
     }
     const id = slugifyLocaleLabel(label)
-    if (DEFAULT_PRIMA_NOTA_LOCALES.some((l) => l.id === id) || locales.some((l) => l.id === id)) {
-      onNotify?.('Questo locale esiste già: selezionalo dall’elenco')
+    if (locales.some((l) => l.id === id)) {
+      onNotify?.('Questo registro esiste già: selezionalo dall’elenco')
       handlePick(id)
       setNewLocaleName('')
+      return
+    }
+    const hiddenBuiltin = DEFAULT_PRIMA_NOTA_LOCALES.find((l) => l.id === id)
+    if (hiddenBuiltin) {
+      const next = restoreHiddenLocaleById(id)
+      onLocalesChange(next)
+      onSelect(id)
+      setNewLocaleName('')
+      setOpen(false)
+      onNotify?.(`Registro «${hiddenBuiltin.label}» ripristinato`)
       return
     }
     const next = [...locales, { id, label, builtin: false }]
@@ -133,57 +179,105 @@ export default function PrimaNotaLocalePicker({
     onSelect(id)
     setNewLocaleName('')
     setOpen(false)
-    onNotify?.(`Locale «${label}» salvato`)
+    onNotify?.(`Registro «${label}» salvato`)
   }
 
   async function handleDeleteLocale(loc) {
-    if (!loc || loc.builtin) return
+    if (!loc?.id) {
+      onNotify?.('Seleziona un registro da eliminare.')
+      return
+    }
     const ok = await onDeleteCustomLocale?.(loc)
     if (ok) setOpen(false)
   }
 
+  async function handleDeleteActiveRegister() {
+    const active = locales.find((loc) => isActiveLocale(loc.id))
+    if (!active) {
+      onNotify?.('Seleziona un registro da eliminare.')
+      return
+    }
+    await handleDeleteLocale(active)
+  }
+
+  const canDeleteActiveRegister = Boolean(locales.find((loc) => isActiveLocale(loc.id)))
+
   return (
     <div ref={rootRef} className="prima-nota-locale-picker card">
       <div className="prima-nota-locale-header">
-        <span className="prima-nota-locale-trigger-title">Locali prima nota</span>
+        <span className="prima-nota-locale-trigger-title">Registri prima nota</span>
         <span className="prima-nota-locale-active-label">
-          Locale attivo: <strong>{currentLabel}</strong>
+          Registro attivo: <strong>{currentLabel}</strong>
           {activeRequiresCode ? <span className="prima-nota-locale-custom-tag"> protetto</span> : null}
         </span>
       </div>
 
-      <div className="prima-nota-locale-buttons" role="listbox" aria-label="Seleziona locale">
-        {locales.map((loc) => (
+      <div className="prima-nota-locale-buttons" role="listbox" aria-label="Seleziona registro">
+        {locales.map((loc) => {
+          const active = isActiveLocale(loc.id)
+          const protectedLocale = isProtectedLocale(loc.id)
+          const locked = protectedLocale && !isUnlockedLocale(loc.id)
+          const pending = String(pendingLocaleId || '').trim().toLowerCase() === String(loc.id || '').trim().toLowerCase()
+          // Risacca: contorno unito come i registri normali (niente tratteggio).
+          const solidOutline = String(loc.id || '').trim().toLowerCase() === 'risacca'
+          const showProtectedStyle = protectedLocale && !solidOutline
+          return (
           <button
             key={loc.id}
             type="button"
-            className={`prima-nota-locale-btn${activeActivity === loc.id ? ' is-active' : ''}${protectedSlugs.includes(loc.id) ? ' is-protected' : ''}`}
+            className={[
+              'prima-nota-locale-btn',
+              active ? 'is-active' : '',
+              showProtectedStyle ? 'is-protected' : '',
+              showProtectedStyle && locked ? 'is-locked' : '',
+              pending && !solidOutline ? 'is-pending' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
             onClick={() => handlePick(loc.id)}
             role="option"
-            aria-selected={activeActivity === loc.id}
+            aria-selected={active}
             title={
-              protectedSlugs.includes(loc.id)
-                ? 'Locale protetto: inserisci il codice a 6 cifre per aprire il registro'
+              protectedLocale
+                ? locked
+                  ? 'Registro protetto: inserisci il codice a 6 cifre per aprire il registro'
+                  : 'Registro protetto (registro aperto)'
                 : undefined
             }
           >
             {loc.label}
             {!loc.builtin && <span className="prima-nota-locale-custom-tag">personalizzato</span>}
-            {protectedSlugs.includes(loc.id) ? (
-              <span className="prima-nota-locale-custom-tag">codice</span>
+            {protectedLocale && !solidOutline ? (
+              <span className="prima-nota-locale-custom-tag">{locked ? 'codice' : 'aperto'}</span>
             ) : null}
           </button>
-        ))}
+          )
+        })}
         {!operatorMode ? (
-          <button
-            type="button"
-            className={`prima-nota-locale-btn prima-nota-locale-btn-manage${open ? ' is-open' : ''}`}
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-controls="prima-nota-locale-manage-panel"
-          >
-            {open ? 'Chiudi gestione' : '+ Altro locale'}
-          </button>
+          <>
+            <button
+              type="button"
+              className={`prima-nota-locale-btn prima-nota-locale-btn-manage${open ? ' is-open' : ''}`}
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              aria-controls="prima-nota-locale-manage-panel"
+            >
+              {open ? 'Chiudi' : 'Aggiungi registro'}
+            </button>
+            <button
+              type="button"
+              className="prima-nota-locale-btn prima-nota-locale-btn-delete"
+              onClick={() => void handleDeleteActiveRegister()}
+              disabled={deleteBusy || !canDeleteActiveRegister}
+              title={
+                canDeleteActiveRegister
+                  ? `Elimina il registro selezionato «${currentLabel}»`
+                  : 'Seleziona un registro da eliminare'
+              }
+            >
+              {deleteBusy ? 'Elimino…' : 'Elimina registro'}
+            </button>
+          </>
         ) : null}
       </div>
 
@@ -222,7 +316,8 @@ export default function PrimaNotaLocalePicker({
             <button
               type="button"
               className="btn btn-outline-secondary btn-sm"
-              onClick={() => onLocaleAccessCodeChange?.(generateLocaleAccessCode())}
+              onClick={handleGenerateCode}
+              title="Genera un nuovo codice a 6 cifre"
             >
               Genera
             </button>
@@ -313,11 +408,12 @@ export default function PrimaNotaLocalePicker({
       {open && !operatorMode ? (
         <div id="prima-nota-locale-manage-panel" className="prima-nota-locale-panel">
           <p className="prima-nota-locale-panel-hint">
-            Aggiungi un locale personalizzato, imposta il codice di accesso per gli operatori o elimina un locale creato per errore.
+            Aggiungi un registro. Per eliminarne uno esistente (anche predefinito), selezionalo nell’elenco e usa{' '}
+            <strong>Elimina registro</strong>.
           </p>
 
           <form className="prima-nota-locale-add" onSubmit={handleAddLocale}>
-            <label htmlFor="prima-nota-new-locale">Aggiungi locale</label>
+            <label htmlFor="prima-nota-new-locale">Nome nuovo registro</label>
             <div className="prima-nota-locale-add-row">
               <input
                 id="prima-nota-new-locale"
@@ -336,7 +432,7 @@ export default function PrimaNotaLocalePicker({
 
           {customLocales.length > 0 ? (
             <div className="prima-nota-locale-delete-list">
-              <label>Locali personalizzati</label>
+              <label>Registri personalizzati</label>
               <ul className="prima-nota-locale-delete-items">
                 {customLocales.map((loc) => (
                   <li key={loc.id} className="prima-nota-locale-delete-item">
