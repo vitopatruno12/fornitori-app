@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { fetchDashboardSummary } from '../services/dashboardService'
+import { fetchAnalyticsSnapshot } from '../services/analyticsService'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import { useOffline } from '../offline/OfflineContext'
 import { getCachedResponseWithMeta } from '../offline/offlineCache'
@@ -169,6 +171,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   const [error, setError] = useState('')
   const [cachedAt, setCachedAt] = useState(null)
   const [windowMonths, setWindowMonths] = useState('6')
+  const [analisiSnap, setAnalisiSnap] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -208,6 +211,22 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
       cancelled = true
     }
   }, [online])
+
+  useEffect(() => {
+    if (operatorMode || !online) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const snap = await fetchAnalyticsSnapshot({ months: 3 })
+        if (!cancelled) setAnalisiSnap(snap)
+      } catch {
+        if (!cancelled) setAnalisiSnap(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [online, operatorMode])
 
   const monthlyRows = useMemo(() => {
     const all = data?.flussi_mensili || []
@@ -347,6 +366,42 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               ) : null}
             </div>
           </section>
+
+          {!operatorMode && analisiSnap ? (
+            <section className="card analisi-home-card" aria-label="Analisi vendite oggi">
+              <div className="analisi-home-card-grid">
+                <div>
+                  <p className="analisi-kicker">Analisi · VNE</p>
+                  <h2 className="analisi-home-title">Vendite di oggi</h2>
+                  <p className="analisi-home-peak">{analisiSnap.picco_previsto?.message || 'Picco previsto in elaborazione.'}</p>
+                </div>
+                <div className="analisi-home-metrics">
+                  <div>
+                    <div className="dashboard-kpi-label">Incasso oggi</div>
+                    <div className="dashboard-kpi-value">{eur(analisiSnap.incasso_oggi)}</div>
+                  </div>
+                  <div>
+                    <div className="dashboard-kpi-label">Operazioni</div>
+                    <div className="dashboard-kpi-value">{analisiSnap.movimenti_oggi}</div>
+                  </div>
+                  <div>
+                    <div className="dashboard-kpi-label">Fascia picco</div>
+                    <div className="dashboard-kpi-value" style={{ fontSize: '1.1rem' }}>
+                      {analisiSnap.picco_previsto?.slot_label || '—'}
+                    </div>
+                  </div>
+                </div>
+                <div className="analisi-home-actions">
+                  <Link to="/analisi" className="btn btn-primary btn-sm">
+                    Apri analisi
+                  </Link>
+                  <Link to="/analisi/oraria" className="btn btn-secondary btn-sm">
+                    Heatmap oraria
+                  </Link>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {(pendingOrders.length > 0) && (
             <section

@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from './api'
+import { apiFetch, apiUrl, API_BASE_URL } from './api'
 
 export async function fetchInvoices(params = {}) {
   const searchParams = new URLSearchParams()
@@ -8,6 +8,10 @@ export async function fetchInvoices(params = {}) {
   const query = searchParams.toString()
   const path = query ? `/invoices?${query}` : '/invoices'
   return apiFetch(path)
+}
+
+export async function fetchInvoicesAnalyticsSummary() {
+  return apiFetch('/invoices/analytics/summary')
 }
 
 export async function createInvoice(formData) {
@@ -22,27 +26,27 @@ export async function createInvoice(formData) {
 }
 
 export async function updateInvoice(id, formData) {
-  const response = await fetch(`${API_BASE_URL}/invoices/${id}`, {
+  const response = await fetch(apiUrl(`/invoices/${id}`), {
     method: 'PUT',
     body: formData,
   })
   if (!response.ok) {
-    throw new Error('Errore nell\'aggiornamento fattura')
+    throw new Error("Errore nell'aggiornamento fattura")
   }
   return response.json()
 }
 
 export async function deleteInvoice(id) {
-  const response = await fetch(`${API_BASE_URL}/invoices/${id}`, {
+  const response = await fetch(apiUrl(`/invoices/${id}`), {
     method: 'DELETE',
   })
   if (!response.ok) {
-    throw new Error('Errore nell\'eliminazione fattura')
+    throw new Error("Errore nell'eliminazione fattura")
   }
 }
 
 export async function markInvoicePaid(id) {
-  const response = await fetch(`${API_BASE_URL}/invoices/${id}/mark-paid`, {
+  const response = await fetch(apiUrl(`/invoices/${id}/mark-paid`), {
     method: 'POST',
   })
   if (!response.ok) {
@@ -52,9 +56,10 @@ export async function markInvoicePaid(id) {
 }
 
 export async function setInvoiceIgnored(id, ignored) {
-  const response = await fetch(`${API_BASE_URL}/invoices/${id}/ignore?ignored=${ignored ? 'true' : 'false'}`, {
-    method: 'POST',
-  })
+  const response = await fetch(
+    apiUrl(`/invoices/${id}/ignore?ignored=${ignored ? 'true' : 'false'}`),
+    { method: 'POST' },
+  )
   if (!response.ok) {
     throw new Error('Errore aggiornamento scadenziario')
   }
@@ -68,22 +73,45 @@ export function getInvoicesExportUrl(supplierId) {
   return `${API_BASE_URL}/invoices/export/csv${q ? '?' + q : ''}`
 }
 
-export async function fetchArubaReceivedInvoices(params = {}) {
+export async function postSdiReceiveXml(file, messageId = '') {
+  const xmlText = await file.text()
+  const headers = { 'Content-Type': 'application/xml; charset=utf-8' }
+  if (messageId) headers['X-SDI-Message-Id'] = messageId
+  const response = await fetch(apiUrl('/sdi/receive'), {
+    method: 'POST',
+    body: xmlText,
+    headers,
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || 'Errore import XML SDI')
+  }
+  const ct = response.headers.get('content-type') || ''
+  if (ct.includes('application/json')) return response.json()
+  return { ok: true }
+}
+
+export async function fetchSdiStatus() {
+  return apiFetch('/sdi/status')
+}
+
+export async function fetchSdiReceivedInvoices(params = {}) {
   const search = new URLSearchParams()
   if (params.days) search.append('days', String(params.days))
-  if (params.size) search.append('size', String(params.size))
   const query = search.toString()
-  const path = query ? `/aruba/invoices/received?${query}` : '/aruba/invoices/received'
+  const path = query ? `/sdi/invoices/received?${query}` : '/sdi/invoices/received'
   return apiFetch(path)
 }
 
-export function getArubaInvoiceDownloadUrl(filename, kind = 'xml') {
-  const search = new URLSearchParams({ filename: String(filename), kind: String(kind) })
-  return apiUrl(`/aruba/invoices/download?${search.toString()}`)
+export function getSdiInvoiceDownloadUrl(invoiceId) {
+  return apiUrl(`/sdi/invoices/${invoiceId}/download`)
 }
 
-export async function assignArubaInvoiceSection(filename, section) {
-  const search = new URLSearchParams({ filename: String(filename), section: String(section) })
-  return apiFetch(`/aruba/invoices/assign?${search.toString()}`, { method: 'POST' })
+export async function assignSdiInvoiceSection(invoiceId, section) {
+  const search = new URLSearchParams({
+    invoice_id: String(invoiceId),
+    section: String(section),
+  })
+  return apiFetch(`/sdi/invoices/assign?${search.toString()}`, { method: 'POST' })
 }
 
