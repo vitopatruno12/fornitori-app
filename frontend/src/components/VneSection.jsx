@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import VneWorkbookGrid from './VneWorkbookGrid.jsx'
 import VneFilterWorkbook from './VneFilterWorkbook.jsx'
-import { AnalisiLoadingBar } from './AnalisiShared.jsx'
+import { AnalisiLoadingBar, VneStatusSemaphore, resolveVneSemaphoreLight } from './AnalisiShared.jsx'
 import {
   VNE_CLOSINGS_COLUMNS,
   VNE_CLOSINGS_WORKBOOK_TITLE,
@@ -116,6 +116,13 @@ export default function VneSection({ embedded = false }) {
           : col,
       ),
     [],
+  )
+  const semaphoreLight = useMemo(
+    () =>
+      resolveVneSemaphoreLight([error, healthWarning], {
+        hasOffline: Object.values(modelConnectivity || {}).some((v) => v === 'offline'),
+      }),
+    [error, healthWarning, modelConnectivity],
   )
 
   useEffect(() => {
@@ -389,8 +396,7 @@ export default function VneSection({ embedded = false }) {
         </>
       )}
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {healthWarning && <div className="alert alert-warning">{healthWarning}</div>}
+      {!loadingModels && <VneStatusSemaphore light={semaphoreLight} />}
 
       <section className="card vne-chiusure-style">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.65rem' }}>

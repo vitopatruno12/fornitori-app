@@ -124,6 +124,64 @@ export function AnalisiSyncStatus({ loading, refreshing, lastSyncAt }) {
   return <p className="analisi-sync-meta">Aggiornato: {when}</p>
 }
 
+/** Classifica semaforo VNE: green / yellow / red. */
+export function resolveVneSemaphoreLight(messages = [], { emptyFail = false, hasOffline = false } = {}) {
+  const items = (Array.isArray(messages) ? messages : [messages])
+    .map((w) => String(w || '').trim())
+    .filter(Boolean)
+  const blob = items.join('\n').toLowerCase()
+  const hardError =
+    emptyFail ||
+    /403|forbidden|accesso negato|credenzial|csrf|http error|errore query|non validi|sessione/.test(blob)
+  const delayed =
+    /timeout|rallent|ritardo|non accessibile|lenta|504|troppo lenta|offline|connessione/.test(blob) ||
+    hasOffline ||
+    (items.length > 0 && !hardError)
+
+  if (hardError) return 'red'
+  if (delayed) return 'yellow'
+  return 'green'
+}
+
+/** Semaforo stato VNE: verde ok, giallo ritardo, rosso errore. */
+export function VneStatusSemaphore({ light = 'green', show = true }) {
+  if (!show) return null
+  const labels = {
+    green: 'Operativo',
+    yellow: 'Rallentamento o in ritardo',
+    red: 'Errore',
+  }
+  const active = light === 'yellow' || light === 'red' ? light : 'green'
+
+  return (
+    <div
+      className={`analisi-vne-semaphore analisi-vne-semaphore--${active}`}
+      role="status"
+      aria-label={`Stato VNE: ${labels[active]}`}
+    >
+      <div className="analisi-vne-semaphore-housing" aria-hidden>
+        <span className={`analisi-vne-light analisi-vne-light--red${active === 'red' ? ' is-on' : ''}`} />
+        <span className={`analisi-vne-light analisi-vne-light--yellow${active === 'yellow' ? ' is-on' : ''}`} />
+        <span className={`analisi-vne-light analisi-vne-light--green${active === 'green' ? ' is-on' : ''}`} />
+      </div>
+      <ul className="analisi-vne-semaphore-legend">
+        <li className={active === 'green' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--green" />
+          Verde — operativo
+        </li>
+        <li className={active === 'yellow' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--yellow" />
+          Giallo — rallentamento o in ritardo
+        </li>
+        <li className={active === 'red' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--red" />
+          Rosso — errore
+        </li>
+      </ul>
+    </div>
+  )
+}
+
 export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label' }) {
   if (!rows?.length) return <p className="empty-state">Nessun dato disponibile nel periodo.</p>
   const max = Math.max(1, ...rows.map((r) => Number(r[valueKey] || 0)))
