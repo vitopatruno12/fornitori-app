@@ -24,7 +24,9 @@ VNE_HEALTH_MAX_TOTAL_SEC = float(os.getenv("VNE_HEALTH_MAX_TOTAL_SEC", "75"))
 VNE_HEALTH_PER_MODEL_SEC = float(os.getenv("VNE_HEALTH_PER_MODEL_SEC", "18"))
 VNE_STATUS_REFERER_RETRY_MAX = int(os.getenv("VNE_STATUS_REFERER_RETRY_MAX", "3"))
 VNE_REQUEST_MAX_SEC = float(os.getenv("VNE_REQUEST_MAX_SEC", os.getenv("VNE_STATUS_MAX_TOTAL_SEC", "40")))
-VNE_ANALYTICS_MAX_TOTAL_SEC = float(os.getenv("VNE_ANALYTICS_MAX_TOTAL_SEC", "120"))
+VNE_ANALYTICS_MAX_TOTAL_SEC = float(os.getenv("VNE_ANALYTICS_MAX_TOTAL_SEC", "90"))
+VNE_ANALYTICS_PER_MODEL_SEC = float(os.getenv("VNE_ANALYTICS_PER_MODEL_SEC", "28"))
+VNE_ANALYTICS_OVERALL_SEC = float(os.getenv("VNE_ANALYTICS_OVERALL_SEC", "75"))
 
 
 @dataclass
@@ -1688,14 +1690,18 @@ def _post_vne_filtered_page(
     base_ref: str,
     feature_label: str,
 ) -> str:
-    """POST filtri VNE; su 403/macchina bloccata rinnova sessione e ritenta una volta."""
-    # CSRF cookie e Origin devono condividere lo stesso host del POST.
+    """POST filtri VNE; su 403 prova host alternativo poi rinnova sessione una volta."""
     aligned_post = _align_url_origin(post_url, filter_url) or post_url
     post_candidates: List[str] = []
-    for u in _host_variants(aligned_post) + _host_variants(post_url):
+    for u in [aligned_post, *(_host_variants(aligned_post))]:
         if u and u not in post_candidates:
             post_candidates.append(u)
+    # Al massimo 2 tentativi host prima del refresh (evita timeout nginx).
+    post_candidates = post_candidates[:2]
     body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
+
+    def _do_post(target: str, sess: "_VneModelSession", ref_filter: str, payload: bytes) -> str:
+        return sess.fetch(target, referer=ref_filter, data=payload)
 
     def _refresh_and_post() -> str:
         nonlocal session, form_data, body, filter_url
@@ -1704,7 +1710,7 @@ def _post_vne_filtered_page(
             filter_url,
             referer=base_ref,
             feature_label=feature_label,
-            max_seconds=VNE_ANALYTICS_MAX_TOTAL_SEC,
+            max_seconds=min(VNE_ANALYTICS_MAX_TOTAL_SEC, VNE_ANALYTICS_PER_MODEL_SEC),
         )
         if _is_machine_blocked(filter_html):
             raise HTTPException(
@@ -1725,27 +1731,15 @@ def _post_vne_filtered_page(
             )
         form_data = [("csrfmiddlewaretoken", csrf)] + [p for p in form_data if p[0] != "csrfmiddlewaretoken"]
         body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
-        retry_posts: List[str] = []
-        for u in _host_variants(_align_url_origin(post_url, filter_url) or post_url):
-            if u and u not in retry_posts:
-                retry_posts.append(u)
-        last_retry_exc: Optional[Exception] = None
-        for candidate in retry_posts:
-            try:
-                return session.fetch(candidate, referer=filter_url, data=body)
-            except Exception as exc:
-                last_retry_exc = exc
-                continue
-        if last_retry_exc:
-            raise last_retry_exc
-        raise RuntimeError(f"POST {feature_label} VNE fallito dopo refresh sessione")
+        target = _align_url_origin(post_url, filter_url) or post_url
+        return _do_post(target, session, filter_url, body)
 
     last_exc: Optional[Exception] = None
     for candidate in post_candidates:
         try:
-            html_text = session.fetch(candidate, referer=filter_url, data=body)
+            html_text = _do_post(candidate, session, filter_url, body)
             if _is_machine_blocked(html_text):
-                html_text = _refresh_and_post()
+                return _refresh_and_post()
             return html_text
         except TimeoutError:
             raise HTTPException(status_code=504, detail=f"Timeout query {feature_label} VNE")
@@ -1777,6 +1771,49 @@ def _post_vne_filtered_page(
     if last_exc:
         raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: {last_exc}") from last_exc
     raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: risposta vuota")
+
+
+def _load_filter_page_on_session(
+    session: "_VneModelSession",
+    model: VneModelConfig,
+    filter_url: str,
+    *,
+    referer: str,
+    feature_label: str,
+) -> Tuple[str, str]:
+    """Carica pagina filtri su sessione già aperta. Ritorna (html, url_usato)."""
+    candidates: List[str] = []
+    for u in _host_variants(filter_url):
+        if u and u not in candidates:
+            candidates.append(u)
+    last_exc: Optional[Exception] = None
+    last_html = ""
+    for candidate in candidates:
+        try:
+            html_text = session.fetch(candidate, referer=referer or candidate)
+            last_html = html_text or ""
+            if _filter_page_usable(last_html):
+                return last_html, candidate
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if _is_machine_blocked(last_html):
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"{feature_label} VNE non disponibili per {model.label}: "
+                "macchina non accessibile sul portale remoto"
+            ),
+        )
+    if last_exc:
+        raise HTTPException(status_code=502, detail=f"Errore lettura pagina filtri {feature_label} VNE: {last_exc}")
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            f"{feature_label} VNE non disponibili per {model.label}: "
+            "sessione/filtri non validi (CSRF mancante)"
+        ),
+    )
 
 
 def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.request.Request, deadline: Optional[float] = None) -> bytes:
@@ -2610,6 +2647,7 @@ def collect_analytics_events(
 ) -> tuple[List[VneAnalyticsEvent], List[str]]:
     """
     Raccoglie operazioni + chiusure da tutte le macchine (o una sola).
+    Una sola sessione VNE per macchina (ops + chiusure) per restare sotto timeout nginx.
     Ritorna (events, warnings).
     """
     models = [m for m in _models() if m.status_url or m.machine_url]
@@ -2620,33 +2658,125 @@ def collect_analytics_events(
 
     events: List[VneAnalyticsEvent] = []
     warnings: List[str] = []
+    overall_deadline = time.monotonic() + VNE_ANALYTICS_OVERALL_SEC
 
     for model in models:
-        try:
-            ops = collect_model_operations(model, date_from, date_to, max_pages=max_op_pages)
-            for row in ops:
-                when = parse_vne_when_text(row.when_text)
-                if not when:
-                    continue
-                amount = float(row.value_eur or 0.0)
-                events.append(
-                    VneAnalyticsEvent(
-                        source="operation",
-                        model_id=model.id,
-                        model_label=model.label,
-                        when=when,
-                        amount=amount,
-                        label=(row.operation_type or "operazione").strip() or "operazione",
-                        when_text=row.when_text,
-                    )
-                )
-        except HTTPException as e:
-            warnings.append(f"Operazioni {model.label}: {e.detail}")
-        except Exception as e:
-            warnings.append(f"Operazioni {model.label}: {e}")
+        remaining = overall_deadline - time.monotonic()
+        if remaining < 8:
+            warnings.append(f"{model.label}: saltata (tempo analisi esaurito)")
+            continue
+
+        completed = _complete_model_config(model)
+        if not completed.sel_operazioni_url or not completed.operazioni_url:
+            warnings.append(f"Operazioni {model.label}: URL non configurati")
+            continue
+
+        per_budget = max(10.0, min(VNE_ANALYTICS_PER_MODEL_SEC, remaining - 2))
+        base_ref = _base_supervlt_referer(completed)
 
         try:
-            closings = collect_model_cash_closings(model, date_from, date_to, max_pages=max_closing_pages)
+            session, filter_html, active, filter_url = _open_model_filter_session(
+                completed,
+                completed.sel_operazioni_url,
+                referer=base_ref,
+                feature_label="Operazioni",
+                max_seconds=per_budget,
+            )
+            csrf = _csrf_from_html(filter_html)
+            form_data: List[tuple[str, str]] = []
+            if csrf:
+                form_data.append(("csrfmiddlewaretoken", csrf))
+            form_data.append(("filters", "filterData"))
+            form_data.append(("init_day_date", to_vne_day_date(date_from)))
+            form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
+            post_url = _align_url_origin(active.operazioni_url or completed.operazioni_url, filter_url)
+            html = _post_vne_filtered_page(
+                active,
+                session,
+                filter_url=filter_url,
+                post_url=post_url,
+                form_data=form_data,
+                base_ref=base_ref,
+                feature_label="Operazioni",
+            )
+            if not _is_machine_blocked(html):
+                ops = _follow_vne_next_pages(
+                    session,
+                    html,
+                    base_url=post_url,
+                    parse_rows=_parse_operations_rows,
+                    max_pages=max_op_pages,
+                )
+                for row in ops:
+                    when = parse_vne_when_text(row.when_text)
+                    if not when:
+                        continue
+                    amount = float(row.value_eur or 0.0)
+                    events.append(
+                        VneAnalyticsEvent(
+                            source="operation",
+                            model_id=model.id,
+                            model_label=model.label,
+                            when=when,
+                            amount=amount,
+                            label=(row.operation_type or "operazione").strip() or "operazione",
+                            when_text=row.when_text,
+                        )
+                    )
+            else:
+                warnings.append(f"Operazioni {model.label}: macchina non accessibile sul portale remoto")
+        except HTTPException as e:
+            warnings.append(f"Operazioni {model.label}: {e.detail}")
+            continue
+        except Exception as e:
+            warnings.append(f"Operazioni {model.label}: {e}")
+            continue
+
+        if time.monotonic() > overall_deadline - 5:
+            warnings.append(f"Chiusure {model.label}: saltate (tempo analisi esaurito)")
+            continue
+
+        closing_filter = active.sel_chiusure_url or completed.sel_chiusure_url
+        closing_post = active.chiusure_url or completed.chiusure_url
+        if not closing_filter or not closing_post:
+            warnings.append(f"Chiusure {model.label}: URL non configurati")
+            continue
+
+        try:
+            filter_html, filter_url = _load_filter_page_on_session(
+                session,
+                active,
+                closing_filter,
+                referer=base_ref,
+                feature_label="Chiusure",
+            )
+            csrf = _csrf_from_html(filter_html)
+            form_data = []
+            if csrf:
+                form_data.append(("csrfmiddlewaretoken", csrf))
+            form_data.append(("filters", "filterData"))
+            form_data.append(("init_day_date", to_vne_day_date(date_from)))
+            form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
+            post_url = _align_url_origin(closing_post, filter_url)
+            html = _post_vne_filtered_page(
+                active,
+                session,
+                filter_url=filter_url,
+                post_url=post_url,
+                form_data=form_data,
+                base_ref=base_ref,
+                feature_label="Chiusure",
+            )
+            if _is_machine_blocked(html):
+                warnings.append(f"Chiusure {model.label}: macchina non accessibile sul portale remoto")
+                continue
+            closings = _follow_vne_next_pages(
+                session,
+                html,
+                base_url=post_url,
+                parse_rows=_parse_cash_closing_rows,
+                max_pages=max_closing_pages,
+            )
             for row in closings:
                 when = parse_vne_when_text(row.when_text)
                 if not when:

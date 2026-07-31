@@ -521,8 +521,8 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
         date_from=date_from,
         date_to=today,
         model_id=mid,
-        max_op_pages=8,
-        max_closing_pages=8,
+        max_op_pages=4,
+        max_closing_pages=4,
     )
 
     snap = _snapshot_from_events(
