@@ -53,32 +53,57 @@ export function AnalisiPageShell({ title, lead, children, actions = null }) {
   )
 }
 
-/** Barra progresso indeterminata (caricamento / sync VNE). */
+/** Barra di caricamento classica con percentuale. */
 export function AnalisiLoadingBar({
   active = false,
   variant = 'primary',
-  label = '',
+  label = 'Caricamento',
 }) {
+  const [percent, setPercent] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!active) {
+      setPercent(0)
+      return undefined
+    }
+    setPercent(6)
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - started
+      // sale verso ~92% in modo asintotico mentre aspetta VNE
+      const next = Math.min(92, Math.round(6 + (1 - Math.exp(-elapsed / 4500)) * 86))
+      setPercent(next)
+    }, 120)
+    return () => window.clearInterval(timer)
+  }, [active])
+
   if (!active) return null
+
   return (
     <div
-      className={`analisi-progress analisi-progress--${variant}`}
+      className={`analisi-progress-card analisi-progress-card--${variant}`}
       role="progressbar"
       aria-busy="true"
-      aria-valuetext={label || 'Caricamento in corso'}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+      aria-label={label}
     >
-      <div className="analisi-progress-track">
-        <div className="analisi-progress-fill" />
+      <div className="analisi-progress-head">
+        <span className="analisi-progress-title">{label}</span>
+        <strong className="analisi-progress-percent">{percent}%</strong>
       </div>
-      {label ? <span className="analisi-progress-label">{label}</span> : null}
+      <div className="analisi-progress-track">
+        <div className="analisi-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
     </div>
   )
 }
 
-/** Stato sync: barra se in corso, altrimenti solo orario ultimo aggiornamento. */
+/** Stato sync: barra percentuale se in corso, altrimenti orario ultimo aggiornamento. */
 export function AnalisiSyncStatus({ loading, refreshing, lastSyncAt }) {
   const busy = Boolean(loading || refreshing)
-  const label = (() => {
+  const when = (() => {
     if (!lastSyncAt) return ''
     const d = new Date(lastSyncAt)
     if (Number.isNaN(d.getTime())) return ''
@@ -90,13 +115,13 @@ export function AnalisiSyncStatus({ loading, refreshing, lastSyncAt }) {
       <AnalisiLoadingBar
         active
         variant={loading ? 'primary' : 'subtle'}
-        label={loading ? 'Sincronizzazione dati VNE' : 'Aggiornamento in corso'}
+        label={loading ? 'Caricamento dati VNE' : 'Aggiornamento dati'}
       />
     )
   }
 
-  if (!label) return null
-  return <p className="analisi-sync-meta">Aggiornato: {label}</p>
+  if (!when) return null
+  return <p className="analisi-sync-meta">Aggiornato: {when}</p>
 }
 
 export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label' }) {
