@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import VneWorkbookGrid from './VneWorkbookGrid.jsx'
 import VneFilterWorkbook from './VneFilterWorkbook.jsx'
+import { AnalisiLoadingBar } from './AnalisiShared.jsx'
 import {
   VNE_CLOSINGS_COLUMNS,
   VNE_CLOSINGS_WORKBOOK_TITLE,
@@ -163,7 +164,9 @@ export default function VneSection({ embedded = false }) {
       const hasStatusData = hasUsableStatusData(data)
       const blockedByPortal =
         excerpt.includes('impossibile accedere alla macchina') ||
-        excerpt.includes('imposible acceder a la maquina')
+        excerpt.includes('imposible acceder a la maquina') ||
+        excerpt.includes('não se consegue acesso') ||
+        excerpt.includes('nao se consegue acesso')
 
       if (blockedByPortal && !hasStatusData) {
         setStatus(null)
@@ -420,7 +423,7 @@ export default function VneSection({ embedded = false }) {
       <section className="card">
         <h2 className="page-subheader" style={{ marginTop: 0 }}>Modelli VNE</h2>
         {loadingModels ? (
-          <p className="loading">Caricamento modelli…</p>
+          <AnalisiLoadingBar active label="Caricamento modelli VNE" />
         ) : (
           <div className="support-tech-grid">
             {models.map((m) => (
@@ -534,7 +537,7 @@ export default function VneSection({ embedded = false }) {
             title={VNE_MACHINES_WORKBOOK_TITLE}
             sheetLabel={
               loadingMachines
-                ? 'Caricamento…'
+                ? 'Aggiornamento…'
                 : machineRows.length > 0
                   ? `${machineRows.length} macchine`
                   : 'Nessuna macchina'
@@ -546,6 +549,7 @@ export default function VneSection({ embedded = false }) {
             totals={machineRows}
             gridClassName="vne-machines-grid"
             loading={loadingMachines}
+            loadingLabel="Lettura stato macchine VNE"
             emptyMessage="Nessuna macchina VNE configurata."
             rowKey={(row) => row.model_id}
             onRowClick={openMachineFromOverview}
@@ -577,7 +581,9 @@ export default function VneSection({ embedded = false }) {
           {!selected?.contabilita_url && (
             <p className="empty-state">Contabilita non configurata per questo modello.</p>
           )}
-          {loadingContabilita && <p className="loading">Caricamento contabilita…</p>}
+          {loadingContabilita && (
+            <AnalisiLoadingBar active label="Lettura contabilità VNE" variant="subtle" />
+          )}
           {!selected?.contabilita_url ? null : !loadingContabilita && !contabilita && (
             <p className="empty-state">Nessun dato contabilita disponibile.</p>
           )}
@@ -622,9 +628,11 @@ export default function VneSection({ embedded = false }) {
             Macchina: <strong>{selectedDisplayName}</strong>
           </p>
           {!status && !loadingStatus && <p className="empty-state">Nessun dato disponibile.</p>}
-          {loadingStatus && <p className="loading">Lettura stato da VNE…</p>}
+          {loadingStatus && (
+            <AnalisiLoadingBar active label="Lettura stato VNE" variant="subtle" />
+          )}
 
-          {status && (
+          {status && !loadingStatus && (
             <VneWorkbookGrid
               title={status.title || 'Stato'}
               sheetLabel={`${statusRows.length} attributi · ${selectedDisplayName}`}
@@ -785,7 +793,7 @@ export default function VneSection({ embedded = false }) {
               title={VNE_OPERATIONS_WORKBOOK_TITLE}
               sheetLabel={
                 loadingOps
-                  ? 'Caricamento…'
+                  ? 'Aggiornamento…'
                   : opsRows.length > 0
                     ? `${opsRows.length} operazioni`
                     : 'Nessuna operazione'
@@ -797,6 +805,7 @@ export default function VneSection({ embedded = false }) {
               totals={operationsTotals}
               gridClassName="vne-operations-grid"
               loading={loadingOps}
+              loadingLabel="Lettura operazioni VNE"
               emptyMessage={
                 !selected?.sel_operazioni_url
                   ? 'Operazioni non configurate per questo modello.'
@@ -927,7 +936,7 @@ export default function VneSection({ embedded = false }) {
               title={VNE_CLOSINGS_WORKBOOK_TITLE}
               sheetLabel={
                 loadingClosings
-                  ? 'Caricamento…'
+                  ? 'Aggiornamento…'
                   : closingRows.length > 0
                     ? `${closingRows.length} chiusure`
                     : 'Nessuna chiusura'
@@ -939,6 +948,7 @@ export default function VneSection({ embedded = false }) {
               totals={closingsTotals}
               gridClassName="vne-closings-grid"
               loading={loadingClosings}
+              loadingLabel="Lettura chiusure VNE"
               emptyMessage={
                 !selected?.sel_chiusure_url
                   ? 'Chiusure non configurate per questo modello.'

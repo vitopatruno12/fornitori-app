@@ -1,5 +1,6 @@
 import React from 'react'
 import WorkbookGrid from './WorkbookGrid.jsx'
+import { AnalisiLoadingBar } from './AnalisiShared.jsx'
 import {
   downloadVneTableCsv,
   downloadVneTableExcel,
@@ -17,6 +18,7 @@ export default function VneWorkbookGrid({
   title,
   sheetLabel = '',
   loading = false,
+  loadingLabel = 'Lettura dati VNE',
   ...rest
 }) {
   const canExport = exportEnabled && !loading && Array.isArray(rows) && rows.length > 0
@@ -69,17 +71,22 @@ export default function VneWorkbookGrid({
   ) : null
 
   return (
-    <WorkbookGrid
-      title={title}
-      sheetLabel={sheetLabel}
-      columns={columns}
-      rows={rows}
-      cellValue={cellValue}
-      totalsLabel={totalsLabel}
-      totals={totals}
-      loading={loading}
-      toolbarActions={toolbarActions}
-      {...rest}
-    />
+    <>
+      <AnalisiLoadingBar active={Boolean(loading)} label={loadingLabel} variant="subtle" />
+      {(!loading || (Array.isArray(rows) && rows.length > 0)) && (
+        <WorkbookGrid
+          title={title}
+          sheetLabel={loading ? 'Aggiornamento…' : sheetLabel}
+          columns={columns}
+          rows={rows}
+          cellValue={cellValue}
+          totalsLabel={totalsLabel}
+          totals={totals}
+          loading={false}
+          toolbarActions={toolbarActions}
+          {...rest}
+        />
+      )}
+    </>
   )
 }
