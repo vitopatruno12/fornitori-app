@@ -6195,6 +6195,26 @@ select.form-control {
   box-shadow: 0 8px 22px rgba(15, 20, 27, 0.28);
 }
 
+.vne-semaphore-wrap {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 0 1rem;
+}
+
+.vne-legacy-skin .vne-semaphore-wrap {
+  margin: 0.25rem 0 1.1rem;
+}
+
+.vne-legacy-skin .analisi-vne-semaphore {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  max-width: 460px;
+  width: 100%;
+  border: 1px solid #334155;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
+}
+
 .analisi-vne-semaphore-housing {
   display: flex;
   flex-direction: column;
@@ -6265,6 +6285,19 @@ select.form-control {
   color: rgba(248, 250, 252, 0.55);
   font-size: 0.8rem;
   line-height: 1.25;
+}
+
+.analisi-vne-semaphore-copy {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.analisi-vne-semaphore-title {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .analisi-vne-semaphore-legend li {

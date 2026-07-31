@@ -396,7 +396,9 @@ export default function VneSection({ embedded = false }) {
         </>
       )}
 
-      {!loadingModels && <VneStatusSemaphore light={semaphoreLight} />}
+      <div className="vne-semaphore-wrap" aria-live="polite">
+        <VneStatusSemaphore light={loadingModels ? 'yellow' : semaphoreLight} show />
+      </div>
 
       <section className="card vne-chiusure-style">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.65rem' }}>

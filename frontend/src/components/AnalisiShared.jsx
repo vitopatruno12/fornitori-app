@@ -164,20 +164,23 @@ export function VneStatusSemaphore({ light = 'green', show = true }) {
         <span className={`analisi-vne-light analisi-vne-light--yellow${active === 'yellow' ? ' is-on' : ''}`} />
         <span className={`analisi-vne-light analisi-vne-light--green${active === 'green' ? ' is-on' : ''}`} />
       </div>
-      <ul className="analisi-vne-semaphore-legend">
-        <li className={active === 'green' ? 'is-active' : ''}>
-          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--green" />
-          Verde — operativo
-        </li>
-        <li className={active === 'yellow' ? 'is-active' : ''}>
-          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--yellow" />
-          Giallo — rallentamento o in ritardo
-        </li>
-        <li className={active === 'red' ? 'is-active' : ''}>
-          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--red" />
-          Rosso — errore
-        </li>
-      </ul>
+      <div className="analisi-vne-semaphore-copy">
+        <strong className="analisi-vne-semaphore-title">Stato collegamento VNE</strong>
+        <ul className="analisi-vne-semaphore-legend">
+          <li className={active === 'green' ? 'is-active' : ''}>
+            <span className="analisi-vne-legend-dot analisi-vne-legend-dot--green" />
+            Verde — operativo
+          </li>
+          <li className={active === 'yellow' ? 'is-active' : ''}>
+            <span className="analisi-vne-legend-dot analisi-vne-legend-dot--yellow" />
+            Giallo — rallentamento o in ritardo
+          </li>
+          <li className={active === 'red' ? 'is-active' : ''}>
+            <span className="analisi-vne-legend-dot analisi-vne-legend-dot--red" />
+            Rosso — errore
+          </li>
+        </ul>
+      </div>
     </div>
   )
 }
