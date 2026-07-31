@@ -159,43 +159,60 @@ function useAnalisiFetch(cacheKey, loader, deps = []) {
   return { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow: forceRefresh }
 }
 
-function Warnings({ items }) {
-  const [openedWarning, setOpenedWarning] = useState('')
-  if (!items?.length) return null
-  const normalizedItems = items.map((w) => String(w || '').trim()).filter(Boolean)
-  const selectedWarning = openedWarning && normalizedItems.includes(openedWarning) ? openedWarning : ''
+function classifyVneLight(warnings, data) {
+  const items = (Array.isArray(warnings) ? warnings : [])
+    .map((w) => String(w || '').trim())
+    .filter(Boolean)
+  const blob = items.join('\n').toLowerCase()
+  const hardError =
+    isFailedEmptyAnalytics(data) ||
+    /403|forbidden|accesso negato|credenzial|csrf|http error|errore query|non validi|sessione/.test(
+      blob,
+    )
+  const delayed =
+    /timeout|rallent|ritardo|non accessibile|lenta|504|troppo lenta/.test(blob) ||
+    (items.length > 0 && !hardError)
 
-  function parseWarningLabel(warningText, index) {
-    const parts = warningText.split(':')
-    if (parts.length < 2) return `Errore VNE ${index + 1}`
-    return parts.slice(0, -1).join(':').trim() || `Errore VNE ${index + 1}`
+  if (hardError) return 'red'
+  if (delayed) return 'yellow'
+  return 'green'
+}
+
+/** Semaforo stato VNE: verde ok, giallo ritardo, rosso errore. */
+function VneStatusSemaphore({ warnings, data }) {
+  if (data == null) return null
+  const light = classifyVneLight(warnings, data)
+  const labels = {
+    green: 'Operativo',
+    yellow: 'Rallentamento o in ritardo',
+    red: 'Errore',
   }
 
   return (
-    <div className="alert alert-warning" role="status">
-      <strong>Avvisi macchine VNE:</strong>
-      <div className="analisi-warning-buttons">
-        {normalizedItems.map((w, idx) => {
-          const active = selectedWarning === w
-          return (
-            <button
-              key={`${w}-${idx}`}
-              type="button"
-              className={`btn analisi-warning-btn ${active ? 'is-active' : ''}`}
-              onClick={() => setOpenedWarning(w)}
-              title="Apri dettaglio errore"
-            >
-              {parseWarningLabel(w, idx)}
-            </button>
-          )
-        })}
+    <div
+      className={`analisi-vne-semaphore analisi-vne-semaphore--${light}`}
+      role="status"
+      aria-label={`Stato VNE: ${labels[light]}`}
+    >
+      <div className="analisi-vne-semaphore-housing" aria-hidden>
+        <span className={`analisi-vne-light analisi-vne-light--red${light === 'red' ? ' is-on' : ''}`} />
+        <span className={`analisi-vne-light analisi-vne-light--yellow${light === 'yellow' ? ' is-on' : ''}`} />
+        <span className={`analisi-vne-light analisi-vne-light--green${light === 'green' ? ' is-on' : ''}`} />
       </div>
-      {selectedWarning && (
-        <div className="analisi-warning-detail" role="alert">
-          <div className="analisi-warning-detail-title">Dettaglio errore</div>
-          <div>{selectedWarning}</div>
-        </div>
-      )}
+      <ul className="analisi-vne-semaphore-legend">
+        <li className={light === 'green' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--green" />
+          Verde — operativo
+        </li>
+        <li className={light === 'yellow' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--yellow" />
+          Giallo — rallentamento o in ritardo
+        </li>
+        <li className={light === 'red' ? 'is-active' : ''}>
+          <span className="analisi-vne-legend-dot analisi-vne-legend-dot--red" />
+          Rosso — errore
+        </li>
+      </ul>
     </div>
   )
 }
@@ -203,16 +220,6 @@ function Warnings({ items }) {
 function DataNote({ text }) {
   if (!text) return null
   return <p className="analisi-note">{text}</p>
-}
-
-function EmptyVneHint({ data }) {
-  if (!isFailedEmptyAnalytics(data)) return null
-  return (
-    <div className="alert alert-warning" role="status">
-      <strong>Valori a zero:</strong> il portale VNE non ha restituito operazioni
-      (accesso negato o sessione scaduta). Controlla le credenziali in VNE e premi «Aggiorna ora».
-    </div>
-  )
 }
 
 export function AnalisiDashboardPage() {
@@ -236,8 +243,7 @@ export function AnalisiDashboardPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       <DataNote text={data?.data_note} />
 
       {loading && !snap ? (
@@ -327,10 +333,6 @@ export function AnalisiDashboardPage() {
         </div>
       )}
 
-      {snap && !machines.length && !loading && (
-        <div className="alert alert-warning">Nessuna scheda macchina disponibile. Verifica credenziali VNE.</div>
-      )}
-
       {data?.monthly?.rows?.length ? (
         <section className="card analisi-panel" style={{ marginTop: '1rem' }}>
           <h2 className="analisi-panel-title">Andamento mensile (tutte le macchine)</h2>
@@ -359,8 +361,7 @@ export function AnalisiGiornalieroPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -397,8 +398,7 @@ export function AnalisiSettimanalePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -430,8 +430,7 @@ export function AnalisiMensilePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -463,8 +462,7 @@ export function AnalisiOrariaPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <>
@@ -505,8 +503,7 @@ export function AnalisiPianificazionePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <Warnings items={data?.warnings} />
-      <EmptyVneHint data={data} />
+      <VneStatusSemaphore warnings={data?.warnings} data={data} />
       {data && (
         <>
           <p className="analisi-note">{data.note}</p>

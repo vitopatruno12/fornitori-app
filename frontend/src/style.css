@@ -6181,75 +6181,120 @@ select.form-control {
   }
 }
 
-.analisi-warning-buttons {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
-  max-width: 620px;
-}
-
-.analisi-warning-btn {
-  border: 1px solid #ca8a04;
-  background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
-  color: #78350f;
-  font-weight: 600;
-  font-size: 0.86rem;
-  border-radius: 999px;
-  padding: 0.35rem 0.7rem;
-  text-align: left;
-  letter-spacing: 0.01em;
-  box-shadow: 0 1px 5px rgba(146, 64, 14, 0.12);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-  animation: analisi-warning-blink 1.5s ease-in-out infinite;
-  min-height: 33px;
-  display: inline-flex;
+.analisi-vne-semaphore {
+  display: flex;
   align-items: center;
+  gap: 0.9rem 1.25rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  max-width: 420px;
+  border-radius: 0.75rem;
+  background: linear-gradient(145deg, #1c2430 0%, #0f141b 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 22px rgba(15, 20, 27, 0.28);
 }
 
-.analisi-warning-btn:hover {
-  background: linear-gradient(180deg, #fde68a 0%, #fcd34d 100%);
-  border-color: #92400e;
-  box-shadow: 0 4px 12px rgba(146, 64, 14, 0.22);
-  transform: translateY(-1px);
+.analisi-vne-semaphore-housing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding: 0.45rem 0.38rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2a3340 0%, #151b24 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.analisi-warning-btn.is-active {
-  background: linear-gradient(180deg, #facc15 0%, #f59e0b 100%);
-  border-color: #7c2d12;
-  color: #431407;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 4px 14px rgba(146, 64, 14, 0.28);
+.analisi-vne-light {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  opacity: 0.22;
+  filter: grayscale(0.35);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
 }
 
-.analisi-warning-detail {
-  margin-top: 0.6rem;
-  max-width: 620px;
-  border: 1px solid #fbbf24;
-  border-left: 5px solid #d97706;
-  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
-  color: #7c2d12;
-  border-radius: 0.58rem;
-  padding: 0.52rem 0.62rem;
-  font-size: 0.84rem;
-  box-shadow: 0 1px 6px rgba(120, 53, 15, 0.1);
+.analisi-vne-light--red {
+  background: radial-gradient(circle at 35% 30%, #fb7185, #b91c1c 70%);
 }
 
-.analisi-warning-detail-title {
-  font-weight: 700;
-  margin-bottom: 0.15rem;
-  font-size: 0.8rem;
+.analisi-vne-light--yellow {
+  background: radial-gradient(circle at 35% 30%, #fde68a, #d97706 70%);
 }
 
-@keyframes analisi-warning-blink {
+.analisi-vne-light--green {
+  background: radial-gradient(circle at 35% 30%, #86efac, #15803d 70%);
+}
+
+.analisi-vne-light.is-on {
+  opacity: 1;
+  filter: none;
+  animation: analisi-vne-light-pulse 1.8s ease-in-out infinite;
+}
+
+.analisi-vne-semaphore--red .analisi-vne-light--red.is-on {
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.85), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+
+.analisi-vne-semaphore--yellow .analisi-vne-light--yellow.is-on {
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.85), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+
+.analisi-vne-semaphore--green .analisi-vne-light--green.is-on {
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.75), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+
+@keyframes analisi-vne-light-pulse {
   0%,
   100% {
-    opacity: 1;
     transform: scale(1);
   }
   50% {
-    opacity: 0.8;
-    transform: scale(1.015);
+    transform: scale(1.06);
   }
+}
+
+.analisi-vne-semaphore-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.28rem;
+  color: rgba(248, 250, 252, 0.55);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.analisi-vne-semaphore-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.analisi-vne-semaphore-legend li.is-active {
+  color: #f8fafc;
+  font-weight: 650;
+}
+
+.analisi-vne-legend-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.analisi-vne-legend-dot--green {
+  background: #22c55e;
+}
+
+.analisi-vne-legend-dot--yellow {
+  background: #f59e0b;
+}
+
+.analisi-vne-legend-dot--red {
+  background: #ef4444;
 }
 
 .analisi-suggestions {
