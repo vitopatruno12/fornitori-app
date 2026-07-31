@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AnalisiPageShell, HeatmapGrid, SeriesBars, eur } from '../components/AnalisiShared.jsx'
+import {
+  AnalisiPageShell,
+  AnalisiSyncStatus,
+  HeatmapGrid,
+  SeriesBars,
+  eur,
+} from '../components/AnalisiShared.jsx'
 import {
   fetchAnalyticsDaily,
   fetchAnalyticsHourly,
@@ -55,13 +61,6 @@ function shouldRefreshAnalytics(savedAtMs) {
   if (todayKey !== savedKey && nowDate.getHours() >= ANALISI_MORNING_HOUR) return true
 
   return false
-}
-
-function fmtLastSync(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('it-IT')
 }
 
 function isFailedEmptyAnalytics(data) {
@@ -206,31 +205,18 @@ function DataNote({ text }) {
   return <p className="analisi-note">{text}</p>
 }
 
-function SyncNote({ lastSyncAt, fromCache, refreshing }) {
-  const label = fmtLastSync(lastSyncAt)
-  if (!label && !refreshing) return null
-  return (
-    <p className="analisi-note">
-      {fromCache ? 'Dati caricati subito da cache locale.' : 'Dati sincronizzati da VNE.'}
-      {label ? ` Ultimo aggiornamento: ${label}.` : ''}
-      {refreshing ? ' Aggiornamento automatico in background…' : ' Refresh automatico ogni 20 minuti.'}
-    </p>
-  )
-}
-
 function EmptyVneHint({ data }) {
   if (!isFailedEmptyAnalytics(data)) return null
   return (
     <div className="alert alert-warning" role="status">
-      <strong>Nessun dato disponibile:</strong> il portale VNE ha rifiutato le letture
-      (403/404). Per questo i totali risultano a zero. Controlla accesso/sessione VNE e
-      premi «Aggiorna ora».
+      <strong>Valori a zero:</strong> il portale VNE non ha restituito operazioni
+      (accesso negato o sessione scaduta). Controlla le credenziali in VNE e premi «Aggiorna ora».
     </div>
   )
 }
 
 export function AnalisiDashboardPage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'overview:months=3',
     () => fetchAnalyticsOverview({ months: 3 }),
     [],
@@ -243,19 +229,24 @@ export function AnalisiDashboardPage() {
       title="Dashboard Analitica"
       lead="Incassi e traffico VNE divisi per macchina: La Risacca, Mani in Pasta, Le Mucche Volanti."
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
-          {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing || loading}>
+          {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
         </button>
       }
     >
-      {loading && (
-        <p className="muted">Caricamento dal portale VNE… può richiedere fino a un minuto alla prima lettura.</p>
-      )}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />
       <DataNote text={data?.data_note} />
+
+      {loading && !snap ? (
+        <div className="analisi-skeleton-grid" aria-hidden>
+          <div className="analisi-skeleton-card" />
+          <div className="analisi-skeleton-card" />
+          <div className="analisi-skeleton-card" />
+        </div>
+      ) : null}
 
       {snap && (
         <section className="dashboard-kpi-grid analisi-kpi-grid" style={{ marginBottom: '1rem' }}>
@@ -351,7 +342,7 @@ export function AnalisiDashboardPage() {
 }
 
 export function AnalisiGiornalieroPage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'daily:days=30',
     () => fetchAnalyticsDaily({ days: 30 }),
     [],
@@ -366,8 +357,7 @@ export function AnalisiGiornalieroPage() {
         </button>
       }
     >
-      {loading && <p className="muted">Caricamento dal portale VNE…</p>}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />
@@ -390,7 +380,7 @@ export function AnalisiGiornalieroPage() {
 }
 
 export function AnalisiSettimanalePage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'weekly:weeks=12',
     () => fetchAnalyticsWeekly({ weeks: 12 }),
     [],
@@ -405,8 +395,7 @@ export function AnalisiSettimanalePage() {
         </button>
       }
     >
-      {loading && <p className="muted">Caricamento dal portale VNE…</p>}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />
@@ -424,7 +413,7 @@ export function AnalisiSettimanalePage() {
 }
 
 export function AnalisiMensilePage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'monthly:months=6',
     () => fetchAnalyticsMonthly({ months: 6 }),
     [],
@@ -439,8 +428,7 @@ export function AnalisiMensilePage() {
         </button>
       }
     >
-      {loading && <p className="muted">Caricamento dal portale VNE…</p>}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />
@@ -458,7 +446,7 @@ export function AnalisiMensilePage() {
 }
 
 export function AnalisiOrariaPage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'hourly:months=3',
     () => fetchAnalyticsHourly({ months: 3 }),
     [],
@@ -473,8 +461,7 @@ export function AnalisiOrariaPage() {
         </button>
       }
     >
-      {loading && <p className="muted">Caricamento operazioni VNE…</p>}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />
@@ -501,7 +488,7 @@ export function AnalisiOrariaPage() {
 }
 
 export function AnalisiPianificazionePage() {
-  const { data, loading, refreshing, error, lastSyncAt, fromCache, refreshNow } = useAnalisiFetch(
+  const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     'staffing:months=3',
     () => fetchAnalyticsStaffing({ months: 3 }),
     [],
@@ -516,8 +503,7 @@ export function AnalisiPianificazionePage() {
         </button>
       }
     >
-      {loading && <p className="muted">Caricamento dal portale VNE…</p>}
-      <SyncNote lastSyncAt={lastSyncAt} fromCache={fromCache} refreshing={refreshing} />
+      <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <Warnings items={data?.warnings} />
       <EmptyVneHint data={data} />

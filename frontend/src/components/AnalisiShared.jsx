@@ -53,6 +53,52 @@ export function AnalisiPageShell({ title, lead, children, actions = null }) {
   )
 }
 
+/** Barra progresso indeterminata (caricamento / sync VNE). */
+export function AnalisiLoadingBar({
+  active = false,
+  variant = 'primary',
+  label = '',
+}) {
+  if (!active) return null
+  return (
+    <div
+      className={`analisi-progress analisi-progress--${variant}`}
+      role="progressbar"
+      aria-busy="true"
+      aria-valuetext={label || 'Caricamento in corso'}
+    >
+      <div className="analisi-progress-track">
+        <div className="analisi-progress-fill" />
+      </div>
+      {label ? <span className="analisi-progress-label">{label}</span> : null}
+    </div>
+  )
+}
+
+/** Stato sync: barra se in corso, altrimenti solo orario ultimo aggiornamento. */
+export function AnalisiSyncStatus({ loading, refreshing, lastSyncAt }) {
+  const busy = Boolean(loading || refreshing)
+  const label = (() => {
+    if (!lastSyncAt) return ''
+    const d = new Date(lastSyncAt)
+    if (Number.isNaN(d.getTime())) return ''
+    return d.toLocaleString('it-IT')
+  })()
+
+  if (busy) {
+    return (
+      <AnalisiLoadingBar
+        active
+        variant={loading ? 'primary' : 'subtle'}
+        label={loading ? 'Sincronizzazione dati VNE' : 'Aggiornamento in corso'}
+      />
+    )
+  }
+
+  if (!label) return null
+  return <p className="analisi-sync-meta">Aggiornato: {label}</p>
+}
+
 export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label' }) {
   if (!rows?.length) return <p className="empty-state">Nessun dato disponibile nel periodo.</p>
   const max = Math.max(1, ...rows.map((r) => Number(r[valueKey] || 0)))
