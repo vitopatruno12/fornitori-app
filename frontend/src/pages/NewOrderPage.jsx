@@ -6,6 +6,7 @@ import { mapOrderLinesToRows } from '../utils/orderLinesNormalize.js'
 import { applyOrderAiResponse, mergeOrderProductRows } from '../utils/orderAiApply.js'
 import OrderVoiceFieldAssistant from '../components/OrderVoiceFieldAssistant.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useAppNavigate } from '../hooks/useAppNavigate'
 import {
   createSupplierOrder,
@@ -1522,7 +1523,7 @@ export default function NewOrderPage({ operatorMode = false }) {
       </p>
       </section>
 
-      {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
+      {loadingSuppliers && <AnalisiLoadingBar active label="Caricamento fornitori" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && (
         <div className="alert alert-success">
@@ -1835,9 +1836,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           )}
 
           {priceListLoading && supplierId && (
-            <p className="loading" style={{ fontSize: '0.85rem' }}>
-              Caricamento listino fornitore…
-            </p>
+            <AnalisiLoadingBar active label="Caricamento listino fornitore" variant="subtle" />
           )}
           <WorkbookGrid
             title={ORDER_MERCHANDISE_WORKBOOK_TITLE}

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   fetchSupplierPaymentsWorkbook,
   saveSupplierPaymentsWorkbook,
@@ -459,7 +460,7 @@ export default function PagamentiPage() {
         </div>
 
         {loading ? (
-          <p className="loading pagamenti-loading">Caricamento registro pagamenti…</p>
+          <AnalisiLoadingBar active label="Caricamento registro pagamenti" variant="subtle" />
         ) : (
           <div className="pagamenti-grid-wrap excel-wrap">
             <table className="app-table excel-table pagamenti-grid">

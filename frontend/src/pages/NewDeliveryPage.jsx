@@ -18,6 +18,7 @@ import {
   deliveryItemsWorkbookTotalsLabel,
 } from '../utils/deliveryItemsWorkbook.js'
 import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 
 const emptyItem = () => ({
   product_description: '',
@@ -488,7 +489,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
         </div>
       </section>
 
-      {loadingSuppliers && <p className="loading">Caricamento fornitori...</p>}
+      {loadingSuppliers && <AnalisiLoadingBar active label="Caricamento fornitori" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
@@ -836,7 +837,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
               </div>
             </form>
 
-            {priceListLoading && <p className="loading pagamenti-loading">Caricamento prezzario…</p>}
+            {priceListLoading && <AnalisiLoadingBar active label="Caricamento prezzario" variant="subtle" />}
             {!priceListLoading && (
               <div className="pagamenti-workbook-card workbook-card-nested">
                 <div className="pagamenti-workbook-toolbar">

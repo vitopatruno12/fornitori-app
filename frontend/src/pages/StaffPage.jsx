@@ -27,6 +27,7 @@ import StaffPayrollDaysModal from '../components/StaffPayrollDaysModal.jsx'
 import StaffPayrollMonthPanel from '../components/StaffPayrollMonthPanel.jsx'
 import StaffSectionBackupBar from '../components/StaffSectionBackupBar.jsx'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { suggestStaffShift } from '../services/aiService'
 import { aggregateMemberWorkedDays, aggregateWeeklyStaffStats } from '../utils/staffWeeklyReport.js'
 import {
@@ -5251,7 +5252,7 @@ export default function StaffPage({ operatorMode = false }) {
           </div>
         ) : null}
 
-        {loading && <p className="loading">Caricamento…</p>}
+        {loading && <AnalisiLoadingBar active label="Caricamento personale" variant="subtle" />}
 
         {!loading && !periodTooLong && (
           <div

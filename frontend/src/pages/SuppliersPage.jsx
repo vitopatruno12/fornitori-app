@@ -16,6 +16,7 @@ import {
   mergeSupplierFields,
   parseSupplierVoiceLocal,
 } from '../utils/supplierVoiceParse.js'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   SUPPLIER_WORKBOOK_COLUMNS,
   SUPPLIER_WORKBOOK_TITLE,
@@ -764,7 +765,7 @@ export default function SuppliersPage() {
             />
           </div>
         </div>
-        {loading && <p className="loading pagamenti-loading">Caricamento anagrafica…</p>}
+        {loading && <AnalisiLoadingBar active label="Caricamento anagrafica" variant="subtle" />}
         {!loading && !error && (
           <div className="pagamenti-grid-wrap excel-wrap suppliers-grid-wrap">
             <table className="app-table excel-table pagamenti-grid suppliers-grid">
@@ -978,7 +979,7 @@ export default function SuppliersPage() {
                 <button type="button" className={`ui-tab ${drawerTab === 'doc' ? 'active' : ''}`} onClick={() => setDrawerTab('doc')}>Documenti</button>
                 <button type="button" className={`ui-tab ${drawerTab === 'price' ? 'active' : ''}`} onClick={() => setDrawerTab('price')}>Listino</button>
               </div>
-              {drawerLoading && <p className="loading">Caricamento…</p>}
+              {drawerLoading && <AnalisiLoadingBar active label="Caricamento dettaglio" variant="subtle" />}
               {!drawerLoading && drawerTab === 'doc' && (
                 <>
                   <p style={{ marginTop: 0, fontSize: '0.9rem' }}><strong>Saldo aperto:</strong> {formatEuro(drawerSupplier.saldo_aperto)}</p>

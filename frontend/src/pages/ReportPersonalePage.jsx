@@ -121,7 +121,7 @@ export default function ReportPersonalePage() {
       <section className="staff-page-hero staff-report-no-print">
         <h1 className="page-header staff-page-title">Report personale</h1>
         <p className="staff-page-lead">
-          Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze e malattia.
+          Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia e ferie.
           Puoi stampare il report o scaricarlo in Excel.
         </p>
       </section>
@@ -191,7 +191,7 @@ export default function ReportPersonalePage() {
           title={workbook.title}
           sheetLabel={
             loading
-              ? 'Caricamento…'
+              ? 'Aggiornamento…'
               : gridRows.length > 0
                 ? `${gridRows.length} righe · ${currentSheet?.name}`
                 : `Nessuna voce · ${currentSheet?.name}`

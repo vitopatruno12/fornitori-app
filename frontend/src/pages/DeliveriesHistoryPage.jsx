@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryNotes, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   DELIVERIES_HISTORY_WORKBOOK_COLUMNS,
   DELIVERIES_HISTORY_WORKBOOK_TITLE,
@@ -478,7 +479,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
             </span>
           </div>
         </div>
-        {loading && <p className="loading pagamenti-loading">Caricamento storico…</p>}
+        {loading && <AnalisiLoadingBar active label="Caricamento storico consegne" variant="subtle" />}
         {!loading && !error && (
           <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap deliveries-grid-wrap">
             <table className="app-table excel-table pagamenti-grid workbook-grid deliveries-grid">

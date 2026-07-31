@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import QuickProductPicker from '../components/QuickProductPicker.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   WAREHOUSE_DESTINATION_OPTIONS,
   WAREHOUSE_SOURCE_LABEL,
@@ -414,7 +415,7 @@ export default function MagazzinoPage({ operatorMode = false, onBackToDelivery }
           </div>
         </div>
 
-        {loading && <p className="loading pagamenti-loading">Caricamento movimenti…</p>}
+        {loading && <AnalisiLoadingBar active label="Caricamento movimenti" variant="subtle" />}
         {!loading && (
           <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
             <table className="app-table excel-table pagamenti-grid workbook-grid warehouse-movements-grid">

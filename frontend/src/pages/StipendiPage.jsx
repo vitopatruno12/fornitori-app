@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   createStaffStipendiMonth,
   deleteStaffStipendiMonth,
@@ -474,7 +475,7 @@ export default function StipendiPage() {
       </section>
 
       {loading ? (
-        <p className="muted">Caricamento…</p>
+        <AnalisiLoadingBar active label="Caricamento stipendi" variant="subtle" />
       ) : (
         <>
           <section className="card pagamenti-workbook-card stipendi-edit-card">

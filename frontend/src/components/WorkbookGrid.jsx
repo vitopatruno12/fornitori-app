@@ -1,4 +1,5 @@
 import React from 'react'
+import { AnalisiLoadingBar } from './AnalisiShared.jsx'
 
 /**
  * Griglia readonly in stile Excel (workbook).
@@ -13,6 +14,7 @@ export default function WorkbookGrid({
   totals = null,
   gridClassName = '',
   loading = false,
+  loadingLabel = 'Caricamento dati',
   emptyMessage = 'Nessun dato disponibile.',
   hideToolbar = false,
   toolbarActions = null,
@@ -47,7 +49,7 @@ export default function WorkbookGrid({
           {toolbarActions}
         </div>
       ) : null}
-      {loading && <p className="loading pagamenti-loading">Caricamento…</p>}
+      <AnalisiLoadingBar active={Boolean(loading)} label={loadingLabel} variant="subtle" />
       {!loading && (
         <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
           <table className={['app-table', 'excel-table', 'pagamenti-grid', 'workbook-grid', gridClassName].filter(Boolean).join(' ')}>

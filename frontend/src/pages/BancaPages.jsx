@@ -6,6 +6,7 @@ import {
   eur,
   formatDate,
 } from '../components/BancaShared.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   confirmBancaConnectOtp,
   connectBancaAccount,
@@ -220,7 +221,7 @@ export function BancaDashboardPage() {
   return (
     <BancaPageShell title="Dashboard bancaria" lead="Saldi, liquidità, flussi e ultimi movimenti.">
       {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <p className="fatture-note">Caricamento…</p>}
+      {loading && <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />}
       {!loading && data && (
         <>
           <div className="ui-kpi-row">
@@ -571,7 +572,7 @@ export function BancaContiPage() {
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Elenco conti</h2>
         {loading ? (
-          <p className="fatture-note">Caricamento…</p>
+          <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
         ) : (
           <WorkbookGrid
             title="Elenco conti"
@@ -745,7 +746,7 @@ export function BancaMovimentiPage() {
 
       <section className="card fatture-panel">
         {loading ? (
-          <p className="fatture-note">Caricamento…</p>
+          <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
         ) : (
           <WorkbookGrid
             title="Movimenti bancari"
@@ -839,7 +840,7 @@ export function BancaRiconciliazionePage() {
           {data?.unmatched_movements ?? '—'}
         </p>
         {loading ? (
-          <p className="fatture-note">Analisi in corso…</p>
+          <AnalisiLoadingBar active label="Analisi movimenti in corso" variant="subtle" />
         ) : (
           <WorkbookGrid
             title="Suggerimenti riconciliazione"

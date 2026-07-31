@@ -15,6 +15,7 @@ import {
 } from '../services/supportTechniciansService'
 import { apiUrl } from '../services/api'
 import { durationHours, generateSupportTechnicianPdf } from '../utils/supportTechnicianReport'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 
 function toYmd(d) {
   const x = new Date(d)
@@ -401,7 +402,7 @@ export default function SupportTechniciansPage() {
           Pulsante verde per aprire WhatsApp. Modifica o elimina dalla scheda.
         </p>
         {loading ? (
-          <p className="loading">Caricamento…</p>
+          <AnalisiLoadingBar active label="Caricamento tecnici" variant="subtle" />
         ) : (
           <>
             <div className="btn-group" style={{ marginBottom: '1rem' }}>
@@ -593,7 +594,7 @@ export default function SupportTechniciansPage() {
         </div>
 
         {actLoading ? (
-          <p className="loading">Caricamento attività…</p>
+          <AnalisiLoadingBar active label="Caricamento attività" variant="subtle" />
         ) : activities.length === 0 ? (
           <p className="empty-state">Nessuna voce nel periodo. Aggiungi un intervento pianificato o un lavoro completato.</p>
         ) : (

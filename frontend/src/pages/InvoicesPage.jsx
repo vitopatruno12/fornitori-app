@@ -5,6 +5,7 @@ import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { apiUrl } from '../services/api'
 import { FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
@@ -556,7 +557,7 @@ export default function InvoicesPage() {
           )}
         </form>
 
-        {loading && <p className="loading">Caricamento...</p>}
+        {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
 
         {!loading && !error && (
           <div className="table-wrap pn-table-wrap" style={{ fontSize: '0.88rem' }}>

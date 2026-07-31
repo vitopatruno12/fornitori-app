@@ -8,6 +8,7 @@ import {
   eur,
   formatDate,
 } from '../components/FattureShared.jsx'
+import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   assignSdiInvoiceSection,
   fetchInvoices,
@@ -231,7 +232,7 @@ export function FattureDashboardPage() {
       title="Dashboard"
       lead="Colpo d'occhio: ricevute, da registrare, scadenze, totali del mese e IVA."
     >
-      {loading && <p className="muted">Caricamento…</p>}
+      {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {data && (
         <>
@@ -340,7 +341,7 @@ export function FattureDaRegistrarePage() {
       title="Da registrare"
       lead="Fatture in elenco senza movimento di Prima Nota collegato — da portare in contabilità."
     >
-      {loading && <p className="muted">Caricamento…</p>}
+      {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       <section className="card fatture-panel">
         <div className="table-wrap pn-table-wrap">
@@ -461,7 +462,7 @@ export function FattureScadenziarioPage() {
         </div>
       }
     >
-      {loading && <p className="muted">Caricamento…</p>}
+      {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {msg && <div className="alert alert-success">{msg}</div>}
       <section className="card fatture-panel">
