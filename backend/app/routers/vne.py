@@ -2433,26 +2433,43 @@ def collect_model_operations(
 ) -> List[VneOperationRow]:
     """Scarica operazioni VNE (con paginazione) per un intervallo date."""
     if not model.sel_operazioni_url or not model.operazioni_url:
-        return []
+        # Deriva URL da status/machine se non espliciti in .env
+        completed = _complete_model_config(model)
+        if not completed.sel_operazioni_url or not completed.operazioni_url:
+            return []
+        model = completed
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session = _VneModelSession.open(model, max_seconds=VNE_ANALYTICS_MAX_TOTAL_SEC)
-    filter_html = session.fetch(model.sel_operazioni_url, referer=base_ref)
-    csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", filter_html) or ""
+    session, filter_html, active = _open_model_filter_session(
+        model,
+        model.sel_operazioni_url,
+        referer=base_ref,
+        feature_label="Operazioni",
+    )
+    csrf = _csrf_from_html(filter_html)
     form_data: List[tuple[str, str]] = []
     if csrf:
         form_data.append(("csrfmiddlewaretoken", csrf))
     form_data.append(("filters", "filterData"))
     form_data.append(("init_day_date", to_vne_day_date(date_from)))
     form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
-    body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
-    html = session.fetch(model.operazioni_url, referer=model.sel_operazioni_url, data=body)
+    filter_url = active.sel_operazioni_url or model.sel_operazioni_url
+    post_url = active.operazioni_url or model.operazioni_url
+    html = _post_vne_filtered_page(
+        active,
+        session,
+        filter_url=filter_url,
+        post_url=post_url,
+        form_data=form_data,
+        base_ref=base_ref,
+        feature_label="Operazioni",
+    )
     if _is_machine_blocked(html):
         return []
     return _follow_vne_next_pages(
         session,
         html,
-        base_url=model.operazioni_url,
+        base_url=post_url,
         parse_rows=_parse_operations_rows,
         max_pages=max_pages,
     )
@@ -2467,26 +2484,42 @@ def collect_model_cash_closings(
 ) -> List[VneCashClosingRow]:
     """Scarica chiusure cassa VNE (con paginazione) per un intervallo date."""
     if not model.sel_chiusure_url or not model.chiusure_url:
-        return []
+        completed = _complete_model_config(model)
+        if not completed.sel_chiusure_url or not completed.chiusure_url:
+            return []
+        model = completed
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session = _VneModelSession.open(model, max_seconds=VNE_ANALYTICS_MAX_TOTAL_SEC)
-    filter_html = session.fetch(model.sel_chiusure_url, referer=base_ref)
-    csrf = _extract_text(r"name=['\"]csrfmiddlewaretoken['\"]\s+value=['\"]([^'\"]+)['\"]", filter_html) or ""
+    session, filter_html, active = _open_model_filter_session(
+        model,
+        model.sel_chiusure_url,
+        referer=base_ref,
+        feature_label="Chiusure",
+    )
+    csrf = _csrf_from_html(filter_html)
     form_data: List[tuple[str, str]] = []
     if csrf:
         form_data.append(("csrfmiddlewaretoken", csrf))
     form_data.append(("filters", "filterData"))
     form_data.append(("init_day_date", to_vne_day_date(date_from)))
     form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
-    body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
-    html = session.fetch(model.chiusure_url, referer=model.sel_chiusure_url, data=body)
+    filter_url = active.sel_chiusure_url or model.sel_chiusure_url
+    post_url = active.chiusure_url or model.chiusure_url
+    html = _post_vne_filtered_page(
+        active,
+        session,
+        filter_url=filter_url,
+        post_url=post_url,
+        form_data=form_data,
+        base_ref=base_ref,
+        feature_label="Chiusure",
+    )
     if _is_machine_blocked(html):
         return []
     return _follow_vne_next_pages(
         session,
         html,
-        base_url=model.chiusure_url,
+        base_url=post_url,
         parse_rows=_parse_cash_closing_rows,
         max_pages=max_pages,
     )
@@ -2543,6 +2576,8 @@ def collect_analytics_events(
                         when_text=row.when_text,
                     )
                 )
+        except HTTPException as e:
+            warnings.append(f"Operazioni {model.label}: {e.detail}")
         except Exception as e:
             warnings.append(f"Operazioni {model.label}: {e}")
 
@@ -2564,6 +2599,8 @@ def collect_analytics_events(
                         when_text=row.when_text,
                     )
                 )
+        except HTTPException as e:
+            warnings.append(f"Chiusure {model.label}: {e.detail}")
         except Exception as e:
             warnings.append(f"Chiusure {model.label}: {e}")
 
