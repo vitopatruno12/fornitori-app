@@ -1218,6 +1218,28 @@ def _host_variants(url: Optional[str]) -> List[str]:
     return uniq
 
 
+def _align_url_origin(url: Optional[str], origin_url: Optional[str]) -> str:
+    """Allinea scheme/host di url a origin_url (evita CSRF 403 www vs non-www)."""
+    target = (url or "").strip()
+    origin = (origin_url or "").strip()
+    if not target or not origin:
+        return target
+    src = urllib.parse.urlparse(origin)
+    dst = urllib.parse.urlparse(target)
+    if not src.scheme or not src.netloc or not dst.path:
+        return target
+    return urllib.parse.urlunparse((src.scheme, src.netloc, dst.path, dst.params, dst.query, dst.fragment))
+
+
+def _csrf_token_from_jar(cj: Optional[CookieJar]) -> str:
+    if not cj:
+        return ""
+    for cookie in cj:
+        if cookie.name == "csrftoken" and cookie.value:
+            return str(cookie.value)
+    return ""
+
+
 def _maybe_login_vne(
     opener: urllib.request.OpenerDirector,
     cj: CookieJar,
@@ -1545,7 +1567,12 @@ def _fetch_model_status(model: VneModelConfig, http_session: Optional[_VneHttpSe
     return html_text
 
 
-def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = None) -> urllib.request.Request:
+def _build_req(
+    url: str,
+    referer: Optional[str] = None,
+    data: Optional[bytes] = None,
+    csrf_token: Optional[str] = None,
+) -> urllib.request.Request:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -1559,6 +1586,8 @@ def _build_req(url: str, referer: Optional[str] = None, data: Optional[bytes] = 
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme and parsed.netloc:
             headers["Origin"] = f"{parsed.scheme}://{parsed.netloc}"
+        if csrf_token:
+            headers["X-CSRFToken"] = csrf_token
     return urllib.request.Request(url, data=data, headers=headers)
 
 
@@ -1579,8 +1608,11 @@ def _open_model_filter_session(
     referer: str,
     feature_label: str,
     max_seconds: Optional[float] = None,
-) -> Tuple["_VneModelSession", str, VneModelConfig]:
-    """Apre sessione macchina e carica la pagina filtri; ritenta una volta se bloccata/senza CSRF."""
+) -> Tuple["_VneModelSession", str, VneModelConfig, str]:
+    """Apre sessione macchina e carica la pagina filtri; ritenta una volta se bloccata/senza CSRF.
+
+    Ritorna anche l'URL filtri effettivamente usato (host allineato ai cookie CSRF).
+    """
     last_html = ""
     last_exc: Optional[Exception] = None
     budget = max_seconds or VNE_ANALYTICS_MAX_TOTAL_SEC
@@ -1618,7 +1650,7 @@ def _open_model_filter_session(
                     html_text = session.fetch(candidate, referer=referer or menu or candidate)
                     last_html = html_text or ""
                     if _filter_page_usable(last_html):
-                        return session, last_html, active
+                        return session, last_html, active, candidate
                 except Exception as exc:
                     last_exc = exc
                     continue
@@ -1657,12 +1689,23 @@ def _post_vne_filtered_page(
     feature_label: str,
 ) -> str:
     """POST filtri VNE; su 403/macchina bloccata rinnova sessione e ritenta una volta."""
+    # CSRF cookie e Origin devono condividere lo stesso host del POST.
+    aligned_post = _align_url_origin(post_url, filter_url) or post_url
+    post_candidates: List[str] = []
+    for u in _host_variants(aligned_post) + _host_variants(post_url):
+        if u and u not in post_candidates:
+            post_candidates.append(u)
     body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
 
     def _refresh_and_post() -> str:
-        nonlocal session, form_data, body
-        session = _VneModelSession.open(model, max_seconds=VNE_ANALYTICS_MAX_TOTAL_SEC)
-        filter_html = session.fetch(filter_url, referer=base_ref)
+        nonlocal session, form_data, body, filter_url
+        session, filter_html, _active, filter_url = _open_model_filter_session(
+            model,
+            filter_url,
+            referer=base_ref,
+            feature_label=feature_label,
+            max_seconds=VNE_ANALYTICS_MAX_TOTAL_SEC,
+        )
         if _is_machine_blocked(filter_html):
             raise HTTPException(
                 status_code=502,
@@ -1682,34 +1725,58 @@ def _post_vne_filtered_page(
             )
         form_data = [("csrfmiddlewaretoken", csrf)] + [p for p in form_data if p[0] != "csrfmiddlewaretoken"]
         body = urllib.parse.urlencode(form_data, doseq=True).encode("utf-8")
-        return session.fetch(post_url, referer=filter_url, data=body)
-
-    try:
-        html_text = session.fetch(post_url, referer=filter_url, data=body)
-        if _is_machine_blocked(html_text):
-            html_text = _refresh_and_post()
-        return html_text
-    except TimeoutError:
-        raise HTTPException(status_code=504, detail=f"Timeout query {feature_label} VNE")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 403:
+        retry_posts: List[str] = []
+        for u in _host_variants(_align_url_origin(post_url, filter_url) or post_url):
+            if u and u not in retry_posts:
+                retry_posts.append(u)
+        last_retry_exc: Optional[Exception] = None
+        for candidate in retry_posts:
             try:
-                return _refresh_and_post()
-            except HTTPException:
-                raise
-            except TimeoutError:
-                raise HTTPException(status_code=504, detail=f"Timeout query {feature_label} VNE")
-            except Exception as retry_exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"{feature_label} VNE non disponibili per {model.label}: "
-                        f"accesso negato dal portale ({retry_exc})"
-                    ),
-                ) from retry_exc
-        raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: {exc}") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: {exc}") from exc
+                return session.fetch(candidate, referer=filter_url, data=body)
+            except Exception as exc:
+                last_retry_exc = exc
+                continue
+        if last_retry_exc:
+            raise last_retry_exc
+        raise RuntimeError(f"POST {feature_label} VNE fallito dopo refresh sessione")
+
+    last_exc: Optional[Exception] = None
+    for candidate in post_candidates:
+        try:
+            html_text = session.fetch(candidate, referer=filter_url, data=body)
+            if _is_machine_blocked(html_text):
+                html_text = _refresh_and_post()
+            return html_text
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail=f"Timeout query {feature_label} VNE")
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code != 403:
+                raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: {exc}") from exc
+            continue
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    if isinstance(last_exc, urllib.error.HTTPError) and last_exc.code == 403:
+        try:
+            return _refresh_and_post()
+        except HTTPException:
+            raise
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail=f"Timeout query {feature_label} VNE")
+        except Exception as retry_exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"{feature_label} VNE non disponibili per {model.label}: "
+                    f"accesso negato dal portale ({retry_exc})"
+                ),
+            ) from retry_exc
+
+    if last_exc:
+        raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: {last_exc}") from last_exc
+    raise HTTPException(status_code=502, detail=f"Errore query {feature_label} VNE: risposta vuota")
 
 
 def _open_bytes_with_retries(opener: urllib.request.OpenerDirector, req: urllib.request.Request, deadline: Optional[float] = None) -> bytes:
@@ -1768,7 +1835,8 @@ def _fetch_html(
     data: Optional[bytes] = None,
     deadline: Optional[float] = None,
 ) -> str:
-    req = _build_req(url, referer=referer, data=data)
+    csrf = _csrf_token_from_jar(_cookie_jar_from_opener(opener)) if data is not None else ""
+    req = _build_req(url, referer=referer, data=data, csrf_token=csrf or None)
     raw = _open_bytes_with_retries(opener, req, deadline=deadline)
     return raw.decode("utf-8", errors="ignore")
 
@@ -2069,7 +2137,7 @@ def get_model_operation_filters(model_id: str):
     if not model.sel_operazioni_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_operazioni URL")
     _ensure_vne_credentials()
-    _session, html, _active = _open_model_filter_session(
+    _session, html, _active, _filter_url = _open_model_filter_session(
         model,
         model.sel_operazioni_url,
         referer=_base_supervlt_referer(model),
@@ -2097,7 +2165,7 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL operazioni")
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session, filter_html, active = _open_model_filter_session(
+    session, filter_html, active, filter_url = _open_model_filter_session(
         model,
         model.sel_operazioni_url,
         referer=base_ref,
@@ -2123,8 +2191,7 @@ def post_model_operations_query(model_id: str, payload: VneOperationsQueryIn):
         for u in payload.users:
             form_data.append(("utenti", u))
 
-    filter_url = active.sel_operazioni_url or model.sel_operazioni_url
-    post_url = active.operazioni_url or model.operazioni_url
+    post_url = _align_url_origin(active.operazioni_url or model.operazioni_url, filter_url)
     html = _post_vne_filtered_page(
         active,
         session,
@@ -2163,7 +2230,7 @@ def get_model_cash_closing_filters(model_id: str):
     if not model.sel_chiusure_url:
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: manca sel_chiusure URL")
     _ensure_vne_credentials()
-    _session, html, _active = _open_model_filter_session(
+    _session, html, _active, _filter_url = _open_model_filter_session(
         model,
         model.sel_chiusure_url,
         referer=_base_supervlt_referer(model),
@@ -2284,7 +2351,7 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
         raise HTTPException(status_code=400, detail=f"{model.label} non configurato: mancano URL chiusure")
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session, filter_html, active = _open_model_filter_session(
+    session, filter_html, active, filter_url = _open_model_filter_session(
         model,
         model.sel_chiusure_url,
         referer=base_ref,
@@ -2304,8 +2371,7 @@ def post_model_cash_closings_query(model_id: str, payload: VneCashClosingQueryIn
         form_data.append(("filters", "filterOp"))
         for op in payload.operators:
             form_data.append(("operators", op))
-    filter_url = active.sel_chiusure_url or model.sel_chiusure_url
-    post_url = active.chiusure_url or model.chiusure_url
+    post_url = _align_url_origin(active.chiusure_url or model.chiusure_url, filter_url)
     html = _post_vne_filtered_page(
         active,
         session,
@@ -2440,7 +2506,7 @@ def collect_model_operations(
         model = completed
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session, filter_html, active = _open_model_filter_session(
+    session, filter_html, active, filter_url = _open_model_filter_session(
         model,
         model.sel_operazioni_url,
         referer=base_ref,
@@ -2453,8 +2519,7 @@ def collect_model_operations(
     form_data.append(("filters", "filterData"))
     form_data.append(("init_day_date", to_vne_day_date(date_from)))
     form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
-    filter_url = active.sel_operazioni_url or model.sel_operazioni_url
-    post_url = active.operazioni_url or model.operazioni_url
+    post_url = _align_url_origin(active.operazioni_url or model.operazioni_url, filter_url)
     html = _post_vne_filtered_page(
         active,
         session,
@@ -2490,7 +2555,7 @@ def collect_model_cash_closings(
         model = completed
     _ensure_vne_credentials()
     base_ref = _base_supervlt_referer(model)
-    session, filter_html, active = _open_model_filter_session(
+    session, filter_html, active, filter_url = _open_model_filter_session(
         model,
         model.sel_chiusure_url,
         referer=base_ref,
@@ -2503,8 +2568,7 @@ def collect_model_cash_closings(
     form_data.append(("filters", "filterData"))
     form_data.append(("init_day_date", to_vne_day_date(date_from)))
     form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
-    filter_url = active.sel_chiusure_url or model.sel_chiusure_url
-    post_url = active.chiusure_url or model.chiusure_url
+    post_url = _align_url_origin(active.chiusure_url or model.chiusure_url, filter_url)
     html = _post_vne_filtered_page(
         active,
         session,

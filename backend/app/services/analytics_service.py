@@ -98,6 +98,9 @@ def _load_events(
         max_op_pages=max_op_pages,
         max_closing_pages=max_closing_pages,
     )
+    # Non mettere in cache risposte vuote con errori VNE (altrimenti restano 0 per ~20 min).
+    if warnings and not events:
+        return events, warnings
     return _cache_set(key, (events, warnings))
 
 
