@@ -16,7 +16,7 @@ import {
   fetchAnalyticsWeekly,
 } from '../services/analyticsService'
 
-const ANALISI_CACHE_PREFIX = 'analisi_cache_v1:'
+const ANALISI_CACHE_PREFIX = 'analisi_cache_v2:'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
 const ANALISI_MORNING_HOUR = 7
 const ANALISI_BACKGROUND_CHECK_MS = 60 * 1000 // 1 min: controlla se serve refresh
@@ -219,7 +219,13 @@ function VneStatusSemaphore({ warnings, data }) {
 
 function DataNote({ text }) {
   if (!text) return null
-  return <p className="analisi-note">{text}</p>
+  // Evita note vecchie ancora in cache browser (cache ~20 min / portale remoto).
+  const cleaned = String(text)
+    .replace(/\s*Aggiornamento live dal portale remoto;?\s*risultati in cache\s*~?\s*20\s*minuti\.?/gi, '')
+    .replace(/\s*risultati in cache\s*~?\s*20\s*minuti\.?/gi, '')
+    .trim()
+  if (!cleaned) return null
+  return <p className="analisi-note">{cleaned}</p>
 }
 
 export function AnalisiDashboardPage() {
