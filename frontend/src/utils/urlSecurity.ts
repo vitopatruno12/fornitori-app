@@ -3,7 +3,7 @@ const FRONTEND_APP_HOSTS = new Set(['www.atlass.it', 'atlass.it'])
 
 /** Path API backend (senza prefisso /api = rischio HTML dalla SPA). */
 const API_RESOURCE_PATH =
-  /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|aruba|support-technicians|vne|health|reference|customers|attachments|sdi)(\/|$)/
+  /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|support-technicians|vne|health|reference|customers|attachments|sdi|banca)(\/|$)/
 
 export function isLocalDevHost(hostname: string): boolean {
   const host = String(hostname || '').toLowerCase()

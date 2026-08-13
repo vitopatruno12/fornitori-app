@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, vne, sdi, banca, warehouse, supplier_payments
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -57,6 +57,9 @@ async def lifespan(app: FastAPI):
         _ensure_warehouse_movements_table()
         _ensure_supplier_payments_workbook_table()
         _ensure_supplier_order_items_volume_liters_column()
+        _ensure_carriers_tables()
+        _ensure_electronic_invoices_tables()
+        _ensure_sdi_electronic_invoice_link()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -205,8 +208,10 @@ app.include_router(warehouse.router)
 app.include_router(supplier_payments.router)
 app.include_router(staff.router)
 app.include_router(support_technicians.router)
+app.include_router(carriers.router)
 app.include_router(vne.router)
 app.include_router(sdi.router)
+app.include_router(electronic_invoices.router)
 app.include_router(banca.router)
 
 
@@ -231,6 +236,194 @@ def _ensure_support_technicians_columns() -> None:
             "Impossibile verificare/aggiornare colonne orarie technician_activities: %s",
             e,
         )
+
+
+
+def _ensure_electronic_invoices_tables() -> None:
+    """Tabelle import XML FatturaPA → fatture passive."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS electronic_invoices (
+                      id SERIAL PRIMARY KEY,
+                      filename VARCHAR(512),
+                      xml_content TEXT NOT NULL,
+                      document_hash VARCHAR(64) NOT NULL UNIQUE,
+                      document_type VARCHAR(16),
+                      invoice_number VARCHAR(128),
+                      invoice_date DATE,
+                      currency VARCHAR(8),
+                      supplier_vat VARCHAR(32),
+                      customer_vat VARCHAR(32),
+                      total_amount NUMERIC(15, 2),
+                      taxable_amount NUMERIC(15, 2),
+                      vat_amount NUMERIC(15, 2),
+                      status VARCHAR(32) NOT NULL DEFAULT 'IMPORTED',
+                      error_message TEXT,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_electronic_invoices_supplier_vat ON electronic_invoices (supplier_vat)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_electronic_invoices_invoice_number ON electronic_invoices (invoice_number)"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS incoming_invoices (
+                      id SERIAL PRIMARY KEY,
+                      electronic_invoice_id INTEGER NOT NULL UNIQUE REFERENCES electronic_invoices(id) ON DELETE CASCADE,
+                      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+                      atlas_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+                      invoice_number VARCHAR(128) NOT NULL,
+                      invoice_date TIMESTAMPTZ NOT NULL,
+                      taxable_amount NUMERIC(15, 2) NOT NULL,
+                      vat_amount NUMERIC(15, 2) NOT NULL,
+                      total_amount NUMERIC(15, 2) NOT NULL,
+                      currency VARCHAR(8) NOT NULL DEFAULT 'EUR',
+                      status VARCHAR(32) NOT NULL DEFAULT 'RECEIVED',
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoices_supplier ON incoming_invoices (supplier_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoices_atlas_invoice ON incoming_invoices (atlas_invoice_id)"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS incoming_invoice_lines (
+                      id SERIAL PRIMARY KEY,
+                      invoice_id INTEGER NOT NULL REFERENCES incoming_invoices(id) ON DELETE CASCADE,
+                      line_number INTEGER NOT NULL,
+                      description TEXT,
+                      quantity NUMERIC(15, 4),
+                      unit_price NUMERIC(15, 8),
+                      line_total NUMERIC(15, 2),
+                      vat_rate NUMERIC(5, 2),
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      UNIQUE (invoice_id, line_number)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoice_lines_invoice ON incoming_invoice_lines (invoice_id)"))
+    except Exception as e:
+        logger.warning("Impossibile creare tabelle electronic/incoming invoices: %s", e)
+
+
+def _ensure_sdi_electronic_invoice_link() -> None:
+    """Fase 1: sdi_invoices.electronic_invoice_id → electronic_invoices."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE sdi_invoices
+                      ADD COLUMN IF NOT EXISTS electronic_invoice_id INTEGER
+                        REFERENCES electronic_invoices(id) ON DELETE SET NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_sdi_invoices_electronic_invoice_id
+                      ON sdi_invoices (electronic_invoice_id)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning("Impossibile aggiungere sdi_invoices.electronic_invoice_id: %s", e)
+
+
+def _ensure_carriers_tables() -> None:
+    """Crea tabelle trasportatori e colonna deliveries.carrier_id se assenti."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS carriers (
+                      id SERIAL PRIMARY KEY,
+                      name VARCHAR(255) NOT NULL,
+                      phone VARCHAR(32),
+                      email VARCHAR(255),
+                      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                      out_of_service BOOLEAN NOT NULL DEFAULT FALSE,
+                      in_service BOOLEAN NOT NULL DEFAULT FALSE,
+                      rest_day INTEGER,
+                      van_label VARCHAR(120),
+                      van_plate VARCHAR(32),
+                      notes TEXT,
+                      sort_order INTEGER NOT NULL DEFAULT 0,
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS carrier_maintenance_logs (
+                      id SERIAL PRIMARY KEY,
+                      carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+                      service_date DATE NOT NULL,
+                      description VARCHAR(512) NOT NULL,
+                      odometer_km INTEGER,
+                      cost NUMERIC(10, 2),
+                      workshop VARCHAR(255),
+                      notes TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS carrier_fuel_expenses (
+                      id SERIAL PRIMARY KEY,
+                      carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+                      expense_date DATE NOT NULL,
+                      liters NUMERIC(10, 2),
+                      amount_eur NUMERIC(10, 2) NOT NULL,
+                      station VARCHAR(255),
+                      odometer_km INTEGER,
+                      notes TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS carrier_other_expenses (
+                      id SERIAL PRIMARY KEY,
+                      carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+                      expense_date DATE NOT NULL,
+                      category VARCHAR(120),
+                      amount_eur NUMERIC(10, 2) NOT NULL,
+                      description VARCHAR(512),
+                      notes TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS carrier_id INTEGER REFERENCES carriers(id) ON DELETE SET NULL"
+                )
+            )
+    except Exception as e:
+        logger.warning("Impossibile verificare/creare tabelle carriers: %s", e)
 
 
 def _ensure_supplier_orders_delivery_location_column() -> None:

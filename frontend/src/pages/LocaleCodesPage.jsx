@@ -26,8 +26,17 @@ function sourceLabel(source) {
   return source || '—'
 }
 
+const PHONE_STORAGE_KEY = 'atlas-link-codici-phone'
+
 export default function LocaleCodesPage() {
   const [query, setQuery] = useState('')
+  const [phone, setPhone] = useState(() => {
+    try {
+      return localStorage.getItem(PHONE_STORAGE_KEY) || ''
+    } catch {
+      return ''
+    }
+  })
   const [otp, setOtp] = useState('')
   const [hits, setHits] = useState([])
   const [loading, setLoading] = useState(false)
@@ -42,8 +51,13 @@ export default function LocaleCodesPage() {
   async function handleRequestOtp(e) {
     e?.preventDefault?.()
     const q = String(query || '').trim()
+    const tel = String(phone || '').replace(/\D/g, '')
     if (q.length < 2) {
       setError('Inserisci almeno 2 caratteri (nome locale Personale o registro Prima Nota).')
+      return
+    }
+    if (tel.length < 10) {
+      setError('Inserisci il cellulare (es. 3331234567) per ricevere l’SMS.')
       return
     }
     setOtpBusy(true)
@@ -53,7 +67,12 @@ export default function LocaleCodesPage() {
     setUnlocked(false)
     setDebugOtp('')
     try {
-      const data = await requestLocaleAccessCodesOtp(q)
+      try {
+        localStorage.setItem(PHONE_STORAGE_KEY, tel)
+      } catch {
+        /* ignore */
+      }
+      const data = await requestLocaleAccessCodesOtp(q, tel)
       const hint = data?.phone_hint || 'il telefono configurato'
       setOtpSentHint(hint)
       setOtp('')
@@ -136,9 +155,8 @@ export default function LocaleCodesPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link codici</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Per vedere i codici: inserisci il <strong>nome locale</strong> o <strong>registro</strong>, richiedi l’
-          <strong>OTP monouso</strong> sul telefono, poi inserisci le 6 cifre. Senza nome o senza OTP i codici non
-          sono visibili.
+          Inserisci il <strong>nome locale</strong> o <strong>registro</strong> e il <strong>cellulare</strong>,
+          poi <strong>Invia SMS</strong>. Ricevi l’OTP a 6 cifre, inseriscilo e premi <strong>Mostra codice</strong>.
         </p>
       </section>
 
@@ -163,6 +181,19 @@ export default function LocaleCodesPage() {
               disabled={loading || otpBusy}
             />
           </div>
+          <div className="form-group" style={{ flex: '0 1 170px', marginBottom: 0 }}>
+            <label htmlFor="locale-code-phone">Cellulare</label>
+            <input
+              id="locale-code-phone"
+              className="form-control"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value.replace(/[^\d+\s]/g, '').slice(0, 16))}
+              placeholder="3331234567"
+              inputMode="tel"
+              autoComplete="tel"
+              disabled={loading || otpBusy}
+            />
+          </div>
           <div className="form-group" style={{ flex: '0 1 140px', marginBottom: 0 }}>
             <label htmlFor="locale-code-otp">OTP (6 cifre)</label>
             <input
@@ -184,7 +215,7 @@ export default function LocaleCodesPage() {
               disabled={loading || otpBusy || String(query || '').trim().length < 2}
               onClick={() => void handleRequestOtp()}
             >
-              {otpBusy ? 'Invio OTP…' : 'Invia OTP'}
+              {otpBusy ? 'Invio SMS…' : 'Invia SMS'}
             </button>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -217,7 +248,8 @@ export default function LocaleCodesPage() {
           </p>
         ) : (
           <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-            Prima clicca <strong>Invia OTP</strong>, poi inserisci il codice ricevuto e premi <strong>Mostra codice</strong>.
+            Prima inserisci il cellulare e clicca <strong>Invia SMS</strong>, poi metti l’OTP e premi{' '}
+            <strong>Mostra codice</strong>.
           </p>
         )}
       </section>

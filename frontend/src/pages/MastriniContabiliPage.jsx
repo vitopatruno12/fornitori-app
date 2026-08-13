@@ -108,6 +108,32 @@ function printMastro(account, periodLabel) {
 }
 
 function documentoLink(mv) {
+  if (mv.linkedInvoiceId && mv.linkedBankMovementId) {
+    return (
+      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
+          Fattura {mv.documentLabel?.split(' · ')[0]?.replace('Fattura ', '') || mv.linkedInvoiceId}
+        </Link>
+        <span aria-hidden>↔</span>
+        <Link to="/banca/movimenti" style={{ textDecoration: 'underline' }}>
+          BA-{mv.linkedBankMovementId}
+        </Link>
+      </span>
+    )
+  }
+  if (mv.linkedInvoiceId && mv.linkedCashEntryId) {
+    return (
+      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+        <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
+          {mv.documentLabel || `Fattura ${mv.linkedInvoiceId}`}
+        </Link>
+        <span aria-hidden>↔</span>
+        <Link to="/prima-nota" style={{ textDecoration: 'underline' }}>
+          PN-{mv.linkedCashEntryId}
+        </Link>
+      </span>
+    )
+  }
   const path = mv.documentPath || ''
   if (!path) return <span>{mv.documentLabel || '—'}</span>
   return (
@@ -118,13 +144,13 @@ function documentoLink(mv) {
 }
 
 const MASTRINI_COLUMNS = [
-  { id: 'code', label: 'Codice conto', width: 120, mono: true, sticky: 'left' },
-  { id: 'description', label: 'Descrizione', width: 300 },
-  { id: 'category', label: 'Categoria', width: 140 },
-  { id: 'dare', label: 'Dare', width: 130, numeric: true },
-  { id: 'avere', label: 'Avere', width: 130, numeric: true },
-  { id: 'saldo', label: 'Saldo', width: 130, numeric: true },
-  { id: 'stato', label: 'Stato', width: 110 },
+  { id: 'code', label: 'Codice conto', width: 12, fluid: true, mono: true },
+  { id: 'description', label: 'Descrizione', width: 32, fluid: true, emphasis: true },
+  { id: 'category', label: 'Categoria', width: 14, fluid: true },
+  { id: 'dare', label: 'Dare', width: 12, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 12, fluid: true, numeric: true },
+  { id: 'saldo', label: 'Saldo', width: 12, fluid: true, numeric: true },
+  { id: 'stato', label: 'Stato', width: 6, fluid: true },
 ]
 
 function mastroCellValue(row, col) {
@@ -140,12 +166,12 @@ function mastroCellValue(row, col) {
 }
 
 const PARTITARIO_COLUMNS = [
-  { id: 'name', label: 'Soggetto', width: 280, sticky: 'left' },
-  { id: 'type', label: 'Tipo', width: 120 },
-  { id: 'dare', label: 'Dare', width: 130, numeric: true },
-  { id: 'avere', label: 'Avere', width: 130, numeric: true },
-  { id: 'saldo', label: 'Saldo', width: 130, numeric: true },
-  { id: 'movements', label: 'Movimenti', width: 110, numeric: true },
+  { id: 'name', label: 'Soggetto', width: 36, fluid: true, emphasis: true },
+  { id: 'type', label: 'Tipo', width: 14, fluid: true },
+  { id: 'dare', label: 'Dare', width: 14, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 14, fluid: true, numeric: true },
+  { id: 'saldo', label: 'Saldo', width: 14, fluid: true, numeric: true },
+  { id: 'movements', label: 'Movimenti', width: 8, fluid: true, numeric: true },
 ]
 
 function partitarioCellValue(row, col) {
@@ -182,13 +208,13 @@ function partitarioDetailCellValue(row, col) {
 }
 
 const MASTRO_DETAIL_COLUMNS = [
-  { id: 'date', label: 'Data', width: 120 },
-  { id: 'registrationNumber', label: 'N. registrazione', width: 150, mono: true },
-  { id: 'description', label: 'Descrizione', width: 280 },
-  { id: 'documentLabel', label: 'Documento collegato', width: 220 },
-  { id: 'dare', label: 'Dare', width: 130, numeric: true },
-  { id: 'avere', label: 'Avere', width: 130, numeric: true },
-  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 150, numeric: true },
+  { id: 'date', label: 'Data', width: 10, fluid: true },
+  { id: 'registrationNumber', label: 'N. registrazione', width: 12, fluid: true, mono: true },
+  { id: 'description', label: 'Descrizione', width: 28, fluid: true, emphasis: true },
+  { id: 'documentLabel', label: 'Documento collegato', width: 18, fluid: true },
+  { id: 'dare', label: 'Dare', width: 10, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 10, fluid: true, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 12, fluid: true, numeric: true },
 ]
 
 function mastroDetailCellValue(row, col) {
@@ -453,7 +479,7 @@ export default function MastriniContabiliPage() {
       </section>
 
       {viewMode === 'mastrini' ? (
-      <section className="card fatture-panel">
+      <section className="card fatture-panel mastrini-fit-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
           <h2 className="fatture-panel-title" style={{ margin: 0 }}>
             Elenco mastrini
@@ -471,6 +497,7 @@ export default function MastriniContabiliPage() {
           rows={filteredAccounts}
           cellValue={mastroCellValue}
           emptyMessage="Nessun mastro nel filtro."
+          gridClassName="mastrini-fit-grid"
           rowKey={(row) => row.code}
           onRowClick={(row) => setSelectedCode(row.code)}
           getRowClassName={(row) => (selected?.code === row.code ? 'workbook-row-selected' : '')}
@@ -493,7 +520,7 @@ export default function MastriniContabiliPage() {
       </section>
       ) : (
         <>
-          <section className="card fatture-panel">
+          <section className="card fatture-panel mastrini-fit-panel">
             <h2 className="fatture-panel-title">Partitario per soggetto</h2>
             <div className="ui-kpi-row">
               <div className="ui-kpi-card">
@@ -520,6 +547,7 @@ export default function MastriniContabiliPage() {
               rows={parties}
               cellValue={partitarioCellValue}
               emptyMessage="Nessun soggetto nel partitario per i filtri attivi."
+              gridClassName="mastrini-fit-grid"
               rowKey={(row) => row.key}
               onRowClick={(row) => setSelectedPartyKey(row.key)}
               getRowClassName={(row) => (selectedParty?.key === row.key ? 'workbook-row-selected' : '')}
@@ -585,7 +613,7 @@ export default function MastriniContabiliPage() {
       )}
 
       {viewMode === 'mastrini' && selected ? (
-        <section className="card fatture-panel">
+        <section className="card fatture-panel mastrini-fit-panel">
           <h2 className="fatture-panel-title">Dettaglio mastro {selected.code}</h2>
           <div className="ui-kpi-row">
             <div className="ui-kpi-card">
@@ -621,6 +649,7 @@ export default function MastriniContabiliPage() {
             rows={advancedRows}
             cellValue={mastroDetailCellValue}
             emptyMessage="Nessun movimento per questo mastro."
+            gridClassName="mastrini-fit-grid"
             rowKey={(row, idx) => `${selected.code}-${row.registrationNumber || 'reg'}-${idx}`}
             actionsHeader="Documento"
             renderActions={(row) => documentoLink(row)}
@@ -659,6 +688,7 @@ export default function MastriniContabiliPage() {
         <ul className="fatture-suggestions">
           <li>Registrazione fattura → aggiorna debiti fornitori e costi.</li>
           <li>Movimento Prima Nota → aggiorna cassa e ricavi/costi.</li>
+          <li>Movimento bancario riconciliato con fattura → collegamento visibile in mastrini e movimenti banca.</li>
           <li>Movimento bancario riconciliato → aggiorna banca e conto collegato.</li>
           <li>Incassi/Pagamenti → aggiornano crediti/debiti e banca.</li>
         </ul>

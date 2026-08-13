@@ -223,6 +223,7 @@ def create_delivery_batch(db: Session, data: DeliveryBatchCreate) -> List[Delive
     _ensure_supplier_ddt_unique(db, supplier_id, ddt_number)
     order_signed_by = _norm_signature(payload.get("order_signed_by"))
     unloading_signed_by = _norm_signature(payload.get("unloading_signed_by"))
+    carrier_id = payload.get("carrier_id")
     items = payload["items"]
     vat_percent = Decimal(str(payload.get("vat_percent") or "23.0"))
 
@@ -266,6 +267,7 @@ def create_delivery_batch(db: Session, data: DeliveryBatchCreate) -> List[Delive
             list_unit_price=list_u,
             price_diff_vs_list=diff,
             anomaly_note=anomaly_note,
+            carrier_id=carrier_id,
         )
         db.add(delivery)
         created.append(delivery)

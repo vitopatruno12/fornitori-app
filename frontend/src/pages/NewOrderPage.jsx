@@ -40,13 +40,14 @@ import {
 } from '../utils/orderMerchandiseWorkbook.js'
 import {
   buildCourierPickupMessage,
-  hasSavedCourierPhone,
   loadOrderCourierContact,
+  mapApiCarriersToEditor,
   resolveCourierEmailsForSend,
   resolveCouriersForWhatsApp,
   saveOrderCourierContact,
 } from '../utils/orderCourierContact.js'
 import OrderCourierEditor from '../components/OrderCourierEditor.jsx'
+import { fetchCarriers, setCarrierInService } from '../services/carriersService'
 
 const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', volume_liters: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'
@@ -243,16 +244,43 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [deletingAllOrders, setDeletingAllOrders] = useState(false)
   const [aiSummary, setAiSummary] = useState('')
   const initialCourier = loadOrderCourierContact()
-  const [sendCopyToCourier, setSendCopyToCourier] = useState(
-    () => initialCourier.sendCopyToCourier || hasSavedCourierPhone(initialCourier.carriers),
-  )
-  const [couriers, setCouriers] = useState(() => initialCourier.carriers)
-  const [courierSaved, setCourierSaved] = useState(() => hasSavedCourierPhone(initialCourier.carriers))
+  const [sendCopyToCourier, setSendCopyToCourier] = useState(() => Boolean(initialCourier.sendCopyToCourier))
+  const [couriers, setCouriers] = useState([])
+  const [couriersLoading, setCouriersLoading] = useState(true)
   const [pendingCourierWhatsAppUrls, setPendingCourierWhatsAppUrls] = useState([])
 
-  const handleCouriersChange = useCallback((nextOrUpdater) => {
-    setCouriers(nextOrUpdater)
+  const loadCouriersFromApi = useCallback(async () => {
+    setCouriersLoading(true)
+    try {
+      const rows = await fetchCarriers()
+      setCouriers(mapApiCarriersToEditor(rows))
+    } catch {
+      setCouriers([])
+    } finally {
+      setCouriersLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    loadCouriersFromApi()
+  }, [loadCouriersFromApi])
+
+  useEffect(() => {
+    saveOrderCourierContact({ sendCopyToCourier, carriers: [] })
+  }, [sendCopyToCourier])
+
+  const handleToggleCourierInService = useCallback(
+    async (carrier, nextValue) => {
+      if (!carrier?.id) return
+      try {
+        await setCarrierInService(carrier.id, nextValue)
+        await loadCouriersFromApi()
+      } catch (e) {
+        setError(e?.message || 'Impossibile aggiornare «In servizio»')
+      }
+    },
+    [loadCouriersFromApi],
+  )
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
@@ -297,6 +325,21 @@ export default function NewOrderPage({ operatorMode = false }) {
     () => suppliers.find((x) => String(x.id) === String(supplierId)) || null,
     [suppliers, supplierId],
   )
+
+  const isQuickProductAllowed = useCallback(
+    (categoryLabel) => {
+      if (!supplierId || !selectedSupplier) return false
+      return isProductCategoryAllowedForSupplier(selectedSupplier, categoryLabel)
+    },
+    [supplierId, selectedSupplier],
+  )
+
+  useEffect(() => {
+    if (!productChoice?.title) return
+    if (!supplierId || !isQuickProductAllowed(productChoice.title)) {
+      setProductChoice(null)
+    }
+  }, [supplierId, productChoice, isQuickProductAllowed])
 
   const couriersForWhatsApp = useMemo(
     () => resolveCouriersForWhatsApp(couriers, normalizeWhatsAppNumber),
@@ -405,34 +448,6 @@ export default function NewOrderPage({ operatorMode = false }) {
     })
     return w
   }, [supplierId, selectedSupplier, sendCopyToCourier, courierPhonesForSend, courierEmailsForSend, expectedDeliveryDate, orderDate, filledRows, dupDescriptions])
-
-  function persistTransporterContact() {
-    const ok = saveOrderCourierContact({
-      sendCopyToCourier,
-      carriers: couriers,
-    })
-    setCourierSaved(ok && courierPhonesForSend.length > 0)
-    return ok
-  }
-
-  function handleSaveTransporter() {
-    setError('')
-    setSuccess('')
-    setSuccessDetail(null)
-    if (!courierPhonesForSend.length) {
-      setError('Inserisci almeno un cellulare trasportatore valido (trasportatore in servizio o attivo)')
-      return
-    }
-    if (!persistTransporterContact()) {
-      setError('Impossibile salvare i trasportatori in questo browser')
-      return
-    }
-    setSuccess('Trasportatori salvati: resteranno disponibili nei prossimi ordini')
-  }
-
-  function markCouriersDirty() {
-    setCourierSaved(false)
-  }
 
   function validateOrderDraftForSend() {
     if (!supplierId) {
@@ -1738,28 +1753,39 @@ export default function NewOrderPage({ operatorMode = false }) {
           <h3 className="page-subheader" style={{ marginTop: '1rem' }}>
             Prodotti da ordinare
           </h3>
-          {!supplierId && (
+          {!supplierId ? (
             <p className="alert alert-warning" style={{ fontSize: '0.85rem', marginBottom: '0.65rem' }}>
               Scegli un fornitore per abilitare i pulsanti prodotti.
             </p>
+          ) : (
+            <p style={{ fontSize: '0.85rem', marginBottom: '0.65rem', color: 'var(--text-muted)' }}>
+              Restano attivi solo i prodotti associati a questo fornitore (categorie merceologiche in anagrafica).
+            </p>
           )}
           <div className="order-product-grid" role="group" aria-label="Prodotti rapidi">
-            {ORDER_QUICK_PRODUCTS.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className={quickProductBtnClassName(item.label, { choice: Boolean(item.variants?.length) })}
-                disabled={!supplierId || saving}
-                onClick={() => handleQuickProductClick(item)}
-                title={
-                  item.variants?.length
-                    ? `Scegli tipo di ${item.label.toLowerCase()}`
-                    : `Aggiungi ${item.label} all'ordine`
-                }
-              >
-                {item.label}
-              </button>
-            ))}
+            {ORDER_QUICK_PRODUCTS.map((item) => {
+              const categoryAllowed = isQuickProductAllowed(item.label)
+              const blockedForSupplier = Boolean(supplierId) && !categoryAllowed
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  className={quickProductBtnClassName(item.label, { choice: Boolean(item.variants?.length) })}
+                  disabled={!supplierId || saving || !categoryAllowed}
+                  aria-disabled={!supplierId || saving || !categoryAllowed}
+                  onClick={() => handleQuickProductClick(item)}
+                  title={
+                    blockedForSupplier
+                      ? SUPPLIER_PRODUCT_BLOCKED_MESSAGE
+                      : item.variants?.length
+                        ? `Scegli tipo di ${item.label.toLowerCase()}`
+                        : `Aggiungi ${item.label} all'ordine`
+                  }
+                >
+                  {item.label}
+                </button>
+              )
+            })}
           </div>
 
           {productChoice && (
@@ -2006,19 +2032,18 @@ export default function NewOrderPage({ operatorMode = false }) {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.65rem' }}>
               <strong>Trasportatore / corriere</strong>
-              {courierSaved && courierPhonesForSend.length ? (
+              {courierPhonesForSend.length ? (
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                  {couriers.length} trasportatore/i memorizzati · in servizio: {activeCouriersLabel || '—'}
+                  In servizio: {activeCouriersLabel || '—'}
                 </span>
               ) : null}
             </div>
-            <OrderCourierEditor carriers={couriers} onCarriersChange={handleCouriersChange} onDirty={markCouriersDirty} />
-            <div style={{ marginTop: '0.65rem', marginBottom: '0.65rem' }}>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSaveTransporter}>
-                Salva trasportatori
-              </button>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', marginBottom: 0 }}>
+            <OrderCourierEditor
+              carriers={couriers}
+              loading={couriersLoading}
+              onToggleInService={handleToggleCourierInService}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', marginTop: '0.65rem', marginBottom: 0 }}>
               <input
                 type="checkbox"
                 checked={sendCopyToCourier}

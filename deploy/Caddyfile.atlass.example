@@ -9,9 +9,15 @@ www.atlass.it, atlass.it {
 	# API FastAPI
 	handle /api/* {
 		uri strip_prefix /api
+		# VNE overview/health possono superare 75s: evita 502 del reverse proxy.
 		reverse_proxy 127.0.0.1:8000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP {remote_host}
+			transport http {
+				response_header_timeout 120s
+				read_timeout 120s
+				write_timeout 120s
+			}
 		}
 	}
 

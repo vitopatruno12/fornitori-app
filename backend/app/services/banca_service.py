@@ -50,8 +50,13 @@ def _account_out(row: BankAccount) -> Dict[str, Any]:
   }
 
 
-def _movement_out(row: BankMovement, account: Optional[BankAccount] = None) -> Dict[str, Any]:
-  return {
+def _movement_out(
+  row: BankMovement,
+  account: Optional[BankAccount] = None,
+  invoice: Optional[Invoice] = None,
+  supplier_name: Optional[str] = None,
+) -> Dict[str, Any]:
+  out = {
     "id": row.id,
     "bank_account_id": row.bank_account_id,
     "account_label": (
@@ -71,6 +76,15 @@ def _movement_out(row: BankMovement, account: Optional[BankAccount] = None) -> D
     "source": row.source,
     "notes": row.notes,
   }
+  if invoice is not None:
+    out["matched_invoice"] = {
+      "id": invoice.id,
+      "invoice_number": invoice.invoice_number or str(invoice.id),
+      "supplier_name": supplier_name or "",
+      "total": float(_dec(invoice.total)),
+      "payment_status": payment_status_label(invoice),
+    }
+  return out
 
 
 def ensure_default_account(db: Session) -> BankAccount:
@@ -299,7 +313,29 @@ def list_movements(
   if counterparty:
     q = q.filter(func.lower(BankMovement.counterparty).like(f"%{counterparty.lower()}%"))
   rows = q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(limit).all()
-  return [_movement_out(m, a) for m, a in rows]
+  invoice_ids = {m.matched_invoice_id for m, _ in rows if m.matched_invoice_id}
+  invoices_by_id: Dict[int, Invoice] = {}
+  suppliers_by_id: Dict[int, str] = {}
+  if invoice_ids:
+    inv_rows = db.query(Invoice).filter(Invoice.id.in_(invoice_ids)).all()
+    invoices_by_id = {inv.id: inv for inv in inv_rows}
+    supplier_ids = {inv.supplier_id for inv in inv_rows if inv.supplier_id}
+    if supplier_ids:
+      suppliers_by_id = {
+        s.id: s.name
+        for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()
+      }
+  return [
+    _movement_out(
+      m,
+      a,
+      invoices_by_id.get(m.matched_invoice_id) if m.matched_invoice_id else None,
+      suppliers_by_id.get(invoices_by_id[m.matched_invoice_id].supplier_id)
+      if m.matched_invoice_id and m.matched_invoice_id in invoices_by_id and invoices_by_id[m.matched_invoice_id].supplier_id
+      else None,
+    )
+    for m, a in rows
+  ]
 
 
 def get_dashboard(db: Session) -> Dict[str, Any]:
@@ -568,12 +604,26 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
     if inv:
       residuo = _dec(inv.total) - _dec(inv.amount_paid)
       mov.difference_amount = residuo - _dec(mov.amount)
-  elif status != "difference":
+      paid = _dec(inv.amount_paid) + _dec(mov.amount)
+      inv.amount_paid = min(_dec(inv.total), paid)
+      inv.is_paid = payment_status_label(inv) == "paid"
+  elif status == "matched" and invoice_id:
+    mov.difference_amount = None
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if inv:
+      inv.amount_paid = _dec(inv.total)
+      inv.is_paid = True
+  else:
     mov.difference_amount = None
   db.commit()
   db.refresh(mov)
   acc = db.query(BankAccount).filter(BankAccount.id == mov.bank_account_id).first()
-  return _movement_out(mov, acc)
+  inv = db.query(Invoice).filter(Invoice.id == mov.matched_invoice_id).first() if mov.matched_invoice_id else None
+  supplier_name = None
+  if inv and inv.supplier_id:
+    sup = db.query(Supplier).filter(Supplier.id == inv.supplier_id).first()
+    supplier_name = sup.name if sup else None
+  return _movement_out(mov, acc, inv, supplier_name)
 
 
 def _refresh_account_balances(db: Session, account: BankAccount) -> None:

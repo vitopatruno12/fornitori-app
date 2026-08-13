@@ -321,6 +321,7 @@ class AccessCodeLookupIn(BaseModel):
 
 class AccessCodeOtpRequestIn(BaseModel):
     query: str = Field(..., min_length=2, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=32)
 
 
 class AccessCodeOtpRequestOut(BaseModel):

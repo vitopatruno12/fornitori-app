@@ -12,6 +12,8 @@ type Props = {
   to: string
   items: NavDropdownItem[]
   onNavigate?: () => void
+  /** Se true (o se `to` è `/`), il link principale è attivo solo sul path esatto. */
+  end?: boolean
 }
 
 function useIsMobileNav() {
@@ -61,14 +63,18 @@ function useNavDropdownMenuPosition(open: boolean, rootRef: React.RefObject<HTML
   return style
 }
 
-export default function AppNavDropdown({ label, to, items, onNavigate }: Props) {
+export default function AppNavDropdown({ label, to, items, onNavigate, end }: Props) {
   const location = useLocation()
   const [open, setOpen] = React.useState(false)
   const rootRef = React.useRef<HTMLDivElement>(null)
   const isMobileNav = useIsMobileNav()
   const menuStyle = useNavDropdownMenuPosition(open && !isMobileNav, rootRef)
+  const endMatch = end ?? to === '/'
   const isGroupActive =
-    location.pathname === to || items.some((item) => location.pathname === item.to)
+    (endMatch
+      ? location.pathname === to
+      : location.pathname === to || location.pathname.startsWith(`${to}/`)) ||
+    items.some((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))
 
   React.useEffect(() => {
     function onDocClick(event: MouseEvent) {
@@ -120,6 +126,7 @@ export default function AppNavDropdown({ label, to, items, onNavigate }: Props) 
       <div className="app-nav-dropdown-trigger">
         <NavLink
           to={to}
+          end={endMatch}
           className={({ isActive }) => `app-nav-dropdown-label${isActive ? ' active' : ''}`}
           onClick={onNavigate}
         >

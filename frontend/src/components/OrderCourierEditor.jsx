@@ -1,161 +1,148 @@
 import React, { useCallback } from 'react'
-import { createCourierCarrier, setCourierInService } from '../utils/orderCourierContact.js'
+import { Link } from 'react-router-dom'
+import {
+  getCourierTrafficStatus,
+  isCourierOperational,
+} from '../utils/orderCourierContact.js'
 
-export default function OrderCourierEditor({ carriers, onCarriersChange, onDirty }) {
-  const list = Array.isArray(carriers) && carriers.length ? carriers : [createCourierCarrier()]
+const TRAFFIC_COLORS = {
+  green: '#16a34a',
+  yellow: '#ca8a04',
+  red: '#dc2626',
+}
 
-  const markDirty = useCallback(() => {
-    if (typeof onDirty === 'function') onDirty()
-  }, [onDirty])
-
-  const updateCarriers = useCallback(
-    (updater) => {
-      if (typeof onCarriersChange !== 'function') return
-      onCarriersChange((previousCarriers) => {
-        const currentList =
-          Array.isArray(previousCarriers) && previousCarriers.length
-            ? previousCarriers
-            : [createCourierCarrier()]
-        return updater(currentList)
-      })
-      markDirty()
-    },
-    [onCarriersChange, markDirty],
+function CourierTrafficLight({ status }) {
+  const color = TRAFFIC_COLORS[status.color] || TRAFFIC_COLORS.red
+  return (
+    <span
+      className="order-courier-traffic"
+      title={status.label}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', flex: '0 0 auto' }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: '50%',
+          background: color,
+          boxShadow: `0 0 0 2px ${color}33`,
+          flex: '0 0 auto',
+        }}
+      />
+      <span style={{ fontSize: '0.82rem', fontWeight: 600, color }}>{status.label}</span>
+    </span>
   )
+}
 
-  const updateCarrier = useCallback(
-    (index, patch) => {
-      updateCarriers((currentList) =>
-        currentList.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
-      )
-    },
-    [updateCarriers],
-  )
+/**
+ * Elenco trasportatori da anagrafica API (pagina Trasportatori).
+ * Qui si sceglie solo «In servizio» per l'ordine; attivo/riposo/fuori servizio si gestiscono in /trasportatori.
+ */
+export default function OrderCourierEditor({ carriers, onToggleInService, loading }) {
+  const list = Array.isArray(carriers) ? carriers : []
 
   const toggleInService = useCallback(
-    (index) => {
-      updateCarriers((currentList) => setCourierInService(currentList, index))
+    (carrier) => {
+      if (typeof onToggleInService !== 'function' || !carrier?.id) return
+      if (!isCourierOperational(carrier) && !carrier.inService) return
+      onToggleInService(carrier, !carrier.inService)
     },
-    [updateCarriers],
+    [onToggleInService],
   )
 
-  const toggleEnabled = useCallback(
-    (index, checked) => {
-      updateCarriers((currentList) =>
-        currentList.map((item, itemIndex) => {
-          if (itemIndex !== index) return item
-          return {
-            ...item,
-            enabled: checked,
-            inService: checked ? item.inService : false,
-          }
-        }),
-      )
-    },
-    [updateCarriers],
-  )
+  if (loading) {
+    return <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Caricamento trasportatori…</p>
+  }
 
-  const addCarrier = useCallback(() => {
-    updateCarriers((currentList) => [...currentList, createCourierCarrier()])
-  }, [updateCarriers])
-
-  const removeCarrier = useCallback(
-    (index) => {
-      updateCarriers((currentList) => {
-        const next = currentList.filter((_, itemIndex) => itemIndex !== index)
-        return next.length ? next : [createCourierCarrier()]
-      })
-    },
-    [updateCarriers],
-  )
+  if (!list.length) {
+    return (
+      <div className="order-courier-editor">
+        <p className="alert alert-warning" style={{ fontSize: '0.85rem' }}>
+          Nessun trasportatore in anagrafica.{' '}
+          <Link to="/trasportatori">Apri Trasportatori</Link> per crearne uno (telefono, riposo, furgone, spese).
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="order-courier-editor">
       <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 0, marginBottom: '0.65rem' }}>
-        Aggiungi più trasportatori con relativi numeri. Spunta <strong>In servizio</strong> per l&apos;ordine corrente
-        (clic di nuovo per togliere). Se nessuno è in servizio, viene usato il primo trasportatore attivo con cellulare valido.
+        Semaforo da anagrafica:{' '}
+        <strong style={{ color: TRAFFIC_COLORS.green }}>verde</strong> in servizio,{' '}
+        <strong style={{ color: TRAFFIC_COLORS.yellow }}>giallo</strong> disponibile,{' '}
+        <strong style={{ color: TRAFFIC_COLORS.red }}>rosso</strong> riposo / fuori servizio / non attivo.
+        Attivo e giorno di riposo si impostano in{' '}
+        <Link to="/trasportatori">Trasportatori</Link>. Spunta <strong>In servizio</strong> per WhatsApp/email di questo ordine.
       </p>
-      {list.map((carrier, index) => (
-        <div
-          key={carrier._key || `courier-${index}`}
-          className="order-courier-row"
-          style={{
-            border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))',
-            borderRadius: 8,
-            padding: '0.65rem 0.75rem',
-            marginBottom: '0.55rem',
-            background: carrier.inService && carrier.enabled !== false ? 'var(--surface-2, rgba(0,0,0,0.03))' : 'transparent',
-            opacity: carrier.enabled === false ? 0.72 : 1,
-          }}
-        >
+      {list.map((carrier) => {
+        const status = getCourierTrafficStatus(carrier)
+        const operational = isCourierOperational(carrier)
+        const borderColor =
+          status.color === 'green'
+            ? 'rgba(22, 163, 74, 0.35)'
+            : status.color === 'yellow'
+              ? 'rgba(202, 138, 4, 0.35)'
+              : 'rgba(220, 38, 38, 0.35)'
+        return (
           <div
-            className="form-row"
-            style={{ alignItems: 'center', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.5rem' }}
+            key={carrier._key || carrier.id}
+            className="order-courier-row"
+            style={{
+              border: `1px solid ${borderColor}`,
+              borderRadius: 8,
+              padding: '0.65rem 0.75rem',
+              marginBottom: '0.55rem',
+              background:
+                status.color === 'green'
+                  ? 'rgba(22, 163, 74, 0.06)'
+                  : status.color === 'red'
+                    ? 'rgba(220, 38, 38, 0.05)'
+                    : 'transparent',
+              opacity: status.color === 'red' ? 0.88 : 1,
+            }}
           >
-            <label
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0, cursor: 'pointer', flex: '0 0 auto' }}
-              title="Trasportatore usato per WhatsApp ed email (clic per attivare/disattivare)"
+            <div
+              className="form-row"
+              style={{ alignItems: 'center', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.35rem' }}
             >
-              <input
-                type="checkbox"
-                checked={Boolean(carrier.inService)}
-                disabled={carrier.enabled === false}
-                onChange={() => toggleInService(index)}
-              />
-              <span style={{ fontSize: '0.88rem', fontWeight: carrier.inService ? 600 : 400 }}>In servizio</span>
-            </label>
-            <label
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0, cursor: 'pointer', flex: '0 0 auto' }}
-              title="Disponibile nell'elenco trasportatori"
-            >
-              <input
-                type="checkbox"
-                checked={carrier.enabled !== false}
-                onChange={(event) => toggleEnabled(index, event.target.checked)}
-              />
-              <span style={{ fontSize: '0.88rem' }}>Attivo</span>
-            </label>
-            {list.length > 1 ? (
-              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => removeCarrier(index)}>
-                Rimuovi
-              </button>
-            ) : null}
-          </div>
-          <div className="form-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: '0.65rem', marginBottom: 0 }}>
-            <div className="form-group" style={{ flex: '1 1 180px', minWidth: 160, marginBottom: 0 }}>
-              <label>Nome trasportatore</label>
-              <input
-                className="form-control"
-                value={carrier.name || ''}
-                onChange={(event) => updateCarrier(index, { name: event.target.value })}
-                placeholder="es. Mario Trasporti"
-              />
+              <CourierTrafficLight status={status} />
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  margin: 0,
+                  cursor: operational || carrier.inService ? 'pointer' : 'not-allowed',
+                  flex: '0 0 auto',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(carrier.inService)}
+                  disabled={!operational && !carrier.inService}
+                  onChange={() => toggleInService(carrier)}
+                />
+                <span style={{ fontSize: '0.88rem', fontWeight: carrier.inService ? 600 : 400 }}>In servizio</span>
+              </label>
+              {carrier.vanLabel || carrier.vanPlate ? (
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Furgone: {[carrier.vanLabel, carrier.vanPlate].filter(Boolean).join(' · ')}
+                </span>
+              ) : null}
             </div>
-            <div className="form-group" style={{ flex: '1 1 160px', minWidth: 140, marginBottom: 0 }}>
-              <label>Cellulare *</label>
-              <input
-                className="form-control"
-                value={carrier.phone || ''}
-                onChange={(event) => updateCarrier(index, { phone: event.target.value })}
-                placeholder="3331234567"
-              />
-            </div>
-            <div className="form-group" style={{ flex: '1 1 220px', minWidth: 180, marginBottom: 0 }}>
-              <label>Email</label>
-              <input
-                type="email"
-                className="form-control"
-                value={carrier.email || ''}
-                onChange={(event) => updateCarrier(index, { email: event.target.value })}
-                placeholder="copia in CC (email)"
-              />
+            <div style={{ fontSize: '0.9rem' }}>
+              <strong>{carrier.name || '—'}</strong>
+              {carrier.phone ? ` · ${carrier.phone}` : ''}
+              {carrier.email ? ` · ${carrier.email}` : ''}
             </div>
           </div>
-        </div>
-      ))}
-      <button type="button" className="btn btn-secondary btn-sm" onClick={addCarrier}>
-        + Aggiungi trasportatore
-      </button>
+        )
+      })}
+      <Link to="/trasportatori" className="btn btn-secondary btn-sm">
+        Gestisci anagrafica trasportatori
+      </Link>
     </div>
   )
 }

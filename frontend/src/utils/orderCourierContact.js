@@ -1,9 +1,27 @@
 const LS_KEY_V2 = 'fornitori_app_order_courier_contact_v2'
 const LS_KEY_V1 = 'fornitori_app_order_courier_contact_v1'
 
+/** Giorni settimana (come Date#getDay): 0=Domenica … 6=Sabato */
+export const COURIER_WEEKDAY_OPTIONS = [
+  { value: 1, label: 'Lunedì' },
+  { value: 2, label: 'Martedì' },
+  { value: 3, label: 'Mercoledì' },
+  { value: 4, label: 'Giovedì' },
+  { value: 5, label: 'Venerdì' },
+  { value: 6, label: 'Sabato' },
+  { value: 0, label: 'Domenica' },
+]
+
 function text(value) {
   const t = String(value ?? '').trim()
   return t || null
+}
+
+function normalizeRestDay(value) {
+  if (value === '' || value == null) return null
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 0 || n > 6) return null
+  return n
 }
 
 let courierKeySeq = 0
@@ -21,19 +39,89 @@ export function createCourierCarrier() {
     email: '',
     enabled: true,
     inService: false,
+    outOfService: false,
+    restDay: null,
   }
 }
 
 export function normalizeCourierCarrier(raw, index = 0) {
   const item = raw && typeof raw === 'object' ? raw : {}
+  const outOfService = Boolean(item.outOfService)
+  const enabled = item.enabled !== false
+  const restDay = normalizeRestDay(item.restDay)
+  const restingToday = restDay != null && restDay === new Date().getDay()
+  const blocked = outOfService || restingToday || !enabled
   return {
+    ...(item.id != null ? { id: item.id } : {}),
     name: String(item.name || '').trim(),
     phone: String(item.phone || '').trim(),
     email: String(item.email || '').trim(),
-    enabled: item.enabled !== false,
-    inService: Boolean(item.inService),
+    enabled,
+    outOfService,
+    restDay,
+    inService: blocked ? false : Boolean(item.inService),
+    ...('vanLabel' in item ? { vanLabel: item.vanLabel || '' } : {}),
+    ...('vanPlate' in item ? { vanPlate: item.vanPlate || '' } : {}),
     _key: item._key || `c-${index}-${Date.now()}`,
   }
+}
+
+/** Oggi è il giorno di riposo del trasportatore. */
+export function isCourierRestDayToday(carrier, today = new Date()) {
+  const restDay = normalizeRestDay(carrier?.restDay)
+  if (restDay == null) return false
+  return restDay === today.getDay()
+}
+
+/**
+ * Semaforo stato trasportatore:
+ * - green: attivo e in servizio
+ * - yellow: attivo ma non in servizio (solo disponibile)
+ * - red: riposo / fuori servizio / non attivo
+ */
+export function getCourierTrafficStatus(carrier, today = new Date()) {
+  const resting = isCourierRestDayToday(carrier, today)
+  if (resting) {
+    return { color: 'red', label: 'Riposo', reason: 'rest' }
+  }
+  if (carrier?.outOfService) {
+    return { color: 'red', label: 'Fuori servizio', reason: 'out' }
+  }
+  if (carrier?.enabled === false) {
+    return { color: 'red', label: 'Non attivo', reason: 'disabled' }
+  }
+  if (carrier?.inService) {
+    return { color: 'green', label: 'In servizio', reason: 'in_service' }
+  }
+  return { color: 'yellow', label: 'Disponibile', reason: 'available' }
+}
+
+export function isCourierOperational(carrier, today = new Date()) {
+  const status = getCourierTrafficStatus(carrier, today)
+  return status.color !== 'red'
+}
+
+/** Mappa record API `/carriers` → shape editor / semaforo. */
+export function mapApiCarrierToEditor(carrier) {
+  if (!carrier) return createCourierCarrier()
+  return {
+    id: carrier.id,
+    _key: `api-${carrier.id}`,
+    name: String(carrier.name || '').trim(),
+    phone: String(carrier.phone || '').trim(),
+    email: String(carrier.email || '').trim(),
+    enabled: carrier.is_active !== false,
+    outOfService: Boolean(carrier.out_of_service),
+    inService: Boolean(carrier.in_service),
+    restDay: carrier.rest_day == null ? null : Number(carrier.rest_day),
+    vanLabel: carrier.van_label || '',
+    vanPlate: carrier.van_plate || '',
+  }
+}
+
+export function mapApiCarriersToEditor(list) {
+  const rows = Array.isArray(list) ? list.map(mapApiCarrierToEditor) : []
+  return rows.length ? rows : []
 }
 
 export function normalizeCourierCarriers(raw) {
@@ -63,6 +151,8 @@ function migrateV1(parsed) {
         email,
         enabled: true,
         inService: true,
+        outOfService: false,
+        restDay: null,
       },
     ]),
   }
@@ -111,20 +201,19 @@ export function isCourierPhoneValid(phone, normalizeWhatsAppNumber) {
 
 export function resolveCouriersForWhatsApp(carriers, normalizeWhatsAppNumber) {
   const list = normalizeCourierCarriers(carriers)
-  const inService = list.filter(
-    (c) => c.inService && c.enabled !== false && isCourierPhoneValid(c.phone, normalizeWhatsAppNumber),
+  const eligible = list.filter(
+    (c) => isCourierOperational(c) && isCourierPhoneValid(c.phone, normalizeWhatsAppNumber),
   )
+  const inService = eligible.filter((c) => c.inService)
   if (inService.length) return inService
-  const fallback = list.find(
-    (c) => c.enabled !== false && isCourierPhoneValid(c.phone, normalizeWhatsAppNumber),
-  )
-  return fallback ? [fallback] : []
+  return eligible.length ? [eligible[0]] : []
 }
 
 export function resolveCourierEmailsForSend(carriers) {
   const list = normalizeCourierCarriers(carriers)
-  const inService = list.filter((c) => c.inService && c.enabled !== false && text(c.email))
-  const source = inService.length ? inService : list.filter((c) => c.enabled !== false && text(c.email))
+  const eligible = list.filter((c) => isCourierOperational(c) && text(c.email))
+  const inService = eligible.filter((c) => c.inService)
+  const source = inService.length ? inService : eligible
   const emails = []
   for (const c of source) {
     const em = text(c.email)
@@ -152,11 +241,11 @@ export function setCourierInService(carriers, index) {
   const list = Array.isArray(carriers) ? carriers.map((item) => ({ ...item })) : []
   if (!list.length) return [createCourierCarrier()]
   const current = list[index]
-  if (!current) return list
+  if (!current || !isCourierOperational(current)) return list
   const turnOff = Boolean(current.inService)
   return list.map((item, itemIndex) => ({
     ...item,
-    inService: turnOff ? false : itemIndex === index,
+    inService: turnOff ? false : itemIndex === index && isCourierOperational(item),
   }))
 }
 

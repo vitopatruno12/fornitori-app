@@ -3,6 +3,7 @@ export const STAFF_MEMBERS_WORKBOOK_TITLE = 'Elenco dipendenti'
 export const STAFF_MEMBERS_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left' },
   { id: 'name', label: 'Nome (piano)', width: 180, emphasis: true },
+  { id: 'section', label: 'Sezione', width: 120 },
   { id: 'email', label: 'Email', width: 200 },
   { id: 'phone', label: 'Telefono', width: 130 },
   { id: 'city', label: 'Città', width: 120 },
@@ -31,6 +32,8 @@ export function staffMemberCellValue(member, column, ctx = {}) {
       return String(rowIndex + 1)
     case 'name':
       return text(member.name)
+    case 'section':
+      return text(member.section)
     case 'email':
       return text(member.email)
     case 'phone':

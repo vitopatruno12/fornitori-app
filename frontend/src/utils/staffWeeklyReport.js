@@ -159,6 +159,7 @@ export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYm
       nPermessi: 0,
       nAssenze: 0,
       nMalattia: 0,
+      nFerie: 0,
     })
     const nameKey = String(m.name || '').trim().toLocaleLowerCase('it')
     if (nameKey) nameToMemberId.set(nameKey, m.id)
@@ -191,6 +192,9 @@ export function aggregateWeeklyStaffStats(members, shifts, dateFromYmd, dateToYm
         break
       case 'sick':
         row.nMalattia += 1
+        break
+      case 'ferie':
+        row.nFerie += 1
         break
       default:
         break
@@ -245,7 +249,7 @@ export function buildWeeklyReportWhatsAppText(periodTitle, rows) {
   const lines = [`📊 Report personale — ${periodTitle}`, '']
   for (const r of rows) {
     lines.push(
-      `• ${r.name}: turno ${formatHoursIt(r.oreTurno)} | permessi ${r.nPermessi} (${formatHoursIt(r.orePermesso)}) | assenze ${r.nAssenze} | malattia ${r.nMalattia}`,
+      `• ${r.name}: turno ${formatHoursIt(r.oreTurno)} | permessi ${r.nPermessi} (${formatHoursIt(r.orePermesso)}) | assenze ${r.nAssenze} | malattia ${r.nMalattia} | ferie ${r.nFerie}`,
     )
   }
   return lines.join('\n')
@@ -399,11 +403,12 @@ export function generateWeeklyStaffReportPdf({
     String(r.nPermessi),
     String(r.nAssenze),
     String(r.nMalattia),
+    String(r.nFerie),
   ])
 
   autoTable(doc, {
     startY: tableStartY,
-    head: [['Dipendente', 'Ore turno', 'Ore permesso', 'N. permessi', 'Assenze', 'Malattia']],
+    head: [['Dipendente', 'Ore turno', 'Ore permesso', 'N. permessi', 'Assenze', 'Malattia', 'Ferie']],
     body,
     styles: { fontSize: 9, cellPadding: 2 },
     headStyles: { fillColor: [41, 98, 120], textColor: 255 },

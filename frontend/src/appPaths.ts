@@ -19,6 +19,7 @@ export const APP_PATHS = {
   'banca-movimenti': '/banca/movimenti',
   'banca-riconciliazione': '/banca/riconciliazione',
   fatture: '/fatture',
+  'fatture-passive': '/fatture/ricevute',
   'fatture-ricevute': '/fatture/ricevute',
   'fatture-da-registrare': '/fatture/da-registrare',
   'fatture-registrate': '/fatture/registrate',
@@ -38,6 +39,7 @@ export const APP_PATHS = {
   'staff-operator-links': '/staff/link-operatori',
   'staff-locale-codes': '/staff/link-codici',
   'support-tech': '/support-tech',
+  trasportatori: '/trasportatori',
   magazzino: '/magazzino',
 } as const
 

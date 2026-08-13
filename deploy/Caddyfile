@@ -11,10 +11,16 @@
 
 api.tuosito.it {
 	# Inoltra tutto a uvicorn in ascolto su 127.0.0.1:8000
+	# VNE overview/health possono superare 75s: evita 502 del reverse proxy.
 	reverse_proxy 127.0.0.1:8000 {
 		# Forward dei veri header per CORS, IP client, ecc.
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			response_header_timeout 120s
+			read_timeout 120s
+			write_timeout 120s
+		}
 	}
 
 	# Limite upload (fatture PDF, allegati): default 10MB, qui 25MB

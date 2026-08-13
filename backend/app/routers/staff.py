@@ -249,7 +249,7 @@ def upsert_locale_pack(payload: staff_schema.StaffLocalePackUpsert, db: Session 
 @router.post("/access-codes/otp/request", response_model=staff_schema.AccessCodeOtpRequestOut)
 def request_access_code_otp(payload: staff_schema.AccessCodeOtpRequestIn, db: Session = Depends(get_db)):
     try:
-        return staff_service.request_access_code_otp(db, payload.query)
+        return staff_service.request_access_code_otp(db, payload.query, phone=payload.phone)
     except ValueError as e:
         msg = str(e)
         if "Attendi" in msg:

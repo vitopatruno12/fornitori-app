@@ -27,11 +27,11 @@ import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { parseBanFile } from '../utils/banFileParser'
 
 const BANK_LAST_MOVEMENTS_COLUMNS = [
-  { id: 'date', label: 'Data', width: 120 },
-  { id: 'description', label: 'Descrizione', width: 320 },
-  { id: 'type', label: 'Tipo', width: 110 },
-  { id: 'amount', label: 'Importo', width: 130, numeric: true },
-  { id: 'status', label: 'Stato', width: 140 },
+  { id: 'date', label: 'Data', width: 14, fluid: true },
+  { id: 'description', label: 'Descrizione', width: 42, fluid: true, emphasis: true },
+  { id: 'type', label: 'Tipo', width: 12, fluid: true },
+  { id: 'amount', label: 'Importo', width: 16, fluid: true, numeric: true },
+  { id: 'status', label: 'Stato', width: 16, fluid: true },
 ]
 
 function bankLastMovementsCellValue(row, col) {
@@ -44,12 +44,12 @@ function bankLastMovementsCellValue(row, col) {
 }
 
 const BANK_ACCOUNTS_COLUMNS = [
-  { id: 'bank', label: 'Banca', width: 260, sticky: 'left' },
-  { id: 'iban', label: 'IBAN', width: 200, mono: true },
-  { id: 'saldo_disponibile', label: 'Saldo disponibile', width: 150, numeric: true },
-  { id: 'saldo_contabile', label: 'Saldo contabile', width: 150, numeric: true },
-  { id: 'status', label: 'Stato', width: 120 },
-  { id: 'last_sync', label: 'Ultima sync', width: 130 },
+  { id: 'bank', label: 'Banca', width: 28, fluid: true, emphasis: true },
+  { id: 'iban', label: 'IBAN', width: 18, fluid: true, mono: true },
+  { id: 'saldo_disponibile', label: 'Saldo disponibile', width: 14, fluid: true, numeric: true },
+  { id: 'saldo_contabile', label: 'Saldo contabile', width: 14, fluid: true, numeric: true },
+  { id: 'status', label: 'Stato', width: 12, fluid: true },
+  { id: 'last_sync', label: 'Ultima sync', width: 14, fluid: true },
 ]
 
 function bankAccountsCellValue(row, col) {
@@ -63,18 +63,26 @@ function bankAccountsCellValue(row, col) {
 }
 
 const BANK_MOVEMENTS_COLUMNS = [
-  { id: 'date', label: 'Data', width: 120 },
-  { id: 'description', label: 'Descrizione', width: 280 },
-  { id: 'causale', label: 'Causale', width: 220 },
-  { id: 'type', label: 'Entrata/Uscita', width: 120 },
-  { id: 'amount', label: 'Importo', width: 130, numeric: true },
-  { id: 'account', label: 'Conto', width: 180 },
-  { id: 'status', label: 'Riconciliazione', width: 140 },
+  { id: 'date', label: 'Data', width: 9, fluid: true },
+  { id: 'description', label: 'Descrizione', width: 22, fluid: true, emphasis: true },
+  { id: 'linked_invoice', label: 'Fattura collegata', width: 16, fluid: true },
+  { id: 'causale', label: 'Causale', width: 14, fluid: true },
+  { id: 'type', label: 'Entrata/Uscita', width: 9, fluid: true },
+  { id: 'amount', label: 'Importo', width: 11, fluid: true, numeric: true },
+  { id: 'account', label: 'Conto', width: 11, fluid: true },
+  { id: 'status', label: 'Riconciliazione', width: 8, fluid: true },
 ]
 
 function bankMovementsCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement_date)
   if (col.id === 'description') return row?.description || '—'
+  if (col.id === 'linked_invoice') {
+    const inv = row?.matched_invoice
+    if (!inv) return row?.matched_invoice_id ? `Fattura #${row.matched_invoice_id}` : '—'
+    const num = inv.invoice_number || inv.id
+    const supplier = inv.supplier_name ? ` · ${inv.supplier_name}` : ''
+    return `Fattura ${num}${supplier}`
+  }
   if (col.id === 'causale') return row?.causale || '—'
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
@@ -84,11 +92,11 @@ function bankMovementsCellValue(row, col) {
 }
 
 const BANK_RECON_COLUMNS = [
-  { id: 'movement', label: 'Movimento', width: 300, sticky: 'left' },
-  { id: 'amount', label: 'Importo', width: 130, numeric: true },
-  { id: 'invoice', label: 'Proposta fattura', width: 320 },
-  { id: 'difference', label: 'Differenza', width: 130, numeric: true },
-  { id: 'status', label: 'Esito', width: 140 },
+  { id: 'movement', label: 'Movimento', width: 32, fluid: true, emphasis: true },
+  { id: 'amount', label: 'Importo', width: 12, fluid: true, numeric: true },
+  { id: 'invoice', label: 'Proposta fattura', width: 32, fluid: true },
+  { id: 'difference', label: 'Differenza', width: 12, fluid: true, numeric: true },
+  { id: 'status', label: 'Esito', width: 12, fluid: true },
 ]
 
 function bankReconCellValue(row, col) {
@@ -268,6 +276,7 @@ export function BancaDashboardPage() {
               rows={data.ultimi_movimenti || []}
               cellValue={bankLastMovementsCellValue}
               emptyMessage="Nessun movimento. Sincronizza un conto da Conti correnti."
+              gridClassName="banca-fit-grid"
               rowKey={(row) => row.id}
             />
           </section>
@@ -569,7 +578,7 @@ export function BancaContiPage() {
         </p>
       </section>
 
-      <section className="card fatture-panel">
+      <section className="card fatture-panel banca-fit-panel">
         <h2 className="fatture-panel-title">Elenco conti</h2>
         {loading ? (
           <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
@@ -581,6 +590,7 @@ export function BancaContiPage() {
             rows={items}
             cellValue={bankAccountsCellValue}
             emptyMessage="Nessun conto."
+            gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
             totals={{
               saldo_disponibile: items.reduce((acc, a) => acc + (Number(a?.saldo_disponibile) || 0), 0),
@@ -744,7 +754,7 @@ export function BancaMovimentiPage() {
         </form>
       </section>
 
-      <section className="card fatture-panel">
+      <section className="card fatture-panel banca-fit-panel">
         {loading ? (
           <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
         ) : (
@@ -755,6 +765,7 @@ export function BancaMovimentiPage() {
             rows={items}
             cellValue={bankMovementsCellValue}
             emptyMessage="Nessun movimento nel filtro. Usa Sincronizza in Conti correnti."
+            gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
             totals={{
               amountEntrate: items.reduce(
@@ -834,7 +845,7 @@ export function BancaRiconciliazionePage() {
     >
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      <section className="card fatture-panel">
+      <section className="card fatture-panel banca-fit-panel">
         <p className="fatture-note" style={{ marginTop: 0 }}>
           Fatture aperte considerate: {data?.open_invoices_count ?? '—'} · Movimenti uscita da riconciliare:{' '}
           {data?.unmatched_movements ?? '—'}
@@ -849,6 +860,7 @@ export function BancaRiconciliazionePage() {
             rows={data?.suggestions || []}
             cellValue={bankReconCellValue}
             emptyMessage="Nessun movimento da riconciliare. Sincronizza i conti e riprova."
+            gridClassName="banca-fit-grid"
             rowKey={(row, idx) => row?.movement?.id || idx}
             totals={{
               amount: (data?.suggestions || []).reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),

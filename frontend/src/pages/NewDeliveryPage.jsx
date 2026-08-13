@@ -19,6 +19,13 @@ import {
 } from '../utils/deliveryItemsWorkbook.js'
 import { fetchSupplierOrder, fetchSupplierOrders } from '../services/supplierOrdersService'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
+import { Link } from 'react-router-dom'
+import { fetchCarriers } from '../services/carriersService'
+import {
+  getCourierTrafficStatus,
+  isCourierOperational,
+  mapApiCarriersToEditor,
+} from '../utils/orderCourierContact.js'
 
 const emptyItem = () => ({
   product_description: '',
@@ -116,11 +123,19 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   const [ordersForImport, setOrdersForImport] = useState([])
   const [ordersForImportLoading, setOrdersForImportLoading] = useState(false)
   const [selectedOrderId, setSelectedOrderId] = useState('')
+  const [carriers, setCarriers] = useState([])
+  const [carrierId, setCarrierId] = useState('')
+  const [carriersLoading, setCarriersLoading] = useState(true)
 
   const supplierLabel = useMemo(() => {
     const s = suppliers.find((x) => String(x.id) === String(supplierId))
     return s ? s.name : ''
   }, [suppliers, supplierId])
+
+  const operationalCarriers = useMemo(
+    () => carriers.filter((c) => isCourierOperational(c)),
+    [carriers],
+  )
 
   const priceListTotals = useMemo(() => priceListWorkbookTotals(priceList), [priceList])
 
@@ -128,6 +143,17 @@ export default function NewDeliveryPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadSuppliers()
+    ;(async () => {
+      setCarriersLoading(true)
+      try {
+        const rows = await fetchCarriers()
+        setCarriers(mapApiCarriersToEditor(rows))
+      } catch {
+        setCarriers([])
+      } finally {
+        setCarriersLoading(false)
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -424,6 +450,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
         unloading_signed_by: unloadingSignedBy.trim() || null,
         vat_percent: Number(vatPercent) || 23,
         note: mergedNote,
+        carrier_id: carrierId ? Number(carrierId) : null,
         items: validItems,
       })
       setSuccess(`Consegna registrata${supplierLabel ? ` — ${supplierLabel}` : ''}`)
@@ -435,6 +462,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
       setOrderSignedBy('')
       setUnloadingSignedBy('')
       setNote('')
+      setCarrierId('')
     } catch (e) {
       const msg = e?.message || ''
       if (msg.includes('DDT') && msg.toLowerCase().includes('gia presente')) {
@@ -511,6 +539,31 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="form-group">
+              <label>Trasportatore</label>
+              <select
+                className="form-control"
+                value={carrierId}
+                onChange={(e) => setCarrierId(e.target.value)}
+                disabled={carriersLoading}
+              >
+                <option value="">Seleziona…</option>
+                {operationalCarriers.map((c) => {
+                  const st = getCourierTrafficStatus(c)
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.phone ? ` · ${c.phone}` : ''}
+                      {` (${st.label})`}
+                    </option>
+                  )
+                })}
+              </select>
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Solo trasportatori attivi (non in riposo/fuori servizio).{' '}
+                <Link to="/trasportatori">Gestisci anagrafica</Link>
+              </p>
             </div>
             <div className="form-group">
               <label>Data consegna</label>

@@ -29,6 +29,7 @@ class DeliveryBase(BaseModel):
   order_signed_by: Optional[str] = None
   unloading_signed_by: Optional[str] = None
   anomaly_note: Optional[str] = None
+  carrier_id: Optional[int] = None
 
 
 class DeliveryCreate(DeliveryBase):
@@ -43,6 +44,7 @@ class DeliveryBatchCreate(BaseModel):
   ddt_number: Optional[str] = None
   order_signed_by: Optional[str] = None
   unloading_signed_by: Optional[str] = None
+  carrier_id: Optional[int] = None
   items: List[DeliveryItemCreate]
 
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchInvoices, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
+import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { apiUrl } from '../services/api'
@@ -34,6 +34,7 @@ export default function InvoicesPage() {
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [detailInv, setDetailInv] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [monthFilter, setMonthFilter] = useState('')
   const [showIgnored, setShowIgnored] = useState(false)
   const [pendingSupplierLabel, setPendingSupplierLabel] = useState('')
@@ -201,6 +202,25 @@ export default function InvoicesPage() {
       setError('Errore nel caricamento delle fatture')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function openInvoiceDetail(inv) {
+    setDetailInv({ ...inv, rows: inv.rows || [] })
+    setDetailLoading(true)
+    try {
+      const full = await fetchInvoice(inv.id)
+      setDetailInv({
+        ...inv,
+        ...full,
+        supplier_name: full.supplier_name || inv.supplier_name,
+        payment_status: full.payment_status || inv.payment_status,
+        rows: Array.isArray(full.rows) ? full.rows : [],
+      })
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento dettaglio fattura')
+    } finally {
+      setDetailLoading(false)
     }
   }
 
@@ -583,7 +603,7 @@ export default function InvoicesPage() {
                   <tr
                     key={inv.id}
                     className="pn-row-click"
-                    onClick={() => setDetailInv(inv)}
+                    onClick={() => openInvoiceDetail(inv)}
                   >
                     <td style={{ fontWeight: 600 }}>{inv.invoice_number}</td>
                     <td>{formatDate(inv.invoice_date)}</td>
@@ -672,6 +692,7 @@ export default function InvoicesPage() {
               <button type="button" className="ui-drawer-close" onClick={() => setDetailInv(null)} aria-label="Chiudi">×</button>
             </div>
             <div className="ui-drawer-body">
+              {detailLoading ? <AnalisiLoadingBar active label="Caricamento dettaglio" variant="subtle" /> : null}
               <p style={{ marginTop: 0 }}><PaymentBadge status={detailInv.payment_status} ignored={detailInv.ignored} /></p>
               <p><strong>Data documento:</strong> {formatDate(detailInv.invoice_date)}</p>
               <p><strong>Scadenza:</strong> {formatDate(detailInv.due_date)}</p>
@@ -681,6 +702,41 @@ export default function InvoicesPage() {
               <p><strong>Già pagato:</strong> € {formatAmount(detailInv.amount_paid)}</p>
               <p><strong>Residuo:</strong> € {formatAmount(Number(detailInv.total) - Number(detailInv.amount_paid || 0))}</p>
               {detailInv.note && <p><strong>Note:</strong> {detailInv.note}</p>}
+
+              <hr style={{ margin: '1rem 0', border: 0, borderTop: '1px solid var(--border, #ddd)' }} />
+              <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>Righe</h3>
+              <div className="table-wrap">
+                <table className="app-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Descrizione</th>
+                      <th className="text-end">Q.tà</th>
+                      <th className="text-end">Imponibile</th>
+                      <th className="text-end">IVA %</th>
+                      <th className="text-end">Totale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(detailInv.rows || []).map((ln) => (
+                      <tr key={ln.line_no}>
+                        <td>{ln.line_no}</td>
+                        <td>{ln.description || '—'}</td>
+                        <td className="text-end">{ln.quantity != null ? Number(ln.quantity).toLocaleString('it-IT') : '—'}</td>
+                        <td className="text-end">€ {formatAmount(ln.imponibile)}</td>
+                        <td className="text-end">{ln.vat_percent != null ? `${ln.vat_percent}%` : '—'}</td>
+                        <td className="text-end">€ {formatAmount(ln.total_line)}</td>
+                      </tr>
+                    ))}
+                    {!detailLoading && !(detailInv.rows || []).length ? (
+                      <tr>
+                        <td colSpan={6} className="empty-state">Nessuna riga</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
               <div className="btn-group" style={{ marginTop: '1rem' }}>
                 <button type="button" className="btn btn-primary" onClick={() => { handleEdit(detailInv); setDetailInv(null) }}>Modifica</button>
                 <button type="button" className="btn btn-secondary" onClick={() => openPrimaNota(detailInv)}>Apri Prima Nota</button>

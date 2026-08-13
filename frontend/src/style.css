@@ -4692,6 +4692,16 @@ select.form-control {
   max-width: 52rem;
 }
 
+.staff-page-hero a {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.staff-page-hero a:hover {
+  color: #ecfdf5;
+}
+
 .prima-nota-locale-picker {
   position: relative;
   margin-bottom: 1rem;
@@ -6007,6 +6017,26 @@ select.form-control {
   color: var(--text-muted, #6b7280);
 }
 
+.analisi-header.staff-page-hero .analisi-kicker {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.analisi-hero-vne-status {
+  margin-top: 0.85rem;
+}
+
+.analisi-header.staff-page-hero .analisi-vne-semaphore {
+  margin-bottom: 0;
+}
+
+.vne-page-hero .analisi-vne-semaphore {
+  margin-bottom: 0;
+}
+
+.vne-legacy-skin .vne-page-hero .analisi-vne-semaphore {
+  max-width: 460px;
+}
+
 .analisi-header-row {
   display: flex;
   align-items: flex-start;
@@ -6827,4 +6857,90 @@ select.form-control {
 .stipendi-excel-card .pagamenti-grid-wrap.excel-wrap {
   overflow-x: hidden !important;
   overflow-y: auto;
+}
+
+.carriers-attr-table-card {
+  padding: 0.85rem;
+}
+
+.carriers-attr-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.carriers-attr-table {
+  min-width: 100%;
+  width: 100%;
+}
+
+.carriers-attr-table thead th {
+  background: #e8f0e4;
+  font-weight: 700;
+}
+
+.carriers-attr-table .excel-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.carriers-attr-table .carriers-draft-row .excel-cell {
+  background: #fffef5;
+}
+
+.carriers-attr-table .carriers-draft-row .excel-cell:focus {
+  background: #fff;
+  outline: 2px solid rgba(15, 76, 92, 0.28);
+}
+
+.mastrini-fit-panel .workbook-grid-wrap,
+.mastrini-fit-panel .pagamenti-grid-wrap.excel-wrap,
+.banca-fit-panel .workbook-grid-wrap,
+.banca-fit-panel .pagamenti-grid-wrap.excel-wrap {
+  overflow-x: hidden !important;
+}
+
+.workbook-grid.mastrini-fit-grid,
+.workbook-grid.banca-fit-grid {
+  min-width: 100% !important;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.workbook-grid.mastrini-fit-grid th,
+.workbook-grid.mastrini-fit-grid td,
+.workbook-grid.banca-fit-grid th,
+.workbook-grid.banca-fit-grid td {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.workbook-grid.mastrini-fit-grid .excel-cell,
+.workbook-grid.banca-fit-grid .excel-cell {
+  min-width: 0;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workbook-grid.mastrini-fit-grid .sup-actions-col {
+  min-width: 0;
+  width: 7%;
+}
+
+.workbook-grid.banca-fit-grid .sup-actions-col {
+  min-width: 0;
+  width: 22%;
+}
+
+.workbook-grid.banca-fit-grid .sup-actions-col > div {
+  flex-wrap: wrap;
+}
+
+
+.workbook-card-nested:has(.banca-fit-grid) .workbook-grid-wrap,
+.workbook-card-nested:has(.banca-fit-grid) .pagamenti-grid-wrap.excel-wrap {
+  overflow-x: hidden !important;
 }

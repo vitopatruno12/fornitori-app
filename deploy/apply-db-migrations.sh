@@ -42,6 +42,7 @@ SAFE_MIGRATIONS=(
   20260710_supplier_payments_workbook.sql
   20260710_supplier_order_items_volume_liters.sql
   20260712_supplier_multi_contacts.sql
+  20260723_staff_member_section.sql
 )
 
 log "Migrazioni SQL su database $DB_NAME"

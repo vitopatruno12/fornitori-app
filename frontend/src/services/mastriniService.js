@@ -94,21 +94,41 @@ function pushMovement(list, accountCode, raw, amount, side) {
   })
 }
 
-function mapCashEntries(entries = []) {
+function buildInvoiceIndex(invoices = []) {
+  const byId = new Map()
+  for (const inv of invoices) {
+    if (inv?.id != null) byId.set(Number(inv.id), inv)
+  }
+  return byId
+}
+
+function invoiceNumber(inv) {
+  return inv?.invoice_number || inv?.number || inv?.id || ''
+}
+
+function mapCashEntries(entries = [], invoicesById = new Map()) {
   const out = []
   for (const row of entries) {
     const amount = Math.abs(toNum(row?.amount))
     if (!amount) continue
+    const linkedInv = row?.invoice_id ? invoicesById.get(Number(row.invoice_id)) : null
+    const invNum = linkedInv ? invoiceNumber(linkedInv) : ''
     const meta = {
       date: isoDate(row?.entry_date),
       registrationNumber: `PN-${row?.id ?? ''}`,
-      description: row?.description || 'Movimento Prima Nota',
-      documentLabel: 'Prima Nota',
-      documentType: 'prima_nota',
-      documentId: row?.id ? String(row.id) : '',
-      documentPath: '/prima-nota',
+      description: linkedInv
+        ? `Prima Nota pagamento fattura ${invNum} — ${row?.description || 'Movimento'}`.trim()
+        : row?.description || 'Movimento Prima Nota',
+      documentLabel: linkedInv ? `Fattura ${invNum} · PN-${row?.id ?? ''}` : 'Prima Nota',
+      documentType: linkedInv ? 'pagamento_fattura_prima_nota' : 'prima_nota',
+      documentId: linkedInv ? String(linkedInv.id) : row?.id ? String(row.id) : '',
+      documentPath: linkedInv ? '/fatture/registrate' : '/prima-nota',
+      linkedInvoiceId: linkedInv ? String(linkedInv.id) : '',
+      linkedCashEntryId: row?.id ? String(row.id) : '',
+      relatedDocumentPath: linkedInv ? '/prima-nota' : '',
+      relatedDocumentLabel: linkedInv ? `Prima Nota PN-${row?.id ?? ''}` : '',
       center: row?.activity || '',
-      supplier: row?.supplier_id ? `Supplier #${row.supplier_id}` : '',
+      supplier: linkedInv?.supplier_name || (row?.supplier_id ? `Supplier #${row.supplier_id}` : ''),
       customer: row?.customer_id ? `Cliente #${row.customer_id}` : '',
       source: 'prima_nota',
     }
@@ -133,12 +153,13 @@ function invoiceAmount(inv) {
   )
 }
 
-function mapInvoices(invoices = []) {
+function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinkedInvoiceIds = new Set()) {
   const out = []
   for (const inv of invoices) {
     const amount = invoiceAmount(inv)
     if (!amount) continue
-    const number = inv?.invoice_number || inv?.number || inv?.id || ''
+    const number = invoiceNumber(inv)
+    const invId = Number(inv?.id)
     const base = {
       date: isoDate(inv?.created_at || inv?.issue_date || inv?.invoice_date || inv?.due_date),
       registrationNumber: `FA-${inv?.id ?? ''}`,
@@ -155,10 +176,13 @@ function mapInvoices(invoices = []) {
     pushMovement(out, '5000', base, amount, 'dare')
     pushMovement(out, '2000', base, amount, 'avere')
 
-    if (String(inv?.payment_status || '').toLowerCase() === 'paid') {
+    const paid = String(inv?.payment_status || '').toLowerCase() === 'paid'
+    const hasBankLink = bankMatchedInvoiceIds.has(invId)
+    const hasCashLink = cashLinkedInvoiceIds.has(invId)
+    if (paid && !hasBankLink && !hasCashLink) {
       const pay = {
         ...base,
-        description: `Pagamento fattura ${number}`.trim(),
+        description: `Pagamento fattura ${number} (senza movimento bancario collegato)`.trim(),
         documentLabel: `Pagamento ${number}`.trim(),
         documentType: 'pagamento_fornitore',
         documentPath: '/pagamenti',
@@ -171,7 +195,7 @@ function mapInvoices(invoices = []) {
   return out
 }
 
-function mapBankMovements(items = []) {
+function mapBankMovements(items = [], invoicesById = new Map()) {
   const out = []
   for (const row of items) {
     const amount = Math.abs(toNum(row?.amount))
@@ -183,17 +207,33 @@ function mapBankMovements(items = []) {
       cat.includes('commission') ||
       desc.toLowerCase().includes('commission') ||
       desc.toLowerCase().includes('spese')
+    const matchedInv =
+      row?.matched_invoice ||
+      (row?.matched_invoice_id ? invoicesById.get(Number(row.matched_invoice_id)) : null)
+    const matchedNum = matchedInv ? invoiceNumber(matchedInv) : ''
+    const supplierName = matchedInv?.supplier_name || row?.matched_invoice?.supplier_name || row?.counterparty || ''
     const base = {
       date: isoDate(row?.movement_date),
       registrationNumber: `BA-${row?.id ?? ''}`,
-      description: desc,
-      documentLabel: row?.account_label ? `Banca ${row.account_label}` : 'Movimento bancario',
-      documentType: 'movimento_bancario',
-      documentId: row?.id ? String(row.id) : '',
-      documentPath: '/banca/movimenti',
+      description: matchedInv
+        ? `Pagamento bancario fattura ${matchedNum} — ${desc}`.trim()
+        : desc,
+      documentLabel: matchedInv
+        ? `Fattura ${matchedNum} · Mov. BA-${row?.id ?? ''}`
+        : row?.account_label
+          ? `Banca ${row.account_label}`
+          : 'Movimento bancario',
+      documentType: matchedInv ? 'pagamento_fattura_banca' : 'movimento_bancario',
+      documentId: matchedInv ? String(matchedInv.id || row.matched_invoice_id) : row?.id ? String(row.id) : '',
+      documentPath: matchedInv ? '/fatture/registrate' : '/banca/movimenti',
+      linkedInvoiceId: matchedInv ? String(matchedInv.id || row.matched_invoice_id) : '',
+      linkedBankMovementId: row?.id ? String(row.id) : '',
+      relatedDocumentPath: matchedInv ? '/banca/movimenti' : '',
+      relatedDocumentLabel: matchedInv ? `Movimento BA-${row?.id ?? ''}` : '',
       center: row?.account_label || '',
-      counterparty: row?.counterparty || '',
-      source: movementType === 'entrata' ? 'incasso' : 'pagamento',
+      counterparty: supplierName,
+      supplier: supplierName,
+      source: matchedInv ? 'pagamento_fattura_banca' : movementType === 'entrata' ? 'incasso' : 'pagamento',
     }
     if (movementType === 'entrata') {
       pushMovement(out, '1100', base, amount, 'dare')
@@ -334,7 +374,19 @@ export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
     bankRes.status === 'fulfilled' && Array.isArray(bankRes.value?.items) ? bankRes.value.items : []
   if (bankRes.status === 'rejected') warnings.push('Movimenti bancari non disponibili.')
 
-  const movements = [...mapCashEntries(cashEntries), ...mapInvoices(invoices), ...mapBankMovements(bankMovements)]
+  const invoicesById = buildInvoiceIndex(invoices)
+  const bankMatchedInvoiceIds = new Set(
+    bankMovements.filter((m) => m?.matched_invoice_id).map((m) => Number(m.matched_invoice_id)),
+  )
+  const cashLinkedInvoiceIds = new Set(
+    cashEntries.filter((e) => e?.invoice_id).map((e) => Number(e.invoice_id)),
+  )
+
+  const movements = [
+    ...mapCashEntries(cashEntries, invoicesById),
+    ...mapInvoices(invoices, bankMatchedInvoiceIds, cashLinkedInvoiceIds),
+    ...mapBankMovements(bankMovements, invoicesById),
+  ]
   const ledger = buildLedger(movements)
   const partitario = buildPartitario(movements)
   return {

@@ -10,6 +10,10 @@ export async function fetchInvoices(params = {}) {
   return apiFetch(path)
 }
 
+export async function fetchInvoice(id) {
+  return apiFetch(`/invoices/${id}`)
+}
+
 export async function fetchInvoicesAnalyticsSummary() {
   return apiFetch('/invoices/analytics/summary')
 }
@@ -71,6 +75,36 @@ export function getInvoicesExportUrl(supplierId) {
   if (supplierId) params.append('supplier_id', String(supplierId))
   const q = params.toString()
   return `${API_BASE_URL}/invoices/export/csv${q ? '?' + q : ''}`
+}
+
+/** Import XML FatturaPA → fatture passive Atlas (senza SdI). */
+export async function importInvoiceXml(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetch(apiUrl('/invoices/import-xml'), {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) {
+    let detail = 'Errore import XML'
+    try {
+      const data = await response.json()
+      detail = data?.detail || detail
+    } catch {
+      const text = await response.text().catch(() => '')
+      if (text) detail = text
+    }
+    throw new Error(typeof detail === 'string' ? detail : 'Errore import XML')
+  }
+  return response.json()
+}
+
+export async function fetchIncomingInvoices(limit = 100) {
+  return apiFetch(`/invoices/incoming?limit=${limit}`)
+}
+
+export async function fetchIncomingInvoice(id) {
+  return apiFetch(`/invoices/incoming/${id}`)
 }
 
 export async function postSdiReceiveXml(file, messageId = '') {

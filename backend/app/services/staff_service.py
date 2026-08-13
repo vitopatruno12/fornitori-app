@@ -775,7 +775,9 @@ def lookup_access_codes(
     return staff_schema.AccessCodeLookupOut(query=raw, hits=hits)
 
 
-def request_access_code_otp(db: Session, query: str) -> staff_schema.AccessCodeOtpRequestOut:
+def request_access_code_otp(
+    db: Session, query: str, phone: Optional[str] = None
+) -> staff_schema.AccessCodeOtpRequestOut:
     """Verifica che il nome esista, poi invia OTP monouso sul telefono configurato."""
     from ..constants.prima_nota_staff_locale import (
         DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS,
@@ -828,7 +830,7 @@ def request_access_code_otp(db: Session, query: str) -> staff_schema.AccessCodeO
     if not found:
         raise ValueError("Nessun locale o registro trovato con questo nome.")
 
-    payload = access_code_otp_service.request_otp(qkey)
+    payload = access_code_otp_service.request_otp(qkey, phone=phone)
     return staff_schema.AccessCodeOtpRequestOut(**payload)
 
 

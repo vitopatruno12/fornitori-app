@@ -3,16 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:all": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:backend-nest\"",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend:wait\"",
+    "dev:all": "concurrently \"npm run dev:frontend:wait\" \"npm run dev:backend\" \"npm run dev:backend-nest\"",
     "build": "cd frontend && npm run build",
     "preview": "cd frontend && npm run preview",
     "dev:frontend": "cd frontend && npm run dev",
+    "dev:frontend:wait": "wait-on -t 120000 http-get://127.0.0.1:8004/health && npm run dev:frontend",
     "dev:backend": "cd backend && .\\\\.venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload --host 127.0.0.1 --port 8004",
     "dev:backend-nest": "cd backend-nest && npm run start:dev"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.0.0",
+    "wait-on": "^8.0.3"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1"

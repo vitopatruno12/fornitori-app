@@ -32,7 +32,7 @@ export function AnalisiSubnav() {
   )
 }
 
-export function AnalisiPageShell({ title, lead, children, actions = null }) {
+export function AnalisiPageShell({ title, lead, children, actions = null, vneStatus = null }) {
   return (
     <div className="analisi-page">
       <header className="analisi-header staff-page-hero">
@@ -43,6 +43,7 @@ export function AnalisiPageShell({ title, lead, children, actions = null }) {
               {title}
             </h1>
             {lead ? <p className="dashboard-subtitle staff-page-lead">{lead}</p> : null}
+            {vneStatus ? <div className="analisi-hero-vne-status">{vneStatus}</div> : null}
           </div>
           {actions}
         </div>

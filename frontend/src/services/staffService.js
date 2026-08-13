@@ -171,11 +171,14 @@ export function deleteStaffLocalePack(localeName, accessCode) {
   return apiFetch(`/staff/locale-packs?${q}`, { ...SYNC_FETCH, method: 'DELETE' })
 }
 
-export async function requestLocaleAccessCodesOtp(query) {
+export async function requestLocaleAccessCodesOtp(query, phone) {
   return apiFetch('/staff/access-codes/otp/request', {
     ...SYNC_FETCH,
     method: 'POST',
-    body: JSON.stringify({ query: String(query || '').trim() }),
+    body: JSON.stringify({
+      query: String(query || '').trim(),
+      phone: String(phone || '').trim() || undefined,
+    }),
   })
 }
 

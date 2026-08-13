@@ -7,8 +7,9 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from ..models.invoice import Invoice
+from ..models.invoice_row import InvoiceRow
 from ..models.supplier import Supplier
-from ..schemas.invoice import InvoiceCreate, InvoiceListOut, InvoiceRead
+from ..schemas.invoice import InvoiceCreate, InvoiceDetailOut, InvoiceListOut, InvoiceRead, InvoiceRowOut
 from .vat_service import calculate_vat
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "invoices"
@@ -74,6 +75,22 @@ def list_invoices(
 def get_invoice(db: Session, invoice_id: int) -> Optional[Invoice]:
   return db.query(Invoice).filter(Invoice.id == invoice_id).first()
 
+
+def get_invoice_detail(db: Session, invoice_id: int) -> Optional[InvoiceDetailOut]:
+  inv = get_invoice(db, invoice_id)
+  if not inv:
+    return None
+  row_models = (
+    db.query(InvoiceRow)
+    .filter(InvoiceRow.invoice_id == invoice_id)
+    .order_by(InvoiceRow.line_no.asc())
+    .all()
+  )
+  base = InvoiceRead.model_validate(inv)
+  return InvoiceDetailOut(
+    **base.model_dump(),
+    rows=[InvoiceRowOut.model_validate(r) for r in row_models],
+  )
 
 async def create_invoice(
   db: Session,

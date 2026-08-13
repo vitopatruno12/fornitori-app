@@ -9,9 +9,11 @@ const KIND_LABELS = {
   permission: 'Permesso',
   absence: 'Assenza',
   sick: 'Malattia',
+  ferie: 'Ferie',
 }
 
 export const STAFF_REPORT_SHEET_VOCI = 'VOCI'
+export const STAFF_REPORT_SHEET_FERIE = 'FERIE'
 export const STAFF_REPORT_SHEET_RIEPILOGO = 'RIEPILOGO'
 export const STAFF_REPORT_SHEET_TOTALI = 'TOTALI'
 
@@ -32,6 +34,7 @@ export const STAFF_REPORT_RIEPILOGO_HEADERS = [
   'N. permessi',
   'Assenze',
   'Malattia',
+  'Ferie',
 ]
 
 export const STAFF_REPORT_VOCI_COLUMNS = [
@@ -51,6 +54,7 @@ export const STAFF_REPORT_RIEPILOGO_COLUMNS = [
   { id: 'permissionCount', label: 'N. permessi', numeric: true, width: 12, fluid: true },
   { id: 'absences', label: 'Assenze', numeric: true, width: 12, fluid: true },
   { id: 'sick', label: 'Malattia', numeric: true, width: 12, fluid: true },
+  { id: 'ferie', label: 'Ferie', numeric: true, width: 12, fluid: true },
 ]
 
 export const STAFF_REPORT_TOTALI_COLUMNS = [
@@ -96,6 +100,20 @@ function compareShifts(a, b, members) {
   return String(a.time_start || '').localeCompare(String(b.time_start || ''))
 }
 
+function shiftToVociRow(shift, members) {
+  const kind = KIND_LABELS[shift.entry_kind] || shift.entry_kind || 'Turno'
+  const hours = hoursBetween(shift.time_start, shift.time_end)
+  return [
+    formatYmdIt(shift.work_date),
+    memberNameForShift(shift, members),
+    kind,
+    formatTimeShort(shift.time_start),
+    formatTimeShort(shift.time_end),
+    formatHoursCell(hours),
+    shift.notes || '',
+  ]
+}
+
 /**
  * @param {{ members: object[], shifts: object[], dateFrom: string, dateTo: string }} opts
  */
@@ -104,24 +122,20 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
   const to = String(dateTo || '').slice(0, 10)
   const title = `Report personale ${from} — ${to}`
 
-  const vociRows = [STAFF_REPORT_VOCI_HEADERS]
   const filtered = (shifts || [])
     .filter((s) => s && s.work_date >= from && s.work_date <= to)
     .slice()
     .sort((a, b) => compareShifts(a, b, members))
 
+  const vociRows = [STAFF_REPORT_VOCI_HEADERS]
   for (const shift of filtered) {
-    const kind = KIND_LABELS[shift.entry_kind] || shift.entry_kind || 'Turno'
-    const hours = hoursBetween(shift.time_start, shift.time_end)
-    vociRows.push([
-      formatYmdIt(shift.work_date),
-      memberNameForShift(shift, members),
-      kind,
-      formatTimeShort(shift.time_start),
-      formatTimeShort(shift.time_end),
-      formatHoursCell(hours),
-      shift.notes || '',
-    ])
+    vociRows.push(shiftToVociRow(shift, members))
+  }
+
+  const ferieShifts = filtered.filter((s) => s.entry_kind === 'ferie')
+  const ferieRows = [STAFF_REPORT_VOCI_HEADERS]
+  for (const shift of ferieShifts) {
+    ferieRows.push(shiftToVociRow(shift, members))
   }
 
   const stats = aggregateWeeklyStaffStats(members, shifts, from, to)
@@ -134,10 +148,12 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
       String(row.nPermessi),
       String(row.nAssenze),
       String(row.nMalattia),
+      String(row.nFerie),
     ]),
   ]
 
   const totals = aggregateShiftPeriodTotals(shifts, from, to)
+  const nFerie = ferieShifts.length
   const turniStr = totals.turniEquivalenti.toLocaleString('it-IT', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
@@ -151,6 +167,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     [`Equivalente turni (${totals.orePerTurnoRiferimento} h)`, turniStr],
     ['Media ore nei giorni con turno', formatHoursLabel(totals.oreMedieGiornoTurno)],
     ['Numero voci nel foglio VOCI', String(Math.max(0, vociRows.length - 1))],
+    ['Numero voci ferie', String(nFerie)],
     ['Numero dipendenti', String(stats.length)],
   ]
 
@@ -160,6 +177,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     dateTo: to,
     sheets: [
       { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows },
+      { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows },
       { name: STAFF_REPORT_SHEET_RIEPILOGO, rows: riepilogoRows },
       { name: STAFF_REPORT_SHEET_TOTALI, rows: totaliRows },
     ],
@@ -190,7 +208,7 @@ export function staffReportColumnCount(sheet) {
 
 export function staffReportColumnsForSheet(sheet) {
   const name = sheet?.name
-  if (name === STAFF_REPORT_SHEET_VOCI) return STAFF_REPORT_VOCI_COLUMNS
+  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) return STAFF_REPORT_VOCI_COLUMNS
   if (name === STAFF_REPORT_SHEET_RIEPILOGO) return STAFF_REPORT_RIEPILOGO_COLUMNS
   if (name === STAFF_REPORT_SHEET_TOTALI) return STAFF_REPORT_TOTALI_COLUMNS
   const headers = staffReportSheetHeaders(sheet)
@@ -222,6 +240,7 @@ function riepilogoRowFromArray(row) {
     permissionCount: row?.[3] ?? '',
     absences: row?.[4] ?? '',
     sick: row?.[5] ?? '',
+    ferie: row?.[6] ?? '',
   }
 }
 
@@ -235,7 +254,7 @@ function totaliRowFromArray(row) {
 export function staffReportGridRows(sheet) {
   const body = staffReportSheetBodyRows(sheet)
   const name = sheet?.name
-  if (name === STAFF_REPORT_SHEET_VOCI) return body.map(vociRowFromArray)
+  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) return body.map(vociRowFromArray)
   if (name === STAFF_REPORT_SHEET_RIEPILOGO) return body.map(riepilogoRowFromArray)
   if (name === STAFF_REPORT_SHEET_TOTALI) return body.map(totaliRowFromArray)
   return body.map((row, rowIndex) => {

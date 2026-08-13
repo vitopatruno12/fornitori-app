@@ -193,6 +193,7 @@ export function AnalisiDashboardPage() {
     <AnalisiPageShell
       title="Dashboard Analitica"
       lead="Incassi e traffico VNE divisi per macchina: La Risacca, Mani in Pasta, Le Mucche Volanti."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing || loading}>
           {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -201,7 +202,6 @@ export function AnalisiDashboardPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       <DataNote text={data?.data_note} />
 
       {loading && !snap ? (
@@ -311,6 +311,7 @@ export function AnalisiGiornalieroPage() {
     <AnalisiPageShell
       title="Andamento giornaliero"
       lead="Incassi giorno per giorno da chiusure cassa VNE (e operazioni se mancano chiusure)."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -319,7 +320,6 @@ export function AnalisiGiornalieroPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -348,6 +348,7 @@ export function AnalisiSettimanalePage() {
     <AnalisiPageShell
       title="Andamento settimanale"
       lead="Confronto settimane da dati VNE."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -356,7 +357,6 @@ export function AnalisiSettimanalePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -380,6 +380,7 @@ export function AnalisiMensilePage() {
     <AnalisiPageShell
       title="Andamento mensile"
       lead="Incassi mensili aggregati da chiusure/operazioni VNE."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -388,7 +389,6 @@ export function AnalisiMensilePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
@@ -412,6 +412,7 @@ export function AnalisiOrariaPage() {
     <AnalisiPageShell
       title="Analisi oraria"
       lead="Heatmap dalle operazioni VNE: intensità = traffico storico. Il numero è gli operatori consigliati."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -420,7 +421,6 @@ export function AnalisiOrariaPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       <DataNote text={data?.data_note} />
       {data && (
         <>
@@ -453,6 +453,7 @@ export function AnalisiPianificazionePage() {
     <AnalisiPageShell
       title="Pianificazione personale"
       lead="Copertura consigliata per fascia, calcolata sul traffico delle operazioni VNE."
+      vneStatus={<AnalisiVneSemaphore data={data} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -461,7 +462,6 @@ export function AnalisiPianificazionePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <AnalisiVneSemaphore data={data} />
       {data && (
         <>
           <p className="analisi-note">{data.note}</p>

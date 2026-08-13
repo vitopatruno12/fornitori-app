@@ -29,3 +29,4 @@ class Delivery(Base):
   list_unit_price = Column(Numeric(10, 2), nullable=True)
   price_diff_vs_list = Column(Numeric(10, 2), nullable=True)
   anomaly_note = Column(Text, nullable=True)
+  carrier_id = Column(Integer, ForeignKey("carriers.id", ondelete="SET NULL"), nullable=True, index=True)

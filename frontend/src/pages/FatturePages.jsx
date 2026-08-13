@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import {
   FatturePageShell,
   FattureStubCard,
@@ -11,11 +11,14 @@ import {
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   assignSdiInvoiceSection,
+  fetchIncomingInvoice,
+  fetchIncomingInvoices,
   fetchInvoices,
   fetchInvoicesAnalyticsSummary,
   fetchSdiReceivedInvoices,
   fetchSdiStatus,
   getSdiInvoiceDownloadUrl,
+  importInvoiceXml,
   markInvoicePaid,
   postSdiReceiveXml,
   setInvoiceIgnored,
@@ -300,14 +303,220 @@ export function FattureDashboardPage() {
 }
 
 export function FattureRicevutePage() {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [showSdiInbox, setShowSdiInbox] = useState(false)
+
+  async function reload() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetchIncomingInvoices(200)
+      const list = Array.isArray(res?.items) ? res.items : []
+      setItems(list)
+      if (!selectedId && list[0]?.id) setSelectedId(list[0].id)
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento fatture ricevute')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    reload()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      setDetailLoading(true)
+      try {
+        const row = await fetchIncomingInvoice(selectedId)
+        if (!cancelled) setDetail(row)
+      } catch (e) {
+        if (!cancelled) setError(e?.message || 'Errore dettaglio')
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId])
+
+  const selected = detail || items.find((r) => r.id === selectedId) || null
+  const vatRate =
+    selected?.lines?.find((l) => l.vat_rate != null)?.vat_rate ??
+    (selected?.taxable_amount && selected?.vat_amount
+      ? Math.round((Number(selected.vat_amount) / Number(selected.taxable_amount)) * 1000) / 10
+      : null)
+
   return (
     <FatturePageShell
       title="Fatture ricevute"
-      lead="Documenti SDI / Agenzia Entrate in inbox Atlas, classificati per destinazione."
+      lead="Fatture elettroniche importate in Atlas (XML / canale SDI): fornitore, imponibile, IVA e righe."
+      actions={
+        <>
+          <Link className="btn btn-secondary btn-sm" to="/fatture/importa-xml">
+            Importa XML
+          </Link>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowSdiInbox((v) => !v)}
+          >
+            {showSdiInbox ? 'Nascondi inbox SDI' : 'Inbox SDI'}
+          </button>
+        </>
+      }
     >
-      <AdeSdiInvoicesPanel />
+      {error && <div className="alert alert-danger">{error}</div>}
+      {loading ? <AnalisiLoadingBar active label="Caricamento fatture ricevute" variant="subtle" /> : null}
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">Elenco</h2>
+        <div className="table-wrap">
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th>N.</th>
+                <th>Fornitore</th>
+                <th>Data</th>
+                <th className="text-end">Totale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((row) => (
+                <tr
+                  key={row.id}
+                  className={selectedId === row.id ? 'pn-row-click workbook-row-selected' : 'pn-row-click'}
+                  onClick={() => setSelectedId(row.id)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <td>{row.invoice_number}</td>
+                  <td>{row.supplier_name || '—'}</td>
+                  <td>{formatDate(row.invoice_date)}</td>
+                  <td className="text-end">{eur(row.total_amount)}</td>
+                </tr>
+              ))}
+              {!loading && items.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="empty-state">
+                    Nessuna fattura ricevuta. Usa Importa XML o il canale SDI.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {selected ? (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">
+            Fattura {selected.invoice_number}
+            {selected.document_type ? ` · ${selected.document_type}` : ''}
+          </h2>
+          {detailLoading ? <AnalisiLoadingBar active label="Caricamento dettaglio" variant="subtle" /> : null}
+          <div className="ui-kpi-row" style={{ marginBottom: '1rem' }}>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Fornitore</div>
+              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
+                {selected.supplier_name || '—'}
+              </div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">P.IVA</div>
+              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
+                {selected.supplier_vat || selected.supplier_vat_xml || '—'}
+              </div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Data</div>
+              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
+                {formatDate(selected.invoice_date)}
+              </div>
+            </div>
+          </div>
+          <div className="ui-kpi-row" style={{ marginBottom: '1rem' }}>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Imponibile</div>
+              <div className="ui-kpi-card-value">{eur(selected.taxable_amount)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">
+                IVA{vatRate != null ? ` ${Number(vatRate)}%` : ''}
+              </div>
+              <div className="ui-kpi-card-value">{eur(selected.vat_amount)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Totale</div>
+              <div className="ui-kpi-card-value">{eur(selected.total_amount)}</div>
+            </div>
+          </div>
+          <h3 className="fatture-panel-title" style={{ fontSize: '1rem' }}>
+            Righe
+          </h3>
+          <div className="table-wrap">
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Descrizione</th>
+                  <th className="text-end">Q.tà</th>
+                  <th className="text-end">Prezzo</th>
+                  <th className="text-end">Totale riga</th>
+                  <th className="text-end">IVA %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(selected.lines || []).map((ln) => (
+                  <tr key={ln.id || ln.line_number}>
+                    <td>{ln.line_number}</td>
+                    <td>{ln.description || '—'}</td>
+                    <td className="text-end">{ln.quantity != null ? Number(ln.quantity).toLocaleString('it-IT') : '—'}</td>
+                    <td className="text-end">{ln.unit_price != null ? Number(ln.unit_price).toLocaleString('it-IT', { maximumFractionDigits: 8 }) : '—'}</td>
+                    <td className="text-end">{eur(ln.line_total)}</td>
+                    <td className="text-end">{ln.vat_rate != null ? `${Number(ln.vat_rate)}%` : '—'}</td>
+                  </tr>
+                ))}
+                {!selected.lines?.length ? (
+                  <tr>
+                    <td colSpan={6} className="empty-state">
+                      Nessuna riga
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          {selected.atlas_invoice_id ? (
+            <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+              Collegata anche in{' '}
+              <Link to="/fatture/registrate">Fatture registrate</Link> (id {selected.atlas_invoice_id}).
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {showSdiInbox ? (
+        <AdeSdiInvoicesPanel title="Inbox SDI (classificazione destinazione)" showAssign autoLoad />
+      ) : null}
     </FatturePageShell>
   )
+}
+
+/** @deprecated usa FattureRicevutePage — redirect da /fatture/passive */
+export function FatturePassivePage() {
+  return <Navigate to="/fatture/ricevute" replace />
 }
 
 export function FattureDaRegistrarePage() {
@@ -593,6 +802,8 @@ export function FattureConservazionePage() {
   )
 }
 
+
+
 export function FattureImportXmlPage() {
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -609,8 +820,15 @@ export function FattureImportXmlPage() {
     setError('')
     setSuccess('')
     try {
-      await postSdiReceiveXml(file)
-      setSuccess('XML inviato a /sdi/receive. Controlla le fatture ricevute / elenco.')
+      const res = await importInvoiceXml(file)
+      if (res?.duplicated) {
+        setSuccess('Questa fattura era già in Atlas (stesso XML). Vedi Fatture ricevute.')
+      } else {
+        const inv = res?.incoming_invoice
+        setSuccess(
+          `Importata fattura n. ${inv?.invoice_number || '—'} · ${inv?.supplier_name || 'fornitore'} · ${eur(inv?.total_amount)}`,
+        )
+      }
       setFile(null)
     } catch (err) {
       setError(err?.message || 'Import fallito')
@@ -620,7 +838,15 @@ export function FattureImportXmlPage() {
   }
 
   return (
-    <FatturePageShell title="Importa XML" lead="Carica un file FatturaPA XML (export AdE / canale SDI) nell’inbox Atlas.">
+    <FatturePageShell
+      title="Importa XML"
+      lead="Carica una FatturaPA XML in Atlas: crea/aggiorna fornitore per P.IVA e registra la fattura ricevuta."
+      actions={
+        <Link className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+          Fatture ricevute
+        </Link>
+      }
+    >
       <section className="card fatture-panel">
         <form onSubmit={onSubmit}>
           <div className="form-group">
@@ -635,7 +861,7 @@ export function FattureImportXmlPage() {
           {error && <div className="alert alert-danger">{error}</div>}
           {success && <div className="alert alert-success">{success}</div>}
           <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Invio…' : 'Importa XML'}
+            {loading ? 'Import…' : 'Importa in Atlas'}
           </button>
         </form>
       </section>

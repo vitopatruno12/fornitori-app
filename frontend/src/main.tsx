@@ -21,6 +21,7 @@ import OperatorLinksPage from './pages/OperatorLinksPage.jsx'
 import LocaleCodesPage from './pages/LocaleCodesPage.jsx'
 import MastriniContabiliPage from './pages/MastriniContabiliPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
+import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
 import VnePage from './pages/VnePage.jsx'
 import {
   AnalisiDashboardPage,
@@ -43,6 +44,7 @@ import {
   FattureDaRegistrarePage,
   FattureDashboardPage,
   FattureImportXmlPage,
+  FatturePassivePage,
   FattureImpostazioniPage,
   FattureLogPage,
   FattureRicevutePage,
@@ -780,7 +782,10 @@ function App() {
             <AppNavDropdown
               label="Nuova consegna"
               to="/new-delivery"
-              items={[{ to: '/magazzino', label: 'Magazzino' }]}
+              items={[
+                { to: '/trasportatori', label: 'Trasportatori' },
+                { to: '/magazzino', label: 'Magazzino' },
+              ]}
               onNavigate={() => setNavOpen(false)}
             />
             <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
@@ -870,6 +875,7 @@ function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/new-order" element={<NewOrderPage />} />
           <Route path="/new-delivery" element={<NewDeliveryPage />} />
+          <Route path="/trasportatori" element={<TrasportatoriPage />} />
           <Route path="/magazzino" element={<MagazzinoPage />} />
           <Route path="/history" element={<DeliveriesHistoryPage />} />
           <Route path="/amministrazione" element={<AmministrazioneDashboardPage />} />
@@ -880,6 +886,7 @@ function App() {
           <Route path="/banca/movimenti" element={<BancaMovimentiPage />} />
           <Route path="/banca/riconciliazione" element={<BancaRiconciliazionePage />} />
           <Route path="/fatture" element={<FattureDashboardPage />} />
+          <Route path="/fatture/passive" element={<FatturePassivePage />} />
           <Route path="/fatture/ricevute" element={<FattureRicevutePage />} />
           <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
           <Route path="/fatture/registrate" element={<InvoicesPage />} />

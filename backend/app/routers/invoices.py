@@ -7,8 +7,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..schemas.invoice import InvoiceCreate, InvoiceListOut, InvoiceRead
+from ..schemas.invoice import InvoiceCreate, InvoiceDetailOut, InvoiceListOut, InvoiceRead
 from ..services import invoice_service
+from ..services.invoice_analytics import get_invoices_analytics_summary
+from ..services import invoice_import_service
 
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -33,6 +35,107 @@ def _parse_optional_int(value: Optional[str]) -> Optional[int]:
   if value is None or (isinstance(value, str) and not str(value).strip()):
     return None
   return int(str(value).strip())
+
+
+@router.get("/analytics/summary")
+def invoices_analytics_summary(db: Session = Depends(get_db)):
+  """KPI dashboard fatture (mese, IVA, scadenze, da registrare)."""
+  return get_invoices_analytics_summary(db)
+
+
+@router.post("/import-xml")
+async def import_invoice_xml(
+  file: UploadFile = File(..., description="XML FatturaPA"),
+  db: Session = Depends(get_db),
+):
+  """
+  Importa una fattura elettronica XML in Atlas (senza SdI).
+  Deduplica per SHA-256 del contenuto.
+  """
+  raw = await file.read()
+  if not raw:
+    raise HTTPException(status_code=400, detail="File XML vuoto")
+  xml_text = raw.decode("utf-8", errors="replace")
+  try:
+    return invoice_import_service.import_xml(db, xml_text, filename=file.filename)
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/incoming")
+def list_incoming_invoices(
+  limit: int = Query(50, ge=1, le=200),
+  db: Session = Depends(get_db),
+):
+  """Elenco fatture ricevute (XML), una riga per documento logico (fornitore+numero+data)."""
+  from ..models.electronic_invoice import IncomingInvoice, IncomingInvoiceLine
+  from ..models.supplier import Supplier
+
+  rows = (
+    db.query(IncomingInvoice)
+    .order_by(IncomingInvoice.invoice_date.desc(), IncomingInvoice.id.desc())
+    .limit(max(limit * 5, 200))
+    .all()
+  )
+
+  # Deduplica reimport dello stesso documento (hash XML diversi, stesso n./data/fornitore)
+  best: dict[tuple, IncomingInvoice] = {}
+  for row in rows:
+    day = row.invoice_date.date().isoformat() if row.invoice_date else ""
+    key = (row.supplier_id or 0, str(row.invoice_number or "").strip(), day)
+    prev = best.get(key)
+    if prev is None:
+      best[key] = row
+      continue
+    prev_score = (1 if prev.atlas_invoice_id else 0, prev.id or 0)
+    cur_score = (1 if row.atlas_invoice_id else 0, row.id or 0)
+    if cur_score > prev_score:
+      best[key] = row
+
+  deduped = sorted(
+    best.values(),
+    key=lambda r: (r.invoice_date or datetime.min.replace(tzinfo=timezone.utc), r.id or 0),
+    reverse=True,
+  )[:limit]
+
+  out = []
+  for row in deduped:
+    supplier = db.query(Supplier).filter(Supplier.id == row.supplier_id).first() if row.supplier_id else None
+    lines = (
+      db.query(IncomingInvoiceLine)
+      .filter(IncomingInvoiceLine.invoice_id == row.id)
+      .order_by(IncomingInvoiceLine.line_number.asc())
+      .all()
+    )
+    out.append(invoice_import_service._incoming_out(row, lines, supplier))
+  return {"items": out, "count": len(out)}
+
+
+@router.get("/incoming/{incoming_id}")
+def get_incoming_invoice(incoming_id: int, db: Session = Depends(get_db)):
+  """Dettaglio fattura passiva importata da XML."""
+  from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice, IncomingInvoiceLine
+  from ..models.supplier import Supplier
+
+  row = db.query(IncomingInvoice).filter(IncomingInvoice.id == incoming_id).first()
+  if not row:
+    raise HTTPException(status_code=404, detail="Fattura passiva non trovata")
+  supplier = db.query(Supplier).filter(Supplier.id == row.supplier_id).first() if row.supplier_id else None
+  lines = (
+    db.query(IncomingInvoiceLine)
+    .filter(IncomingInvoiceLine.invoice_id == row.id)
+    .order_by(IncomingInvoiceLine.line_number.asc())
+    .all()
+  )
+  electronic = (
+    db.query(ElectronicInvoice).filter(ElectronicInvoice.id == row.electronic_invoice_id).first()
+  )
+  payload = invoice_import_service._incoming_out(row, lines, supplier)
+  if electronic:
+    payload["document_type"] = electronic.document_type
+    payload["filename"] = electronic.filename
+    payload["supplier_vat_xml"] = electronic.supplier_vat
+  return payload
 
 
 @router.get("/export/csv")
@@ -82,9 +185,9 @@ def list_invoices(
   )
 
 
-@router.get("/{invoice_id}", response_model=InvoiceRead)
+@router.get("/{invoice_id}", response_model=InvoiceDetailOut)
 def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
-  inv = invoice_service.get_invoice(db, invoice_id)
+  inv = invoice_service.get_invoice_detail(db, invoice_id)
   if not inv:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
   return inv

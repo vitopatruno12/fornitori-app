@@ -1,8 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InvoiceBase(BaseModel):
@@ -32,6 +32,26 @@ class InvoiceRead(InvoiceBase):
 
   class Config:
     from_attributes = True
+
+
+class InvoiceRowOut(BaseModel):
+  line_no: int
+  description: Optional[str] = None
+  quantity: Optional[Decimal] = None
+  unit_price: Optional[Decimal] = None
+  vat_percent: Decimal
+  imponibile: Decimal
+  vat_amount: Decimal
+  total_line: Decimal
+
+  class Config:
+    from_attributes = True
+
+
+class InvoiceDetailOut(InvoiceRead):
+  """Dettaglio fattura con righe (solo GET /invoices/{id})."""
+
+  rows: List[InvoiceRowOut] = Field(default_factory=list)
 
 
 class InvoiceListOut(InvoiceRead):

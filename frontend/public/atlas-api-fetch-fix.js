@@ -6,7 +6,7 @@
   if (typeof window === 'undefined' || !window.fetch) return
   var hosts = { 'www.atlass.it': 1, 'atlass.it': 1 }
   var apiPaths =
-    /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|aruba|support-technicians|vne|health|reference|customers|attachments|sdi)(\/|$)/
+    /^\/(suppliers|invoices|deliveries|cash|dashboard|ai|staff|price-list|supplier-orders|support-technicians|vne|health|reference|customers|attachments|sdi|banca)(\/|$)/
 
   function isLocalHost(hostname) {
     var h = (hostname || '').toLowerCase()

@@ -16,11 +16,14 @@ from base64 import b64encode
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
 _STORE: Dict[str, Dict[str, Any]] = {}
 _STORE_PATH = Path(__file__).resolve().parent.parent.parent / ".access_code_otp_store.json"
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 
 OTP_TTL_SEC = max(60, int(os.getenv("ACCESS_CODES_OTP_TTL_SEC", "300") or "300"))
 OTP_COOLDOWN_SEC = max(15, int(os.getenv("ACCESS_CODES_OTP_COOLDOWN_SEC", "45") or "45"))
@@ -50,6 +53,11 @@ def _hash_otp(otp: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}:{otp}".encode("utf-8")).hexdigest()
 
 
+def _reload_otp_env() -> None:
+    """Ricarica ACCESS_CODES_OTP_* da backend/.env (anche senza restart)."""
+    load_dotenv(_ENV_FILE, override=True)
+
+
 def _debug_enabled() -> bool:
     flag = (os.getenv("ACCESS_CODES_OTP_DEBUG") or "").strip().lower()
     if flag in {"1", "true", "yes", "on"}:
@@ -59,6 +67,18 @@ def _debug_enabled() -> bool:
 
 def _otp_phone() -> str:
     return _normalize_phone(os.getenv("ACCESS_CODES_OTP_PHONE") or "")
+
+
+def resolve_otp_phone(raw: Optional[str] = None) -> str:
+    """Numero dalla UI, altrimenti ACCESS_CODES_OTP_PHONE nel .env."""
+    typed = _normalize_phone(raw)
+    if typed:
+        if len(typed) == 12 and typed.startswith("39") and typed[2] == "3":
+            return typed
+        if len(typed) == 10 and typed.startswith("3"):
+            return "39" + typed
+        raise ValueError("Numero non valido: usa un cellulare italiano (es. 3331234567).")
+    return _otp_phone()
 
 
 def _load_store() -> None:
@@ -125,9 +145,14 @@ def _send_sms(phone: str, message: str) -> None:
                 raise RuntimeError(f"Twilio OTP HTTP {resp.status}")
         return
 
+    if _debug_enabled():
+        logger.info("ACCESS_CODES OTP debug (SMS non configurato): %s", message)
+        return
+
     raise RuntimeError(
         "Invio SMS non configurato: imposta ACCESS_CODES_OTP_WEBHOOK_URL oppure "
-        "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER."
+        "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER, "
+        "oppure ACCESS_CODES_OTP_DEBUG=1 in sviluppo."
     )
 
 
@@ -135,17 +160,16 @@ def _send_sms(phone: str, message: str) -> None:
 import urllib.parse  # noqa: E402
 
 
-def request_otp(query_key: str) -> Dict[str, Any]:
+def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
     """Crea e invia un OTP monouso legato al nome locale/registro."""
+    _reload_otp_env()
     key = str(query_key or "").strip().lower()
     if len(key) < 2:
         raise ValueError("Nome locale o registro non valido.")
 
-    phone = _otp_phone()
-    if not phone and not _debug_enabled():
-        raise ValueError(
-            "OTP non configurato: imposta ACCESS_CODES_OTP_PHONE nel backend/.env."
-        )
+    dest = resolve_otp_phone(phone)
+    if not dest and not _debug_enabled():
+        raise ValueError("Inserisci il numero di cellulare per ricevere l'SMS.")
 
     now = time.time()
     with _LOCK:
@@ -175,9 +199,9 @@ def request_otp(query_key: str) -> Dict[str, Any]:
 
     sent = False
     send_error = ""
-    if phone:
+    if dest:
         try:
-            _send_sms(phone, message)
+            _send_sms(dest, message)
             sent = True
         except Exception as exc:
             send_error = str(exc)
@@ -188,18 +212,18 @@ def request_otp(query_key: str) -> Dict[str, Any]:
                     _save_store()
                 raise ValueError(f"Impossibile inviare l'OTP sul telefono: {send_error}") from exc
     else:
-        logger.warning("ACCESS_CODES_OTP_PHONE assente: OTP solo in debug: %s", otp)
+        logger.warning("Nessun telefono OTP: codice solo in debug: %s", otp)
 
     logger.info(
         "OTP Link codici generato per query_key=%s phone=%s sent=%s",
         key,
-        _phone_hint(phone) if phone else "n/a",
+        _phone_hint(dest) if dest else "n/a",
         sent,
     )
 
     out: Dict[str, Any] = {
         "ok": True,
-        "phone_hint": _phone_hint(phone) if phone else "debug",
+        "phone_hint": _phone_hint(dest) if dest else "debug",
         "expires_in_sec": OTP_TTL_SEC,
         "sent": sent,
     }

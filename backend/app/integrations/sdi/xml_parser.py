@@ -1,6 +1,6 @@
 """
-Estrazione campi da XML FatturaPA (namespace-agnostic).
-Allineato ai path usati in app/routers/aruba.py per destinazione e codice destinatario.
+Estrazione campi da XML FatturaPA (namespace-agnostic)
+per destinazione e codice destinatario SDI.
 """
 from __future__ import annotations
 
