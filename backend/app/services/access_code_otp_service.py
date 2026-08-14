@@ -107,8 +107,8 @@ def _purge_expired(now: float) -> None:
         _STORE.pop(k, None)
 
 
-def _send_via_webhook(phone: str, message: str) -> bool:
-    """POST JSON a ACCESS_CODES_OTP_WEBHOOK_URL (Make/n8n/tuo script → WhatsApp)."""
+def _send_via_webhook(phone: str, message: str, otp: str = "") -> bool:
+    """POST JSON a ACCESS_CODES_OTP_WEBHOOK_URL (script locale → WhatsApp Meta)."""
     webhook = (os.getenv("ACCESS_CODES_OTP_WEBHOOK_URL") or "").strip()
     if not webhook:
         return False
@@ -118,6 +118,7 @@ def _send_via_webhook(phone: str, message: str) -> bool:
             "to": phone,
             "message": message,
             "text": message,
+            "otp": otp,
             "channel": "whatsapp",
         }
     ).encode("utf-8")
@@ -130,29 +131,6 @@ def _send_via_webhook(phone: str, message: str) -> bool:
     with urllib.request.urlopen(req, timeout=20) as resp:
         if getattr(resp, "status", 200) >= 400:
             raise RuntimeError(f"Webhook OTP HTTP {resp.status}")
-    return True
-
-
-def _send_via_callmebot_whatsapp(phone: str, message: str) -> bool:
-    """WhatsApp via CallMeBot (senza Twilio). Richiede apikey da callmebot.com."""
-    apikey = (os.getenv("ACCESS_CODES_OTP_WHATSAPP_CALLMEBOT_APIKEY") or "").strip()
-    if not apikey:
-        return False
-    qs = urllib.parse.urlencode({"phone": phone, "text": message, "apikey": apikey})
-    url = f"https://api.callmebot.com/whatsapp.php?{qs}"
-    req = urllib.request.Request(url, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            status = getattr(resp, "status", 200)
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:200]
-        raise RuntimeError(f"CallMeBot WhatsApp HTTP {exc.code}: {detail}") from exc
-    if status >= 400:
-        raise RuntimeError(f"CallMeBot WhatsApp HTTP {status}: {raw[:200]}")
-    low = raw.lower()
-    if "error" in low or "invalid" in low or "apikey" in low and "wrong" in low:
-        raise RuntimeError(f"CallMeBot WhatsApp: {raw[:240]}")
     return True
 
 
@@ -181,23 +159,22 @@ def _send_via_twilio_sms(phone: str, message: str) -> bool:
     return True
 
 
-def _send_otp_message(phone: str, message: str) -> None:
-    """Invia OTP: webhook WhatsApp → CallMeBot WhatsApp → Twilio SMS → debug."""
-    if _send_via_webhook(phone, message):
-        return
-    if _send_via_callmebot_whatsapp(phone, message):
+def _send_otp_message(phone: str, message: str, otp: str = "") -> None:
+    """Invia OTP: webhook locale (Meta) → Twilio SMS → debug."""
+    if _send_via_webhook(phone, message, otp=otp):
         return
     if _send_via_twilio_sms(phone, message):
         return
 
     if _debug_enabled():
-        logger.info("ACCESS_CODES OTP debug (canale WhatsApp/SMS non configurato): %s", message)
+        logger.info("ACCESS_CODES OTP debug (canale WhatsApp non configurato): %s", message)
         return
 
     raise RuntimeError(
         "Invio OTP non configurato: imposta ACCESS_CODES_OTP_WEBHOOK_URL "
-        "(Make/n8n/script → WhatsApp) oppure ACCESS_CODES_OTP_WHATSAPP_CALLMEBOT_APIKEY, "
-        "oppure Twilio, oppure ACCESS_CODES_OTP_DEBUG=1 in sviluppo."
+        "(http://127.0.0.1:8791/send → WhatsApp Meta) "
+        "con WHATSAPP_CLOUD_TOKEN e WHATSAPP_PHONE_NUMBER_ID, "
+        "oppure ACCESS_CODES_OTP_DEBUG=1 in sviluppo."
     )
 
 
@@ -242,7 +219,7 @@ def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
     send_error = ""
     if dest:
         try:
-            _send_otp_message(dest, message)
+            _send_otp_message(dest, message, otp=otp)
             sent = True
         except Exception as exc:
             send_error = str(exc)

@@ -1,5 +1,5 @@
 [Unit]
-Description=ATLAS OTP WhatsApp webhook (CallMeBot)
+Description=ATLAS OTP WhatsApp webhook (Meta Cloud API)
 After=network.target
 Wants=network-online.target
 
