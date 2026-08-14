@@ -57,7 +57,7 @@ export default function LocaleCodesPage() {
       return
     }
     if (tel.length < 10) {
-      setError('Inserisci il cellulare (es. 3331234567) per ricevere l’SMS.')
+      setError('Inserisci il cellulare (es. 3331234567) per ricevere l’OTP su WhatsApp.')
       return
     }
     setOtpBusy(true)
@@ -156,7 +156,7 @@ export default function LocaleCodesPage() {
         <h1 className="page-header staff-page-title">Link codici</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
           Inserisci il <strong>nome locale</strong> o <strong>registro</strong> e il <strong>cellulare</strong>,
-          poi <strong>Invia SMS</strong>. Ricevi l’OTP a 6 cifre, inseriscilo e premi <strong>Mostra codice</strong>.
+          poi <strong>Invia WhatsApp</strong>. Ricevi l’OTP a 6 cifre, inseriscilo e premi <strong>Mostra codice</strong>.
         </p>
       </section>
 
@@ -211,11 +211,11 @@ export default function LocaleCodesPage() {
           <div className="form-group" style={{ marginBottom: 0 }}>
             <button
               type="button"
-              className="btn btn-outline-secondary"
+              className="btn btn-whatsapp"
               disabled={loading || otpBusy || String(query || '').trim().length < 2}
               onClick={() => void handleRequestOtp()}
             >
-              {otpBusy ? 'Invio SMS…' : 'Invia SMS'}
+              {otpBusy ? 'Invio WhatsApp…' : 'Invia WhatsApp'}
             </button>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -248,7 +248,7 @@ export default function LocaleCodesPage() {
           </p>
         ) : (
           <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-            Prima inserisci il cellulare e clicca <strong>Invia SMS</strong>, poi metti l’OTP e premi{' '}
+            Prima inserisci il cellulare e clicca <strong>Invia WhatsApp</strong>, poi metti l’OTP e premi{' '}
             <strong>Mostra codice</strong>.
           </p>
         )}

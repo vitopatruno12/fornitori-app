@@ -11,10 +11,11 @@ import random
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from base64 import b64encode
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 
@@ -106,58 +107,98 @@ def _purge_expired(now: float) -> None:
         _STORE.pop(k, None)
 
 
-def _send_sms(phone: str, message: str) -> None:
+def _send_via_webhook(phone: str, message: str) -> bool:
+    """POST JSON a ACCESS_CODES_OTP_WEBHOOK_URL (Make/n8n/tuo script → WhatsApp)."""
     webhook = (os.getenv("ACCESS_CODES_OTP_WEBHOOK_URL") or "").strip()
-    if webhook:
-        body = json.dumps({"phone": phone, "to": phone, "message": message, "text": message}).encode("utf-8")
-        req = urllib.request.Request(
-            webhook,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if getattr(resp, "status", 200) >= 400:
-                raise RuntimeError(f"Webhook OTP HTTP {resp.status}")
-        return
+    if not webhook:
+        return False
+    body = json.dumps(
+        {
+            "phone": phone,
+            "to": phone,
+            "message": message,
+            "text": message,
+            "channel": "whatsapp",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        webhook,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        if getattr(resp, "status", 200) >= 400:
+            raise RuntimeError(f"Webhook OTP HTTP {resp.status}")
+    return True
 
+
+def _send_via_callmebot_whatsapp(phone: str, message: str) -> bool:
+    """WhatsApp via CallMeBot (senza Twilio). Richiede apikey da callmebot.com."""
+    apikey = (os.getenv("ACCESS_CODES_OTP_WHATSAPP_CALLMEBOT_APIKEY") or "").strip()
+    if not apikey:
+        return False
+    qs = urllib.parse.urlencode({"phone": phone, "text": message, "apikey": apikey})
+    url = f"https://api.callmebot.com/whatsapp.php?{qs}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            status = getattr(resp, "status", 200)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"CallMeBot WhatsApp HTTP {exc.code}: {detail}") from exc
+    if status >= 400:
+        raise RuntimeError(f"CallMeBot WhatsApp HTTP {status}: {raw[:200]}")
+    low = raw.lower()
+    if "error" in low or "invalid" in low or "apikey" in low and "wrong" in low:
+        raise RuntimeError(f"CallMeBot WhatsApp: {raw[:240]}")
+    return True
+
+
+def _send_via_twilio_sms(phone: str, message: str) -> bool:
     sid = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
     token = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
     from_number = (os.getenv("TWILIO_FROM_NUMBER") or "").strip()
-    if sid and token and from_number:
-        to = f"+{phone}" if not phone.startswith("+") else phone
-        form = urllib.parse.urlencode(
-            {"To": to, "From": from_number, "Body": message}
-        ).encode("utf-8")
-        auth = b64encode(f"{sid}:{token}".encode("ascii")).decode("ascii")
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-        req = urllib.request.Request(
-            url,
-            data=form,
-            headers={
-                "Authorization": f"Basic {auth}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if getattr(resp, "status", 200) >= 400:
-                raise RuntimeError(f"Twilio OTP HTTP {resp.status}")
+    if not (sid and token and from_number):
+        return False
+    to = f"+{phone}" if not phone.startswith("+") else phone
+    form = urllib.parse.urlencode({"To": to, "From": from_number, "Body": message}).encode("utf-8")
+    auth = b64encode(f"{sid}:{token}".encode("ascii")).decode("ascii")
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+    req = urllib.request.Request(
+        url,
+        data=form,
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        if getattr(resp, "status", 200) >= 400:
+            raise RuntimeError(f"Twilio OTP HTTP {resp.status}")
+    return True
+
+
+def _send_otp_message(phone: str, message: str) -> None:
+    """Invia OTP: webhook WhatsApp → CallMeBot WhatsApp → Twilio SMS → debug."""
+    if _send_via_webhook(phone, message):
+        return
+    if _send_via_callmebot_whatsapp(phone, message):
+        return
+    if _send_via_twilio_sms(phone, message):
         return
 
     if _debug_enabled():
-        logger.info("ACCESS_CODES OTP debug (SMS non configurato): %s", message)
+        logger.info("ACCESS_CODES OTP debug (canale WhatsApp/SMS non configurato): %s", message)
         return
 
     raise RuntimeError(
-        "Invio SMS non configurato: imposta ACCESS_CODES_OTP_WEBHOOK_URL oppure "
-        "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER, "
-        "oppure ACCESS_CODES_OTP_DEBUG=1 in sviluppo."
+        "Invio OTP non configurato: imposta ACCESS_CODES_OTP_WEBHOOK_URL "
+        "(Make/n8n/script → WhatsApp) oppure ACCESS_CODES_OTP_WHATSAPP_CALLMEBOT_APIKEY, "
+        "oppure Twilio, oppure ACCESS_CODES_OTP_DEBUG=1 in sviluppo."
     )
-
-
-# Lazy import for urlencode used in Twilio branch
-import urllib.parse  # noqa: E402
 
 
 def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
@@ -169,7 +210,7 @@ def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
 
     dest = resolve_otp_phone(phone)
     if not dest and not _debug_enabled():
-        raise ValueError("Inserisci il numero di cellulare per ricevere l'SMS.")
+        raise ValueError("Inserisci il numero di cellulare per ricevere l'OTP su WhatsApp.")
 
     now = time.time()
     with _LOCK:
@@ -201,7 +242,7 @@ def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
     send_error = ""
     if dest:
         try:
-            _send_sms(dest, message)
+            _send_otp_message(dest, message)
             sent = True
         except Exception as exc:
             send_error = str(exc)

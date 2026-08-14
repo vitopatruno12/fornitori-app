@@ -1,0 +1,24 @@
+[Unit]
+Description=ATLAS OTP WhatsApp webhook (CallMeBot)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mic04
+Group=mic04
+WorkingDirectory=/opt/fornitori-app/backend
+EnvironmentFile=-/opt/fornitori-app/backend/.env
+Environment=OTP_WHATSAPP_WEBHOOK_HOST=127.0.0.1
+Environment=OTP_WHATSAPP_WEBHOOK_PORT=8791
+ExecStart=/opt/fornitori-app/backend/venv/bin/python /opt/fornitori-app/backend/scripts/otp_whatsapp_webhook.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/fornitori-app/backend
+
+[Install]
+WantedBy=multi-user.target
