@@ -251,6 +251,7 @@ function App() {
     'banca-movimenti': 'movimenti bancari',
     'banca-riconciliazione': 'riconciliazione bancaria',
     fatture: 'fatture dashboard',
+    'fatture-passive': 'fatture ricevute',
     'fatture-ricevute': 'fatture ricevute',
     'fatture-da-registrare': 'fatture da registrare',
     'fatture-registrate': 'fatture registrate',
@@ -269,6 +270,7 @@ function App() {
     'staff-operator-links': 'link operatori',
     'staff-locale-codes': 'link codici',
     'support-tech': 'assistenza-tecnici',
+    trasportatori: 'trasportatori',
   }
 
   async function runAi(promptOverride?: string) {
@@ -459,6 +461,10 @@ function App() {
       'banca-conti': ['Come collego un conto corrente?', 'Come sincronizzo i movimenti?'],
       'banca-movimenti': ['Filtra i movimenti bancari del mese'],
       'banca-riconciliazione': ['Ci sono differenze da riconciliare?'],
+      'fatture-passive': [
+        'Come aggiorno l’inbox fatture SDI?',
+        'Come assegno una fattura a Via Abba?',
+      ],
       'fatture-ricevute': [
         'Come aggiorno l’inbox fatture SDI?',
         'Come assegno una fattura a Via Abba?',
@@ -511,6 +517,10 @@ function App() {
       'support-tech': [
         'Come registro un intervento completato assistenza?',
         'Differenza tra voce pianificata e lavoro svolto?',
+      ],
+      trasportatori: [
+        'Quali trasportatori sono in servizio oggi?',
+        'Come segno un furgone in riposo?',
       ],
     }
     return map[page] || []
