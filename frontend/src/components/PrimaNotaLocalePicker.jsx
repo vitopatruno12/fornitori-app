@@ -87,7 +87,15 @@ export default function PrimaNotaLocalePicker({
 
   useEffect(() => {
     const id = String(autoPromptLocaleId || '').trim()
-    if (!id || !requiresCodeBeforeOpen(id)) return
+    if (!id || !requiresCodeBeforeOpen(id)) {
+      // Registro aperto/sbloccato: togli il prompt così resta visibile Chiudi.
+      setPendingLocaleId((prev) => {
+        if (!prev) return prev
+        if (!requiresCodeBeforeOpen(prev)) return ''
+        return prev
+      })
+      return
+    }
     setPendingLocaleId(id)
     setPendingCode('')
     setCodePromptError('')
@@ -303,8 +311,12 @@ export default function PrimaNotaLocalePicker({
               onChange={(ev) => onLocaleAccessCodeChange?.(ev.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={(ev) => {
                 if (ev.key !== 'Enter') return
+                if (localeRegisterOpen || unlockBusy) {
+                  ev.preventDefault()
+                  return
+                }
                 const code = normalizeLocaleAccessCode(localeAccessCode)
-                if (!isValidLocaleAccessCode(code) || unlockBusy) return
+                if (!isValidLocaleAccessCode(code)) return
                 ev.preventDefault()
                 void onVerifyAndSelectLocale?.(activeActivity, code)
               }}
@@ -312,41 +324,74 @@ export default function PrimaNotaLocalePicker({
               inputMode="numeric"
               autoComplete="off"
               maxLength={6}
+              disabled={localeRegisterOpen}
+              readOnly={localeRegisterOpen}
+              aria-disabled={localeRegisterOpen}
             />
             <button
               type="button"
               className="btn btn-outline-secondary btn-sm"
               onClick={handleGenerateCode}
               title="Genera un nuovo codice a 6 cifre"
+              disabled={localeRegisterOpen}
             >
               Genera
             </button>
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={saveCodeBusy || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
+              disabled={
+                localeRegisterOpen ||
+                saveCodeBusy ||
+                !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))
+              }
               onClick={() => void onSaveLocaleAccessCode?.()}
             >
               {saveCodeBusy ? 'Salvo…' : 'Salva codice'}
             </button>
             <button
               type="button"
-              className="btn btn-success btn-sm"
-              disabled={unlockBusy || localeRegisterOpen || !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))}
-              onClick={() => void onVerifyAndSelectLocale?.(activeActivity, normalizeLocaleAccessCode(localeAccessCode))}
+              className={`btn btn-sm prima-nota-accedi-btn${localeRegisterOpen ? ' is-register-open' : ''}`}
+              disabled={
+                unlockBusy ||
+                localeRegisterOpen ||
+                !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))
+              }
+              tabIndex={localeRegisterOpen ? -1 : undefined}
+              aria-disabled={localeRegisterOpen || unlockBusy}
+              onClick={
+                localeRegisterOpen
+                  ? undefined
+                  : () => void onVerifyAndSelectLocale?.(activeActivity, normalizeLocaleAccessCode(localeAccessCode))
+              }
+              title={
+                localeRegisterOpen
+                  ? 'Registro aperto: Accedi bloccato. Usa Chiudi per richiuderlo.'
+                  : 'Inserisci il codice e accedi al registro.'
+              }
             >
-              {unlockBusy ? 'Accesso…' : 'Accedi'}
+              {unlockBusy ? 'Accesso…' : localeRegisterOpen ? 'Bloccato' : 'Accedi'}
             </button>
             <button
               type="button"
-              className="btn btn-outline-danger btn-sm"
-              disabled={!localeRegisterOpen}
-              onClick={() => onCloseLocaleAccess?.()}
+              className="btn btn-outline-danger btn-sm prima-nota-chiudi-btn"
+              onClick={() => {
+                setPendingLocaleId('')
+                setPendingCode('')
+                setCodePromptError('')
+                onCloseLocaleAccess?.()
+              }}
               title="Chiude il registro di questo locale: servirà di nuovo il codice per Accedi."
             >
               Chiudi
             </button>
           </div>
+          <p className="prima-nota-locale-panel-hint" style={{ marginTop: '0.55rem', marginBottom: 0 }}>
+            Stato registro:{' '}
+            <strong style={{ color: localeRegisterOpen ? '#047857' : '#b45309' }}>
+              {localeRegisterOpen ? 'APERTO' : 'CHIUSO'}
+            </strong>
+          </p>
         </div>
       ) : null}
 
@@ -358,8 +403,13 @@ export default function PrimaNotaLocalePicker({
           <div className="prima-nota-locale-add-row">
             <button
               type="button"
-              className="btn btn-outline-danger btn-sm"
-              onClick={() => onCloseLocaleAccess?.()}
+              className="btn btn-outline-danger btn-sm prima-nota-chiudi-btn"
+              onClick={() => {
+                setPendingLocaleId('')
+                setPendingCode('')
+                setCodePromptError('')
+                onCloseLocaleAccess?.()
+              }}
             >
               Chiudi registro
             </button>
@@ -394,7 +444,7 @@ export default function PrimaNotaLocalePicker({
               autoFocus
               aria-label="Codice locale"
             />
-            <button type="submit" className="btn btn-success btn-sm" disabled={unlockBusy}>
+            <button type="submit" className="btn btn-sm prima-nota-accedi-btn" disabled={unlockBusy}>
               {unlockBusy ? 'Accesso…' : 'Accedi'}
             </button>
             <button type="button" className="btn btn-outline-secondary btn-sm" onClick={cancelCodePrompt} disabled={unlockBusy}>

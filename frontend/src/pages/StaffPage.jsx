@@ -80,6 +80,28 @@ import {
 } from '../utils/staffPayrollWorkbook.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
+const STAFF_LOCALE_SESSION_KEY = 'staffLocaleSessionOpen'
+
+function readStaffLocaleSessionOpenKeys() {
+  try {
+    const raw = sessionStorage.getItem(STAFF_LOCALE_SESSION_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((k) => String(k || '').trim().toLocaleLowerCase('it')).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function writeStaffLocaleSessionOpenKeys(keys) {
+  try {
+    const unique = [...new Set((keys || []).map((k) => String(k || '').trim().toLocaleLowerCase('it')).filter(Boolean))]
+    sessionStorage.setItem(STAFF_LOCALE_SESSION_KEY, JSON.stringify(unique))
+  } catch {
+    // ignore
+  }
+}
 
 function formatEurAmount(value) {
   const n = Number(value)
@@ -1043,6 +1065,8 @@ export default function StaffPage({ operatorMode = false }) {
   const [reportLoading, setReportLoading] = useState(false)
   const [localeStaffName, setLocaleStaffName] = useState('')
   const [localeAccessCode, setLocaleAccessCode] = useState('')
+  const [localeSessionOpenKeys, setLocaleSessionOpenKeys] = useState(() => new Set(readStaffLocaleSessionOpenKeys()))
+  const [localeSessionBusy, setLocaleSessionBusy] = useState(false)
   const [savedLocaleNames, setSavedLocaleNames] = useState([])
   const [userDeletableLocaleNames, setUserDeletableLocaleNames] = useState([])
   const [planningClipboard, setPlanningClipboard] = useState(() => readPlanningClipboard())
@@ -2341,6 +2365,26 @@ export default function StaffPage({ operatorMode = false }) {
     return direct
   }
 
+  function isStaffLocaleSessionOpen(localeName) {
+    const key = localeNameCompareKey(localeName)
+    if (!key) return false
+    return localeSessionOpenKeys.has(key)
+  }
+
+  function setStaffLocaleSessionOpen(localeName, open) {
+    const key = localeNameCompareKey(localeName)
+    if (!key) return
+    setLocaleSessionOpenKeys((prev) => {
+      const next = new Set([...prev])
+      if (open) next.add(key)
+      else next.delete(key)
+      writeStaffLocaleSessionOpenKeys([...next])
+      return next
+    })
+  }
+
+  const activeLocaleSessionOpen = isStaffLocaleSessionOpen(localeStaffName)
+
   function findLocaleStoreKey(store, localeName) {
     const target = localeNameCompareKey(localeName)
     if (!target) return ''
@@ -2640,6 +2684,54 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }
 
+  async function handleOpenLocaleSession() {
+    const localeName = resolveCanonicalLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Inserisci o seleziona il locale da aprire.')
+      return
+    }
+    if (localeName !== normalizeLocaleName(localeStaffName)) {
+      setLocaleStaffName(localeName)
+    }
+    if (isStaffLocaleSessionOpen(localeName)) {
+      setSuccess(`Locale «${localeName}» già aperto.`)
+      return
+    }
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    setLocaleSessionBusy(true)
+    setError('')
+    try {
+      const access = await verifyLocaleZoneAccess(localeName, code)
+      if (!access.ok) {
+        setError(localeAccessErrorMessage({ ...access, localeName }, 'aprire il locale'))
+        return
+      }
+      setStaffLocaleSessionOpen(localeName, true)
+      setMembersBackupLocale(localeName)
+      setSuccess(`Locale «${localeName}» aperto. Usa Chiudi per bloccarlo di nuovo.`)
+    } finally {
+      setLocaleSessionBusy(false)
+    }
+  }
+
+  function handleCloseLocaleSession() {
+    const localeName = resolveCanonicalLocaleName(localeStaffName) || normalizeLocaleName(localeStaffName)
+    if (!localeName) {
+      setError('Seleziona il locale da chiudere.')
+      return
+    }
+    const wasOpen = isStaffLocaleSessionOpen(localeName)
+    setStaffLocaleSessionOpen(localeName, false)
+    setLocaleAccessCode('')
+    setLocaleSessionBusy(false)
+    setError('')
+    setSuccess(
+      wasOpen
+        ? `Locale «${localeName}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`
+        : `Locale «${localeName}» già chiuso.`,
+    )
+  }
+
   async function assertActiveLocaleZoneAccess() {
     let localeName = resolveCanonicalLocaleName(localeStaffName || membersBackupLocale)
     if (!localeName) {
@@ -2649,6 +2741,10 @@ export default function StaffPage({ operatorMode = false }) {
         }
       }
       return { ok: true, localeName: '', code: undefined }
+    }
+    const requiresCode = await localeRequiresAccessCode(localeName)
+    if (requiresCode && !isStaffLocaleSessionOpen(localeName)) {
+      return { ok: false, localeName, needsOpen: true }
     }
     const code = normalizeLocaleAccessCode(localeAccessCode)
     const access = await verifyLocaleZoneAccess(localeName, code)
@@ -2665,6 +2761,9 @@ export default function StaffPage({ operatorMode = false }) {
   function localeAccessErrorMessage(access, action) {
     if (access.needsLocale) {
       return `Seleziona il locale e inserisci il codice a 6 cifre prima di ${action}.`
+    }
+    if (access.needsOpen) {
+      return `Apri il locale «${access.localeName}» con Accedi prima di ${action}.`
     }
     if (access.needsCode) {
       return `Inserisci il codice a 6 cifre del locale "${access.localeName}" per ${action}.`
@@ -4400,19 +4499,63 @@ export default function StaffPage({ operatorMode = false }) {
               className="form-control"
               value={localeAccessCode}
               onChange={(e) => setLocaleAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(ev) => {
+                if (ev.key !== 'Enter') return
+                if (activeLocaleSessionOpen || localeSessionBusy) {
+                  ev.preventDefault()
+                  return
+                }
+                const code = normalizeLocaleAccessCode(localeAccessCode)
+                if (!isValidLocaleAccessCode(code)) return
+                ev.preventDefault()
+                void handleOpenLocaleSession()
+              }}
               placeholder="123456"
               inputMode="numeric"
               autoComplete="off"
               maxLength={6}
-              disabled={shiftBusy || loading || demoLoading || reportLoading}
-              title="Obbligatorio per caricare i dipendenti: ogni locale ha il suo codice. Chi salva il locale vede il codice nel messaggio di conferma."
+              disabled={
+                activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading || localeSessionBusy
+              }
+              readOnly={activeLocaleSessionOpen}
+              title="Obbligatorio per aprire il locale: ogni zona ha il suo codice."
             />
           </div>
           <button
             type="button"
+            className={`btn prima-nota-accedi-btn${activeLocaleSessionOpen ? ' is-register-open' : ''}`}
+            disabled={
+              localeSessionBusy ||
+              activeLocaleSessionOpen ||
+              shiftBusy ||
+              loading ||
+              demoLoading ||
+              reportLoading ||
+              !normalizeLocaleName(localeStaffName)
+            }
+            onClick={() => void handleOpenLocaleSession()}
+            title={
+              activeLocaleSessionOpen
+                ? 'Locale già aperto: Accedi bloccato. Usa Chiudi per richiuderlo.'
+                : 'Inserisci il codice e apri il locale (come in Prima Nota).'
+            }
+          >
+            {localeSessionBusy ? 'Accesso…' : activeLocaleSessionOpen ? 'Bloccato' : 'Accedi'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger prima-nota-chiudi-btn"
+            onClick={() => handleCloseLocaleSession()}
+            disabled={localeSessionBusy}
+            title="Chiude il locale: servirà di nuovo il codice per Accedi."
+          >
+            Chiudi
+          </button>
+          <button
+            type="button"
             className="btn btn-outline-secondary"
             onClick={() => void handleGenerateLocaleCode()}
-            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            disabled={activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading}
             title="Genera un nuovo codice da usare al prossimo salvataggio"
           >
             Genera codice
@@ -4460,8 +4603,13 @@ export default function StaffPage({ operatorMode = false }) {
             Elimina locale
           </button>
           <p style={{ flex: '1 1 100%', margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: il personale può caricare solo la lista della propria zona (es. Bar Momento).
-            Al primo salvataggio compare il codice da comunicare al team; senza codice corretto non si accede agli elenchi degli altri locali.
+            Stato locale:{' '}
+            <strong style={{ color: activeLocaleSessionOpen ? '#047857' : '#b45309' }}>
+              {activeLocaleSessionOpen ? 'APERTO' : 'CHIUSO'}
+            </strong>
+            {' — '}
+            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: apri con <strong>Accedi</strong> (come in Prima Nota) e
+            chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
           </p>
         </div>
         <div

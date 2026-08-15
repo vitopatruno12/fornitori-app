@@ -192,10 +192,19 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     return protectedSlugs.includes(String(activeActivity || '').trim().toLowerCase())
   }
 
+  function isActiveLocaleUnlocked() {
+    const slug = String(activeActivity || '').trim().toLowerCase()
+    if (!slug) return false
+    if ([...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)) return true
+    // Sessione già aperta in questo browser (codice salvato).
+    return isValidLocaleAccessCode(readStoredPrimaNotaAccessCode(slug))
+  }
+
   function hasActiveLocaleAccess() {
     if (!activeLocaleNeedsCode()) return true
     const slug = String(activeActivity || '').trim().toLowerCase()
-    if (![...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)) return false
+    const unlocked = [...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)
+    if (!unlocked && !isValidLocaleAccessCode(readStoredPrimaNotaAccessCode(slug))) return false
     return isValidLocaleAccessCode(resolveActiveAccessCode())
   }
 
@@ -289,6 +298,12 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   async function handleVerifyAndSelectLocale(activityId, code) {
+    const slug = String(activityId || '').trim().toLowerCase()
+    const alreadyOpen =
+      Boolean(slug) &&
+      protectedSlugs.includes(slug) &&
+      [...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)
+    if (alreadyOpen) return true
     setUnlockBusy(true)
     setError('')
     try {
@@ -299,9 +314,14 @@ export default function PrimaNotaPage({ operatorMode = false }) {
         }
         return false
       }
+      const normalized = normalizeLocaleAccessCode(code)
+      // Sempre persisti: altrimenti Chiudi/Accedi e il reload perdono lo stato aperto.
+      if (isValidLocaleAccessCode(normalized)) {
+        saveStoredPrimaNotaAccessCode(slug, normalized)
+      }
       selectActivity(activityId)
-      setLocaleAccessCode(normalizeLocaleAccessCode(code))
-      setUnlockedSlugs((prev) => new Set([...prev, String(activityId || '').trim().toLowerCase()]))
+      setLocaleAccessCode(normalized)
+      setUnlockedSlugs((prev) => new Set([...prev, slug]))
       setSuccess(`Locale «${localeLabel(activityId, locales)}» aperto.`)
       return true
     } finally {
@@ -310,18 +330,26 @@ export default function PrimaNotaPage({ operatorMode = false }) {
   }
 
   function handleCloseLocaleAccess() {
-    if (!activeLocaleNeedsCode() || !hasActiveLocaleAccess()) return
     const slug = String(activeActivity || '').trim().toLowerCase()
+    if (!slug) return
+    const wasOpen =
+      [...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug) ||
+      isValidLocaleAccessCode(readStoredPrimaNotaAccessCode(slug))
     clearStoredPrimaNotaAccessCode(slug)
     setUnlockedSlugs((prev) => {
-      const next = new Set([...prev].map((s) => String(s || '').trim().toLowerCase()))
+      const next = new Set([...prev].map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
       next.delete(slug)
       return next
     })
     setLocaleAccessCode('')
     setDrawerEntry(null)
+    setUnlockBusy(false)
     setError('')
-    setSuccess(`Registro «${activeActivityLabel}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`)
+    if (wasOpen) {
+      setSuccess(`Registro «${activeActivityLabel}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`)
+    } else {
+      setSuccess(`Registro «${activeActivityLabel}» già chiuso.`)
+    }
   }
 
   async function handleDeleteCustomLocale(loc) {
@@ -1444,7 +1472,8 @@ export default function PrimaNotaPage({ operatorMode = false }) {
     : Number(fiscaleGiorno || 0) + Number(nonFiscaleGiorno || 0) + Number(posGiorno || 0) + Number(refillGiorno || 0)
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
   const needsLocaleUnlock = activeLocaleNeedsCode() && !hasActiveLocaleAccess()
-  const localeRegisterOpen = activeLocaleNeedsCode() && hasActiveLocaleAccess()
+  // Aperto in UI = sessione sbloccata o codice ancora in memoria browser.
+  const localeRegisterOpen = isActiveLocaleUnlocked()
 
   const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : entrateCassaGiornoComputed
   const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed
