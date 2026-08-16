@@ -63,7 +63,11 @@ export default function AiManagerPopups({ enabled = true }) {
       const data = await fetchManagerInsights()
       const list = Array.isArray(data?.insights) ? data.insights : []
       setAllInsights(list)
-      setLastError('')
+      if (data?.__unavailable) {
+        setLastError('AI Manager temporaneamente non disponibile (API offline o in riavvio).')
+      } else {
+        setLastError('')
+      }
     } catch (e) {
       setLastError(e?.message || 'Errore nel recupero insight')
     }

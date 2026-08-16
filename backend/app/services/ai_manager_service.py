@@ -49,50 +49,51 @@ def _orders_insights(db: Session) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     today = _today()
 
-    overdue = (
+    overdue_q = (
         db.query(SupplierOrder)
         .filter(SupplierOrder.status == "pending")
         .filter(SupplierOrder.expected_delivery_date.isnot(None))
         .filter(SupplierOrder.expected_delivery_date < today)
-        .all()
     )
-    if overdue:
+    overdue_n = overdue_q.count()
+    if overdue_n:
+        sample = overdue_q.limit(10).all()
         examples = ", ".join(
             f"#{o.sequence_number or o.id} ({o.supplier_name_snapshot or 'Fornitore'})"
-            for o in overdue[:3]
+            for o in sample[:3]
         )
-        more = f" e altri {len(overdue) - 3}" if len(overdue) > 3 else ""
+        more = f" e altri {overdue_n - 3}" if overdue_n > 3 else ""
         out.append(
             _insight(
-                key=f"orders_overdue:{today.isoformat()}:{len(overdue)}",
+                key=f"orders_overdue:{today.isoformat()}:{overdue_n}",
                 severity="warning",
                 category="orders",
                 title="Ordini in sospeso oltre la data prevista",
-                message=f"Ci sono {len(overdue)} ordini ancora in sospeso con consegna prevista già passata: {examples}{more}.",
+                message=f"Ci sono {overdue_n} ordini ancora in sospeso con consegna prevista già passata: {examples}{more}.",
                 target_page="new-order",
-                count=len(overdue),
-                payload={"order_ids": [o.id for o in overdue[:10]]},
+                count=overdue_n,
+                payload={"order_ids": [o.id for o in sample]},
             )
         )
 
     week_ago = today - timedelta(days=7)
-    pending_old = (
+    pending_old_n = (
         db.query(SupplierOrder)
         .filter(SupplierOrder.status == "pending")
         .filter(SupplierOrder.order_date <= week_ago)
         .filter(SupplierOrder.expected_delivery_date.is_(None))
-        .all()
+        .count()
     )
-    if pending_old:
+    if pending_old_n:
         out.append(
             _insight(
-                key=f"orders_old_pending:{today.isoformat()}:{len(pending_old)}",
+                key=f"orders_old_pending:{today.isoformat()}:{pending_old_n}",
                 severity="info",
                 category="orders",
                 title="Ordini in sospeso da oltre 7 giorni",
-                message=f"{len(pending_old)} ordini sono in sospeso da più di una settimana e non hanno data consegna prevista. Considera di sollecitare o aggiornare lo stato.",
+                message=f"{pending_old_n} ordini sono in sospeso da più di una settimana e non hanno data consegna prevista. Considera di sollecitare o aggiornare lo stato.",
                 target_page="new-order",
-                count=len(pending_old),
+                count=pending_old_n,
             )
         )
     return out
@@ -106,6 +107,8 @@ def _deliveries_insights(db: Session) -> List[Dict[str, Any]]:
         db.query(Delivery)
         .filter(Delivery.delivery_date >= month_start)
         .filter(Delivery.anomaly_note.isnot(None))
+        .filter(Delivery.anomaly_note != "")
+        .limit(200)
         .all()
     )
     real_anom = [d for d in anomalies if (d.anomaly_note or "").strip()]
@@ -127,6 +130,7 @@ def _deliveries_insights(db: Session) -> List[Dict[str, Any]]:
         db.query(Delivery)
         .filter(Delivery.ddt_number.isnot(None))
         .filter(Delivery.delivery_date >= today - timedelta(days=120))
+        .limit(1500)
         .all()
     )
     for d in recent:
@@ -159,6 +163,7 @@ def _invoices_insights(db: Session) -> List[Dict[str, Any]]:
         .filter(Invoice.is_paid.is_(False))
         .filter(Invoice.due_date.isnot(None))
         .filter(Invoice.due_date < datetime(today.year, today.month, today.day, tzinfo=timezone.utc))
+        .limit(500)
         .all()
     )
     if overdue_q:
@@ -183,6 +188,7 @@ def _invoices_insights(db: Session) -> List[Dict[str, Any]]:
         .filter(Invoice.due_date.isnot(None))
         .filter(Invoice.due_date >= datetime(today.year, today.month, today.day, tzinfo=timezone.utc))
         .filter(Invoice.due_date <= datetime(in7.year, in7.month, in7.day, tzinfo=timezone.utc))
+        .limit(500)
         .all()
     )
     if soon:
