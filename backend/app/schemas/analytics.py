@@ -59,8 +59,10 @@ class AnalyticsHeatCell(BaseModel):
     total_amount: Decimal = Decimal("0")
     avg_amount: Decimal = Decimal("0")
     movimenti: int = 0
+    avg_visits: float = 0
     sample_days: int = 0
     intensity: float = 0
+    visit_intensity: float = 0
     operatori_consigliati: int = 1
     level: str = "nullo"
 
@@ -80,8 +82,11 @@ class AnalyticsHeatmapResponse(BaseModel):
     hours: List[int]
     weekdays: List[str]
     max_avg_amount: Decimal = Decimal("0")
+    max_avg_visits: float = 0
     cells: List[AnalyticsHeatCell]
     suggestions: List[AnalyticsSuggestion]
+    machines: List[str] = Field(default_factory=list)
+    by_machine: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     data_note: str = ""
 
@@ -119,6 +124,9 @@ class AnalyticsMachineOverview(BaseModel):
     snapshot: AnalyticsSnapshot
     weekly: Dict[str, Any] = Field(default_factory=dict)
     top_slots: List[AnalyticsSuggestion] = Field(default_factory=list)
+    hours: List[int] = Field(default_factory=list)
+    weekdays: List[str] = Field(default_factory=list)
+    cells: List[AnalyticsHeatCell] = Field(default_factory=list)
 
 
 class AnalyticsOverviewResponse(BaseModel):

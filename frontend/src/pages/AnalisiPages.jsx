@@ -4,9 +4,12 @@ import {
   AnalisiPageShell,
   AnalisiSyncStatus,
   HeatmapGrid,
+  MachineCompareCharts,
+  PopularTimesChart,
   SeriesBars,
+  TopSlotsColumnChart,
   VneStatusSemaphore,
-  resolveVneSemaphoreLight,
+  resolveAnalisiVneSemaphoreLight,
   eur,
 } from '../components/AnalisiShared.jsx'
 import {
@@ -17,6 +20,7 @@ import {
   fetchAnalyticsStaffing,
   fetchAnalyticsWeekly,
 } from '../services/analyticsService'
+import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
 
 const ANALISI_CACHE_PREFIX = 'analisi_cache_v2:'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
@@ -172,12 +176,15 @@ function DataNote({ text }) {
   return <p className="analisi-note">{cleaned}</p>
 }
 
-function AnalisiVneSemaphore({ data }) {
-  if (data == null) return null
-  const light = resolveVneSemaphoreLight(data?.warnings, {
-    emptyFail: isFailedEmptyAnalytics(data),
+function AnalisiVneSemaphore({ data, loading = false, refreshing = false, error = '' }) {
+  const light = resolveAnalisiVneSemaphoreLight({
+    data,
+    loading,
+    refreshing,
+    error,
+    expectedMachines: 3,
   })
-  return <VneStatusSemaphore light={light} />
+  return <VneStatusSemaphore light={light} show />
 }
 
 export function AnalisiDashboardPage() {
@@ -193,7 +200,7 @@ export function AnalisiDashboardPage() {
     <AnalisiPageShell
       title="Dashboard Analitica"
       lead="Incassi e traffico VNE divisi per macchina: La Risacca, Mani in Pasta, Le Mucche Volanti."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing || loading}>
           {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -203,6 +210,8 @@ export function AnalisiDashboardPage() {
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <DataNote text={data?.data_note} />
+
+      <EasyRetailPosImportPanel onImported={() => refreshNow()} />
 
       {loading && !snap ? (
         <div className="analisi-skeleton-grid" aria-hidden>
@@ -217,7 +226,7 @@ export function AnalisiDashboardPage() {
           <div className="dashboard-kpi dashboard-kpi--primary">
             <div className="dashboard-kpi-label">Totale incasso oggi</div>
             <div className="dashboard-kpi-value">{eur(snap.incasso_oggi)}</div>
-            <div className="dashboard-kpi-hint">Somma di tutte le macchine</div>
+            <div className="dashboard-kpi-hint">Da chiusure di giornata (tutte le macchine)</div>
           </div>
           <div className="dashboard-kpi">
             <div className="dashboard-kpi-label">Operazioni oggi</div>
@@ -232,6 +241,8 @@ export function AnalisiDashboardPage() {
         </section>
       )}
 
+      {machines.length > 0 ? <MachineCompareCharts machines={machines} /> : null}
+
       {machines.length > 0 && (
         <div className="analisi-machine-grid">
           {machines.map((m) => {
@@ -245,6 +256,7 @@ export function AnalisiDashboardPage() {
                     <div className="dashboard-kpi-value" style={{ fontSize: '1.25rem' }}>
                       {eur(s.incasso_oggi)}
                     </div>
+                    <div className="dashboard-kpi-sub">chiusura giornata</div>
                   </div>
                   <div>
                     <div className="dashboard-kpi-label">Operazioni</div>
@@ -265,13 +277,21 @@ export function AnalisiDashboardPage() {
                 <p className="analisi-home-peak" style={{ marginTop: '0.65rem' }}>
                   {s.picco_previsto?.message || 'Nessun picco storico disponibile.'}
                 </p>
+                <PopularTimesChart
+                  cells={m.cells}
+                  hours={m.hours}
+                  weekdays={m.weekdays}
+                  title={`Orari di punta · ${m.model_label}`}
+                />
+                <p className="analisi-machine-scope">
+                  Fonte visite:{' '}
+                  <strong>{m.visits_source === 'pos' ? 'scontrini EasyRetail' : 'operazioni VNE (stima)'}</strong>
+                </p>
                 <h3 className="analisi-machine-subtitle">Fasce consigliate</h3>
-                <ul className="analisi-suggestions">
-                  {(m.top_slots || []).map((slot) => (
-                    <li key={`${m.model_id}-${slot.weekday_label}-${slot.slot_label}`}>{slot.message}</li>
-                  ))}
-                  {!m.top_slots?.length ? <li>Pochi dati operazioni per questa macchina.</li> : null}
-                </ul>
+                <TopSlotsColumnChart
+                  suggestions={m.top_slots}
+                  emptyText="Pochi dati operazioni per questa macchina."
+                />
                 <h3 className="analisi-machine-subtitle">Andamento settimanale</h3>
                 <SeriesBars
                   rows={(m.weekly?.rows || []).map((r) => ({ ...r, label: r.label }))}
@@ -279,7 +299,7 @@ export function AnalisiDashboardPage() {
                 />
                 <div className="analisi-panel-actions">
                   <Link className="btn btn-secondary btn-sm" to={`/analisi/oraria`}>
-                    Heatmap
+                    Heatmap · {m.model_label}
                   </Link>
                   <Link className="btn btn-secondary btn-sm" to="/vne">
                     Apri VNE
@@ -311,7 +331,7 @@ export function AnalisiGiornalieroPage() {
     <AnalisiPageShell
       title="Andamento giornaliero"
       lead="Incassi giorno per giorno da chiusure cassa VNE (e operazioni se mancano chiusure)."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -348,7 +368,7 @@ export function AnalisiSettimanalePage() {
     <AnalisiPageShell
       title="Andamento settimanale"
       lead="Confronto settimane da dati VNE."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -380,7 +400,7 @@ export function AnalisiMensilePage() {
     <AnalisiPageShell
       title="Andamento mensile"
       lead="Incassi mensili aggregati da chiusure/operazioni VNE."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -408,11 +428,17 @@ export function AnalisiOrariaPage() {
     () => fetchAnalyticsHourly({ months: 3 }),
     [],
   )
+  const machines = Array.isArray(data?.by_machine) ? data.by_machine : []
+  const machineLabels =
+    (Array.isArray(data?.machines) && data.machines.length
+      ? data.machines
+      : machines.map((m) => m.model_label).filter(Boolean)) || []
+
   return (
     <AnalisiPageShell
       title="Analisi oraria"
-      lead="Heatmap dalle operazioni VNE: intensità = traffico storico. Il numero è gli operatori consigliati."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      lead="Heatmap e flusso traffico VNE per macchina: intensità = storico operazioni. Il numero è gli operatori consigliati."
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
@@ -425,18 +451,51 @@ export function AnalisiOrariaPage() {
       {data && (
         <>
           <section className="card analisi-panel">
+            <h2 className="analisi-panel-title">Heatmap e flusso — tutte le macchine</h2>
+            <p className="analisi-machine-scope" role="status">
+              {machineLabels.length
+                ? `Macchine nel flusso: ${machineLabels.join(' · ')}`
+                : 'Macchine nel flusso: aggregato VNE'}
+            </p>
             <HeatmapGrid hours={data.hours} weekdays={data.weekdays} cells={data.cells} />
+            <PopularTimesChart
+              cells={data.cells}
+              hours={data.hours}
+              weekdays={data.weekdays}
+              title="Orari di punta — tutte le macchine"
+            />
+            <h3 className="analisi-machine-subtitle">Top fasce — tutte le macchine</h3>
+            <TopSlotsColumnChart suggestions={data.suggestions} />
           </section>
-          <section className="card analisi-panel">
-            <h2 className="analisi-panel-title">Top fasce</h2>
-            <ul className="analisi-suggestions">
-              {(data.suggestions || []).map((s) => (
-                <li key={`${s.weekday_label}-${s.slot_label}`}>
-                  {s.message} · media {eur(s.avg_amount)}
-                </li>
+
+          {machines.length > 0 ? (
+            <div className="analisi-machine-grid" style={{ marginTop: '1rem' }}>
+              {machines.map((m) => (
+                <section key={m.model_id} className="card analisi-panel analisi-machine-card">
+                  <h2 className="analisi-panel-title">Heatmap e flusso — {m.model_label}</h2>
+                  <p className="analisi-machine-scope" role="status">
+                    Macchina: <strong>{m.model_label}</strong>
+                  </p>
+                  <HeatmapGrid
+                    hours={m.hours || data.hours}
+                    weekdays={m.weekdays || data.weekdays}
+                    cells={m.cells || []}
+                  />
+                  <PopularTimesChart
+                    cells={m.cells}
+                    hours={m.hours || data.hours}
+                    weekdays={m.weekdays || data.weekdays}
+                    title={`Orari di punta · ${m.model_label}`}
+                  />
+                  <h3 className="analisi-machine-subtitle">Top fasce · {m.model_label}</h3>
+                  <TopSlotsColumnChart
+                    suggestions={m.suggestions}
+                    emptyText="Pochi dati operazioni per questa macchina."
+                  />
+                </section>
               ))}
-            </ul>
-          </section>
+            </div>
+          ) : null}
         </>
       )}
     </AnalisiPageShell>
@@ -453,7 +512,7 @@ export function AnalisiPianificazionePage() {
     <AnalisiPageShell
       title="Pianificazione personale"
       lead="Copertura consigliata per fascia, calcolata sul traffico delle operazioni VNE."
-      vneStatus={<AnalisiVneSemaphore data={data} />}
+      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}

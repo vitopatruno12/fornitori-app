@@ -30,8 +30,72 @@ MONTH_LABELS_IT = [
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 _CACHE_TTL_SEC = float(__import__("os").getenv("ANALYTICS_CACHE_TTL_SEC", "1200"))
 DATA_NOTE = (
-    "Dati da macchine VNE: operazioni (traffico orario) e chiusure cassa (incasso giornaliero)."
+    "Dati da macchine VNE: operazioni (traffico orario) e chiusure cassa (incasso giornaliero). "
+    "Orari di punta: preferisce scontrini EasyRetail (POS) se importati."
 )
+
+
+def _apply_pos_visits(
+    heat: dict,
+    *,
+    date_from: date,
+    date_to: date,
+    model_id: Optional[str] = None,
+) -> dict:
+    """Sovrascrive avg_visits con scontrini POS EasyRetail quando disponibili."""
+    try:
+        from ..database import SessionLocal
+        from .pos_receipts_service import load_pos_visit_buckets
+    except Exception:
+        return heat
+
+    db = SessionLocal()
+    try:
+        mid = _parse_model_id(model_id)
+        buckets = load_pos_visit_buckets(db, date_from=date_from, date_to=date_to, model_id=mid)
+    except Exception:
+        return heat
+    finally:
+        db.close()
+
+    if not buckets:
+        return heat
+
+    scope_key = mid or "all"
+    cells = list(heat.get("cells") or [])
+    max_avg_visits = 0.0
+    used = 0
+    for cell in cells:
+        wd = int(cell.get("weekday") or 0)
+        hr = int(cell.get("hour") or 0)
+        hit = buckets.get((scope_key, wd, hr)) or buckets.get(("all", wd, hr))
+        if not hit:
+            continue
+        cell["avg_visits"] = round(float(hit["avg_visits"]), 2)
+        cell["movimenti"] = int(round(float(hit["visits"])))
+        cell["sample_days"] = int(hit.get("sample_days") or cell.get("sample_days") or 1)
+        cell["visit_source"] = "pos"
+        max_avg_visits = max(max_avg_visits, float(hit["avg_visits"]))
+        used += 1
+
+    if used <= 0:
+        return heat
+
+    for cell in cells:
+        avg_v = float(cell.get("avg_visits") or 0)
+        cell["visit_intensity"] = round(0.0 if max_avg_visits <= 0 else avg_v / max_avg_visits, 3)
+
+    heat["cells"] = cells
+    heat["max_avg_visits"] = round(max_avg_visits, 2)
+    heat["visits_source"] = "pos"
+    note = str(heat.get("data_note") or "")
+    if "EasyRetail" not in note:
+        heat["data_note"] = (
+            (note + " ").strip()
+            + " Orari di punta da scontrini EasyRetail (registratore)."
+        ).strip()
+    return heat
+
 
 
 def _dec(n: Any) -> Decimal:
@@ -120,6 +184,12 @@ def _day_incasso(events: List[VneAnalyticsEvent], day: date) -> Decimal:
     return _dec(sum(e.amount for e in ops))
 
 
+def _day_incasso_chiusure(events: List[VneAnalyticsEvent], day: date) -> Decimal:
+    """Incasso giornata: solo chiusure cassa (nessun fallback sulle operazioni)."""
+    clos = [e for e in _closings(events) if e.when.date() == day]
+    return _dec(sum(e.amount for e in clos))
+
+
 def _day_movimenti(events: List[VneAnalyticsEvent], day: date) -> int:
     return sum(1 for e in _ops(events) if e.when.date() == day)
 
@@ -142,7 +212,8 @@ def _snapshot_from_events(
     scoped = _filter_events_for_model(events, model_id)
     mid = _parse_model_id(model_id)
 
-    incasso_oggi = _day_incasso(scoped, today)
+    # Dashboard: incasso oggi solo da chiusure di giornata (non dalle operazioni).
+    incasso_oggi = _day_incasso_chiusure(scoped, today)
     movimenti_oggi = _day_movimenti(scoped, today)
 
     bucket_amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
@@ -270,12 +341,15 @@ def _heatmap_from_events(
 
     cells = []
     max_avg = 0.0
+    max_avg_visits = 0.0
     for wd in range(7):
         for hr in BUSINESS_HOURS:
             days_n = max(1, len(day_seen[(wd, hr)]))
             tot = float(amount[(wd, hr)])
             avg = tot / days_n
+            avg_visits = count[(wd, hr)] / days_n
             max_avg = max(max_avg, avg)
+            max_avg_visits = max(max_avg_visits, avg_visits)
             cells.append(
                 {
                     "weekday": wd,
@@ -285,6 +359,7 @@ def _heatmap_from_events(
                     "total_amount": _dec(tot),
                     "avg_amount": _dec(avg),
                     "movimenti": count[(wd, hr)],
+                    "avg_visits": round(avg_visits, 2),
                     "sample_days": len(day_seen[(wd, hr)]),
                 }
             )
@@ -292,7 +367,9 @@ def _heatmap_from_events(
     for cell in cells:
         avg = float(cell["avg_amount"])
         intensity = 0.0 if max_avg <= 0 else avg / max_avg
+        visit_intensity = 0.0 if max_avg_visits <= 0 else float(cell["avg_visits"]) / max_avg_visits
         cell["intensity"] = round(intensity, 3)
+        cell["visit_intensity"] = round(visit_intensity, 3)
         cell["operatori_consigliati"] = _intensity_to_operators(avg, max_avg)
         if intensity >= 0.75:
             cell["level"] = "alto"
@@ -327,8 +404,10 @@ def _heatmap_from_events(
         "hours": BUSINESS_HOURS,
         "weekdays": WEEKDAY_LABELS_IT,
         "max_avg_amount": _dec(max_avg),
+        "max_avg_visits": round(max_avg_visits, 2),
         "cells": cells,
         "suggestions": suggestions,
+        "machines": sorted({e.model_label for e in scoped if e.model_label}),
         "warnings": list(warnings or []),
         "data_note": DATA_NOTE,
     }
@@ -442,11 +521,49 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None) -> di
 
 
 def get_hourly_heatmap(*, months: int = 3, model_id: Optional[str] = None) -> dict:
+    from ..routers.vne import _models
+
     months = max(1, min(6, int(months or 3)))
     today = date.today()
     date_from = today - timedelta(days=min(93, months * 31) - 1)
     events, warnings = _load_events(date_from=date_from, date_to=today, model_id=model_id)
-    return _heatmap_from_events(events, months=months, model_id=model_id, warnings=warnings)
+    heat = _heatmap_from_events(events, months=months, model_id=model_id, warnings=warnings)
+    heat = _apply_pos_visits(heat, date_from=date_from, date_to=today, model_id=model_id)
+
+    mid = _parse_model_id(model_id)
+    machine_models = _models()
+    if mid:
+        machine_models = [m for m in machine_models if m.id == mid]
+
+    by_machine = []
+    for model in machine_models:
+        m_events = [e for e in events if e.model_id == model.id]
+        m_warn = [w for w in warnings if model.label in w]
+        m_heat = _heatmap_from_events(
+            m_events,
+            months=months,
+            model_id=model.id,
+            warnings=m_warn,
+        )
+        m_heat = _apply_pos_visits(m_heat, date_from=date_from, date_to=today, model_id=model.id)
+        by_machine.append(
+            {
+                "model_id": model.id,
+                "model_label": model.label,
+                "hours": m_heat["hours"],
+                "weekdays": m_heat["weekdays"],
+                "cells": m_heat["cells"],
+                "suggestions": m_heat["suggestions"],
+                "max_avg_amount": m_heat["max_avg_amount"],
+                "machines": [model.label],
+                "warnings": m_warn,
+                "visits_source": m_heat.get("visits_source") or "vne",
+            }
+        )
+
+    heat["by_machine"] = by_machine
+    heat["machines"] = [m.label for m in machine_models] or list(heat.get("machines") or [])
+    return heat
 
 
 def get_staffing_plan(*, months: int = 3, model_id: Optional[str] = None) -> dict:
@@ -521,7 +638,8 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
         date_to=today,
         model_id=mid,
         max_op_pages=4,
-        max_closing_pages=4,
+        # Più pagine chiusure: l'incasso oggi della dashboard dipende da queste.
+        max_closing_pages=10,
     )
 
     snap = _snapshot_from_events(
@@ -589,6 +707,7 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
             model_id=model.id,
             warnings=m_warn,
         )
+        m_heat = _apply_pos_visits(m_heat, date_from=date_from, date_to=today, model_id=model.id)
         by_machine.append(
             {
                 "model_id": model.id,
@@ -596,6 +715,10 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
                 "snapshot": m_snap,
                 "weekly": m_weekly,
                 "top_slots": m_heat["suggestions"][:5],
+                "hours": m_heat["hours"],
+                "weekdays": m_heat["weekdays"],
+                "cells": m_heat["cells"],
+                "visits_source": m_heat.get("visits_source") or "vne",
             }
         )
 

@@ -2647,7 +2647,8 @@ def collect_analytics_events(
 ) -> tuple[List[VneAnalyticsEvent], List[str]]:
     """
     Raccoglie operazioni + chiusure da tutte le macchine (o una sola).
-    Una sola sessione VNE per macchina (ops + chiusure) per restare sotto timeout nginx.
+    Priorità alle chiusure (incasso giornata dashboard), poi operazioni (traffico orario).
+    Una sola sessione VNE per macchina per restare sotto timeout nginx.
     Ritorna (events, warnings).
     """
     models = [m for m in _models() if m.status_url or m.machine_url]
@@ -2667,23 +2668,115 @@ def collect_analytics_events(
             continue
 
         completed = _complete_model_config(model)
-        if not completed.sel_operazioni_url or not completed.operazioni_url:
-            warnings.append(f"Operazioni {model.label}: URL non configurati")
+        has_ops = bool(completed.sel_operazioni_url and completed.operazioni_url)
+        has_closings = bool(completed.sel_chiusure_url and completed.chiusure_url)
+        if not has_ops and not has_closings:
+            warnings.append(f"{model.label}: URL operazioni/chiusure non configurati")
             continue
 
         per_budget = max(10.0, min(VNE_ANALYTICS_PER_MODEL_SEC, remaining - 2))
         base_ref = _base_supervlt_referer(completed)
+        entry_filter = (
+            completed.sel_chiusure_url
+            if has_closings
+            else completed.sel_operazioni_url
+        )
+        entry_label = "Chiusure" if has_closings else "Operazioni"
 
         try:
             session, filter_html, active, filter_url = _open_model_filter_session(
                 completed,
-                completed.sel_operazioni_url,
+                entry_filter,
                 referer=base_ref,
-                feature_label="Operazioni",
+                feature_label=entry_label,
                 max_seconds=per_budget,
             )
+        except HTTPException as e:
+            warnings.append(f"{model.label}: {e.detail}")
+            continue
+        except Exception as e:
+            warnings.append(f"{model.label}: {e}")
+            continue
+
+        # 1) Chiusure di giornata prima (incasso dashboard)
+        if has_closings:
+            try:
+                if entry_filter != (active.sel_chiusure_url or completed.sel_chiusure_url):
+                    filter_html, filter_url = _load_filter_page_on_session(
+                        session,
+                        active,
+                        active.sel_chiusure_url or completed.sel_chiusure_url,
+                        referer=base_ref,
+                        feature_label="Chiusure",
+                    )
+                csrf = _csrf_from_html(filter_html)
+                form_data: List[tuple[str, str]] = []
+                if csrf:
+                    form_data.append(("csrfmiddlewaretoken", csrf))
+                form_data.append(("filters", "filterData"))
+                form_data.append(("init_day_date", to_vne_day_date(date_from)))
+                form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
+                closing_post = active.chiusure_url or completed.chiusure_url
+                post_url = _align_url_origin(closing_post, filter_url)
+                html = _post_vne_filtered_page(
+                    active,
+                    session,
+                    filter_url=filter_url,
+                    post_url=post_url,
+                    form_data=form_data,
+                    base_ref=base_ref,
+                    feature_label="Chiusure",
+                )
+                if _is_machine_blocked(html):
+                    warnings.append(f"Chiusure {model.label}: macchina non accessibile sul portale remoto")
+                else:
+                    closings = _follow_vne_next_pages(
+                        session,
+                        html,
+                        base_url=post_url,
+                        parse_rows=_parse_cash_closing_rows,
+                        max_pages=max_closing_pages,
+                    )
+                    for row in closings:
+                        when = parse_vne_when_text(row.when_text)
+                        if not when:
+                            continue
+                        amount = float(row.total_eur or 0.0)
+                        events.append(
+                            VneAnalyticsEvent(
+                                source="closing",
+                                model_id=model.id,
+                                model_label=model.label,
+                                when=when,
+                                amount=amount,
+                                label="chiusura cassa",
+                                when_text=row.when_text,
+                            )
+                        )
+            except HTTPException as e:
+                warnings.append(f"Chiusure {model.label}: {e.detail}")
+            except Exception as e:
+                warnings.append(f"Chiusure {model.label}: {e}")
+
+        if time.monotonic() > overall_deadline - 5:
+            if has_ops:
+                warnings.append(f"Operazioni {model.label}: saltate (tempo analisi esaurito)")
+            continue
+
+        # 2) Operazioni (traffico orario / heatmap)
+        if not has_ops:
+            continue
+
+        try:
+            filter_html, filter_url = _load_filter_page_on_session(
+                session,
+                active,
+                active.sel_operazioni_url or completed.sel_operazioni_url,
+                referer=base_ref,
+                feature_label="Operazioni",
+            )
             csrf = _csrf_from_html(filter_html)
-            form_data: List[tuple[str, str]] = []
+            form_data = []
             if csrf:
                 form_data.append(("csrfmiddlewaretoken", csrf))
             form_data.append(("filters", "filterData"))
@@ -2699,7 +2792,9 @@ def collect_analytics_events(
                 base_ref=base_ref,
                 feature_label="Operazioni",
             )
-            if not _is_machine_blocked(html):
+            if _is_machine_blocked(html):
+                warnings.append(f"Operazioni {model.label}: macchina non accessibile sul portale remoto")
+            else:
                 ops = _follow_vne_next_pages(
                     session,
                     html,
@@ -2723,80 +2818,10 @@ def collect_analytics_events(
                             when_text=row.when_text,
                         )
                     )
-            else:
-                warnings.append(f"Operazioni {model.label}: macchina non accessibile sul portale remoto")
         except HTTPException as e:
             warnings.append(f"Operazioni {model.label}: {e.detail}")
-            continue
         except Exception as e:
             warnings.append(f"Operazioni {model.label}: {e}")
-            continue
-
-        if time.monotonic() > overall_deadline - 5:
-            warnings.append(f"Chiusure {model.label}: saltate (tempo analisi esaurito)")
-            continue
-
-        closing_filter = active.sel_chiusure_url or completed.sel_chiusure_url
-        closing_post = active.chiusure_url or completed.chiusure_url
-        if not closing_filter or not closing_post:
-            warnings.append(f"Chiusure {model.label}: URL non configurati")
-            continue
-
-        try:
-            filter_html, filter_url = _load_filter_page_on_session(
-                session,
-                active,
-                closing_filter,
-                referer=base_ref,
-                feature_label="Chiusure",
-            )
-            csrf = _csrf_from_html(filter_html)
-            form_data = []
-            if csrf:
-                form_data.append(("csrfmiddlewaretoken", csrf))
-            form_data.append(("filters", "filterData"))
-            form_data.append(("init_day_date", to_vne_day_date(date_from)))
-            form_data.append(("end_day_date", to_vne_day_date(date_to, end_of_day=True)))
-            post_url = _align_url_origin(closing_post, filter_url)
-            html = _post_vne_filtered_page(
-                active,
-                session,
-                filter_url=filter_url,
-                post_url=post_url,
-                form_data=form_data,
-                base_ref=base_ref,
-                feature_label="Chiusure",
-            )
-            if _is_machine_blocked(html):
-                warnings.append(f"Chiusure {model.label}: macchina non accessibile sul portale remoto")
-                continue
-            closings = _follow_vne_next_pages(
-                session,
-                html,
-                base_url=post_url,
-                parse_rows=_parse_cash_closing_rows,
-                max_pages=max_closing_pages,
-            )
-            for row in closings:
-                when = parse_vne_when_text(row.when_text)
-                if not when:
-                    continue
-                amount = float(row.total_eur or 0.0)
-                events.append(
-                    VneAnalyticsEvent(
-                        source="closing",
-                        model_id=model.id,
-                        model_label=model.label,
-                        when=when,
-                        amount=amount,
-                        label="chiusura cassa",
-                        when_text=row.when_text,
-                    )
-                )
-        except HTTPException as e:
-            warnings.append(f"Chiusure {model.label}: {e.detail}")
-        except Exception as e:
-            warnings.append(f"Chiusure {model.label}: {e}")
 
     events.sort(key=lambda e: e.when)
     return events, warnings

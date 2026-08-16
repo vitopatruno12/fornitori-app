@@ -1,4 +1,6 @@
 import { apiFetch } from './api'
+import { apiUrl } from './apiBase'
+import { formatApiError, parseApiJson } from '../offline/offlineApiHelpers'
 
 function qs(params = {}) {
   const sp = new URLSearchParams()
@@ -36,4 +38,33 @@ export async function fetchAnalyticsHourly({ modelId, months = 3 } = {}) {
 
 export async function fetchAnalyticsStaffing({ modelId, months = 3 } = {}) {
   return apiFetch(`/analytics/staffing${qs({ model_id: modelId, months })}`)
+}
+
+export async function fetchPosReceiptStats() {
+  return apiFetch('/pos-receipts/stats')
+}
+
+export async function importPosReceiptsCsv(file, { modelId } = {}) {
+  const body = new FormData()
+  body.append('file', file)
+  if (modelId) body.append('model_id', modelId)
+  const response = await fetch(apiUrl('/pos-receipts/import-csv'), {
+    method: 'POST',
+    body,
+  })
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`
+    try {
+      const data = await parseApiJson(response)
+      detail = formatApiError(data) || detail
+    } catch {
+      // ignore
+    }
+    throw new Error(detail)
+  }
+  return response.json()
+}
+
+export function posReceiptsTemplateUrl() {
+  return apiUrl('/pos-receipts/template.csv')
 }

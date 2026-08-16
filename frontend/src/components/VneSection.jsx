@@ -117,13 +117,19 @@ export default function VneSection({ embedded = false }) {
       ),
     [],
   )
-  const semaphoreLight = useMemo(
-    () =>
-      resolveVneSemaphoreLight([error, healthWarning], {
-        hasOffline: Object.values(modelConnectivity || {}).some((v) => v === 'offline'),
-      }),
-    [error, healthWarning, modelConnectivity],
-  )
+  const semaphoreLight = useMemo(() => {
+    // Solo il modello selezionato: unknown/pending → giallo; offline → rosso; online → verde.
+    const selectedState = selectedId ? modelConnectivity?.[selectedId] : undefined
+    const isOffline =
+      selectedState === 'offline' ||
+      (!selectedId && Object.values(modelConnectivity || {}).some((v) => v === 'offline'))
+    const isPending =
+      selectedState === 'unknown' || (Boolean(selectedId) && selectedState == null)
+    return resolveVneSemaphoreLight([error, healthWarning], {
+      hasOffline: isOffline,
+      pending: isPending,
+    })
+  }, [error, healthWarning, modelConnectivity, selectedId])
 
   useEffect(() => {
     let mounted = true
@@ -374,12 +380,12 @@ export default function VneSection({ embedded = false }) {
   useEffect(() => {
     if (!Array.isArray(models) || models.length === 0) return
     // Non bombardare il backend con verifiche parallele su tutti i modelli:
-    // inizializziamo lo stato e verifichiamo il modello quando viene aperto.
+    // stato sconosciuto finché il modello non viene aperto (non "offline").
     setModelConnectivity((prev) => {
       const next = { ...prev }
       for (const m of models) {
         if (!m?.id || !m?.configured) continue
-        if (!next[m.id]) next[m.id] = 'offline'
+        if (!next[m.id]) next[m.id] = 'unknown'
       }
       return next
     })
