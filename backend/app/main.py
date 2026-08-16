@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices, pos_receipts
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI):
         _ensure_carriers_tables()
         _ensure_electronic_invoices_tables()
         _ensure_sdi_electronic_invoice_link()
+        _ensure_bank_module_tables()
+        _ensure_pos_receipts_table()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -165,6 +167,14 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     logger.error("SQLAlchemyError su %s (%s): %s", request.url.path, type(exc).__name__, exc)
     detail = "Errore database."
     err_text = str(exc).lower()
+    missing_rel = None
+    for marker in ("relation \"", "relation '", 'column "', "column '"):
+        if marker in err_text:
+            start = err_text.find(marker) + len(marker)
+            end = err_text.find(marker[-1], start)
+            if end > start:
+                missing_rel = err_text[start:end]
+                break
     if "warehouse_movements" in err_text or "supplier_payments_workbooks" in err_text or "volume_liters" in err_text:
         detail = (
             "Schema database incompleto (magazzino, pagamenti fornitori o ordini). "
@@ -173,8 +183,9 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
         )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (
-            "Tabella o colonna mancante nel database. "
-            "Applicare le migrazioni in backend/migrations o deploy/ensure-warehouse-payments-tables.sh"
+            "Tabella o colonna mancante nel database"
+            + (f" ({missing_rel})" if missing_rel else "")
+            + ". Applicare le migrazioni in backend/migrations o deploy/ensure-warehouse-payments-tables.sh"
         )
     payload = {"detail": detail, "error": "sqlalchemy_error"}
     if EXPOSE_ERROR_DETAILS:
@@ -213,6 +224,7 @@ app.include_router(vne.router)
 app.include_router(sdi.router)
 app.include_router(electronic_invoices.router)
 app.include_router(banca.router)
+app.include_router(pos_receipts.router)
 
 
 def _ensure_support_technicians_columns() -> None:
@@ -237,6 +249,17 @@ def _ensure_support_technicians_columns() -> None:
             e,
         )
 
+
+
+def _safe_exec_sql(sql: str, *, label: str) -> bool:
+    """Esegue SQL in transazione dedicata; False se fallisce (es. ownership index)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+        return True
+    except Exception as e:
+        logger.warning("%s: %s", label, e)
+        return False
 
 
 def _ensure_electronic_invoices_tables() -> None:
@@ -268,8 +291,6 @@ def _ensure_electronic_invoices_tables() -> None:
                     """
                 )
             )
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_electronic_invoices_supplier_vat ON electronic_invoices (supplier_vat)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_electronic_invoices_invoice_number ON electronic_invoices (invoice_number)"))
             conn.execute(
                 text(
                     """
@@ -291,8 +312,6 @@ def _ensure_electronic_invoices_tables() -> None:
                     """
                 )
             )
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoices_supplier ON incoming_invoices (supplier_id)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoices_atlas_invoice ON incoming_invoices (atlas_invoice_id)"))
             conn.execute(
                 text(
                     """
@@ -311,7 +330,28 @@ def _ensure_electronic_invoices_tables() -> None:
                     """
                 )
             )
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incoming_invoice_lines_invoice ON incoming_invoice_lines (invoice_id)"))
+        # INDEX separati: se la tabella è owned da postgres, CREATE INDEX fallisce
+        # ma non deve annullare la creazione tabelle.
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_electronic_invoices_supplier_vat ON electronic_invoices (supplier_vat)",
+            label="Index electronic_invoices.supplier_vat",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_electronic_invoices_invoice_number ON electronic_invoices (invoice_number)",
+            label="Index electronic_invoices.invoice_number",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_incoming_invoices_supplier ON incoming_invoices (supplier_id)",
+            label="Index incoming_invoices.supplier_id",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_incoming_invoices_atlas_invoice ON incoming_invoices (atlas_invoice_id)",
+            label="Index incoming_invoices.atlas_invoice_id",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_incoming_invoice_lines_invoice ON incoming_invoice_lines (invoice_id)",
+            label="Index incoming_invoice_lines.invoice_id",
+        )
     except Exception as e:
         logger.warning("Impossibile creare tabelle electronic/incoming invoices: %s", e)
 
@@ -709,14 +749,13 @@ def _ensure_staff_stipendi_months_table() -> None:
                     """
                 )
             )
-            conn.execute(
-                text(
-                    """
-                    CREATE INDEX IF NOT EXISTS ix_staff_stipendi_months_year_month
-                    ON staff_stipendi_months (year_month DESC)
-                    """
-                )
-            )
+        _safe_exec_sql(
+            """
+            CREATE INDEX IF NOT EXISTS ix_staff_stipendi_months_year_month
+            ON staff_stipendi_months (year_month DESC)
+            """,
+            label="Index staff_stipendi_months.year_month",
+        )
     except Exception as e:
         logger.warning(
             "Impossibile verificare/creare staff_stipendi_months: %s",
@@ -918,6 +957,108 @@ def _ensure_supplier_order_items_volume_liters_column() -> None:
         )
 
 
+def _ensure_bank_module_tables() -> None:
+    """Conti e movimenti banca (migr. 20260723_bank_module.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS bank_accounts (
+                      id SERIAL PRIMARY KEY,
+                      bank_name VARCHAR(160) NOT NULL,
+                      account_name VARCHAR(160) NOT NULL DEFAULT 'Conto corrente',
+                      iban VARCHAR(34),
+                      saldo_disponibile NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                      saldo_contabile NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                      connection_status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+                      last_sync_at TIMESTAMPTZ,
+                      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                      notes TEXT,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS bank_movements (
+                      id SERIAL PRIMARY KEY,
+                      bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+                      movement_date DATE NOT NULL,
+                      description VARCHAR(512),
+                      causale VARCHAR(256),
+                      movement_type VARCHAR(16) NOT NULL,
+                      amount NUMERIC(14, 2) NOT NULL,
+                      counterparty VARCHAR(256),
+                      category VARCHAR(120),
+                      reconciliation_status VARCHAR(32) NOT NULL DEFAULT 'unmatched',
+                      matched_invoice_id INTEGER REFERENCES invoices(id),
+                      matched_cash_entry_id INTEGER REFERENCES cash_entries(id),
+                      difference_amount NUMERIC(14, 2),
+                      source VARCHAR(32) NOT NULL DEFAULT 'manual',
+                      notes TEXT,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_bank_movements_account ON bank_movements (bank_account_id)",
+            label="Index bank_movements.bank_account_id",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_bank_movements_date ON bank_movements (movement_date DESC)",
+            label="Index bank_movements.movement_date",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_bank_movements_status ON bank_movements (reconciliation_status)",
+            label="Index bank_movements.reconciliation_status",
+        )
+    except Exception as e:
+        logger.warning("Impossibile verificare/creare tabelle banca: %s", e)
+
+
+def _ensure_pos_receipts_table() -> None:
+    """Scontrini POS (migr. 20260816_pos_receipts.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pos_receipts (
+                      id SERIAL PRIMARY KEY,
+                      source VARCHAR(32) NOT NULL DEFAULT 'easyretail',
+                      store_key VARCHAR(64) NOT NULL DEFAULT '',
+                      model_id VARCHAR(32),
+                      model_label VARCHAR(80),
+                      external_id VARCHAR(120) NOT NULL,
+                      receipt_at TIMESTAMPTZ NOT NULL,
+                      amount_eur NUMERIC(12, 2),
+                      is_void INTEGER NOT NULL DEFAULT 0,
+                      raw_store VARCHAR(120),
+                      created_at TIMESTAMPTZ DEFAULT NOW(),
+                      CONSTRAINT uq_pos_receipts_source_store_external UNIQUE (source, store_key, external_id)
+                    )
+                    """
+                )
+            )
+        for sql, label in (
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_source ON pos_receipts (source)", "Index pos_receipts.source"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_store_key ON pos_receipts (store_key)", "Index pos_receipts.store_key"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_model_id ON pos_receipts (model_id)", "Index pos_receipts.model_id"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_receipt_at ON pos_receipts (receipt_at)", "Index pos_receipts.receipt_at"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_when_store ON pos_receipts (receipt_at, store_key)", "Index pos_receipts.when_store"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_model_when ON pos_receipts (model_id, receipt_at)", "Index pos_receipts.model_when"),
+        ):
+            _safe_exec_sql(sql, label=label)
+    except Exception as e:
+        logger.warning("Impossibile verificare/creare pos_receipts: %s", e)
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
@@ -951,6 +1092,12 @@ def _check_critical_schema_columns() -> None:
         required_tables = [
             ("warehouse_movements", "20260710_warehouse_movements.sql"),
             ("supplier_payments_workbooks", "20260710_supplier_payments_workbook.sql"),
+            ("staff_stipendi_months", "20260729_staff_stipendi_months.sql"),
+            ("bank_accounts", "20260723_bank_module.sql"),
+            ("bank_movements", "20260723_bank_module.sql"),
+            ("carriers", "20260812_carriers.sql"),
+            ("electronic_invoices", "20260812_electronic_invoices.sql"),
+            ("pos_receipts", "20260816_pos_receipts.sql"),
         ]
         insp = inspect(engine)
         missing = []

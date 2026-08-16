@@ -43,6 +43,12 @@ SAFE_MIGRATIONS=(
   20260710_supplier_order_items_volume_liters.sql
   20260712_supplier_multi_contacts.sql
   20260723_staff_member_section.sql
+  20260723_bank_module.sql
+  20260729_staff_stipendi_months.sql
+  20260812_carriers.sql
+  20260812_electronic_invoices.sql
+  20260812_sdi_electronic_invoice_link.sql
+  20260816_pos_receipts.sql
 )
 
 log "Migrazioni SQL su database $DB_NAME"

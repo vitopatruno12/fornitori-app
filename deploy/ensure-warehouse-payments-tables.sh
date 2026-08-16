@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Crea tabelle magazzino / pagamenti fornitori e colonna volume_liters come superuser,
-# poi assegna permessi all'utente app (fornitori_user).
+# Crea/aggiorna tabelle schema Atlas e assegna ownership all'utente app (fornitori_user).
+# Copre magazzino, pagamenti, ordini, staff, banca, carriers, fatture elettroniche, POS.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/fornitori-app}"
@@ -56,17 +56,17 @@ warn() { printf "\033[1;33m%s\033[0m\n" "$*"; }
 err() { printf "\033[1;31mERRORE: %s\033[0m\n" "$*" >&2; }
 
 if ! command -v psql >/dev/null 2>&1; then
-  warn "psql non trovato: salto migrazioni magazzino/pagamenti."
+  warn "psql non trovato: salto migrazioni schema."
   exit 0
 fi
 
 if ! sudo -u postgres psql -tAc "SELECT 1" >/dev/null 2>&1; then
-  warn "Impossibile connettersi a PostgreSQL come postgres: salto migrazioni magazzino/pagamenti."
+  warn "Impossibile connettersi a PostgreSQL come postgres: salto migrazioni schema."
   exit 0
 fi
 
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
-  warn "Database '$DB_NAME' non trovato: salto migrazioni magazzino/pagamenti."
+  warn "Database '$DB_NAME' non trovato: salto migrazioni schema."
   exit 0
 fi
 
@@ -79,20 +79,29 @@ _apply_sql_file() {
   local name="$1"
   local file="$MIG_DIR/$name"
   if [[ ! -f "$file" ]]; then
-    err "File migrazione assente: $file"
-    exit 1
+    warn "File migrazione assente (salto): $file"
+    return 0
   fi
   log "Applico $name"
   sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -f "$file"
 }
 
-log "Migrazioni magazzino / pagamenti / ordini su $DB_NAME (owner $DB_USER)"
+log "Migrazioni schema Atlas su $DB_NAME (owner $DB_USER)"
 
 for mig in \
+  20260616_staff_locale_access_code.sql \
+  20260617_prima_nota_locale_access_code.sql \
   20260710_warehouse_movements.sql \
   20260710_supplier_payments_workbook.sql \
   20260710_supplier_order_items_volume_liters.sql \
-  20260712_supplier_multi_contacts.sql
+  20260712_supplier_multi_contacts.sql \
+  20260723_staff_member_section.sql \
+  20260723_bank_module.sql \
+  20260729_staff_stipendi_months.sql \
+  20260812_carriers.sql \
+  20260812_electronic_invoices.sql \
+  20260812_sdi_electronic_invoice_link.sql \
+  20260816_pos_receipts.sql
 do
   _apply_sql_file "$mig"
 done
@@ -100,18 +109,56 @@ done
 _grant_table() {
   local table="$1"
   sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" <<SQL
-ALTER TABLE ${table} OWNER TO "$DB_USER";
-ALTER SEQUENCE IF EXISTS ${table}_id_seq OWNER TO "$DB_USER";
+ALTER TABLE IF EXISTS ${table} OWNER TO "$DB_USER";
+DO \$\$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = '${table}_id_seq' AND c.relkind = 'S'
+  ) THEN
+    EXECUTE 'ALTER SEQUENCE ${table}_id_seq OWNER TO "$DB_USER"';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE ${table}_id_seq TO "$DB_USER"';
+  END IF;
+END
+\$\$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ${table} TO "$DB_USER";
-GRANT USAGE, SELECT ON SEQUENCE ${table}_id_seq TO "$DB_USER";
 SQL
 }
 
-_grant_table warehouse_movements
-_grant_table supplier_payments_workbooks
+for table in \
+  warehouse_movements \
+  supplier_payments_workbooks \
+  staff_stipendi_months \
+  staff_payroll_months \
+  staff_locale_packs \
+  staff_backups \
+  bank_accounts \
+  bank_movements \
+  carriers \
+  carrier_maintenance_logs \
+  carrier_fuel_expenses \
+  carrier_other_expenses \
+  electronic_invoices \
+  incoming_invoices \
+  incoming_invoice_lines \
+  pos_receipts \
+  prima_nota_locale_packs
+do
+  if sudo -u postgres psql -tAc \
+    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table'" \
+    -d "$DB_NAME" | grep -q 1; then
+    _grant_table "$table"
+  else
+    warn "Tabella $table assente dopo CREATE (verifica migrazione)."
+  fi
+done
 
 sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" <<SQL
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE supplier_order_items TO "$DB_USER";
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE suppliers TO "$DB_USER";
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE deliveries TO "$DB_USER";
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sdi_invoices TO "$DB_USER";
 SQL
 
 for table in warehouse_movements supplier_payments_workbooks; do
@@ -139,4 +186,4 @@ for col in phones_json emails_json cities_json merchandise_categories_json; do
   fi
 done
 
-log "OK: warehouse_movements, supplier_payments_workbooks, volume_liters e suppliers multi-contact presenti."
+log "OK: schema Atlas aggiornato e ownership assegnata a $DB_USER."
