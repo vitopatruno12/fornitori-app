@@ -61,7 +61,7 @@ function mapCarrierForStatus(c) {
 
 const TRAFFIC = { green: '#16a34a', yellow: '#ca8a04', red: '#dc2626' }
 
-export default function TrasportatoriPage() {
+export default function TrasportatoriPage({ operatorMode = false }) {
   const [list, setList] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState(null)
@@ -325,8 +325,17 @@ export default function TrasportatoriPage() {
           <div className="delivery-hero-copy">
             <h1 className="page-header staff-page-title">Trasportatori</h1>
             <p className="staff-page-lead">
-              Anagrafica, disponibilità, furgone, manutenzione e spese. L&apos;attivo/non attivo qui regola{' '}
-              <Link to="/new-order">Nuovo ordine</Link> e <Link to="/new-delivery">Nuova consegna</Link>.
+              {operatorMode ? (
+                <>
+                  Anagrafica, disponibilità, furgone, manutenzione e spese. Lo stato «In servizio» vale per{' '}
+                  <strong>Nuovo ordine</strong> e consegne dalla stessa postazione operativa.
+                </>
+              ) : (
+                <>
+                  Anagrafica, disponibilità, furgone, manutenzione e spese. L&apos;attivo/non attivo qui regola{' '}
+                  <Link to="/new-order">Nuovo ordine</Link> e <Link to="/new-delivery">Nuova consegna</Link>.
+                </>
+              )}
             </p>
           </div>
           <button type="button" className="btn btn-secondary delivery-hero-action-btn" onClick={startCreate}>

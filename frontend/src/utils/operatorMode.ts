@@ -15,7 +15,7 @@ const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
 export type OperatorDeliveryView = 'new-delivery' | 'history' | 'magazzino'
-export type OperatorStationView = 'overview' | 'staff' | 'orders' | 'prima-nota'
+export type OperatorStationView = 'overview' | 'staff' | 'orders' | 'prima-nota' | 'trasportatori'
 
 import { ensureHttpsUrl } from './urlSecurity'
 
@@ -150,6 +150,7 @@ export function getOperatorStationView(): OperatorStationView {
   if (raw === 'personale' || raw === 'staff') return 'staff'
   if (raw === 'ordini' || raw === 'orders' || raw === 'ordine') return 'orders'
   if (raw === 'prima-nota' || raw === 'primanota' || raw === 'cassa') return 'prima-nota'
+  if (raw === 'trasportatori' || raw === 'trasportatore' || raw === 'corrieri') return 'trasportatori'
   if (raw === 'panoramica' || raw === 'overview' || raw === 'dashboard') return 'overview'
   return 'overview'
 }
@@ -188,7 +189,13 @@ export function getOperatorStationPublicUrl(view: OperatorStationView = 'overvie
   const base = buildPublicUrl(OPERATOR_STATION_PATH)
   if (view === 'overview') return base
   const section =
-    view === 'staff' ? 'personale' : view === 'orders' ? 'ordini' : 'prima-nota'
+    view === 'staff'
+      ? 'personale'
+      : view === 'orders'
+        ? 'ordini'
+        : view === 'trasportatori'
+          ? 'trasportatori'
+          : 'prima-nota'
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}sezione=${section}`
 }
