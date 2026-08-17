@@ -15,7 +15,17 @@ const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
 export type OperatorDeliveryView = 'new-delivery' | 'history' | 'magazzino'
-export type OperatorStationView = 'overview' | 'staff' | 'orders' | 'prima-nota' | 'trasportatori'
+export type OperatorStationView =
+  | 'overview'
+  | 'orders'
+  | 'delivery'
+  | 'delivery-history'
+  | 'magazzino'
+  | 'staff'
+  | 'staff-report'
+  | 'stipendi'
+  | 'prima-nota'
+  | 'trasportatori'
 
 import { ensureHttpsUrl } from './urlSecurity'
 
@@ -143,15 +153,50 @@ export function markOperatorStationEntryPoint(): void {
   }
 }
 
+const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview'>, string> = {
+  orders: 'ordini',
+  delivery: 'consegna',
+  'delivery-history': 'storico-consegne',
+  magazzino: 'magazzino',
+  staff: 'personale',
+  'staff-report': 'report-personale',
+  stipendi: 'stipendi',
+  'prima-nota': 'prima-nota',
+  trasportatori: 'trasportatori',
+}
+
+const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
+  personale: 'staff',
+  staff: 'staff',
+  ordini: 'orders',
+  orders: 'orders',
+  ordine: 'orders',
+  consegna: 'delivery',
+  'nuova-consegna': 'delivery',
+  delivery: 'delivery',
+  storico: 'delivery-history',
+  'storico-consegne': 'delivery-history',
+  history: 'delivery-history',
+  magazzino: 'magazzino',
+  'report-personale': 'staff-report',
+  report: 'staff-report',
+  stipendi: 'stipendi',
+  'prima-nota': 'prima-nota',
+  primanota: 'prima-nota',
+  cassa: 'prima-nota',
+  trasportatori: 'trasportatori',
+  trasportatore: 'trasportatori',
+  corrieri: 'trasportatori',
+  panoramica: 'overview',
+  overview: 'overview',
+  dashboard: 'overview',
+}
+
 export function getOperatorStationView(): OperatorStationView {
   if (typeof window === 'undefined') return 'orders'
   const q = new URLSearchParams(window.location.search)
   const raw = String(q.get('sezione') || '').trim().toLowerCase()
-  if (raw === 'personale' || raw === 'staff') return 'staff'
-  if (raw === 'ordini' || raw === 'orders' || raw === 'ordine') return 'orders'
-  if (raw === 'prima-nota' || raw === 'primanota' || raw === 'cassa') return 'prima-nota'
-  if (raw === 'trasportatori' || raw === 'trasportatore' || raw === 'corrieri') return 'trasportatori'
-  if (raw === 'panoramica' || raw === 'overview' || raw === 'dashboard') return 'overview'
+  if (raw && STATION_VIEW_ALIASES[raw]) return STATION_VIEW_ALIASES[raw]
   return 'overview'
 }
 
@@ -188,14 +233,7 @@ export function getOperatorPrimaNotaPublicUrl(): string {
 export function getOperatorStationPublicUrl(view: OperatorStationView = 'overview'): string {
   const base = buildPublicUrl(OPERATOR_STATION_PATH)
   if (view === 'overview') return base
-  const section =
-    view === 'staff'
-      ? 'personale'
-      : view === 'orders'
-        ? 'ordini'
-        : view === 'trasportatori'
-          ? 'trasportatori'
-          : 'prima-nota'
+  const section = STATION_SECTION_BY_VIEW[view]
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}sezione=${section}`
 }

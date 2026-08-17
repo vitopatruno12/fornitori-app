@@ -5,6 +5,11 @@ import StaffPage from './pages/StaffPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
+import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
+import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
+import MagazzinoPage from './pages/MagazzinoPage.jsx'
+import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
+import StipendiPage from './pages/StipendiPage.jsx'
 import {
   getOperatorStationView,
   markOperatorStationEntryPoint,
@@ -13,22 +18,38 @@ import {
   type OperatorStationView,
 } from './utils/operatorMode.ts'
 
-const TOP_SECTIONS: { id: OperatorStationView; label: string; title: string }[] = [
+type StationSection = { id: OperatorStationView; label: string; title: string }
+
+const TOP_SECTIONS: StationSection[] = [
   { id: 'overview', label: 'Panoramica', title: 'Panoramica' },
   { id: 'orders', label: 'Nuovo ordine', title: 'Nuovo ordine' },
 ]
 
-const PERSONALE_MENU: { id: OperatorStationView; label: string; title: string }[] = [
-  { id: 'staff', label: 'Dipendenti e turni', title: 'Personale' },
-  { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
+const DELIVERY_SUBMENU: StationSection[] = [
   { id: 'trasportatori', label: 'Trasportatori', title: 'Trasportatori' },
+  { id: 'magazzino', label: 'Magazzino', title: 'Magazzino' },
 ]
 
+const PERSONALE_MENU: StationSection[] = [
+  { id: 'staff', label: 'Dipendenti e turni', title: 'Personale' },
+  { id: 'staff-report', label: 'Report personale', title: 'Report personale' },
+  { id: 'stipendi', label: 'Stipendi', title: 'Stipendi' },
+  { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
+]
+
+const ALL_SECTIONS: StationSection[] = [
+  ...TOP_SECTIONS,
+  { id: 'delivery', label: 'Nuova consegna', title: 'Nuova consegna' },
+  { id: 'delivery-history', label: 'Storico consegne', title: 'Storico consegne' },
+  ...DELIVERY_SUBMENU,
+  ...PERSONALE_MENU,
+]
+
+const DELIVERY_VIEWS: OperatorStationView[] = ['delivery', 'magazzino', 'trasportatori']
+const PERSONALE_VIEWS: OperatorStationView[] = ['staff', 'staff-report', 'stipendi', 'prima-nota']
+
 function resolveStationTitle(view: OperatorStationView): string {
-  const hit =
-    TOP_SECTIONS.find((s) => s.id === view) ||
-    PERSONALE_MENU.find((s) => s.id === view)
-  return hit?.title || 'Postazione operativa'
+  return ALL_SECTIONS.find((s) => s.id === view)?.title || 'Postazione operativa'
 }
 
 export default function OperatorStationApp() {
@@ -55,8 +76,8 @@ export default function OperatorStationApp() {
   }, [])
 
   const activeTitle = resolveStationTitle(view)
-  const personaleViews: OperatorStationView[] = ['staff', 'prima-nota', 'trasportatori']
-  const personaleActive = personaleViews.includes(view)
+  const deliveryActive = DELIVERY_VIEWS.includes(view)
+  const personaleActive = PERSONALE_VIEWS.includes(view)
   const personaleMain = PERSONALE_MENU.find((s) => s.id === view) || PERSONALE_MENU[0]
 
   const nav = [
@@ -66,6 +87,24 @@ export default function OperatorStationApp() {
       active: view === section.id,
       onClick: () => setStationView(section.id),
     })),
+    {
+      id: 'delivery-menu',
+      label: 'Nuova consegna',
+      active: deliveryActive,
+      onClick: () => setStationView('delivery'),
+      items: DELIVERY_SUBMENU.map((item) => ({
+        id: item.id,
+        label: item.label,
+        active: view === item.id,
+        onClick: () => setStationView(item.id),
+      })),
+    },
+    {
+      id: 'delivery-history',
+      label: 'Storico consegne',
+      active: view === 'delivery-history',
+      onClick: () => setStationView('delivery-history'),
+    },
     {
       id: 'personale-menu',
       label: 'Personale',
@@ -80,26 +119,39 @@ export default function OperatorStationApp() {
     },
   ]
 
+  let content: React.ReactNode
+  if (view === 'overview') {
+    content = <HomePage operatorMode onOperatorNavigate={setStationView} />
+  } else if (view === 'staff') {
+    content = <StaffPage operatorMode />
+  } else if (view === 'prima-nota') {
+    content = <PrimaNotaPage operatorMode />
+  } else if (view === 'staff-report') {
+    content = <ReportPersonalePage />
+  } else if (view === 'stipendi') {
+    content = <StipendiPage />
+  } else if (view === 'delivery') {
+    content = <NewDeliveryPage operatorMode />
+  } else if (view === 'delivery-history') {
+    content = <DeliveriesHistoryPage operatorMode />
+  } else if (view === 'magazzino') {
+    content = <MagazzinoPage operatorMode onBackToDelivery={() => setStationView('delivery')} />
+  } else if (view === 'trasportatori') {
+    content = <TrasportatoriPage operatorMode />
+  } else {
+    content = <NewOrderPage operatorMode />
+  }
+
   return (
     <OperatorSatelliteShell
       documentTitle={`ATLAS — ${activeTitle} (postazione)`}
-      loginHint="Accesso postazione operativa — Panoramica, Nuovo ordine e menu Personale (turni, Prima Nota, Trasportatori)"
+      loginHint="Accesso postazione operativa — ordini, consegne, personale (turni, report, stipendi, Prima Nota)"
       headerTitle="Postazione operativa"
-      headerSubtitle={`${activeTitle} — menu Personale con dipendenti, Prima Nota e Trasportatori`}
+      headerSubtitle={`${activeTitle} — come il gestionale, senza link operatori/codici`}
       stationOnly
       nav={nav}
     >
-      {view === 'overview' ? (
-        <HomePage operatorMode onOperatorNavigate={setStationView} />
-      ) : view === 'staff' ? (
-        <StaffPage operatorMode />
-      ) : view === 'prima-nota' ? (
-        <PrimaNotaPage operatorMode />
-      ) : view === 'trasportatori' ? (
-        <TrasportatoriPage operatorMode />
-      ) : (
-        <NewOrderPage operatorMode />
-      )}
+      {content}
     </OperatorSatelliteShell>
   )
 }

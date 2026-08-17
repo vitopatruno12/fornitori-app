@@ -20,7 +20,7 @@ export function buildOperatorLinksCatalog() {
       section: 'Postazione operativa',
       label: 'Panoramica',
       description:
-        'Link unificato PWA: Panoramica, Nuovo ordine e menu Personale a tendina (dipendenti, Prima Nota, Trasportatori).',
+        'Link unificato PWA: Panoramica, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne e menu Personale (turni, report, stipendi, Prima Nota).',
       url: getOperatorStationPublicUrl('overview'),
     },
     {
@@ -40,6 +40,42 @@ export function buildOperatorLinksCatalog() {
       url: getOperatorStationPublicUrl('orders'),
     },
     {
+      id: 'station-delivery',
+      section: 'Postazione operativa',
+      label: 'Nuova consegna',
+      description:
+        'Apre la postazione operativa sulla registrazione DDT e merce in ingresso (menu Nuova consegna).',
+      url: getOperatorStationPublicUrl('delivery'),
+    },
+    {
+      id: 'station-delivery-history',
+      section: 'Postazione operativa',
+      label: 'Storico consegne',
+      description: 'Apre lo storico consegne nella postazione operativa unificata.',
+      url: getOperatorStationPublicUrl('delivery-history'),
+    },
+    {
+      id: 'station-magazzino',
+      section: 'Postazione operativa',
+      label: 'Consegne — Magazzino',
+      description: 'Apre il magazzino dalla postazione operativa (sotto menu Nuova consegna).',
+      url: getOperatorStationPublicUrl('magazzino'),
+    },
+    {
+      id: 'station-staff-report',
+      section: 'Postazione operativa',
+      label: 'Personale — Report',
+      description: 'Apre il report personale (menu Personale, come nel gestionale).',
+      url: getOperatorStationPublicUrl('staff-report'),
+    },
+    {
+      id: 'station-stipendi',
+      section: 'Postazione operativa',
+      label: 'Personale — Stipendi',
+      description: 'Apre gli stipendi (menu Personale, come nel gestionale).',
+      url: getOperatorStationPublicUrl('stipendi'),
+    },
+    {
       id: 'station-prima-nota',
       section: 'Postazione operativa',
       label: 'Personale — Prima Nota',
@@ -50,9 +86,9 @@ export function buildOperatorLinksCatalog() {
     {
       id: 'station-trasportatori',
       section: 'Postazione operativa',
-      label: 'Personale — Trasportatori',
+      label: 'Consegne — Trasportatori',
       description:
-        'Apre la postazione operativa su anagrafica trasportatori, semaforo in servizio, furgone e spese (menu Personale).',
+        'Apre anagrafica trasportatori dalla postazione operativa (sotto menu Nuova consegna).',
       url: getOperatorStationPublicUrl('trasportatori'),
     },
     {
