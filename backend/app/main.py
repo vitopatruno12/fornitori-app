@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices, pos_receipts
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices, pos_receipts, whatsapp
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -225,6 +225,7 @@ app.include_router(sdi.router)
 app.include_router(electronic_invoices.router)
 app.include_router(banca.router)
 app.include_router(pos_receipts.router)
+app.include_router(whatsapp.router)
 
 
 def _ensure_support_technicians_columns() -> None:

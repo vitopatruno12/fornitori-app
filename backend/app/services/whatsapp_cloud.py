@@ -123,3 +123,46 @@ def send_whatsapp_cloud(phone: str, message: str, otp: Optional[str] = None) -> 
     }
     _post_graph(url, token, payload)
     return "text"
+
+
+def send_whatsapp_text(phone: str, message: str) -> str:
+    """Invio testo libero (avviso ritiro trasportatore), senza template OTP."""
+    token = (os.getenv("WHATSAPP_CLOUD_TOKEN") or os.getenv("WHATSAPP_TOKEN") or "").strip()
+    phone_id = (os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "").strip()
+    if not token or not phone_id:
+        raise RuntimeError(
+            "WhatsApp automatico non configurato: imposta WHATSAPP_CLOUD_TOKEN e WHATSAPP_PHONE_NUMBER_ID"
+        )
+
+    to = normalize_wa_phone(phone)
+    if len(to) < 10:
+        raise RuntimeError("Numero WhatsApp trasportatore non valido")
+
+    body = str(message or "").strip()
+    if not body:
+        raise RuntimeError("Messaggio WhatsApp vuoto")
+    if len(body) > 4096:
+        body = body[:4090] + "…"
+
+    url = _graph_url(phone_id)
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to,
+        "type": "text",
+        "text": {"preview_url": False, "body": body},
+    }
+    _post_graph(url, token, payload)
+    return "text"
+
+
+def friendly_whatsapp_error(exc: Exception) -> str:
+    text = str(exc or "")
+    if "131047" in text:
+        return (
+            "WhatsApp ha rifiutato l'invio automatico: il trasportatore deve aver scritto "
+            "al numero aziendale almeno una volta, oppure serve un template Meta approvato."
+        )
+    if "131026" in text:
+        return "Numero WhatsApp del trasportatore non raggiungibile."
+    return text[:400] or "Invio WhatsApp automatico non riuscito"
