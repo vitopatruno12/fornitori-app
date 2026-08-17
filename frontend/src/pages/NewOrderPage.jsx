@@ -48,7 +48,6 @@ import {
 } from '../utils/orderCourierContact.js'
 import OrderCourierEditor from '../components/OrderCourierEditor.jsx'
 import { fetchCarriers, setCarrierInService } from '../services/carriersService'
-import { sendWhatsAppMany } from '../services/whatsappService.js'
 
 const emptyRow = () => ({ product_description: '', pieces: '', weight_kg: '', volume_liters: '', note: '' })
 const TEMPLATE_LS = 'fornitori_app_order_row_template_v1'
@@ -83,6 +82,31 @@ function openWhatsAppWithMessage(phone, message) {
   const url = buildWhatsAppUrl(phone, message)
   window.open(url, '_blank')
   return { url }
+}
+
+/** Apre più chat WhatsApp nello stesso click (fornitore + trasportatore). */
+function openWhatsAppUrlsNow(urls) {
+  const list = (Array.isArray(urls) ? urls : []).map((u) => String(u || '').trim()).filter(Boolean)
+  const stamp = Date.now()
+  return list.map((url, i) => {
+    const name = `atlas_wa_${stamp}_${i}`
+    let win = null
+    try {
+      win = window.open('about:blank', name)
+      if (win && !win.closed) {
+        win.location.href = url
+      } else {
+        win = window.open(url, name)
+      }
+    } catch {
+      try {
+        win = window.open(url, name)
+      } catch {
+        win = null
+      }
+    }
+    return Boolean(win && !win.closed)
+  })
 }
 
 function courierWhatsAppTargets({ couriers, phones }) {
@@ -245,7 +269,6 @@ export default function NewOrderPage({ operatorMode = false }) {
   const [sendCopyToCourier, setSendCopyToCourier] = useState(() => Boolean(initialCourier.sendCopyToCourier))
   const [couriers, setCouriers] = useState([])
   const [couriersLoading, setCouriersLoading] = useState(true)
-  const [courierWaSending, setCourierWaSending] = useState(false)
 
   const loadCouriersFromApi = useCallback(async () => {
     setCouriersLoading(true)
@@ -1068,61 +1091,51 @@ export default function NewOrderPage({ operatorMode = false }) {
     saveOrderCourierContact({ sendCopyToCourier, carriers: couriers })
   }
 
-  async function sendCourierWhatsAppAuto(courierMessage) {
-    const msg = String(courierMessage || '').trim()
-    const targets = courierWhatsAppTargets({
-      couriers: couriersForWhatsApp,
-      phones: courierPhonesForSend,
-    })
-    if (!msg || !targets.length) {
-      throw new Error('Manca cellulare o messaggio ritiro per il trasportatore.')
-    }
-    const res = await sendWhatsAppMany(
-      targets.map((item) => ({ phone: item.phone, message: msg, name: item.name })),
-    )
-    const sentNames = (res?.results || []).filter((r) => r.ok).map((r) => r.name || r.phone)
-    const fail = (res?.results || []).filter((r) => !r.ok)
-    return { sentNames, fail }
-  }
-
-  async function openSupplierAndNotifyCouriers({ supplierPhone, supplierMessage, courierMessage }) {
+  function openSupplierAndCouriersWhatsApp({ supplierPhone, supplierName, supplierMessage, courierMessage }) {
     persistTransporterContact()
-    if (!String(supplierMessage || '').trim()) {
+    const supplierMsg = String(supplierMessage || '').trim()
+    const courierMsg = String(courierMessage || '').trim()
+    if (!supplierMsg) {
       setError('Impossibile preparare WhatsApp per il fornitore: manca il testo ordine.')
       return false
     }
-    openWhatsAppWithMessage(supplierPhone, supplierMessage)
-    setCourierWaSending(true)
-    try {
-      const { sentNames, fail } = await sendCourierWhatsAppAuto(courierMessage)
-      const sentLabel = sentNames.join(', ') || 'trasportatore'
-      if (fail.length && !sentNames.length) {
-        setError(`WhatsApp fornitore aperto. Avviso trasportatore non inviato: ${fail[0].error || 'errore'}`)
-        return false
-      }
-      if (fail.length) {
-        setSuccess(`WhatsApp fornitore aperto. Inviato in automatico a ${sentLabel}. Non inviato: ${fail.map((f) => f.name || f.phone).join(', ')}.`)
-        return true
-      }
-      setSuccess(`WhatsApp fornitore aperto. Avviso ritiro inviato in automatico a ${sentLabel} (senza aprire il browser).`)
-      return true
-    } catch (err) {
-      setError(`WhatsApp fornitore aperto. Avviso trasportatore non inviato: ${err?.message || 'errore'}`)
+    if (!courierMsg) {
+      setError('Impossibile preparare WhatsApp per il trasportatore: manca il messaggio ritiro.')
       return false
-    } finally {
-      setCourierWaSending(false)
     }
+    const courierList = courierWhatsAppTargets({
+      couriers: couriersForWhatsApp,
+      phones: courierPhonesForSend,
+    })
+    if (!courierList.length) {
+      setError('Seleziona un trasportatore in servizio (o attivo) con cellulare valido')
+      return false
+    }
+    const supplierUrl = buildWhatsAppUrl(supplierPhone, supplierMsg)
+    const courierUrls = courierList.map((c) => buildWhatsAppUrl(c.phone, courierMsg))
+    const opened = openWhatsAppUrlsNow([supplierUrl, ...courierUrls])
+    const fornitore = supplierName || supplierLabel || 'fornitore'
+    const trasportatori = courierList.map((c) => c.name || c.phone).join(', ')
+    if (opened.length && opened.every(Boolean)) {
+      setSuccess(`Aperte ${opened.length} chat WhatsApp: ${fornitore} e ${trasportatori}.`)
+      return true
+    }
+    setSuccess(
+      `WhatsApp aperto (fornitore + trasportatore). Se manca una scheda, consenti i popup per questo sito nel browser.`,
+    )
+    return true
   }
 
-  async function handleWhatsApp() {
+  function handleWhatsApp() {
     setError('')
     setSuccess('')
     setSuccessDetail(null)
     if (!validateOrderDraftForSend()) return
     const supplierMessage = buildWhatsAppMessage()
     if (sendCopyToCourier && courierPhonesForSend.length) {
-      await openSupplierAndNotifyCouriers({
+      openSupplierAndCouriersWhatsApp({
         supplierPhone: selectedSupplier?.phone,
+        supplierName: selectedSupplier?.name || supplierLabel,
         supplierMessage,
         courierMessage: buildCourierMessageFromDraft(),
       })
@@ -1130,11 +1143,11 @@ export default function NewOrderPage({ operatorMode = false }) {
     }
     openWhatsAppWithMessage(selectedSupplier?.phone, supplierMessage)
     if (sendCopyToCourier && !courierPhonesForSend.length) {
-      setSuccess('WhatsApp aperto per il fornitore. Spunta WhatsApp e seleziona un trasportatore con cellulare.')
+      setSuccess('WhatsApp aperto per il fornitore. Seleziona un trasportatore in servizio con cellulare valido.')
     }
   }
 
-  async function handleWhatsAppWithCourier() {
+  function handleWhatsAppWithCourier() {
     setError('')
     setSuccess('')
     setSuccessDetail(null)
@@ -1143,8 +1156,9 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Seleziona un trasportatore in servizio (o attivo) con cellulare valido')
       return
     }
-    await openSupplierAndNotifyCouriers({
+    openSupplierAndCouriersWhatsApp({
       supplierPhone: selectedSupplier?.phone,
+      supplierName: selectedSupplier?.name || supplierLabel,
       supplierMessage: buildWhatsAppMessage(),
       courierMessage: buildCourierMessageFromDraft(),
     })
@@ -1211,8 +1225,9 @@ export default function NewOrderPage({ operatorMode = false }) {
     const sup = supplierById[full.supplier_id]
     const supplierMessage = buildWhatsAppTextFromOrder(full)
     if (sendCopyToCourier && courierPhonesForSend.length) {
-      await openSupplierAndNotifyCouriers({
+      openSupplierAndCouriersWhatsApp({
         supplierPhone: sup?.phone,
+        supplierName: full.supplier_name || sup?.name,
         supplierMessage,
         courierMessage: buildCourierMessageFromOrder(full, sup),
       })
@@ -1240,8 +1255,9 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    await openSupplierAndNotifyCouriers({
+    openSupplierAndCouriersWhatsApp({
       supplierPhone: sup?.phone,
+      supplierName: full.supplier_name || sup?.name,
       supplierMessage: buildWhatsAppTextFromOrder(full),
       courierMessage: buildCourierMessageFromOrder(full, sup),
     })
@@ -1596,9 +1612,9 @@ export default function NewOrderPage({ operatorMode = false }) {
                     type="button"
                     className="btn btn-whatsapp btn-sm"
                     style={{ marginLeft: '0.35rem' }}
-                    disabled={!canWhatsAppWithCourier || courierWaSending}
+                    disabled={!canWhatsAppWithCourier}
                     onClick={() => handleWhatsAppAfterSaveWithCourier(successDetail.id)}
-                    title={canWhatsAppWithCourier ? 'Apre WhatsApp fornitore e invia in automatico al trasportatore' : 'Imposta un trasportatore in servizio con cellulare valido'}
+                    title={canWhatsAppWithCourier ? 'Apre 2 chat WhatsApp: fornitore e trasportatore' : 'Imposta un trasportatore in servizio con cellulare valido'}
                   >
                     WhatsApp + trasportatore
                   </button>
@@ -2052,7 +2068,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                 onChange={(e) => setSendCopyToCourier(e.target.checked)}
               />
               <span style={{ fontSize: '0.9rem' }}>
-                WhatsApp al trasportatore: se ha il numero, l’avviso ritiro parte in automatico (senza aprire il browser). Vale anche come copia email.
+                Includi trasportatore su WhatsApp ed email: con la spunta attiva si aprono <strong>2 chat WhatsApp</strong> (fornitore + trasportatore «In servizio»).
               </span>
             </label>
           </div>
@@ -2178,14 +2194,14 @@ export default function NewOrderPage({ operatorMode = false }) {
               type="button"
               className="btn btn-whatsapp"
               onClick={handleWhatsAppWithCourier}
-              disabled={!supplierId || !canWhatsAppWithCourier || courierWaSending}
+              disabled={!supplierId || !canWhatsAppWithCourier}
               title={
                 canWhatsAppWithCourier
-                  ? 'Apre WhatsApp del fornitore e invia in automatico l’avviso al trasportatore'
+                  ? 'Apre 2 chat WhatsApp: fornitore e trasportatore'
                   : 'Imposta un trasportatore in servizio con cellulare valido'
               }
             >
-              {courierWaSending ? 'Invio al trasportatore…' : 'WhatsApp fornitore + trasportatore'}
+              WhatsApp fornitore + trasportatore
             </button>
             <button type="button" className="btn btn-secondary" onClick={handleEmail} disabled={!supplierId}>
               Invia ordine via email
@@ -2218,7 +2234,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           )}
           {canWhatsAppWithCourier && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
-              Con <strong>WhatsApp fornitore + trasportatore</strong> si apre solo la chat del fornitore; l’avviso ritiro al trasportatore «In servizio» parte in automatico se ha il numero.
+              <strong>WhatsApp fornitore + trasportatore</strong> apre due schede insieme. Se il browser ne blocca una, consenti i popup per questo sito.
             </p>
           )}
         </form>
@@ -2321,10 +2337,10 @@ export default function NewOrderPage({ operatorMode = false }) {
                     type="button"
                     className="btn btn-whatsapp btn-sm"
                     onClick={() => handleWhatsAppSavedOrderWithCourier(order)}
-                    disabled={!canWhatsAppWithCourier || courierWaSending}
+                    disabled={!canWhatsAppWithCourier}
                     title={
                       canWhatsAppWithCourier
-                        ? 'Apre WhatsApp fornitore e invia in automatico al trasportatore'
+                        ? 'Apre 2 chat WhatsApp: fornitore e trasportatore'
                         : 'Imposta un trasportatore in servizio con cellulare valido'
                     }
                   >
