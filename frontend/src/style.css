@@ -2748,10 +2748,17 @@ select.form-control {
   flex-shrink: 0;
 }
 
-.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main,
-.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret {
+.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main:not(.is-active),
+.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret:not(.is-active) {
   border-color: var(--accent, #2563eb);
   color: var(--accent, #2563eb);
+}
+
+.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main.is-active,
+.operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
 }
 
 .operator-satellite-nav-btn-main {
