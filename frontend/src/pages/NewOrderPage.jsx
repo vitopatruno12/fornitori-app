@@ -1066,6 +1066,10 @@ export default function NewOrderPage({ operatorMode = false }) {
     }
   }
 
+  function persistTransporterContact() {
+    saveOrderCourierContact({ sendCopyToCourier, carriers: couriers })
+  }
+
   function applyCourierWhatsAppResult(pendingCourierUrls) {
     setPendingCourierWhatsAppUrls(pendingCourierUrls || [])
     const pending = (pendingCourierUrls || []).length
