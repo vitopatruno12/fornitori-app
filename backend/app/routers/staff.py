@@ -262,10 +262,15 @@ def request_access_code_otp(payload: staff_schema.AccessCodeOtpRequestIn, db: Se
 @router.post("/access-codes/lookup", response_model=staff_schema.AccessCodeLookupOut)
 def lookup_access_codes(payload: staff_schema.AccessCodeLookupIn, db: Session = Depends(get_db)):
     try:
-        return staff_service.lookup_access_codes(db, payload.query, otp=payload.otp)
+        return staff_service.lookup_access_codes(
+            db,
+            payload.query,
+            otp=payload.otp,
+            unlock_password=payload.unlock_password,
+        )
     except ValueError as e:
         msg = str(e)
-        if "OTP" in msg or "otp" in msg:
+        if "OTP" in msg or "otp" in msg or "Password" in msg or "password" in msg:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
         if "non trovato" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)

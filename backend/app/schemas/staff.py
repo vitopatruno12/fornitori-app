@@ -316,7 +316,8 @@ class StaffBackupUpsert(BaseModel):
 
 class AccessCodeLookupIn(BaseModel):
     query: str = Field(..., min_length=2, max_length=255)
-    otp: str = Field(..., min_length=6, max_length=6)
+    otp: Optional[str] = Field(default=None, min_length=6, max_length=6)
+    unlock_password: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class AccessCodeOtpRequestIn(BaseModel):

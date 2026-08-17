@@ -20,7 +20,7 @@ export function buildOperatorLinksCatalog() {
       section: 'Postazione operativa',
       label: 'Panoramica',
       description:
-        'Link unificato PWA: Panoramica, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne e menu Personale (turni, report, stipendi, Prima Nota).',
+        'Link unificato PWA: Panoramica, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne e menu Personale (turni, report, stipendi, Prima Nota).',
       url: getOperatorStationPublicUrl('overview'),
     },
     {
@@ -30,6 +30,14 @@ export function buildOperatorLinksCatalog() {
       description:
         'Apre la postazione operativa su dipendenti, turni e pianificazione (voce del menu Personale).',
       url: getOperatorStationPublicUrl('staff'),
+    },
+    {
+      id: 'station-suppliers',
+      section: 'Postazione operativa',
+      label: 'Fornitori',
+      description:
+        'Apre l’anagrafica fornitori dalla postazione operativa (come nel gestionale).',
+      url: getOperatorStationPublicUrl('suppliers'),
     },
     {
       id: 'station-orders',

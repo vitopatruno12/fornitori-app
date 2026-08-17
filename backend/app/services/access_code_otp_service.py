@@ -252,6 +252,21 @@ def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
     return out
 
 
+def verify_unlock_password(password: Optional[str]) -> None:
+    """Verifica password di sblocco Link codici (sostituto temporaneo dell'OTP WhatsApp)."""
+    _reload_otp_env()
+    expected = (os.getenv("ACCESS_CODES_UNLOCK_PASSWORD") or "").strip()
+    if not expected:
+        raise ValueError(
+            "Password Link codici non configurata sul server (ACCESS_CODES_UNLOCK_PASSWORD)."
+        )
+    provided = str(password or "").strip()
+    if not provided:
+        raise ValueError("Inserisci la password di sblocco.")
+    if not hmac.compare_digest(provided, expected):
+        raise ValueError("Password non valida.")
+
+
 def verify_and_consume_otp(query_key: str, otp_code: Optional[str]) -> None:
     """Verifica OTP monouso. In caso di successo lo consuma (non riutilizzabile)."""
     key = str(query_key or "").strip().lower()

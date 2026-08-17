@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { lookupLocaleAccessCodes, requestLocaleAccessCodesOtp } from '../services/staffService'
+import { lookupLocaleAccessCodes } from '../services/staffService'
 
 async function copyText(value) {
   try {
@@ -26,84 +26,28 @@ function sourceLabel(source) {
   return source || '—'
 }
 
-const PHONE_STORAGE_KEY = 'atlas-link-codici-phone'
-
 export default function LocaleCodesPage() {
   const [query, setQuery] = useState('')
-  const [phone, setPhone] = useState(() => {
-    try {
-      return localStorage.getItem(PHONE_STORAGE_KEY) || ''
-    } catch {
-      return ''
-    }
-  })
-  const [otp, setOtp] = useState('')
+  const [unlockPassword, setUnlockPassword] = useState('')
   const [hits, setHits] = useState([])
   const [loading, setLoading] = useState(false)
-  const [otpBusy, setOtpBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [unlocked, setUnlocked] = useState(false)
   const [copiedCode, setCopiedCode] = useState('')
-  const [otpSentHint, setOtpSentHint] = useState('')
-  const [debugOtp, setDebugOtp] = useState('')
-
-  async function handleRequestOtp(e) {
-    e?.preventDefault?.()
-    const q = String(query || '').trim()
-    const tel = String(phone || '').replace(/\D/g, '')
-    if (q.length < 2) {
-      setError('Inserisci almeno 2 caratteri (nome locale Personale o registro Prima Nota).')
-      return
-    }
-    if (tel.length < 10) {
-      setError('Inserisci il cellulare (es. 3331234567) per ricevere l’OTP su WhatsApp.')
-      return
-    }
-    setOtpBusy(true)
-    setError('')
-    setSuccess('')
-    setHits([])
-    setUnlocked(false)
-    setDebugOtp('')
-    try {
-      try {
-        localStorage.setItem(PHONE_STORAGE_KEY, tel)
-      } catch {
-        /* ignore */
-      }
-      const data = await requestLocaleAccessCodesOtp(q, tel)
-      const hint = data?.phone_hint || 'il telefono configurato'
-      setOtpSentHint(hint)
-      setOtp('')
-      if (data?.debug_otp) {
-        setDebugOtp(String(data.debug_otp))
-        setSuccess(
-          `OTP inviato (modalità debug). Codice: ${data.debug_otp}. Inseriscilo sotto e apri i codici locale.`,
-        )
-      } else {
-        setSuccess(`OTP monouso inviato a ${hint}. Inseriscilo per visualizzare i codici.`)
-      }
-    } catch (err) {
-      setOtpSentHint('')
-      setError(err?.message || 'Impossibile inviare l’OTP.')
-    } finally {
-      setOtpBusy(false)
-    }
-  }
 
   async function handleLookup(e) {
     e?.preventDefault?.()
     const q = String(query || '').trim()
-    const code = String(otp || '').replace(/\D/g, '').slice(0, 6)
+    const password = String(unlockPassword || '').trim()
     if (q.length < 2) {
       setError('Inserisci almeno 2 caratteri (nome locale Personale o registro Prima Nota).')
       setHits([])
       setUnlocked(false)
       return
     }
-    if (code.length !== 6) {
-      setError('Inserisci il codice OTP a 6 cifre ricevuto sul telefono.')
+    if (!password) {
+      setError('Inserisci la password di sblocco.')
       setHits([])
       setUnlocked(false)
       return
@@ -112,20 +56,20 @@ export default function LocaleCodesPage() {
     setError('')
     setSuccess('')
     try {
-      const data = await lookupLocaleAccessCodes(q, code)
+      const data = await lookupLocaleAccessCodes(q, password)
       const rows = Array.isArray(data?.hits) ? data.hits : []
       setHits(rows)
       setUnlocked(rows.length > 0)
-      setOtp('')
-      setDebugOtp('')
+      setUnlockPassword('')
       if (!rows.length) {
         setError('Nessuna credenziale trovata per questo nome.')
       } else {
-        setSuccess(`Trovate ${rows.length} credenziali per «${q}». L’OTP è stato consumato.`)
+        setSuccess(`Codice locale per «${q}». La password è stata azzerata.`)
       }
     } catch (err) {
       setHits([])
       setUnlocked(false)
+      setUnlockPassword('')
       setError(err?.message || 'Impossibile recuperare i codici.')
     } finally {
       setLoading(false)
@@ -145,9 +89,7 @@ export default function LocaleCodesPage() {
     setError('')
     setSuccess('')
     setQuery('')
-    setOtp('')
-    setOtpSentHint('')
-    setDebugOtp('')
+    setUnlockPassword('')
   }
 
   return (
@@ -155,8 +97,9 @@ export default function LocaleCodesPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link codici</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Inserisci il <strong>nome locale</strong> o <strong>registro</strong> e il <strong>cellulare</strong>,
-          poi <strong>Invia WhatsApp</strong>. Ricevi l’OTP a 6 cifre, inseriscilo e premi <strong>Mostra codice</strong>.
+          Scegli il <strong>nome locale</strong> o <strong>registro</strong>, inserisci la{' '}
+          <strong>password di sblocco</strong> e premi <strong>Mostra</strong>. La password viene azzerata dopo
+          l&apos;uso. OTP WhatsApp temporaneamente disattivato.
         </p>
       </section>
 
@@ -165,7 +108,7 @@ export default function LocaleCodesPage() {
 
       <section className="card" style={{ padding: '1rem 1.15rem', marginBottom: '1rem' }}>
         <form onSubmit={handleLookup} className="form-row" style={{ alignItems: 'end', gap: '0.75rem' }}>
-          <div className="form-group" style={{ flex: '1 1 240px', marginBottom: 0 }}>
+          <div className="form-group" style={{ flex: '1 1 260px', marginBottom: 0 }}>
             <label htmlFor="locale-code-query">Nome locale o registro</label>
             <input
               id="locale-code-query"
@@ -175,88 +118,58 @@ export default function LocaleCodesPage() {
                 setQuery(e.target.value)
                 setUnlocked(false)
                 setHits([])
+                setUnlockPassword('')
               }}
               placeholder="Es. Bar-momento oppure Risacca"
               autoComplete="off"
-              disabled={loading || otpBusy}
+              disabled={loading}
             />
           </div>
-          <div className="form-group" style={{ flex: '0 1 170px', marginBottom: 0 }}>
-            <label htmlFor="locale-code-phone">Cellulare</label>
+          <div className="form-group" style={{ flex: '0 1 220px', marginBottom: 0 }}>
+            <label htmlFor="locale-code-password">Password di sblocco</label>
             <input
-              id="locale-code-phone"
+              id="locale-code-password"
+              type="password"
               className="form-control"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value.replace(/[^\d+\s]/g, '').slice(0, 16))}
-              placeholder="3331234567"
-              inputMode="tel"
-              autoComplete="tel"
-              disabled={loading || otpBusy}
+              value={unlockPassword}
+              onChange={(e) => setUnlockPassword(e.target.value)}
+              placeholder="Password"
+              autoComplete="current-password"
+              disabled={loading}
             />
-          </div>
-          <div className="form-group" style={{ flex: '0 1 140px', marginBottom: 0 }}>
-            <label htmlFor="locale-code-otp">OTP (6 cifre)</label>
-            <input
-              id="locale-code-otp"
-              className="form-control"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="123456"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              disabled={loading || otpBusy}
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <button
-              type="button"
-              className="btn btn-whatsapp"
-              disabled={loading || otpBusy || String(query || '').trim().length < 2}
-              onClick={() => void handleRequestOtp()}
-            >
-              {otpBusy ? 'Invio WhatsApp…' : 'Invia WhatsApp'}
-            </button>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={loading || otpBusy || String(otp || '').replace(/\D/g, '').length !== 6}
+              disabled={
+                loading ||
+                String(query || '').trim().length < 2 ||
+                !String(unlockPassword || '').trim()
+              }
             >
-              {loading ? 'Verifica…' : 'Mostra codice'}
+              {loading ? 'Verifica…' : 'Mostra'}
             </button>
           </div>
           {unlocked ? (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <button type="button" className="btn btn-secondary" onClick={handleReset} disabled={loading || otpBusy}>
+              <button type="button" className="btn btn-secondary" onClick={handleReset} disabled={loading}>
                 Chiudi
               </button>
             </div>
           ) : null}
         </form>
-        {otpSentHint ? (
-          <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-            OTP inviato a <strong>{otpSentHint}</strong>
-            {debugOtp ? (
-              <>
-                {' '}
-                · debug: <code>{debugOtp}</code>
-              </>
-            ) : null}
-            . Il codice è monouso e scade in pochi minuti.
-          </p>
-        ) : (
-          <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-            Prima inserisci il cellulare e clicca <strong>Invia WhatsApp</strong>, poi metti l’OTP e premi{' '}
-            <strong>Mostra codice</strong>.
-          </p>
-        )}
+        <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+          Dopo <strong>Mostra</strong> vedi il codice a 6 cifre del locale scelto. Per un altro locale cambia
+          nome e reinserisci la password.
+        </p>
       </section>
 
       {unlocked ? (
         <section className="card" style={{ padding: '1rem 1.15rem' }}>
-          <h2 className="page-subheader" style={{ marginTop: 0 }}>Credenziali trovate</h2>
+          <h2 className="page-subheader" style={{ marginTop: 0 }}>
+            Credenziali trovate
+          </h2>
           <div style={{ display: 'grid', gap: '0.75rem' }}>
             {hits.map((hit) => (
               <div

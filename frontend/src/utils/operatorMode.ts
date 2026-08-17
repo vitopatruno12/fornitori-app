@@ -17,6 +17,7 @@ const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 export type OperatorDeliveryView = 'new-delivery' | 'history' | 'magazzino'
 export type OperatorStationView =
   | 'overview'
+  | 'suppliers'
   | 'orders'
   | 'delivery'
   | 'delivery-history'
@@ -154,6 +155,7 @@ export function markOperatorStationEntryPoint(): void {
 }
 
 const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview'>, string> = {
+  suppliers: 'fornitori',
   orders: 'ordini',
   delivery: 'consegna',
   'delivery-history': 'storico-consegne',
@@ -168,6 +170,9 @@ const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview'>, 
 const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
   personale: 'staff',
   staff: 'staff',
+  fornitori: 'suppliers',
+  suppliers: 'suppliers',
+  fornitore: 'suppliers',
   ordini: 'orders',
   orders: 'orders',
   ordine: 'orders',

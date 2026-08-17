@@ -10,6 +10,7 @@ import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
 import StipendiPage from './pages/StipendiPage.jsx'
+import SuppliersPage from './pages/SuppliersPage.jsx'
 import {
   getOperatorStationView,
   markOperatorStationEntryPoint,
@@ -22,6 +23,7 @@ type StationSection = { id: OperatorStationView; label: string; title: string }
 
 const TOP_SECTIONS: StationSection[] = [
   { id: 'overview', label: 'Panoramica', title: 'Panoramica' },
+  { id: 'suppliers', label: 'Fornitori', title: 'Fornitori' },
   { id: 'orders', label: 'Nuovo ordine', title: 'Nuovo ordine' },
 ]
 
@@ -130,6 +132,8 @@ export default function OperatorStationApp() {
     content = <ReportPersonalePage />
   } else if (view === 'stipendi') {
     content = <StipendiPage />
+  } else if (view === 'suppliers') {
+    content = <SuppliersPage />
   } else if (view === 'delivery') {
     content = <NewDeliveryPage operatorMode />
   } else if (view === 'delivery-history') {
@@ -145,7 +149,7 @@ export default function OperatorStationApp() {
   return (
     <OperatorSatelliteShell
       documentTitle={`ATLAS — ${activeTitle} (postazione)`}
-      loginHint="Accesso postazione operativa — ordini, consegne, personale (turni, report, stipendi, Prima Nota)"
+      loginHint="Accesso postazione operativa — fornitori, ordini, consegne, personale (turni, report, stipendi, Prima Nota)"
       headerTitle="Postazione operativa"
       headerSubtitle={`${activeTitle} — come il gestionale, senza link operatori/codici`}
       stationOnly

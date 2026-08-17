@@ -673,9 +673,12 @@ def list_locale_packs(db: Session) -> List[staff_schema.StaffLocalePackSummary]:
 
 
 def lookup_access_codes(
-    db: Session, query: str, otp: Optional[str] = None
+    db: Session,
+    query: str,
+    otp: Optional[str] = None,
+    unlock_password: Optional[str] = None,
 ) -> staff_schema.AccessCodeLookupOut:
-    """Recupera i codici a 6 cifre da nome locale/registro solo dopo OTP monouso."""
+    """Recupera i codici a 6 cifre da nome locale/registro dopo password o OTP."""
     from ..constants.prima_nota_staff_locale import (
         DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS,
         _locale_name_key,
@@ -687,7 +690,10 @@ def lookup_access_codes(
     if len(qkey) < 2:
         raise ValueError("Inserisci almeno 2 caratteri del nome locale o registro.")
 
-    access_code_otp_service.verify_and_consume_otp(qkey, otp)
+    if str(unlock_password or "").strip():
+        access_code_otp_service.verify_unlock_password(unlock_password)
+    else:
+        access_code_otp_service.verify_and_consume_otp(qkey, otp)
 
     hits: List[staff_schema.AccessCodeLookupHit] = []
     seen: set[tuple[str, str]] = set()

@@ -182,13 +182,13 @@ export async function requestLocaleAccessCodesOtp(query, phone) {
   })
 }
 
-export async function lookupLocaleAccessCodes(query, otp) {
+export async function lookupLocaleAccessCodes(query, unlockPassword) {
   return apiFetch('/staff/access-codes/lookup', {
     ...SYNC_FETCH,
     method: 'POST',
     body: JSON.stringify({
       query: String(query || '').trim(),
-      otp: String(otp || '').replace(/\D/g, '').slice(0, 6),
+      unlock_password: String(unlockPassword || '').trim(),
     }),
   })
 }
