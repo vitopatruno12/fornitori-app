@@ -4,7 +4,6 @@ import HomePage from './pages/HomePage.jsx'
 import StaffPage from './pages/StaffPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
-import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
 import {
   getOperatorStationView,
   markOperatorStationEntryPoint,
@@ -13,25 +12,12 @@ import {
   type OperatorStationView,
 } from './utils/operatorMode.ts'
 
-const PERSONALE_VIEWS: OperatorStationView[] = ['staff', 'prima-nota', 'trasportatori']
-
-const PERSONALE_MENU: { id: OperatorStationView; label: string; title: string }[] = [
-  { id: 'staff', label: 'Dipendenti e turni', title: 'Personale' },
-  { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
-  { id: 'trasportatori', label: 'Trasportatori', title: 'Trasportatori' },
-]
-
-const TOP_SECTIONS: { id: OperatorStationView; label: string; title: string }[] = [
+const STATION_SECTIONS: { id: OperatorStationView; label: string; title: string }[] = [
   { id: 'overview', label: 'Panoramica', title: 'Panoramica' },
+  { id: 'staff', label: 'Personale', title: 'Personale' },
   { id: 'orders', label: 'Nuovo ordine', title: 'Nuovo ordine' },
+  { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
 ]
-
-function resolveStationTitle(view: OperatorStationView): string {
-  const hit =
-    TOP_SECTIONS.find((s) => s.id === view) ||
-    PERSONALE_MENU.find((s) => s.id === view)
-  return hit?.title || 'Postazione operativa'
-}
 
 export default function OperatorStationApp() {
   const [view, setView] = React.useState<OperatorStationView>(() => getOperatorStationView())
@@ -56,39 +42,21 @@ export default function OperatorStationApp() {
     syncOperatorStationViewInUrl(next)
   }, [])
 
-  const activeTitle = resolveStationTitle(view)
-  const personaleActive = PERSONALE_VIEWS.includes(view)
-  const personaleMain = PERSONALE_MENU.find((s) => s.id === view) || PERSONALE_MENU[0]
-
-  const nav = [
-    ...TOP_SECTIONS.map((section) => ({
-      id: section.id,
-      label: section.label,
-      active: view === section.id,
-      onClick: () => setStationView(section.id),
-    })),
-    {
-      id: 'personale-admin',
-      label: 'Personale amministrazione',
-      active: personaleActive,
-      onClick: () => setStationView(personaleMain.id),
-      items: PERSONALE_MENU.map((item) => ({
-        id: item.id,
-        label: item.label,
-        active: view === item.id,
-        onClick: () => setStationView(item.id),
-      })),
-    },
-  ]
+  const active = STATION_SECTIONS.find((s) => s.id === view) || STATION_SECTIONS[0]
 
   return (
     <OperatorSatelliteShell
-      documentTitle={`ATLAS — ${activeTitle} (postazione)`}
-      loginHint="Accesso postazione operativa — Panoramica, ordini, personale, Prima Nota e trasportatori"
+      documentTitle={`ATLAS — ${active.title} (postazione)`}
+      loginHint="Accesso postazione operativa — Panoramica, Personale, Nuovo ordine e Prima Nota"
       headerTitle="Postazione operativa"
-      headerSubtitle={`${activeTitle} — menu Personale amministrazione con Prima Nota e Trasportatori`}
+      headerSubtitle={`${active.title} — accesso limitato alle quattro sezioni operative`}
       stationOnly
-      nav={nav}
+      nav={STATION_SECTIONS.map((section) => ({
+        id: section.id,
+        label: section.label,
+        active: view === section.id,
+        onClick: () => setStationView(section.id),
+      }))}
     >
       {view === 'overview' ? (
         <HomePage operatorMode onOperatorNavigate={setStationView} />
@@ -96,8 +64,6 @@ export default function OperatorStationApp() {
         <StaffPage operatorMode />
       ) : view === 'prima-nota' ? (
         <PrimaNotaPage operatorMode />
-      ) : view === 'trasportatori' ? (
-        <TrasportatoriPage operatorMode />
       ) : (
         <NewOrderPage operatorMode />
       )}

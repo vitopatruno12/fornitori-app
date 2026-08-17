@@ -807,17 +807,15 @@ function App() {
                 { to: '/amministrazione/mastrini', label: 'Mastrini contabili' },
                 { to: '/banca', label: 'Banca' },
                 { to: '/fatture', label: 'Fatture Fornitori' },
+                { to: '/prima-nota', label: 'Prima Nota' },
                 { to: '/amministrazione/impostazioni', label: 'Impostazioni' },
               ]}
               onNavigate={() => setNavOpen(false)}
             />
             <AppNavDropdown
-              label="Personale amministrazione"
+              label="Personale"
               to="/staff"
               items={[
-                { to: '/staff', label: 'Dipendenti e turni' },
-                { to: '/prima-nota', label: 'Prima Nota' },
-                { to: '/trasportatori', label: 'Trasportatori' },
                 { to: '/staff/report', label: 'Report personale' },
                 { to: '/staff/stipendi', label: 'Stipendi' },
                 { to: '/staff/link-operatori', label: 'Link operatori' },

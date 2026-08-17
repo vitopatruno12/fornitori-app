@@ -20,15 +20,15 @@ export function buildOperatorLinksCatalog() {
       section: 'Postazione operativa',
       label: 'Panoramica',
       description:
-        'Link unificato PWA: dashboard semplificata con Panoramica, Nuovo ordine e menu Personale amministrazione (dipendenti, Prima Nota, Trasportatori).',
+        'Link unificato PWA: dashboard semplificata con accesso a Personale, Nuovo ordine e Prima Nota. Senza menu fornitori, fatture, consegne complete.',
       url: getOperatorStationPublicUrl('overview'),
     },
     {
       id: 'station-staff',
       section: 'Postazione operativa',
-      label: 'Personale — dipendenti',
+      label: 'Personale',
       description:
-        'Apre la postazione operativa su dipendenti, turni e pianificazione (sotto menu Personale amministrazione).',
+        'Apre la postazione operativa direttamente sulla sezione dipendenti, turni e pianificazione.',
       url: getOperatorStationPublicUrl('staff'),
     },
     {
@@ -42,18 +42,10 @@ export function buildOperatorLinksCatalog() {
     {
       id: 'station-prima-nota',
       section: 'Postazione operativa',
-      label: 'Personale — Prima Nota',
+      label: 'Prima Nota',
       description:
-        'Apre la postazione operativa sulla cassa: movimenti, riepilogo e report del locale attivo (Personale amministrazione).',
+        'Apre la postazione operativa sulla cassa: movimenti, riepilogo e report del locale attivo.',
       url: getOperatorStationPublicUrl('prima-nota'),
-    },
-    {
-      id: 'station-trasportatori',
-      section: 'Postazione operativa',
-      label: 'Personale — Trasportatori',
-      description:
-        'Apre la postazione operativa su anagrafica trasportatori, semaforo in servizio, furgone e spese (Personale amministrazione).',
-      url: getOperatorStationPublicUrl('trasportatori'),
     },
     {
       id: 'order-only',
