@@ -204,38 +204,42 @@ export default function OperatorSatelliteShell({
     <div className="app-wrap operator-order-wrap">
       <OfflineBanner />
       <PwaInstallPrompt />
-      <header className="operator-order-header" aria-label="Intestazione operatore">
-        <img src="/atlas-logo.svg" alt="ATLAS" className="operator-order-logo" />
-        <div className="operator-order-header-text">
-          <strong>{headerTitle}</strong>
-          <span>{headerSubtitle}</span>
-        </div>
-        <div className="operator-order-header-actions">
-          <AtlasUpdateButton />
-          <button type="button" className="btn btn-secondary btn-sm operator-order-logout" onClick={handleLogout}>
-            Esci
-          </button>
-        </div>
-      </header>
-      {nav && nav.length > 0 ? (
-        <nav className="operator-satellite-nav" aria-label="Sezioni operatore">
-          {nav.map((item) =>
-            item.items && item.items.length > 0 ? (
-              <OperatorSatelliteNavDropdown key={item.id} item={{ ...item, items: item.items }} />
-            ) : (
-              <button
-                key={item.id}
-                type="button"
-                className={`operator-satellite-nav-btn${item.active ? ' is-active' : ''}`}
-                onClick={item.onClick}
-                aria-current={item.active ? 'page' : undefined}
-              >
-                {item.label}
+      <div className="operator-station-band">
+        <div className="operator-station-band-inner">
+          <header className="operator-order-header" aria-label="Intestazione operatore">
+            <img src="/atlas-logo.svg" alt="ATLAS" className="operator-order-logo" />
+            <div className="operator-order-header-text">
+              <strong>{headerTitle}</strong>
+              <span>{headerSubtitle}</span>
+            </div>
+            <div className="operator-order-header-actions">
+              <AtlasUpdateButton />
+              <button type="button" className="btn btn-secondary btn-sm operator-order-logout" onClick={handleLogout}>
+                Esci
               </button>
-            ),
-          )}
-        </nav>
-      ) : null}
+            </div>
+          </header>
+          {nav && nav.length > 0 ? (
+            <nav className="operator-satellite-nav" aria-label="Sezioni operatore">
+              {nav.map((item) =>
+                item.items && item.items.length > 0 ? (
+                  <OperatorSatelliteNavDropdown key={item.id} item={{ ...item, items: item.items }} />
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`operator-satellite-nav-btn${item.active ? ' is-active' : ''}`}
+                    onClick={item.onClick}
+                    aria-current={item.active ? 'page' : undefined}
+                  >
+                    {item.label}
+                  </button>
+                ),
+              )}
+            </nav>
+          ) : null}
+        </div>
+      </div>
       <main className="app-main operator-order-main">{children}</main>
     </div>
   )

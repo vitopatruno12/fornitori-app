@@ -5585,21 +5585,39 @@ select.form-control {
   flex-direction: column;
 }
 
+.operator-station-band {
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 42%, #0d9488 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 90;
+}
+
+.operator-station-band-inner {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0.85rem 1.5rem 1.1rem;
+  box-sizing: border-box;
+}
+
 .operator-order-header {
   display: flex;
   align-items: center;
   gap: 0.75rem 1rem;
   flex-wrap: wrap;
-  padding: 0.65rem 1rem;
-  background: var(--surface-card, #fff);
-  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
 }
 
 .operator-order-logo {
   height: 36px;
   width: auto;
   flex-shrink: 0;
+  filter: brightness(0) invert(1);
 }
 
 .operator-order-header-text {
@@ -5609,12 +5627,13 @@ select.form-control {
   flex: 1 1 200px;
   min-width: 0;
   font-size: 0.88rem;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .operator-order-header-text strong {
-  font-size: 1rem;
-  color: var(--text-heading);
+  font-size: 1.05rem;
+  color: #fff;
+  font-weight: 700;
 }
 
 .operator-order-header-actions {
@@ -5625,13 +5644,97 @@ select.form-control {
   margin-left: auto;
 }
 
+.operator-order-header-actions .btn-secondary {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.operator-order-header-actions .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+
 .operator-order-logout {
   flex-shrink: 0;
 }
 
 .operator-order-main {
   flex: 1;
-  padding-top: 0.75rem;
+  padding-top: 1rem;
+}
+
+.operator-station-band .operator-satellite-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 0 0;
+  background: transparent;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom: none;
+}
+
+.operator-station-band .operator-satellite-nav-btn {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  backdrop-filter: blur(4px);
+}
+
+.operator-station-band .operator-satellite-nav-btn.is-active {
+  background: #fff;
+  border-color: #fff;
+  color: #0f766e;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2);
+}
+
+.operator-station-band .operator-satellite-nav-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.operator-station-band .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main:not(.is-active),
+.operator-station-band .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret:not(.is-active) {
+  border-color: rgba(255, 255, 255, 0.55);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.operator-station-band .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main.is-active,
+.operator-station-band .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret {
+  background: #fff;
+  border-color: #fff;
+  color: #0f766e;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2);
+}
+
+.operator-station-band .operator-satellite-nav-btn-main,
+.operator-station-band .operator-satellite-nav-btn-caret {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.operator-station-band .operator-satellite-nav-btn-main:hover,
+.operator-station-band .operator-satellite-nav-btn-caret:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.operator-station-band .operator-satellite-nav-btn-main {
+  border-radius: 999px 0 0 999px;
+  border-right: none;
+}
+
+.operator-station-band .operator-satellite-nav-btn-caret {
+  border-radius: 0 999px 999px 0;
 }
 
 .operator-order-login-hint {
@@ -5800,7 +5903,11 @@ select.form-control {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding: 0.5rem 0.85rem;
+    padding: 0.85rem 0 0;
+  }
+
+  .operator-station-band-inner {
+    padding: 0.65rem 1.25rem 0.95rem;
   }
 
   .operator-satellite-nav::-webkit-scrollbar {
@@ -5812,7 +5919,7 @@ select.form-control {
   }
 
   .operator-order-header {
-    padding: 0.55rem 0.85rem;
+    padding: 0;
   }
 
   .operator-order-header-text span {
