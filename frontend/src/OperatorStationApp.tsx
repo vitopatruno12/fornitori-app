@@ -151,7 +151,7 @@ export default function OperatorStationApp() {
       documentTitle={`ATLAS — ${activeTitle} (postazione)`}
       loginHint="Accesso postazione operativa — fornitori, ordini, consegne, personale (turni, report, stipendi, Prima Nota)"
       headerTitle="Postazione operativa"
-      headerSubtitle={`${activeTitle} — come il gestionale, senza link operatori/codici`}
+      headerSubtitle=""
       stationOnly
       nav={nav}
     >

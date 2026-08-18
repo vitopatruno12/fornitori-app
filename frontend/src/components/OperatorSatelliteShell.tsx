@@ -210,7 +210,7 @@ export default function OperatorSatelliteShell({
             <img src="/atlas-logo.svg" alt="ATLAS" className="operator-order-logo" />
             <div className="operator-order-header-text">
               <strong>{headerTitle}</strong>
-              <span>{headerSubtitle}</span>
+              {headerSubtitle ? <span>{headerSubtitle}</span> : null}
             </div>
             <div className="operator-order-header-actions">
               <AtlasUpdateButton />
