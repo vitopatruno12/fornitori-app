@@ -94,6 +94,25 @@ else
 fi
 
 API_DIR="${API_DIR:-/opt/fornitori-app}"
+
+ensure_access_codes_unlock_password() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  if grep -qE '^ACCESS_CODES_UNLOCK_PASSWORD=' "$env_file"; then
+    return 0
+  fi
+  {
+    echo ""
+    echo "# Link codici — password sblocco (aggiunto automaticamente da release-safe.sh)"
+    echo "ACCESS_CODES_UNLOCK_PASSWORD=Burnet"
+  } >> "$env_file"
+  log "Aggiunto ACCESS_CODES_UNLOCK_PASSWORD=Burnet in $env_file"
+}
+
+for _env_candidate in "$APP_DIR/backend/.env" "$API_DIR/backend/.env" "/opt/fornitori-app/backend/.env"; do
+  ensure_access_codes_unlock_password "$_env_candidate"
+done
+
 if [[ "$RESTART_API" == "1" ]] && [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f "$API_DIR")" != "$(readlink -f "$APP_DIR")" ]]; then
   log "Aggiornamento backend API in $API_DIR (cartella usata da systemd)"
   git -C "$API_DIR" fetch origin

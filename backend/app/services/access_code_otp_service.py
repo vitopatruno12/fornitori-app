@@ -28,6 +28,8 @@ _ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
 
 OTP_TTL_SEC = max(60, int(os.getenv("ACCESS_CODES_OTP_TTL_SEC", "300") or "300"))
 OTP_COOLDOWN_SEC = max(15, int(os.getenv("ACCESS_CODES_OTP_COOLDOWN_SEC", "45") or "45"))
+_DEFAULT_UNLOCK_PASSWORD = "Burnet"
+_UNLOCK_DEFAULT_WARNED = False
 
 
 def _normalize_otp(code: Optional[str]) -> str:
@@ -252,14 +254,25 @@ def request_otp(query_key: str, phone: Optional[str] = None) -> Dict[str, Any]:
     return out
 
 
+def _resolve_unlock_password() -> str:
+    """Password da .env; se assente usa Burnet (compatibilità deploy senza variabile)."""
+    global _UNLOCK_DEFAULT_WARNED
+    _reload_otp_env()
+    configured = (os.getenv("ACCESS_CODES_UNLOCK_PASSWORD") or "").strip()
+    if configured:
+        return configured
+    if not _UNLOCK_DEFAULT_WARNED:
+        logger.warning(
+            "ACCESS_CODES_UNLOCK_PASSWORD non impostata: uso password predefinita. "
+            "Imposta ACCESS_CODES_UNLOCK_PASSWORD=Burnet nel backend/.env del server."
+        )
+        _UNLOCK_DEFAULT_WARNED = True
+    return _DEFAULT_UNLOCK_PASSWORD
+
+
 def verify_unlock_password(password: Optional[str]) -> None:
     """Verifica password di sblocco Link codici (sostituto temporaneo dell'OTP WhatsApp)."""
-    _reload_otp_env()
-    expected = (os.getenv("ACCESS_CODES_UNLOCK_PASSWORD") or "").strip()
-    if not expected:
-        raise ValueError(
-            "Password Link codici non configurata sul server (ACCESS_CODES_UNLOCK_PASSWORD)."
-        )
+    expected = _resolve_unlock_password()
     provided = str(password or "").strip()
     if not provided:
         raise ValueError("Inserisci la password di sblocco.")
