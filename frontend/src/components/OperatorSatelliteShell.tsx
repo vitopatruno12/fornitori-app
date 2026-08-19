@@ -5,6 +5,8 @@ import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './AtlasUpdateButton.jsx'
 
+const ATLAS_OPERATOR_SESSION_KEY = 'atlasAuthOperator'
+
 export type OperatorNavItem = {
   id: string
   label: string
@@ -104,7 +106,7 @@ export default function OperatorSatelliteShell({
 }: OperatorSatelliteShellProps) {
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
     try {
-      return sessionStorage.getItem('atlasAuth') === '1'
+      return sessionStorage.getItem(ATLAS_OPERATOR_SESSION_KEY) === '1'
     } catch {
       return false
     }
@@ -121,7 +123,7 @@ export default function OperatorSatelliteShell({
 
   React.useEffect(() => {
     try {
-      sessionStorage.setItem('atlasAuth', isAuthenticated ? '1' : '0')
+      sessionStorage.setItem(ATLAS_OPERATOR_SESSION_KEY, isAuthenticated ? '1' : '0')
     } catch {
       /* ignore */
     }

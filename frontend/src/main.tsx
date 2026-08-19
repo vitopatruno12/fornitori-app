@@ -39,6 +39,7 @@ import {
   BancaMovimentiPage,
   BancaRiconciliazionePage,
 } from './pages/BancaPages.jsx'
+
 import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
@@ -75,6 +76,8 @@ import {
   shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
 
+const ATLAS_MAIN_SESSION_KEY = 'atlasAuthMain'
+
 type AiHistoryItem = {
   id: string
   page: PageKey
@@ -91,7 +94,7 @@ function App() {
   const navigate = useNavigate()
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
     try {
-      return sessionStorage.getItem('atlasAuth') === '1'
+      return sessionStorage.getItem(ATLAS_MAIN_SESSION_KEY) === '1'
     } catch {
       return false
     }
@@ -130,7 +133,7 @@ function App() {
 
   React.useEffect(() => {
     try {
-      sessionStorage.setItem('atlasAuth', isAuthenticated ? '1' : '0')
+      sessionStorage.setItem(ATLAS_MAIN_SESSION_KEY, isAuthenticated ? '1' : '0')
     } catch {
       // ignore storage errors
     }
