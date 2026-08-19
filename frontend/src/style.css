@@ -2748,6 +2748,10 @@ select.form-control {
   flex-shrink: 0;
 }
 
+.operator-satellite-nav-dropdown.is-open {
+  z-index: 120;
+}
+
 .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-main:not(.is-active),
 .operator-satellite-nav-dropdown.is-active .operator-satellite-nav-btn-caret:not(.is-active) {
   border-color: var(--accent, #2563eb);
@@ -2785,7 +2789,7 @@ select.form-control {
   border-radius: 8px;
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
   padding: 0.3rem;
-  z-index: 40;
+  z-index: 130;
 }
 
 .operator-satellite-nav-dropdown-item {
@@ -5817,6 +5821,10 @@ select.form-control {
   border-radius: 0 999px 999px 0;
 }
 
+.operator-station-band .operator-satellite-nav-dropdown-menu {
+  z-index: 140;
+}
+
 .operator-order-login-hint {
   text-align: center;
   font-size: 0.9rem;
@@ -5986,8 +5994,23 @@ select.form-control {
     padding: 0.85rem 0 0;
   }
 
+  /* Postazione operativa: niente scroll orizzontale che taglia i menu ▾ (Personale, Consegna) */
+  .operator-station-band .operator-satellite-nav {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 0.45rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .operator-station-band .operator-satellite-nav-dropdown:last-child .operator-satellite-nav-dropdown-menu,
+  .operator-station-band .operator-satellite-nav-dropdown:nth-last-child(2) .operator-satellite-nav-dropdown-menu {
+    left: auto;
+    right: 0;
+  }
+
   .operator-station-band-inner {
     padding: 0.65rem 1.25rem 0.95rem;
+    overflow: visible;
   }
 
   .operator-satellite-nav::-webkit-scrollbar {
