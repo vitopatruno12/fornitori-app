@@ -12,6 +12,10 @@ interface ImportMetaEnv {
   readonly VITE_ATLAS_LOGIN_USER?: string
   /** Password login ATLAS */
   readonly VITE_ATLAS_LOGIN_PASSWORD?: string
+  /** Username login satelliti / postazione operativa */
+  readonly VITE_OPERATOR_LOGIN_USER?: string
+  /** Password login satelliti / postazione operativa */
+  readonly VITE_OPERATOR_LOGIN_PASSWORD?: string
 }
 
 interface ImportMeta {

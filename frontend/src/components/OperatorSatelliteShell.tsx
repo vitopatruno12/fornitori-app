@@ -1,5 +1,5 @@
 import React from 'react'
-import { validateAtlasLogin } from '../utils/atlasAuth'
+import { validateAtlasOperatorLogin } from '../utils/atlasAuth'
 import { setOperatorStationLock } from '../utils/operatorMode.ts'
 import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
@@ -136,7 +136,7 @@ export default function OperatorSatelliteShell({
       setLoginError('Inserisci username e password')
       return
     }
-    if (!validateAtlasLogin(u, p)) {
+    if (!validateAtlasOperatorLogin(u, p)) {
       setLoginError('Username o password non corretti')
       return
     }

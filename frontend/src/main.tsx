@@ -1,6 +1,6 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { validateAtlasLogin } from './utils/atlasAuth'
+import { validateAtlasMainLogin } from './utils/atlasAuth'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './style.css'
@@ -670,7 +670,7 @@ function App() {
       setLoginError('Inserisci username e password')
       return
     }
-    if (!validateAtlasLogin(u, p)) {
+    if (!validateAtlasMainLogin(u, p)) {
       setLoginError('Username o password non corretti')
       return
     }
