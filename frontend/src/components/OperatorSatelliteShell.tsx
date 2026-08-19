@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { validateAtlasOperatorLogin } from '../utils/atlasAuth'
 import { setOperatorStationLock } from '../utils/operatorMode.ts'
 import OfflineBanner from './OfflineBanner.jsx'
@@ -20,22 +21,106 @@ export type OperatorNavItem = {
   }[]
 }
 
+function computeDropdownMenuStyle(anchor: HTMLElement, menuEl: HTMLElement | null): React.CSSProperties {
+  const rect = anchor.getBoundingClientRect()
+  const gap = 6
+  const viewportPad = 10
+  const minWidth = Math.max(rect.width, 176)
+  const menuHeight = menuEl?.offsetHeight ?? 220
+  const maxLeft = window.innerWidth - viewportPad - minWidth
+
+  let top = rect.bottom + gap
+  let left = Math.min(Math.max(rect.left, viewportPad), Math.max(viewportPad, maxLeft))
+
+  if (top + menuHeight > window.innerHeight - viewportPad) {
+    top = Math.max(viewportPad, rect.top - gap - menuHeight)
+  }
+
+  return {
+    position: 'fixed',
+    top,
+    left,
+    minWidth,
+    zIndex: 1000,
+  }
+}
+
 function OperatorSatelliteNavDropdown({
   item,
 }: {
   item: OperatorNavItem & { items: NonNullable<OperatorNavItem['items']> }
 }) {
   const [open, setOpen] = React.useState(false)
+  const [menuStyle, setMenuStyle] = React.useState<React.CSSProperties>({})
   const rootRef = React.useRef<HTMLDivElement>(null)
+  const menuRef = React.useRef<HTMLDivElement>(null)
   const groupActive = item.active || item.items.some((sub) => sub.active)
 
+  const updateMenuPosition = React.useCallback(() => {
+    if (!rootRef.current) return
+    setMenuStyle(computeDropdownMenuStyle(rootRef.current, menuRef.current))
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!open) return
+    updateMenuPosition()
+    const raf = window.requestAnimationFrame(updateMenuPosition)
+    return () => window.cancelAnimationFrame(raf)
+  }, [open, updateMenuPosition, item.items.length])
+
   React.useEffect(() => {
+    if (!open) return
+
     function onDocClick(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (rootRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
     }
-    if (open) document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
+
+    function onEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    window.addEventListener('mousedown', onDocClick)
+    window.addEventListener('keydown', onEscape)
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return () => {
+      window.removeEventListener('mousedown', onDocClick)
+      window.removeEventListener('keydown', onEscape)
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [open, updateMenuPosition])
+
+  const menu =
+    open && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            ref={menuRef}
+            className="operator-satellite-nav-dropdown-menu is-portal"
+            style={menuStyle}
+            role="menu"
+          >
+            {item.items.map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                role="menuitem"
+                className={`operator-satellite-nav-dropdown-item${sub.active ? ' is-active' : ''}`}
+                onClick={() => {
+                  setOpen(false)
+                  sub.onClick()
+                }}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )
+      : null
 
   return (
     <div
@@ -63,24 +148,7 @@ function OperatorSatelliteNavDropdown({
       >
         ▾
       </button>
-      {open ? (
-        <div className="operator-satellite-nav-dropdown-menu" role="menu">
-          {item.items.map((sub) => (
-            <button
-              key={sub.id}
-              type="button"
-              role="menuitem"
-              className={`operator-satellite-nav-dropdown-item${sub.active ? ' is-active' : ''}`}
-              onClick={() => {
-                setOpen(false)
-                sub.onClick()
-              }}
-            >
-              {sub.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {menu}
     </div>
   )
 }

@@ -2792,6 +2792,15 @@ select.form-control {
   z-index: 130;
 }
 
+.operator-satellite-nav-dropdown-menu.is-portal {
+  position: fixed;
+  top: auto;
+  left: auto;
+  z-index: 1000;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+}
+
 .operator-satellite-nav-dropdown-item {
   display: block;
   width: 100%;
