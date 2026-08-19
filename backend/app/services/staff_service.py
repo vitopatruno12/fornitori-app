@@ -142,6 +142,8 @@ def delete_all_members(
 
 
 def _validate_times(kind: str, t0: Optional[time], t1: Optional[time]) -> None:
+    if kind in staff_schema.ALL_DAY_ENTRY_KINDS:
+        return
     if kind == "shift":
         if t0 is None or t1 is None:
             raise ValueError("Per un turno indicare ora inizio e ora fine")
@@ -156,11 +158,16 @@ def create_shift(db: Session, payload: staff_schema.StaffShiftCreate) -> StaffSh
     if not m:
         raise ValueError("Dipendente non trovato")
     _validate_times(payload.entry_kind, payload.time_start, payload.time_end)
+    time_start = payload.time_start
+    time_end = payload.time_end
+    if payload.entry_kind in staff_schema.ALL_DAY_ENTRY_KINDS:
+        time_start = None
+        time_end = None
     row = StaffShiftEntry(
         staff_member_id=payload.staff_member_id,
         work_date=payload.work_date,
-        time_start=payload.time_start,
-        time_end=payload.time_end,
+        time_start=time_start,
+        time_end=time_end,
         entry_kind=payload.entry_kind,
         notes=(payload.notes.strip() if payload.notes else None),
     )
@@ -190,6 +197,9 @@ def update_shift(db: Session, shift_id: int, payload: staff_schema.StaffShiftUpd
         row.entry_kind = data["entry_kind"]
     if "notes" in data:
         row.notes = data["notes"].strip() if data["notes"] else None
+    if row.entry_kind in staff_schema.ALL_DAY_ENTRY_KINDS:
+        row.time_start = None
+        row.time_end = None
     _validate_times(row.entry_kind, row.time_start, row.time_end)
     db.commit()
     db.refresh(row)

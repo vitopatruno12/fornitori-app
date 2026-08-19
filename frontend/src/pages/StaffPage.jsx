@@ -50,6 +50,7 @@ import {
 import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import {
+  CORE_PLANNING_SECTIONS,
   defaultSectionsForLocale,
   memberMatchesSection,
   normalizeSectionName,
@@ -129,6 +130,14 @@ const KIND_LABELS = {
   absence: 'Assenza',
   sick: 'Malattia',
   ferie: 'Ferie',
+  riposo: 'Riposo',
+}
+
+const ALL_DAY_ENTRY_KINDS = ['absence', 'sick', 'ferie', 'riposo']
+const ENTRY_KIND_VALUES = ['shift', 'permission', ...ALL_DAY_ENTRY_KINDS]
+
+function isAllDayKind(kind) {
+  return ALL_DAY_ENTRY_KINDS.includes(String(kind || ''))
 }
 
 /** Giorni della settimana (lun–dom) rispetto a weekAnchor (lunedì). */
@@ -205,6 +214,86 @@ function findPlanningBackupSlotForAnchor(anchor, weeks) {
   const a = toYMD(startOfWeekMonday(anchor))
   const idx = weeks.findIndex((w) => w.fromStr === a)
   return idx >= 0 ? idx : 0
+}
+
+function StaffActionDropdown({
+  label,
+  className = 'btn btn-secondary btn-sm',
+  disabled = false,
+  open,
+  onOpenChange,
+  items = [],
+  title,
+}) {
+  const rootRef = React.useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    function onDocClick(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) onOpenChange(false)
+    }
+    document.addEventListener('pointerdown', onDocClick)
+    return () => document.removeEventListener('pointerdown', onDocClick)
+  }, [open, onOpenChange])
+
+  return (
+    <div className={`staff-action-dropdown${open ? ' is-open' : ''}`} ref={rootRef}>
+      <button
+        type="button"
+        className={className}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={title}
+        onClick={() => onOpenChange(!open)}
+      >
+        <span>{label}</span>
+        <span className="staff-action-dropdown-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <div className="staff-action-dropdown-menu" role="menu">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={`staff-action-dropdown-item${item.active ? ' is-active' : ''}`}
+              disabled={disabled || item.disabled}
+              onClick={() => {
+                onOpenChange(false)
+                item.onClick?.()
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function groupShiftsByDate(shiftList) {
+  const m = new Map()
+  for (const s of shiftList || []) {
+    const key = shiftWorkDateKey(s.work_date)
+    if (!key) continue
+    if (!m.has(key)) m.set(key, [])
+    m.get(key).push(s)
+  }
+  for (const arr of m.values()) {
+    arr.sort((a, b) => (a.staff_member_name || '').localeCompare(b.staff_member_name || '', 'it'))
+  }
+  return m
+}
+
+function shiftBelongsToSection(shift, sectionName, members, sectionsList) {
+  if (!sectionName) return true
+  const member = (members || []).find((m) => Number(m.id) === Number(shift?.staff_member_id))
+  if (member) return memberMatchesSection(member, sectionName, sectionsList)
+  return false
 }
 
 function StaffCheckboxDropdown({
@@ -569,9 +658,9 @@ function buildShiftApiPayload(staffId, workDate, entryKind, timeStart, timeEnd, 
       payload.time_end = null
     }
   }
-  if (entryKind === 'absence' || entryKind === 'sick' || entryKind === 'ferie') {
-    payload.time_start = timeStart ? `${timeStart}:00` : null
-    payload.time_end = timeEnd ? `${timeEnd}:00` : null
+  if (isAllDayKind(entryKind)) {
+    payload.time_start = null
+    payload.time_end = null
   }
   return { data: payload }
 }
@@ -819,7 +908,7 @@ function resolveOneShiftSuggestion(item, members, spoken, defaultDate) {
   }
 
   const entryKind =
-    item.entry_kind && ['shift', 'permission', 'absence', 'sick', 'ferie'].includes(String(item.entry_kind))
+    item.entry_kind && ENTRY_KIND_VALUES.includes(String(item.entry_kind))
       ? String(item.entry_kind)
       : 'shift'
 
@@ -1078,6 +1167,11 @@ export default function StaffPage({ operatorMode = false }) {
   const [formEnd, setFormEnd] = useState('16:00')
   const [formKind, setFormKind] = useState('shift')
   const [formNotes, setFormNotes] = useState('')
+  const [formGenere, setFormGenere] = useState('')
+  const [planningSection, setPlanningSection] = useState('')
+  const [loadPlanMenuOpen, setLoadPlanMenuOpen] = useState(false)
+  const [refreshPlanMenuOpen, setRefreshPlanMenuOpen] = useState(false)
+  const [copyPlanMenuOpen, setCopyPlanMenuOpen] = useState(false)
   const [weekLoadDays, setWeekLoadDays] = useState(() => new Set([0, 1, 2, 3, 4]))
   const weekLoadDaysSelectAllRef = React.useRef(null)
   const [membersDropdownOpen, setMembersDropdownOpen] = useState(false)
@@ -1638,19 +1732,41 @@ export default function StaffPage({ operatorMode = false }) {
     return { ok: true, from: fromD, to: toD, kind: 'period', dayCount: n }
   }, [planView, weekAnchor, dayFocus, periodFrom, periodTo])
 
-  const shiftsByDate = useMemo(() => {
-    const m = new Map()
-    for (const s of shifts) {
-      const key = shiftWorkDateKey(s.work_date)
-      if (!key) continue
-      if (!m.has(key)) m.set(key, [])
-      m.get(key).push(s)
+  const membersInFormGenere = useMemo(() => {
+    if (!formGenere) return members
+    return members.filter((m) => memberMatchesSection(m, formGenere, localeSections))
+  }, [members, formGenere, localeSections])
+
+  const planningSectionOptions = useMemo(() => {
+    const out = [...localeSections]
+    const seen = new Set(out.map((s) => sectionCompareKey(s)))
+    for (const s of CORE_PLANNING_SECTIONS) {
+      const key = sectionCompareKey(s)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(s)
     }
-    for (const arr of m.values()) {
-      arr.sort((a, b) => (a.staff_member_name || '').localeCompare(b.staff_member_name || '', 'it'))
+    return out
+  }, [localeSections])
+
+  const visiblePlanningShifts = useMemo(() => {
+    if (!planningSection) return shifts
+    return shifts.filter((s) => shiftBelongsToSection(s, planningSection, members, localeSections))
+  }, [shifts, planningSection, members, localeSections])
+
+  const planningWeekBlocks = useMemo(() => {
+    const sections = planningSection ? [planningSection] : planningSectionOptions
+    if (!sections.length) {
+      return [{ section: 'Generale', sectionLabel: 'Tutti i dipendenti', shiftsByDate: groupShiftsByDate(shifts) }]
     }
-    return m
-  }, [shifts])
+    return sections.map((section) => ({
+      section,
+      sectionLabel: section,
+      shiftsByDate: groupShiftsByDate(
+        shifts.filter((s) => shiftBelongsToSection(s, section, members, localeSections)),
+      ),
+    }))
+  }, [planningSection, planningSectionOptions, shifts, members, localeSections])
 
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
@@ -1702,6 +1818,22 @@ export default function StaffPage({ operatorMode = false }) {
     () => members.filter((m) => memberMatchesSection(m, activeSection, localeSections)),
     [members, activeSection, localeSections],
   )
+
+  useEffect(() => {
+    if (editingShiftId) return
+    if (planningSection) setFormGenere(planningSection)
+  }, [planningSection, editingShiftId])
+
+  useEffect(() => {
+    if (editingShiftId) return
+    if (!formGenere) return
+    setFormMemberIds((prev) => {
+      const allowed = new Set(membersInFormGenere.map((m) => m.id))
+      const next = new Set([...prev].filter((id) => allowed.has(id)))
+      if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev
+      return next
+    })
+  }, [formGenere, membersInFormGenere, editingShiftId])
 
   function handleAddLocaleSection() {
     const name = normalizeSectionName(newSectionName)
@@ -1800,6 +1932,20 @@ export default function StaffPage({ operatorMode = false }) {
       setLoading(false)
     }
   }, [planView, weekAnchor, dayFocus, periodFrom, periodTo, loadForRange])
+
+  const applyPlanningSection = useCallback((sectionName) => {
+    const next = normalizeSectionName(sectionName)
+    setPlanningSection(next)
+    if (next) setFormGenere(next)
+  }, [])
+
+  const reloadPlanningForSection = useCallback(
+    async (sectionName) => {
+      applyPlanningSection(sectionName)
+      await reloadPlanning()
+    },
+    [applyPlanningSection, reloadPlanning],
+  )
 
   useEffect(() => {
     const onDataSynced = async () => {
@@ -1932,8 +2078,10 @@ export default function StaffPage({ operatorMode = false }) {
     }
     setError('')
     const rangeLabel = `${rangeFromStr} → ${rangeToStr}`
-    const title = `📅 Planning turni (${rangeLabel})`
-    const body = buildWhatsAppPlanningBody(shifts, displayDayCells, shiftLine)
+    const title = planningSection
+      ? `📅 Planning ${planningSection} (${rangeLabel})`
+      : `📅 Planning turni (${rangeLabel})`
+    const body = buildWhatsAppPlanningBody(visiblePlanningShifts, displayDayCells, shiftLine)
     const fullText = `${title}\n\n${body}`
     const waUrl = `https://wa.me/?text=${encodeURIComponent(fullText)}`
 
@@ -2141,15 +2289,18 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }
 
-  const allFormMembersSelected = members.length > 0 && members.every((m) => formMemberIds.has(m.id))
-  const someFormMembersSelected = members.some((m) => formMemberIds.has(m.id))
+  const allFormMembersSelected =
+    membersInFormGenere.length > 0 && membersInFormGenere.every((m) => formMemberIds.has(m.id))
+  const someFormMembersSelected = membersInFormGenere.some((m) => formMemberIds.has(m.id))
   const allWeekDaysSelected = WEEK_LOAD_DAY_OPTIONS.every((d) => weekLoadDays.has(d.offset))
   const someWeekDaysSelected = WEEK_LOAD_DAY_OPTIONS.some((d) => weekLoadDays.has(d.offset))
 
   const membersDropdownLabel = useMemo(() => {
-    if (members.length === 0) return 'Nessun dipendente'
+    if (membersInFormGenere.length === 0) {
+      return formGenere ? `Nessun dipendente in ${formGenere}` : 'Nessun dipendente'
+    }
     if (formMemberIds.size === 0) return 'Seleziona dipendenti…'
-    if (allFormMembersSelected) return 'Tutti i dipendenti'
+    if (allFormMembersSelected) return formGenere ? `Tutti (${formGenere})` : 'Tutti i dipendenti'
     if (formMemberIds.size === 1) {
       const m = members.find((x) => formMemberIds.has(x.id))
       return m?.name || '1 dipendente'
@@ -2157,7 +2308,7 @@ export default function StaffPage({ operatorMode = false }) {
     const names = members.filter((m) => formMemberIds.has(m.id)).map((m) => m.name)
     if (names.length <= 2) return names.join(', ')
     return `${formMemberIds.size} dipendenti selezionati`
-  }, [members, formMemberIds, allFormMembersSelected])
+  }, [members, membersInFormGenere, formMemberIds, allFormMembersSelected, formGenere])
 
   const weekDaysDropdownLabel = useMemo(() => {
     if (weekLoadDays.size === 0) return 'Seleziona giorni…'
@@ -2196,7 +2347,7 @@ export default function StaffPage({ operatorMode = false }) {
       setFormMemberIds(new Set())
       return
     }
-    setFormMemberIds(new Set(members.map((m) => m.id)))
+    setFormMemberIds(new Set(membersInFormGenere.map((m) => m.id)))
   }
 
   useEffect(() => {
@@ -3273,6 +3424,9 @@ export default function StaffPage({ operatorMode = false }) {
     setFormEnd(timeInputValue(s.time_end))
     setFormKind(s.entry_kind || 'shift')
     setFormNotes(s.notes || '')
+    const member = members.find((m) => Number(m.id) === Number(s.staff_member_id))
+    const section = normalizeSectionName(member?.section) || planningSection || localeSections[0] || ''
+    if (section) setFormGenere(section)
   }
 
   const resetForm = useCallback(() => {
@@ -3283,8 +3437,9 @@ export default function StaffPage({ operatorMode = false }) {
     setFormEnd('16:00')
     setFormKind('shift')
     setFormNotes('')
+    setFormGenere(planningSection || '')
     setError('')
-  }, [])
+  }, [planningSection])
 
   /** Mantieni i dipendenti selezionati nel modulo turni allineati all’elenco reale (evita POST con id eliminato → 400). */
   useEffect(() => {
@@ -3471,9 +3626,9 @@ export default function StaffPage({ operatorMode = false }) {
         payload.time_end = null
       }
     }
-    if (formKind === 'absence' || formKind === 'sick' || formKind === 'ferie') {
-      payload.time_start = formStart ? `${formStart}:00` : null
-      payload.time_end = formEnd ? `${formEnd}:00` : null
+    if (isAllDayKind(formKind)) {
+      payload.time_start = null
+      payload.time_end = null
     }
     return { payload }
   }
@@ -3729,7 +3884,7 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }
 
-  async function handleCopyPlanning() {
+  async function handleCopyPlanning(sectionName = planningSection) {
     if (shiftBusy || loading) return
     if (planView === 'period' && periodTooLong) {
       setError(`Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`)
@@ -3739,6 +3894,9 @@ export default function StaffPage({ operatorMode = false }) {
       setError('Aggiungi almeno un dipendente prima di copiare il planning.')
       return
     }
+
+    applyPlanningSection(sectionName)
+    const sectionLabel = normalizeSectionName(sectionName)
 
     const { fromStr: sourceFromStr, toStr: sourceToStr, dayCount } = computeVisiblePlanningRange(
       planView,
@@ -3760,9 +3918,15 @@ export default function StaffPage({ operatorMode = false }) {
         /* usa elenco locale */
       }
 
-      const sourceShifts = await fetchPlanningShiftsInRange(sourceFromStr, sourceToStr, mem, shifts)
+      const sourceShifts = (await fetchPlanningShiftsInRange(sourceFromStr, sourceToStr, mem, shifts)).filter((row) =>
+        sectionName ? shiftBelongsToSection(row, sectionName, mem, localeSections) : true,
+      )
       if (!sourceShifts.length) {
-        setError(`Nessuna voce nella ${srcLabel} (${sourceFromStr} → ${sourceToStr}).`)
+        setError(
+          sectionLabel
+            ? `Nessuna voce ${sectionLabel} nella ${srcLabel} (${sourceFromStr} → ${sourceToStr}).`
+            : `Nessuna voce nella ${srcLabel} (${sourceFromStr} → ${sourceToStr}).`,
+        )
         return
       }
 
@@ -3770,7 +3934,7 @@ export default function StaffPage({ operatorMode = false }) {
       setPlanningClipboard(pack)
       writePlanningClipboard(pack)
       setSuccess(
-        `Copiati ${sourceShifts.length} turni (${sourceFromStr} → ${sourceToStr}). Vai al periodo di destinazione e premi Incolla.`,
+        `Copiati ${sourceShifts.length} turni${sectionLabel ? ` (${sectionLabel})` : ''} (${sourceFromStr} → ${sourceToStr}). Vai al periodo di destinazione e premi Incolla.`,
       )
     } catch (err) {
       setError(err?.message || 'Copia planning non riuscita')
@@ -4354,7 +4518,7 @@ export default function StaffPage({ operatorMode = false }) {
             ) : (
               <>
                 Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
-                <strong>assenze</strong> e <strong>malattia</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
+                <strong>assenze</strong>, <strong>malattia</strong>, <strong>ferie</strong> e <strong>riposo</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
                 oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
                 <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
                 parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio sul server, recuperabile da altri PC e browser).
@@ -5256,19 +5420,38 @@ export default function StaffPage({ operatorMode = false }) {
                 </span>
               </>
             )}
-            <button
-              type="button"
+            <StaffActionDropdown
+              label={loading ? 'Caricamento…' : planningSection ? `Carica piano · ${planningSection}` : 'Carica piano'}
               className="btn btn-primary"
               disabled={loading || demoLoading || periodTooLong}
-              onClick={() => reloadPlanning()}
+              open={loadPlanMenuOpen}
+              onOpenChange={(next) => {
+                setLoadPlanMenuOpen(next)
+                if (next) {
+                  setRefreshPlanMenuOpen(false)
+                  setCopyPlanMenuOpen(false)
+                }
+              }}
               title={
                 periodTooLong
                   ? `Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`
-                  : 'Scarica turni dal server per il periodo selezionato'
+                  : 'Scegli il piano da mostrare: Banco, Cucina, Forno o un’altra sezione'
               }
-            >
-              {loading ? 'Caricamento…' : 'Carica piano'}
-            </button>
+              items={[
+                {
+                  id: '__all__',
+                  label: 'Tutti i piani',
+                  active: !planningSection,
+                  onClick: () => void reloadPlanningForSection(''),
+                },
+                ...planningSectionOptions.map((section) => ({
+                  id: `load-${section}`,
+                  label: section,
+                  active: sectionCompareKey(section) === sectionCompareKey(planningSection),
+                  onClick: () => void reloadPlanningForSection(section),
+                })),
+              ]}
+            />
             <button
               type="button"
               className="btn btn-whatsapp btn-sm"
@@ -5295,38 +5478,66 @@ export default function StaffPage({ operatorMode = false }) {
             >
               {reportLoading ? 'Report…' : 'Report PDF'}
             </button>
-            <button
-              type="button"
+            <StaffActionDropdown
+              label={loading ? 'Aggiornamento…' : planningSection ? `Aggiorna piano · ${planningSection}` : 'Aggiorna piano'}
               className="btn btn-outline-secondary btn-sm"
               disabled={shiftBusy || loading || demoLoading}
-              onClick={() => void reloadPlanning()}
-              title={
-                planView === 'week'
-                  ? 'Ricarica dal server tutti i turni della settimana (lun–dom) selezionata'
-                  : planView === 'day'
-                    ? 'Ricarica dal server le voci del giorno selezionato'
-                    : 'Ricarica dal server tutte le voci dell’intervallo Dal–Al (anche dopo «Mese»)'
-              }
-            >
-              {loading ? 'Aggiornamento…' : 'Aggiorna piano'}
-            </button>
-            <button
-              type="button"
+              open={refreshPlanMenuOpen}
+              onOpenChange={(next) => {
+                setRefreshPlanMenuOpen(next)
+                if (next) {
+                  setLoadPlanMenuOpen(false)
+                  setCopyPlanMenuOpen(false)
+                }
+              }}
+              title="Scegli quale piano aggiornare dal server"
+              items={[
+                {
+                  id: 'refresh-all',
+                  label: 'Tutti i piani',
+                  active: !planningSection,
+                  onClick: () => void reloadPlanningForSection(''),
+                },
+                ...planningSectionOptions.map((section) => ({
+                  id: `refresh-${section}`,
+                  label: section,
+                  active: sectionCompareKey(section) === sectionCompareKey(planningSection),
+                  onClick: () => void reloadPlanningForSection(section),
+                })),
+              ]}
+            />
+            <StaffActionDropdown
+              label={shiftBusy ? 'Copia…' : planningSection ? `Copia · ${planningSection}` : 'Copia'}
               className="btn btn-secondary btn-sm"
               disabled={shiftBusy || loading || demoLoading || periodTooLong || members.length === 0}
-              onClick={() => void handleCopyPlanning()}
+              open={copyPlanMenuOpen}
+              onOpenChange={(next) => {
+                setCopyPlanMenuOpen(next)
+                if (next) {
+                  setLoadPlanMenuOpen(false)
+                  setRefreshPlanMenuOpen(false)
+                }
+              }}
               title={
                 periodTooLong
                   ? `Intervallo troppo lungo (${periodDayCount} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni.`
-                  : planView === 'week'
-                    ? 'Copia turni e nomi dipendenti della settimana visibile negli appunti planning'
-                    : planView === 'day'
-                      ? 'Copia le voci del giorno visibile negli appunti planning'
-                      : 'Copia turni e nomi del periodo visibile negli appunti planning'
+                  : 'Copia il piano della sezione scelta (Banco, Cucina, Forno…)'
               }
-            >
-              {shiftBusy ? 'Copia…' : 'Copia'}
-            </button>
+              items={[
+                {
+                  id: 'copy-all',
+                  label: 'Tutti i piani',
+                  active: !planningSection,
+                  onClick: () => void handleCopyPlanning(''),
+                },
+                ...planningSectionOptions.map((section) => ({
+                  id: `copy-${section}`,
+                  label: section,
+                  active: sectionCompareKey(section) === sectionCompareKey(planningSection),
+                  onClick: () => void handleCopyPlanning(section),
+                })),
+              ]}
+            />
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -5385,6 +5596,9 @@ export default function StaffPage({ operatorMode = false }) {
               </span>
             </>
           )}
+          <span style={{ marginLeft: '0.65rem' }}>
+            · Piano: <strong>{planningSection || 'Tutti'}</strong>
+          </span>
           {planningClipboard?.shifts?.length ? (
             <span style={{ marginLeft: '0.65rem', opacity: 0.9 }}>
               · Planning copiato: <strong>{planningClipboardSummary(planningClipboard)}</strong>
@@ -5403,73 +5617,88 @@ export default function StaffPage({ operatorMode = false }) {
         {loading && <AnalisiLoadingBar active label="Caricamento personale" variant="subtle" />}
 
         {!loading && !periodTooLong && (
-          <div
-            className={
-              planView === 'day'
-                ? 'staff-week-grid staff-week-grid--single'
-                : planView === 'period' && displayDayCells.length > 14
-                  ? 'staff-week-grid staff-week-grid--period-scroll'
-                  : 'staff-week-grid'
-            }
-          >
-            {displayDayCells.map((d) => {
-              const ymd = toYMD(d)
-              const dow = d.getDay()
-              const label = DAY_HEADERS[dow]
-              const dayNum = d.getDate()
-              const list = shiftsByDate.get(ymd) || []
-              return (
-                <div key={ymd} className="staff-day-card card" style={{ padding: '0.85rem', margin: 0 }}>
-                  <div
-                    className="staff-day-title"
-                    style={{
-                      fontWeight: 700,
-                      fontSize: '0.95rem',
-                      marginBottom: '0.6rem',
-                      borderBottom: '1px solid var(--border, #e5e7eb)',
-                      paddingBottom: '0.35rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.5rem',
-                    }}
-                  >
-                    <span>
-                      {label} {dayNum}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-vino btn-sm"
-                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
-                      onClick={() => openDayAndInsertShift(d)}
-                      disabled={shiftBusy}
-                      title="Apri questo giorno e vai al modulo per inserire un turno"
-                    >
-                      Apri giorno
-                    </button>
-                  </div>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
-                    {list.map((s) => (
-                      <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
-                        <span>{shiftLine(s)}</span>
-                        <span style={{ flexShrink: 0 }}>
+          <div className="staff-planning-sections">
+            {planningWeekBlocks.map((block) => (
+              <div key={block.section} className="staff-section-week">
+                <h3 className="staff-section-week-title">
+                  Settimana {block.sectionLabel}
+                  <span>
+                    {members.filter((m) => memberMatchesSection(m, block.section, localeSections)).length} dipendenti
+                  </span>
+                </h3>
+                <div
+                  className={
+                    planView === 'day'
+                      ? 'staff-week-grid staff-week-grid--single'
+                      : planView === 'period' && displayDayCells.length > 14
+                        ? 'staff-week-grid staff-week-grid--period-scroll'
+                        : 'staff-week-grid'
+                  }
+                >
+                  {displayDayCells.map((d) => {
+                    const ymd = toYMD(d)
+                    const dow = d.getDay()
+                    const label = DAY_HEADERS[dow]
+                    const dayNum = d.getDate()
+                    const list = block.shiftsByDate.get(ymd) || []
+                    return (
+                      <div key={`${block.section}-${ymd}`} className="staff-day-card card" style={{ padding: '0.85rem', margin: 0 }}>
+                        <div
+                          className="staff-day-title"
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.95rem',
+                            marginBottom: '0.6rem',
+                            borderBottom: '1px solid var(--border, #e5e7eb)',
+                            paddingBottom: '0.35rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          <span>
+                            {label} {dayNum}
+                          </span>
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '0.15rem 0.4rem' }}
+                            className="btn btn-vino btn-sm"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+                            onClick={() => {
+                              applyPlanningSection(block.section)
+                              openDayAndInsertShift(d)
+                            }}
                             disabled={shiftBusy}
-                            onClick={() => startEditShift(s)}
+                            title={`Apri questo giorno nel piano ${block.sectionLabel}`}
                           >
-                            Mod.
+                            Apri giorno
                           </button>
-                        </span>
-                      </li>
-                    ))}
-                    {list.length === 0 && <li style={{ color: 'var(--text-muted)' }}>Nessuna voce</li>}
-                  </ul>
+                        </div>
+                        <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
+                          {list.map((s) => (
+                            <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
+                              <span>{shiftLine(s)}</span>
+                              <span style={{ flexShrink: 0 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem' }}
+                                  disabled={shiftBusy}
+                                  onClick={() => startEditShift(s)}
+                                >
+                                  Mod.
+                                </button>
+                              </span>
+                            </li>
+                          ))}
+                          {list.length === 0 && <li style={{ color: 'var(--text-muted)' }}>Nessuna voce</li>}
+                        </ul>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -5482,8 +5711,12 @@ export default function StaffPage({ operatorMode = false }) {
           <div className="staff-shift-form-hint" role="note">
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
             <p className="staff-shift-form-hint-list" style={{ margin: 0 }}>
-              Seleziona <strong>Dipendenti</strong> e <strong>Giorni settimana</strong>, imposta <strong>Tipo</strong> e orari, poi clicca{' '}
-              <strong>Carica</strong>. Inserisce le voci per ogni dipendente nei giorni scelti della settimana visibile in pianificazione.
+              Scegli il <strong>Genere</strong> (Banco, Cucina, Forno… dalla sezione del dipendente), i{' '}
+              <strong>Dipendenti</strong> e i <strong>Giorni settimana</strong>, imposta il <strong>Tipo</strong>
+              {isAllDayKind(formKind)
+                ? ' (ferie, assenza, malattia e riposo non richiedono orari)'
+                : ' e gli orari'}
+              , poi clicca <strong>Carica</strong>. Inserisce le voci nella settimana di quella sezione.
             </p>
           </div>
         ) : null}
@@ -5510,6 +5743,26 @@ export default function StaffPage({ operatorMode = false }) {
           style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}
           aria-busy={shiftBusy}
         >
+          <div className="form-group" style={{ flex: '0 1 150px' }}>
+            <label>Genere</label>
+            <select
+              className="form-control"
+              value={formGenere}
+              disabled={shiftBusy}
+              onChange={(e) => {
+                const next = e.target.value
+                setFormGenere(next)
+                if (next) applyPlanningSection(next)
+              }}
+            >
+              <option value="">Tutte le sezioni</option>
+              {planningSectionOptions.map((section) => (
+                <option key={section} value={section}>
+                  {section}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="form-group" style={{ flex: '1 1 170px' }}>
             <label>Dipendenti</label>
             <StaffCheckboxDropdown
@@ -5520,16 +5773,22 @@ export default function StaffPage({ operatorMode = false }) {
                 setMembersDropdownOpen(next)
                 if (next) setWeekDaysDropdownOpen(false)
               }}
-              disabled={shiftBusy || members.length === 0}
-              showSelectAll={members.length > 0 && !editingShiftId}
+              disabled={shiftBusy || membersInFormGenere.length === 0}
+              showSelectAll={membersInFormGenere.length > 0 && !editingShiftId}
               selectAllRef={formMemberSelectAllRef}
               allSelected={allFormMembersSelected}
               onToggleAll={toggleSelectAllFormMembers}
               selectAllDisabled={shiftBusy}
               menuAriaLabel="Seleziona dipendenti"
-              emptyMessage={members.length === 0 ? 'Nessun dipendente in elenco' : null}
+              emptyMessage={
+                membersInFormGenere.length === 0
+                  ? formGenere
+                    ? `Nessun dipendente in «${formGenere}». Assegna la sezione in anagrafica.`
+                    : 'Nessun dipendente in elenco'
+                  : null
+              }
             >
-              {members.map((m) => (
+              {membersInFormGenere.map((m) => (
                 <label key={m.id} className="staff-shift-member-option">
                   <input
                     type="checkbox"
@@ -5584,6 +5843,7 @@ export default function StaffPage({ operatorMode = false }) {
               <option value="absence">Assenza</option>
               <option value="sick">Malattia</option>
               <option value="ferie">Ferie</option>
+              <option value="riposo">Riposo</option>
             </select>
           </div>
           {(formKind === 'shift' || formKind === 'permission') && (
@@ -5594,18 +5854,6 @@ export default function StaffPage({ operatorMode = false }) {
               </div>
               <div className="form-group" style={{ flex: '0 1 100px' }}>
                 <label>Fine</label>
-                <input type="time" className="form-control" value={formEnd} onChange={(e) => setFormEnd(e.target.value)} disabled={shiftBusy} />
-              </div>
-            </>
-          )}
-          {(formKind === 'absence' || formKind === 'sick' || formKind === 'ferie') && (
-            <>
-              <div className="form-group" style={{ flex: '0 1 100px' }}>
-                <label>Inizio (opz.)</label>
-                <input type="time" className="form-control" value={formStart} onChange={(e) => setFormStart(e.target.value)} disabled={shiftBusy} />
-              </div>
-              <div className="form-group" style={{ flex: '0 1 100px' }}>
-                <label>Fine (opz.)</label>
                 <input type="time" className="form-control" value={formEnd} onChange={(e) => setFormEnd(e.target.value)} disabled={shiftBusy} />
               </div>
             </>

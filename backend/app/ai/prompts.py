@@ -84,7 +84,7 @@ Checklist:
 STAFF_SHIFT_EXTRACT = """Pianificazione personale (turni Italia). JSON:
 {"suggested_shifts":[{"staff_member_name":"","work_date":"YYYY-MM-DD","entry_kind":"shift","time_start":"HH:MM","time_end":"HH:MM","notes":""}],"suggested_fields":null,"warnings":[],"confidence":0.0-1.0}
 Un turno = 1 elemento in suggested_shifts. Espandi "tutti" / "lun-ven" in più righe.
-entry_kind: shift|permission|absence|sick. Usa oggi/domani/giorni settimana rispetto a "today" nel messaggio."""
+entry_kind: shift|permission|absence|sick|ferie|riposo. Per absence/sick/ferie/riposo non mettere orari. Usa oggi/domani/giorni settimana rispetto a "today" nel messaggio."""
 
 ASK_AI = """Assistente operativo gestionale ATLAS (fornitori, ordini, consegne, fatture, prima nota, personale).
 JSON: {"answer":"testo","confidence":0.0-1.0,"suggested_actions":[]}

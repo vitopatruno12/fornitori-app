@@ -10,6 +10,7 @@ const KIND_LABELS = {
   absence: 'Assenza',
   sick: 'Malattia',
   ferie: 'Ferie',
+  riposo: 'Riposo',
 }
 
 export const STAFF_REPORT_SHEET_VOCI = 'VOCI'
@@ -35,6 +36,7 @@ export const STAFF_REPORT_RIEPILOGO_HEADERS = [
   'Assenze',
   'Malattia',
   'Ferie',
+  'Riposo',
 ]
 
 export const STAFF_REPORT_VOCI_COLUMNS = [
@@ -55,6 +57,7 @@ export const STAFF_REPORT_RIEPILOGO_COLUMNS = [
   { id: 'absences', label: 'Assenze', numeric: true, width: 12, fluid: true },
   { id: 'sick', label: 'Malattia', numeric: true, width: 12, fluid: true },
   { id: 'ferie', label: 'Ferie', numeric: true, width: 12, fluid: true },
+  { id: 'riposo', label: 'Riposo', numeric: true, width: 12, fluid: true },
 ]
 
 export const STAFF_REPORT_TOTALI_COLUMNS = [
@@ -149,6 +152,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
       String(row.nAssenze),
       String(row.nMalattia),
       String(row.nFerie),
+      String(row.nRiposo ?? 0),
     ]),
   ]
 
@@ -241,6 +245,7 @@ function riepilogoRowFromArray(row) {
     absences: row?.[4] ?? '',
     sick: row?.[5] ?? '',
     ferie: row?.[6] ?? '',
+    riposo: row?.[7] ?? '',
   }
 }
 

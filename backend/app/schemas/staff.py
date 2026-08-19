@@ -3,7 +3,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-EntryKind = Literal["shift", "permission", "absence", "sick", "ferie"]
+EntryKind = Literal["shift", "permission", "absence", "sick", "ferie", "riposo"]
+ALL_DAY_ENTRY_KINDS = ("absence", "sick", "ferie", "riposo")
 
 
 def _strip_opt(v: Optional[str]) -> Optional[str]:
