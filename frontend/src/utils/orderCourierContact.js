@@ -73,6 +73,12 @@ export function isCourierRestDayToday(carrier, today = new Date()) {
   return restDay === today.getDay()
 }
 
+export function getRestDayLabel(restDay) {
+  const day = normalizeRestDay(restDay)
+  if (day == null) return null
+  return COURIER_WEEKDAY_OPTIONS.find((opt) => opt.value === day)?.label || null
+}
+
 /**
  * Semaforo stato trasportatore:
  * - green: attivo e in servizio

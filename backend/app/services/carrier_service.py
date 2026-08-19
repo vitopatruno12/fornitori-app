@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,27 @@ from ..models.carrier import (
     CarrierOtherExpense,
 )
 from ..schemas import carriers as sch
+
+APP_TIMEZONE = ZoneInfo("Europe/Rome")
+
+
+def js_weekday_today() -> int:
+    """Giorno settimana stile JavaScript Date#getDay (0=Dom … 6=Sab) in fuso Europe/Rome."""
+    now = datetime.now(APP_TIMEZONE)
+    return (now.weekday() + 1) % 7
+
+
+def is_carrier_rest_day_today(rest_day: Optional[int]) -> bool:
+    if rest_day is None:
+        return False
+    return int(rest_day) == js_weekday_today()
+
+
+def _ensure_can_enter_service(row: Carrier) -> None:
+    if not row.is_active or row.out_of_service:
+        raise ValueError("Trasportatore non operativo")
+    if is_carrier_rest_day_today(row.rest_day):
+        raise ValueError("Trasportatore in giorno di riposo")
 
 
 def list_carriers(db: Session, active_only: bool = False) -> List[Carrier]:
@@ -36,6 +58,8 @@ def create_carrier(db: Session, payload: sch.CarrierCreate) -> Carrier:
     if data.get("out_of_service"):
         data["is_active"] = False
         data["in_service"] = False
+    if data.get("in_service") and is_carrier_rest_day_today(data.get("rest_day")):
+        data["in_service"] = False
     if data.get("in_service"):
         _clear_in_service(db)
     row = Carrier(**data)
@@ -57,6 +81,9 @@ def update_carrier(db: Session, carrier_id: int, payload: sch.CarrierUpdate) -> 
         data["in_service"] = False
     if data.get("in_service") is True:
         _clear_in_service(db, except_id=carrier_id)
+    rest_day = data.get("rest_day", row.rest_day)
+    if data.get("in_service") is True and is_carrier_rest_day_today(rest_day):
+        data["in_service"] = False
     for key, value in data.items():
         setattr(row, key, value)
     db.commit()
@@ -78,12 +105,7 @@ def set_in_service(db: Session, carrier_id: int, value: bool = True) -> Optional
     if not row:
         return None
     if value:
-        if not row.is_active or row.out_of_service:
-            raise ValueError("Trasportatore non operativo")
-        # Allinea a Date#getDay JS: 0=Domenica … 6=Sabato
-        js_today = (date.today().weekday() + 1) % 7
-        if row.rest_day is not None and row.rest_day == js_today:
-            raise ValueError("Trasportatore in giorno di riposo")
+        _ensure_can_enter_service(row)
         _clear_in_service(db, except_id=carrier_id)
         row.in_service = True
     else:

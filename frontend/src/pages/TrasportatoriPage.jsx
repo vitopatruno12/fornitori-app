@@ -18,6 +18,8 @@ import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   COURIER_WEEKDAY_OPTIONS,
   getCourierTrafficStatus,
+  getRestDayLabel,
+  isCourierRestDayToday,
 } from '../utils/orderCourierContact.js'
 import CarrierAttributeTable from '../components/CarrierAttributeTable.jsx'
 import {
@@ -143,6 +145,13 @@ export default function TrasportatoriPage({ operatorMode = false }) {
     return src ? getCourierTrafficStatus(mapCarrierForStatus(src)) : null
   }, [detail, list, selectedId])
 
+  const formRestingToday = useMemo(
+    () => isCourierRestDayToday({ restDay: form.rest_day === '' ? null : Number(form.rest_day) }),
+    [form.rest_day],
+  )
+
+  const formRestDayLabel = useMemo(() => getRestDayLabel(form.rest_day), [form.rest_day])
+
   const dashboardStats = useMemo(() => {
     let green = 0
     let yellow = 0
@@ -196,13 +205,14 @@ export default function TrasportatoriPage({ operatorMode = false }) {
     setSaving(true)
     setError('')
     setSuccess('')
+    const restingToday = isCourierRestDayToday({ restDay: form.rest_day === '' ? null : Number(form.rest_day) })
     const payload = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
       is_active: form.out_of_service ? false : Boolean(form.is_active),
       out_of_service: Boolean(form.out_of_service),
-      in_service: form.out_of_service || !form.is_active ? false : Boolean(form.in_service),
+      in_service: restingToday || form.out_of_service || !form.is_active ? false : Boolean(form.in_service),
       rest_day: form.rest_day === '' ? null : Number(form.rest_day),
       van_label: form.van_label.trim() || null,
       van_plate: form.van_plate.trim() || null,
@@ -441,16 +451,39 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                 </div>
               </div>
               <div className="form-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+                {formRestingToday ? (
+                  <p className="alert alert-warning" style={{ flex: '1 1 100%', margin: 0, fontSize: '0.86rem' }}>
+                    Oggi è giorno di riposo{formRestDayLabel ? ` (${formRestDayLabel})` : ''}: il trasportatore compare come{' '}
+                    <strong>Riposo</strong> e non può andare «In servizio». Domani torna disponibile automaticamente.{' '}
+                    <strong>Fuori servizio</strong> è un’impostazione manuale separata: toglila se l’avevi attivata per errore.
+                  </p>
+                ) : null}
                 <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
                   <input type="checkbox" checked={form.is_active && !form.out_of_service} disabled={form.out_of_service} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
                   Attivo
                 </label>
                 <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
-                  <input type="checkbox" checked={form.out_of_service} onChange={(e) => setForm((f) => ({ ...f, out_of_service: e.target.checked, is_active: e.target.checked ? false : f.is_active, in_service: false }))} />
+                  <input
+                    type="checkbox"
+                    checked={form.out_of_service}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        out_of_service: e.target.checked,
+                        is_active: e.target.checked ? false : true,
+                        in_service: false,
+                      }))
+                    }
+                  />
                   Fuori servizio
                 </label>
                 <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
-                  <input type="checkbox" checked={form.in_service} disabled={form.out_of_service || !form.is_active} onChange={(e) => setForm((f) => ({ ...f, in_service: e.target.checked }))} />
+                  <input
+                    type="checkbox"
+                    checked={form.in_service}
+                    disabled={formRestingToday || form.out_of_service || !form.is_active}
+                    onChange={(e) => setForm((f) => ({ ...f, in_service: e.target.checked }))}
+                  />
                   In servizio
                 </label>
               </div>
@@ -462,7 +495,14 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvataggio…' : 'Salva anagrafica'}</button>
                 {editingId ? (
                   <>
-                    <button type="button" className="btn btn-secondary" onClick={() => handleToggleInService(editingId, true)}>Metti in servizio</button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={formRestingToday || form.out_of_service || !form.is_active}
+                      onClick={() => handleToggleInService(editingId, true)}
+                    >
+                      Metti in servizio
+                    </button>
                     <button type="button" className="btn btn-secondary" onClick={() => handleToggleInService(editingId, false)}>Togli servizio</button>
                     <button type="button" className="btn btn-outline-danger" onClick={() => handleDelete(editingId)}>Elimina</button>
                   </>
