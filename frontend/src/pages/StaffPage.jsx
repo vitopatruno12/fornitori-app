@@ -4603,16 +4603,71 @@ export default function StaffPage({ operatorMode = false }) {
               Annulla
             </button>
           )}
+        </form>
+        <div
+          className="staff-section-toolbar"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            alignItems: 'center',
+            marginBottom: '1rem',
+          }}
+        >
+          <div className="btn-group" role="tablist" aria-label="Sezioni personale">
+            {localeSections.map((section) => {
+              const count = members.filter((m) => memberMatchesSection(m, section, localeSections)).length
+              const active = sectionCompareKey(section) === sectionCompareKey(activeSection)
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    setActiveSection(section)
+                    setNewMemberSection(section)
+                  }}
+                >
+                  {section}
+                  {count ? ` (${count})` : ''}
+                </button>
+              )
+            })}
+          </div>
+          <div className="form-group" style={{ marginBottom: 0, display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+            <input
+              className="form-control form-control-sm"
+              style={{ minWidth: 140, maxWidth: 200 }}
+              value={newSectionName}
+              onChange={(e) => setNewSectionName(e.target.value)}
+              placeholder="Nuova sezione"
+              aria-label="Nome nuova sezione"
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleAddLocaleSection}>
+              + Aggiungi sezione
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              onClick={handleRemoveActiveSection}
+              disabled={localeSections.length <= 1}
+              title="Elimina la sezione attiva se non ha dipendenti assegnati"
+            >
+              Elimina sezione
+            </button>
+          </div>
           <button
             type="button"
-            className="btn btn-outline-danger"
+            className="btn btn-outline-danger btn-sm"
             disabled={members.length === 0 || shiftBusy || demoLoading || reportLoading}
             onClick={() => void handleDeleteAllMembers()}
             title="Rimuove tutti i dipendenti: serve il codice zona se il locale selezionato è protetto"
           >
             Elimina elenco dipendenti
           </button>
-        </form>
+        </div>
         <div
           style={{
             display: 'flex',
@@ -4775,60 +4830,6 @@ export default function StaffPage({ operatorMode = false }) {
             Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: apri con <strong>Accedi</strong> (come in Prima Nota) e
             chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
           </p>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-            alignItems: 'center',
-            marginBottom: '0.75rem',
-          }}
-        >
-          <div className="btn-group" role="tablist" aria-label="Sezioni personale">
-            {localeSections.map((section) => {
-              const count = members.filter((m) => memberMatchesSection(m, section, localeSections)).length
-              const active = sectionCompareKey(section) === sectionCompareKey(activeSection)
-              return (
-                <button
-                  key={section}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => {
-                    setActiveSection(section)
-                    setNewMemberSection(section)
-                  }}
-                >
-                  {section}
-                  {count ? ` (${count})` : ''}
-                </button>
-              )
-            })}
-          </div>
-          <div className="form-group" style={{ marginBottom: 0, display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-            <input
-              className="form-control form-control-sm"
-              style={{ minWidth: 140, maxWidth: 200 }}
-              value={newSectionName}
-              onChange={(e) => setNewSectionName(e.target.value)}
-              placeholder="Nuova sezione"
-              aria-label="Nome nuova sezione"
-            />
-            <button type="button" className="btn btn-secondary btn-sm" onClick={handleAddLocaleSection}>
-              + Aggiungi sezione
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-danger btn-sm"
-              onClick={handleRemoveActiveSection}
-              disabled={localeSections.length <= 1}
-              title="Elimina la sezione attiva se non ha dipendenti assegnati"
-            >
-              Elimina sezione
-            </button>
-          </div>
         </div>
         <div className="workbook-card-nested">
           <div className="pagamenti-workbook-toolbar">
