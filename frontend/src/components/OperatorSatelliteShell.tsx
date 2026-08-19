@@ -184,6 +184,15 @@ export default function OperatorSatelliteShell({
   const [loginError, setLoginError] = React.useState('')
   const [showPassword, setShowPassword] = React.useState(false)
   const [isLoggingIn, setIsLoggingIn] = React.useState(false)
+  const [compactHeaderActions, setCompactHeaderActions] = React.useState(false)
+
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1100px)')
+    const apply = () => setCompactHeaderActions(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
 
   React.useEffect(() => {
     document.title = documentTitle
@@ -283,7 +292,7 @@ export default function OperatorSatelliteShell({
               {headerSubtitle ? <span>{headerSubtitle}</span> : null}
             </div>
             <div className="operator-order-header-actions">
-              <AtlasUpdateButton />
+              <AtlasUpdateButton iconOnly={compactHeaderActions} />
               <button type="button" className="btn btn-secondary btn-sm operator-order-logout" onClick={handleLogout}>
                 Esci
               </button>

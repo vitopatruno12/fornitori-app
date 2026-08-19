@@ -5691,8 +5691,9 @@ select.form-control {
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0.85rem 1.5rem 1.1rem;
+  padding: 0.85rem max(1.5rem, env(safe-area-inset-right, 0px)) 1.1rem max(1.5rem, env(safe-area-inset-left, 0px));
   box-sizing: border-box;
+  overflow: visible;
 }
 
 .operator-order-header {
@@ -6018,8 +6019,46 @@ select.form-control {
   }
 
   .operator-station-band-inner {
-    padding: 0.65rem 1.25rem 0.95rem;
+    padding: 0.65rem max(1.25rem, env(safe-area-inset-right, 0px)) 0.95rem max(1.25rem, env(safe-area-inset-left, 0px));
     overflow: visible;
+  }
+
+  .operator-order-header {
+    row-gap: 0.55rem;
+  }
+
+  .operator-order-header-text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .operator-order-header-actions {
+    margin-left: 0;
+    flex: 1 1 100%;
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .operator-order-header-actions .atlas-update-btn {
+    border-color: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    max-width: 100%;
+  }
+
+  .operator-order-header-actions .atlas-update-btn--fab {
+    min-width: 2.35rem;
+    min-height: 2.35rem;
+    padding: 0.4rem;
+  }
+
+  .operator-order-logout {
+    width: auto;
+    min-width: 4.25rem;
+    flex-shrink: 0;
   }
 
   .operator-satellite-nav::-webkit-scrollbar {
@@ -6244,7 +6283,8 @@ select.form-control {
   }
 
   .operator-order-logout {
-    width: 100%;
+    width: auto;
+    min-width: 4.25rem;
   }
 
   .prima-nota-locale-add-row {
