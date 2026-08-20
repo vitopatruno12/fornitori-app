@@ -1,5 +1,4 @@
 import {
-  ensureHttpsUrl,
   getOperatorDeliveryPublicUrl,
   getOperatorOrderPublicUrl,
   getOperatorPrimaNotaPublicUrl,
@@ -13,8 +12,30 @@ export const OPERATOR_LINKS_WORKBOOK_TITLE = 'Link operatori'
  * @returns {Array<{ id: string, section: string, label: string, description: string, url: string }>}
  */
 export function buildOperatorLinksCatalog() {
-  const deliveryBase = getOperatorDeliveryPublicUrl()
+  const deliveryBase = getOperatorDeliveryPublicUrl('overview')
   return [
+    {
+      id: 'carrier-station',
+      section: 'Postazione trasportatore',
+      label: 'Panoramica trasportatore',
+      description:
+        'Link ATLAS per il trasportatore: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino) e Storico consegne.',
+      url: deliveryBase,
+    },
+    {
+      id: 'carrier-delivery',
+      section: 'Postazione trasportatore',
+      label: 'Nuova consegna',
+      description: 'Apre la postazione trasportatore direttamente su Nuova consegna (menu a tendina Magazzino/Trasportatori).',
+      url: getOperatorDeliveryPublicUrl('new-delivery'),
+    },
+    {
+      id: 'carrier-history',
+      section: 'Postazione trasportatore',
+      label: 'Storico consegne',
+      description: 'Apre lo storico consegne nella postazione trasportatore.',
+      url: getOperatorDeliveryPublicUrl('history'),
+    },
     {
       id: 'station-overview',
       section: 'Postazione operativa',
@@ -106,30 +127,6 @@ export function buildOperatorLinksCatalog() {
       description:
         'Pagina dedicata solo agli ordini fornitore: stessa schermata Nuovo ordine, senza il resto del gestionale.',
       url: getOperatorOrderPublicUrl(),
-    },
-    {
-      id: 'delivery-new',
-      section: 'Consegne',
-      label: 'Nuova consegna',
-      description:
-        'Satellite consegne: registrazione DDT e merce in ingresso. Include schede per storico e magazzino nello stesso link base.',
-      url: deliveryBase,
-    },
-    {
-      id: 'delivery-history',
-      section: 'Consegne',
-      label: 'Storico consegne',
-      description:
-        'Apre il satellite consegne sulla scheda storico: ricerca, analisi prezzi e note consegne.',
-      url: ensureHttpsUrl(`${deliveryBase}?pagina=storico`),
-    },
-    {
-      id: 'delivery-magazzino',
-      section: 'Consegne',
-      label: 'Magazzino',
-      description:
-        'Apre il satellite consegne sul magazzino: entrata/uscita merce con operatore, firma e tracciamento sede.',
-      url: ensureHttpsUrl(`${deliveryBase}?pagina=magazzino`),
     },
     {
       id: 'prima-nota-only',

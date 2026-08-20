@@ -14,7 +14,13 @@ export const OPERATOR_STATION_PATH = '/operatore-postazione'
 const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
-export type OperatorDeliveryView = 'new-delivery' | 'history' | 'magazzino'
+export type OperatorDeliveryView =
+  | 'overview'
+  | 'suppliers'
+  | 'new-delivery'
+  | 'history'
+  | 'magazzino'
+  | 'trasportatori'
 export type OperatorStationView =
   | 'overview'
   | 'suppliers'
@@ -207,8 +213,34 @@ export function getOperatorStationView(): OperatorStationView {
   return 'overview'
 }
 
+const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
+  panoramica: 'overview',
+  overview: 'overview',
+  fornitori: 'suppliers',
+  suppliers: 'suppliers',
+  consegna: 'new-delivery',
+  'nuova-consegna': 'new-delivery',
+  delivery: 'new-delivery',
+  storico: 'history',
+  history: 'history',
+  'storico-consegne': 'history',
+  magazzino: 'magazzino',
+  trasportatori: 'trasportatori',
+  trasportatore: 'trasportatori',
+  corrieri: 'trasportatori',
+}
+
+const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
+  overview: null,
+  suppliers: 'fornitori',
+  'new-delivery': 'consegna',
+  history: 'storico',
+  magazzino: 'magazzino',
+  trasportatori: 'trasportatori',
+}
+
 export function getOperatorDeliveryView(): OperatorDeliveryView {
-  if (typeof window === 'undefined') return 'new-delivery'
+  if (typeof window === 'undefined') return 'overview'
   const path = normalizePathname()
   const hash = normalizeHash()
   if (
@@ -219,18 +251,24 @@ export function getOperatorDeliveryView(): OperatorDeliveryView {
     return 'history'
   }
   const q = new URLSearchParams(window.location.search)
-  if (q.get('pagina') === 'storico') return 'history'
-  if (q.get('pagina') === 'magazzino') return 'magazzino'
-  return 'new-delivery'
+  const raw = String(q.get('pagina') || q.get('sezione') || '')
+    .trim()
+    .toLowerCase()
+  if (raw && DELIVERY_VIEW_BY_PAGINA[raw]) return DELIVERY_VIEW_BY_PAGINA[raw]
+  return 'overview'
 }
 
 export function getOperatorOrderPublicUrl(): string {
   return buildPublicUrl(OPERATOR_ORDER_PATH)
 }
 
-/** Un solo link da condividere: apre Nuova consegna e Storico (schede in pagina). */
-export function getOperatorDeliveryPublicUrl(): string {
-  return buildPublicUrl(OPERATOR_DELIVERY_PATH)
+/** Link postazione trasportatore (panoramica / fornitori / consegne). */
+export function getOperatorDeliveryPublicUrl(view: OperatorDeliveryView = 'overview'): string {
+  const base = buildPublicUrl(OPERATOR_DELIVERY_PATH)
+  const pagina = DELIVERY_PAGINA_BY_VIEW[view]
+  if (!pagina) return base
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}pagina=${pagina}`
 }
 
 export function getOperatorPrimaNotaPublicUrl(): string {
@@ -262,9 +300,6 @@ export function syncOperatorStationViewInUrl(view: OperatorStationView): void {
 /** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia scheda; resta sullo stesso percorso base. */
 export function syncOperatorDeliveryViewInUrl(view: OperatorDeliveryView): void {
   if (typeof window === 'undefined') return
-  const base = getOperatorDeliveryPublicUrl()
-  const url = ensureHttpsUrl(
-    view === 'history' ? `${base}?pagina=storico` : view === 'magazzino' ? `${base}?pagina=magazzino` : base,
-  )
+  const url = ensureHttpsUrl(getOperatorDeliveryPublicUrl(view))
   window.history.replaceState(null, '', url)
 }
