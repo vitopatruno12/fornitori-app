@@ -69,7 +69,6 @@ import {
   OPERATOR_ORDER_PATH,
   OPERATOR_PRIMA_NOTA_PATH,
   OPERATOR_STATION_PATH,
-  getOperatorStationPublicUrl,
   getOperatorStationRouterPath,
   getOperatorStationView,
   isOperatorStationLocked,
