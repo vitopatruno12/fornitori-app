@@ -1,0 +1,33 @@
+{
+  "id": "/operatore-consegne",
+  "name": "ATLAS — Postazione trasportatore",
+  "short_name": "ATLAS Consegne",
+  "description": "Postazione trasportatore ATLAS: panoramica, fornitori, nuova consegna e storico. Credenziali dedicate al link consegne.",
+  "theme_color": "#1e3a5f",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "orientation": "any",
+  "scope": "/",
+  "start_url": "/operatore-consegne",
+  "lang": "it",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

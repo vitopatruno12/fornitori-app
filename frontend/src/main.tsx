@@ -1,6 +1,6 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { validateAtlasMainLogin, looksLikeOperatorCredentials } from './utils/atlasAuth'
+import { validateAtlasMainLogin, looksLikeCarrierCredentials, looksLikeOperatorCredentials } from './utils/atlasAuth'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './style.css'
@@ -76,7 +76,14 @@ import {
   setOperatorStationLock,
   shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
-import { markOperatorPwaLaunchPreferred, prefersOperatorPwaLaunch, shouldRedirectStandaloneToOperatorStation } from './utils/pwaManifest.ts'
+import {
+  markCarrierPwaLaunchPreferred,
+  markOperatorPwaLaunchPreferred,
+  prefersCarrierPwaLaunch,
+  prefersOperatorPwaLaunch,
+  shouldRedirectStandaloneToCarrierDelivery,
+  shouldRedirectStandaloneToOperatorStation,
+} from './utils/pwaManifest.ts'
 
 const ATLAS_MAIN_SESSION_KEY = 'atlasAuthMain'
 
@@ -673,6 +680,11 @@ function App() {
     navigate(getOperatorStationRouterPath('overview'), { replace: true })
   }
 
+  function goToCarrierDeliveryLogin() {
+    markCarrierPwaLaunchPreferred()
+    navigate(OPERATOR_DELIVERY_PATH, { replace: true })
+  }
+
   function handleLoginSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (isLoggingIn) return
@@ -686,6 +698,11 @@ function App() {
     if (looksLikeOperatorCredentials(u, p)) {
       setLoginError('')
       goToOperatorStationLogin()
+      return
+    }
+    if (looksLikeCarrierCredentials(u, p)) {
+      setLoginError('')
+      goToCarrierDeliveryLogin()
       return
     }
     if (!validateAtlasMainLogin(u, p)) {
@@ -1056,13 +1073,21 @@ function MainAppGate() {
     return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
   }
 
-  // App installata (standalone): se era postazione operativa, non aprire il login gestionale.
-  if (
-    isStandalone &&
-    (location.pathname === '/' || location.pathname === '') &&
-    (shouldOpenOperatorStation() || prefersOperatorPwaLaunch() || shouldRedirectStandaloneToOperatorStation(location.pathname))
-  ) {
-    return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
+  // App installata (standalone): se era postazione operativa / trasportatore, non aprire il login gestionale.
+  if (isStandalone && (location.pathname === '/' || location.pathname === '')) {
+    if (
+      prefersCarrierPwaLaunch() ||
+      shouldRedirectStandaloneToCarrierDelivery(location.pathname)
+    ) {
+      return <Navigate to={OPERATOR_DELIVERY_PATH} replace />
+    }
+    if (
+      shouldOpenOperatorStation() ||
+      prefersOperatorPwaLaunch() ||
+      shouldRedirectStandaloneToOperatorStation(location.pathname)
+    ) {
+      return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
+    }
   }
 
   return <App />

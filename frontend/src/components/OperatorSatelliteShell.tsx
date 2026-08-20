@@ -1,12 +1,15 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { validateAtlasOperatorLogin } from '../utils/atlasAuth'
+import { type OperatorAuthMode, validateOperatorAuthMode } from '../utils/atlasAuth'
 import { setOperatorStationLock } from '../utils/operatorMode.ts'
 import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './AtlasUpdateButton.jsx'
 
-const ATLAS_OPERATOR_SESSION_KEY = 'atlasAuthOperator'
+const SESSION_KEY_BY_MODE: Record<OperatorAuthMode, string> = {
+  operator: 'atlasAuthOperator',
+  carrier: 'atlasAuthCarrier',
+}
 
 export type OperatorNavItem = {
   id: string
@@ -160,6 +163,8 @@ type OperatorSatelliteShellProps = {
   headerSubtitle?: string
   nav?: OperatorNavItem[]
   stationOnly?: boolean
+  /** Credenziali: postazione operativa oppure postazione trasportatore. */
+  authMode?: OperatorAuthMode
   children: React.ReactNode
 }
 
@@ -170,11 +175,13 @@ export default function OperatorSatelliteShell({
   headerSubtitle = 'Collegato al gestionale ATLAS — salvataggio sullo stesso database',
   nav,
   stationOnly = false,
+  authMode = 'operator',
   children,
 }: OperatorSatelliteShellProps) {
+  const sessionKey = SESSION_KEY_BY_MODE[authMode]
   const [isAuthenticated, setIsAuthenticated] = React.useState(() => {
     try {
-      return sessionStorage.getItem(ATLAS_OPERATOR_SESSION_KEY) === '1'
+      return sessionStorage.getItem(sessionKey) === '1'
     } catch {
       return false
     }
@@ -200,11 +207,11 @@ export default function OperatorSatelliteShell({
 
   React.useEffect(() => {
     try {
-      sessionStorage.setItem(ATLAS_OPERATOR_SESSION_KEY, isAuthenticated ? '1' : '0')
+      sessionStorage.setItem(sessionKey, isAuthenticated ? '1' : '0')
     } catch {
       /* ignore */
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, sessionKey])
 
   function handleLoginSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -215,7 +222,7 @@ export default function OperatorSatelliteShell({
       setLoginError('Inserisci username e password')
       return
     }
-    if (!validateAtlasOperatorLogin(u, p)) {
+    if (!validateOperatorAuthMode(authMode, u, p)) {
       setLoginError('Username o password non corretti')
       return
     }

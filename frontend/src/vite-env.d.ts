@@ -16,6 +16,10 @@ interface ImportMetaEnv {
   readonly VITE_OPERATOR_LOGIN_USER?: string
   /** Password login satelliti / postazione operativa */
   readonly VITE_OPERATOR_LOGIN_PASSWORD?: string
+  /** Username login postazione trasportatore (/operatore-consegne) */
+  readonly VITE_CARRIER_LOGIN_USER?: string
+  /** Password login postazione trasportatore */
+  readonly VITE_CARRIER_LOGIN_PASSWORD?: string
 }
 
 interface ImportMeta {

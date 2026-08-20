@@ -11,6 +11,7 @@ import {
   syncOperatorDeliveryViewInUrl,
   type OperatorDeliveryView,
 } from './utils/operatorMode.ts'
+import { applyContextPwaManifest, markCarrierPwaLaunchPreferred } from './utils/pwaManifest.ts'
 
 const DELIVERY_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'trasportatori', label: 'Trasportatori' },
@@ -30,6 +31,11 @@ const TITLES: Record<OperatorDeliveryView, string> = {
 
 export default function OperatorDeliveryApp() {
   const [view, setView] = React.useState<OperatorDeliveryView>(() => getOperatorDeliveryView())
+
+  React.useEffect(() => {
+    markCarrierPwaLaunchPreferred()
+    applyContextPwaManifest()
+  }, [])
 
   const setDeliveryView = React.useCallback((next: OperatorDeliveryView) => {
     setView(next)
@@ -84,8 +90,9 @@ export default function OperatorDeliveryApp() {
 
   return (
     <OperatorSatelliteShell
+      authMode="carrier"
       documentTitle={`ATLAS — ${headerTitle} (trasportatore)`}
-      loginHint="Accesso postazione trasportatore — panoramica, fornitori, nuova consegna e storico"
+      loginHint="Accesso postazione trasportatore (credenziali Simone) — panoramica, fornitori, nuova consegna e storico"
       headerTitle="Postazione trasportatore"
       headerSubtitle=""
       nav={[
