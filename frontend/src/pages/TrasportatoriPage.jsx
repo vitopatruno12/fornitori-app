@@ -329,7 +329,7 @@ export default function TrasportatoriPage({ operatorMode = false }) {
   }
 
   return (
-    <div>
+    <div className="carriers-page">
       <section className="staff-page-hero">
         <div className="delivery-hero-row">
           <div className="delivery-hero-copy">
@@ -357,47 +357,46 @@ export default function TrasportatoriPage({ operatorMode = false }) {
       {loading && <AnalisiLoadingBar active label="Caricamento trasportatori" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      <section className="card" style={{ marginBottom: '1rem', padding: '0.85rem' }}>
-        <div style={{ display: 'grid', gap: '0.6rem', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-          <div style={{ border: '1px solid var(--border-subtle, rgba(0,0,0,0.08))', borderRadius: 8, padding: '0.6rem' }}>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Totale trasportatori</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{dashboardStats.total}</div>
+      <section className="card carriers-kpi-card">
+        <div className="carriers-kpi-grid">
+          <div className="carriers-kpi">
+            <div className="carriers-kpi-label">Totale trasportatori</div>
+            <div className="carriers-kpi-value">{dashboardStats.total}</div>
           </div>
-          <div style={{ border: `1px solid ${TRAFFIC.green}44`, borderRadius: 8, padding: '0.6rem' }}>
-            <div style={{ fontSize: '0.78rem', color: TRAFFIC.green }}>Verde · in servizio</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: TRAFFIC.green }}>{dashboardStats.green}</div>
+          <div className="carriers-kpi carriers-kpi--green">
+            <div className="carriers-kpi-label" style={{ color: TRAFFIC.green }}>Verde · in servizio</div>
+            <div className="carriers-kpi-value" style={{ color: TRAFFIC.green }}>{dashboardStats.green}</div>
           </div>
-          <div style={{ border: `1px solid ${TRAFFIC.yellow}44`, borderRadius: 8, padding: '0.6rem' }}>
-            <div style={{ fontSize: '0.78rem', color: TRAFFIC.yellow }}>Giallo · disponibile</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: TRAFFIC.yellow }}>{dashboardStats.yellow}</div>
+          <div className="carriers-kpi carriers-kpi--yellow">
+            <div className="carriers-kpi-label" style={{ color: TRAFFIC.yellow }}>Giallo · disponibile</div>
+            <div className="carriers-kpi-value" style={{ color: TRAFFIC.yellow }}>{dashboardStats.yellow}</div>
           </div>
-          <div style={{ border: `1px solid ${TRAFFIC.red}44`, borderRadius: 8, padding: '0.6rem' }}>
-            <div style={{ fontSize: '0.78rem', color: TRAFFIC.red }}>Rosso · non operativo</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: TRAFFIC.red }}>{dashboardStats.red}</div>
+          <div className="carriers-kpi carriers-kpi--red">
+            <div className="carriers-kpi-label" style={{ color: TRAFFIC.red }}>Rosso · non operativo</div>
+            <div className="carriers-kpi-value" style={{ color: TRAFFIC.red }}>{dashboardStats.red}</div>
           </div>
         </div>
       </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 320px) 1fr', gap: '1rem', alignItems: 'start' }}>
-        <section className="card">
+      <div className="carriers-layout">
+        <section className="card carriers-list-panel">
           <h2 className="page-subheader" style={{ marginTop: 0 }}>Elenco</h2>
           {!list.length && !loading ? (
             <p className="empty-state">Nessun trasportatore. Creane uno.</p>
           ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            <ul className="carriers-list">
               {list.map((c) => {
                 const st = getCourierTrafficStatus(mapCarrierForStatus(c))
                 const active = String(selectedId) === String(c.id)
                 return (
-                  <li key={c.id} style={{ marginBottom: '0.45rem' }}>
+                  <li key={c.id}>
                     <button
                       type="button"
-                      className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}
+                      className={`btn btn-sm carriers-list-btn ${active ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => startEdit(c)}
                     >
-                      <span>{c.name}</span>
-                      <span style={{ color: TRAFFIC[st.color], fontWeight: 700 }}>{st.label}</span>
+                      <span className="carriers-list-name">{c.name}</span>
+                      <span className="carriers-list-status" style={{ color: TRAFFIC[st.color] }}>{st.label}</span>
                     </button>
                   </li>
                 )
@@ -406,9 +405,9 @@ export default function TrasportatoriPage({ operatorMode = false }) {
           )}
         </section>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="carriers-detail-panel">
           <section className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="carriers-detail-header">
               <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
                 {editingId ? 'Modifica anagrafica' : 'Nuovo trasportatore'}
               </h2>
@@ -450,7 +449,7 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                   </select>
                 </div>
               </div>
-              <div className="form-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+              <div className="form-row carriers-flags-row">
                 {formRestingToday ? (
                   <p className="alert alert-warning" style={{ flex: '1 1 100%', margin: 0, fontSize: '0.86rem' }}>
                     Oggi è giorno di riposo{formRestDayLabel ? ` (${formRestDayLabel})` : ''}: il trasportatore compare come{' '}
@@ -458,11 +457,11 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                     <strong>Fuori servizio</strong> è un’impostazione manuale separata: toglila se l’avevi attivata per errore.
                   </p>
                 ) : null}
-                <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
+                <label className="carriers-flag">
                   <input type="checkbox" checked={form.is_active && !form.out_of_service} disabled={form.out_of_service} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
                   Attivo
                 </label>
-                <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
+                <label className="carriers-flag">
                   <input
                     type="checkbox"
                     checked={form.out_of_service}
@@ -477,7 +476,7 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                   />
                   Fuori servizio
                 </label>
-                <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', margin: 0 }}>
+                <label className="carriers-flag">
                   <input
                     type="checkbox"
                     checked={form.in_service}
@@ -491,7 +490,7 @@ export default function TrasportatoriPage({ operatorMode = false }) {
                 <label>Note / disponibilità</label>
                 <textarea className="form-control" rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div className="carriers-actions">
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvataggio…' : 'Salva anagrafica'}</button>
                 {editingId ? (
                   <>

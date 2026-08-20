@@ -5849,6 +5849,8 @@ select.form-control {
 .operator-order-main {
   flex: 1;
   padding-top: 1rem;
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .operator-station-band .operator-satellite-nav {
@@ -7650,6 +7652,8 @@ select.form-control {
 
 .carriers-attr-table-card {
   padding: 0.85rem;
+  overflow: visible;
+  min-width: 0;
 }
 
 .carriers-attr-table-header {
@@ -7661,8 +7665,15 @@ select.form-control {
   flex-wrap: wrap;
 }
 
+.carriers-attr-table-card .pagamenti-grid-wrap.excel-wrap {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
 .carriers-attr-table {
-  min-width: 100%;
+  min-width: 520px;
   width: 100%;
 }
 
@@ -7682,6 +7693,150 @@ select.form-control {
 .carriers-attr-table .carriers-draft-row .excel-cell:focus {
   background: #fff;
   outline: 2px solid rgba(15, 76, 92, 0.28);
+}
+
+/* Layout pagina Trasportatori: desktop a 2 colonne, tablet 10" in colonna */
+.carriers-page {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.carriers-kpi-card {
+  margin-bottom: 1rem;
+  padding: 0.85rem;
+}
+
+.carriers-kpi-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.carriers-kpi {
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  padding: 0.6rem;
+  min-width: 0;
+}
+
+.carriers-kpi-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.carriers-kpi-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.carriers-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.carriers-list-panel,
+.carriers-detail-panel {
+  min-width: 0;
+}
+
+.carriers-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.carriers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.carriers-list-btn {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.carriers-list-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carriers-list-status {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.carriers-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.carriers-flags-row {
+  flex-wrap: wrap;
+  gap: 0.85rem 1rem;
+  align-items: center;
+}
+
+.carriers-flag {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0;
+}
+
+.carriers-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1199px) {
+  .carriers-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .carriers-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .carriers-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .carriers-page .staff-page-lead {
+    max-width: none;
+  }
+
+  .operator-order-main .carriers-page {
+    padding-bottom: 1.25rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .carriers-kpi-grid,
+  .carriers-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .mastrini-fit-panel .workbook-grid-wrap,
