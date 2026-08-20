@@ -129,19 +129,45 @@ function courierWhatsAppTargets({ couriers, phones }) {
 function openOrderEmailClient({ supplierEmail, courierEmail, sendCopyToCourier, subject, body, courierBody }) {
   const to = String(supplierEmail || '').trim()
   if (!to) throw new Error('Email fornitore mancante in anagrafica')
-  const params = new URLSearchParams()
-  params.set('subject', subject)
-  const emailBody =
-    sendCopyToCourier && courierBody ? `${body}\n\n---\n\n${courierBody}` : body
-  params.set('body', emailBody)
+  let emailBody =
+    sendCopyToCourier && courierBody ? `${body}\n\n---\n\n${courierBody}` : String(body || '')
   const cc = sendCopyToCourier
     ? (Array.isArray(courierEmail) ? courierEmail : [courierEmail])
         .map((e) => String(e || '').trim())
         .filter(Boolean)
         .join(',')
     : ''
-  if (cc) params.set('cc', cc)
-  window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString()}`
+  const buildHref = (bodyText) => {
+    const parts = [
+      `subject=${encodeURIComponent(String(subject || ''))}`,
+      `body=${encodeURIComponent(bodyText)}`,
+    ]
+    if (cc) parts.push(`cc=${encodeURIComponent(cc)}`)
+    return `mailto:${to}?${parts.join('&')}`
+  }
+  // Windows/Outlook ~2000 char limit on mailto URLs
+  const MAX_MAILTO = 1800
+  const notice = '\n\n[…testo troncato: apri il PDF ordine per il dettaglio completo]'
+  let href = buildHref(emailBody)
+  if (href.length > MAX_MAILTO) {
+    let lo = 0
+    let hi = emailBody.length
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2)
+      const candidate = `${emailBody.slice(0, mid)}${notice}`
+      if (buildHref(candidate).length <= MAX_MAILTO) lo = mid
+      else hi = mid - 1
+    }
+    emailBody = lo > 0 ? `${emailBody.slice(0, lo)}${notice}` : notice.trim()
+    href = buildHref(emailBody)
+  }
+  const a = document.createElement('a')
+  a.href = href
+  a.rel = 'noopener noreferrer'
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 function formatDateIt(iso) {
@@ -1164,8 +1190,11 @@ export default function NewOrderPage({ operatorMode = false }) {
     })
   }
 
-  function handleEmail() {
+  function handleEmail(e) {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault()
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
     setError('')
+    setSuccess('')
     const em = (selectedSupplier?.email || '').trim()
     if (!em) {
       setError('Email fornitore mancante in anagrafica')
@@ -2203,7 +2232,7 @@ export default function NewOrderPage({ operatorMode = false }) {
             >
               WhatsApp fornitore + trasportatore
             </button>
-            <button type="button" className="btn btn-secondary" onClick={handleEmail} disabled={!supplierId}>
+            <button type="button" className="btn btn-secondary" onClick={(e) => handleEmail(e)} disabled={!supplierId}>
               Invia ordine via email
             </button>
             {!operatorMode && (
