@@ -245,6 +245,13 @@ export function getOperatorStationPublicUrl(view: OperatorStationView = 'overvie
   return `${base}${sep}sezione=${section}`
 }
 
+/** Path relativo per React Router (non URL assoluta https://…). */
+export function getOperatorStationRouterPath(view: OperatorStationView = 'overview'): string {
+  if (view === 'overview') return OPERATOR_STATION_PATH
+  const section = STATION_SECTION_BY_VIEW[view]
+  return `${OPERATOR_STATION_PATH}?sezione=${section}`
+}
+
 /** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia sezione. */
 export function syncOperatorStationViewInUrl(view: OperatorStationView): void {
   if (typeof window === 'undefined') return

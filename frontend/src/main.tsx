@@ -1,6 +1,6 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { validateAtlasMainLogin } from './utils/atlasAuth'
+import { validateAtlasMainLogin, looksLikeOperatorCredentials } from './utils/atlasAuth'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './style.css'
@@ -70,12 +70,14 @@ import {
   OPERATOR_PRIMA_NOTA_PATH,
   OPERATOR_STATION_PATH,
   getOperatorStationPublicUrl,
+  getOperatorStationRouterPath,
   getOperatorStationView,
   isOperatorStationLocked,
+  markOperatorStationEntryPoint,
   setOperatorStationLock,
   shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
-import { prefersOperatorPwaLaunch, shouldRedirectStandaloneToOperatorStation } from './utils/pwaManifest.ts'
+import { markOperatorPwaLaunchPreferred, prefersOperatorPwaLaunch, shouldRedirectStandaloneToOperatorStation } from './utils/pwaManifest.ts'
 
 const ATLAS_MAIN_SESSION_KEY = 'atlasAuthMain'
 
@@ -665,6 +667,13 @@ function App() {
     setAiOpen(false)
   }
 
+  function goToOperatorStationLogin() {
+    markOperatorStationEntryPoint()
+    markOperatorPwaLaunchPreferred()
+    setOperatorStationLock(true)
+    navigate(getOperatorStationRouterPath('overview'), { replace: true })
+  }
+
   function handleLoginSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (isLoggingIn) return
@@ -672,6 +681,12 @@ function App() {
     const p = loginPassword.trim()
     if (!u || !p) {
       setLoginError('Inserisci username e password')
+      return
+    }
+    // Se digiti le credenziali della postazione sul login gestionale, apri la postazione.
+    if (looksLikeOperatorCredentials(u, p)) {
+      setLoginError('')
+      goToOperatorStationLogin()
       return
     }
     if (!validateAtlasMainLogin(u, p)) {
@@ -752,11 +767,17 @@ function App() {
           {(typeof window !== 'undefined' &&
             (window.matchMedia('(display-mode: standalone)').matches ||
               Boolean((navigator as Navigator & { standalone?: boolean }).standalone))) && (
-            <p className="operator-order-login-hint" style={{ marginTop: '0.85rem' }}>
-              Stai cercando la <strong>postazione operativa</strong>?{' '}
-              <a href={OPERATOR_STATION_PATH}>Apri login operatore</a>
-              {' '}(credenziali lemaniinpasta… / brunetti)
-            </p>
+            <div style={{ marginTop: '0.85rem', textAlign: 'center' }}>
+              <p className="operator-order-login-hint" style={{ marginBottom: '0.55rem' }}>
+                Questa schermata è il <strong>gestionale grande</strong> (michele… / andiamo).
+              </p>
+              <button type="button" className="btn btn-primary" onClick={goToOperatorStationLogin}>
+                Apri postazione operativa
+              </button>
+              <p className="operator-order-login-hint" style={{ marginTop: '0.45rem', fontSize: '0.8rem' }}>
+                Credenziali: lemaniinpasta.abba42@gmail.com / brunetti
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -1033,7 +1054,7 @@ function MainAppGate() {
       Boolean((navigator as Navigator & { standalone?: boolean }).standalone))
 
   if (isOperatorStationLocked()) {
-    return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
+    return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
   }
 
   // App installata (standalone): se era postazione operativa, non aprire il login gestionale.
@@ -1042,7 +1063,7 @@ function MainAppGate() {
     (location.pathname === '/' || location.pathname === '') &&
     (shouldOpenOperatorStation() || prefersOperatorPwaLaunch() || shouldRedirectStandaloneToOperatorStation(location.pathname))
   ) {
-    return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
+    return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
   }
 
   return <App />

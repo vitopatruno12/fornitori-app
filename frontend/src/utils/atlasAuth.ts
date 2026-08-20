@@ -23,3 +23,8 @@ export function validateAtlasOperatorLogin(username: string, password: string): 
   const { u, p } = normalizeCredentials(username, password)
   return u === ATLAS_OPERATOR_LOGIN_USER.toLocaleLowerCase('it') && p === ATLAS_OPERATOR_LOGIN_PASSWORD
 }
+
+/** True se l’utente ha digitato le credenziali della postazione (anche sul login gestionale). */
+export function looksLikeOperatorCredentials(username: string, password: string): boolean {
+  return validateAtlasOperatorLogin(username, password)
+}
