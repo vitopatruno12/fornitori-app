@@ -2502,6 +2502,77 @@ select.form-control {
   min-width: 1680px;
 }
 
+.delivery-items-mobile {
+  display: none;
+}
+
+.delivery-item-card {
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius, 8px);
+  padding: 0.75rem;
+  margin: 0.65rem;
+  background: #fff;
+}
+
+.delivery-item-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.delivery-item-card .form-group {
+  margin-bottom: 0.55rem;
+}
+
+.delivery-item-card-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.delivery-items-mobile-hint {
+  margin: 0.35rem 0.75rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.35;
+}
+
+@media (max-width: 640px) {
+  .delivery-items-desktop {
+    display: none !important;
+  }
+
+  .delivery-items-mobile {
+    display: block;
+  }
+
+  .workbook-card-nested:has(.delivery-items-mobile) {
+    overflow: visible;
+  }
+
+  .delivery-hero-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .delivery-order-import-row,
+  .new-delivery-page .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .new-delivery-page .btn-group,
+  .new-delivery-page .btn-group .btn {
+    width: 100%;
+  }
+
+  .app-main {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .prima-nota-movements-grid {
   min-width: 2100px;
 }

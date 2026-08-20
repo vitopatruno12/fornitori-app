@@ -495,7 +495,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   }
 
   return (
-    <div>
+    <div className="new-delivery-page">
       <section className="staff-page-hero">
         <div className="delivery-hero-row">
           <div className="delivery-hero-copy">
@@ -681,7 +681,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                 <span className="pagamenti-workbook-sheet-label">{items.length} righe</span>
               </div>
             </div>
-            <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap">
+            <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap delivery-items-desktop">
               <table className="app-table excel-table pagamenti-grid workbook-grid delivery-items-grid">
                 <colgroup>
                   {DELIVERY_ITEMS_WORKBOOK_COLUMNS.map((col) => (
@@ -806,6 +806,81 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <div className="delivery-items-mobile" aria-label="Prodotti consegnati (vista telefono)">
+              {items.map((item, index) => (
+                <article key={index} className="delivery-item-card">
+                  <header className="delivery-item-card-head">
+                    <strong>Riga {index + 1}</strong>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={() => removeItem(index)}
+                    >
+                      Rimuovi
+                    </button>
+                  </header>
+                  <div className="form-group">
+                    <label>Prodotto / merce</label>
+                    <input
+                      className="form-control"
+                      value={item.product_description}
+                      onChange={(e) => updateItem(index, 'product_description', e.target.value)}
+                      placeholder="Descrizione"
+                    />
+                  </div>
+                  <div className="delivery-item-card-row">
+                    <div className="form-group">
+                      <label>Pezzi / cassette</label>
+                      <input
+                        className="form-control"
+                        type="number"
+                        inputMode="numeric"
+                        value={item.pieces}
+                        onChange={(e) => updateItem(index, 'pieces', e.target.value)}
+                        placeholder="es. 10"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Peso kg (facolt.)</label>
+                      <input
+                        className="form-control"
+                        type="number"
+                        inputMode="decimal"
+                        step="0.001"
+                        value={item.weight_kg}
+                        onChange={(e) => updateItem(index, 'weight_kg', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="delivery-item-card-row">
+                    <div className="form-group">
+                      <label>Prezzo unit. € (facolt.)</label>
+                      <input
+                        className="form-control"
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        value={item.unit_price}
+                        onChange={(e) => updateItem(index, 'unit_price', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Note</label>
+                      <input
+                        className="form-control"
+                        value={item.note}
+                        onChange={(e) => updateItem(index, 'note', e.target.value)}
+                        placeholder="opzionale"
+                      />
+                    </div>
+                  </div>
+                </article>
+              ))}
+              <p className="delivery-items-mobile-hint">
+                Su telefono: inserisci merce e cassette. Peso e prezzo sono facoltativi.
+              </p>
             </div>
           </div>
           <button type="button" className="btn btn-secondary" onClick={addItem} style={{ marginBottom: '1rem' }}>
