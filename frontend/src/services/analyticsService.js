@@ -44,6 +44,20 @@ export async function fetchPosReceiptStats() {
   return apiFetch('/pos-receipts/stats')
 }
 
+export async function fetchPosReceiptSyncStatus() {
+  return apiFetch('/pos-receipts/sync-status')
+}
+
+export async function triggerPosReceiptsGdbSync({ modelId, lookbackHours } = {}) {
+  return apiFetch('/pos-receipts/sync-gdb', {
+    method: 'POST',
+    body: JSON.stringify({
+      model_id: modelId || undefined,
+      lookback_hours: lookbackHours || undefined,
+    }),
+  })
+}
+
 export async function importPosReceiptsCsv(file, { modelId } = {}) {
   const body = new FormData()
   body.append('file', file)

@@ -46,3 +46,6 @@ backend-nest/dist/
 
 # File temporanei git
 .git/COMMIT_MSG_TMP.txt
+
+backend/vendor/firebird/
+

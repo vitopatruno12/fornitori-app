@@ -443,6 +443,84 @@ def load_pos_visit_buckets(
     return out
 
 
+def ingest_receipt_dicts(db: Session, items: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Upsert da lista JSON (agent GDB / integrazioni)."""
+    rows: List[Dict[str, Any]] = []
+    skipped = 0
+    for raw in items:
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        when = raw.get("receipt_at")
+        if isinstance(when, str):
+            when = _parse_datetime(when, "")
+        if not isinstance(when, datetime):
+            skipped += 1
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        store_raw = str(raw.get("raw_store") or raw.get("store") or raw.get("store_key") or "").strip()
+        fallback = str(raw.get("model_id") or "").strip() or None
+        store_key, model_id, model_label = resolve_store(store_raw or str(raw.get("store_key") or ""), fallback)
+        external = str(raw.get("external_id") or "").strip()
+        if not external:
+            external = f"{store_key}:{when.isoformat()}"
+        amount = raw.get("amount_eur")
+        if amount is not None and not isinstance(amount, Decimal):
+            amount = _parse_amount(str(amount))
+        is_void = 1 if raw.get("is_void") in (1, True, "1", "true") else 0
+        rows.append(
+            {
+                "source": str(raw.get("source") or SOURCE_EASYRETAIL)[:32],
+                "store_key": store_key,
+                "model_id": model_id,
+                "model_label": model_label or raw.get("model_label"),
+                "external_id": external[:120],
+                "receipt_at": when,
+                "amount_eur": amount,
+                "is_void": is_void,
+                "raw_store": store_raw or None,
+            }
+        )
+    stats = upsert_receipts(db, rows) if rows else {"inserted": 0, "updated": 0, "skipped_void": 0}
+    return {"ok": True, "parsed": len(rows), "skipped": skipped, **stats}
+
+
+def sync_from_easyretail_gdb(
+    db: Session,
+    *,
+    dsn: Optional[str] = None,
+    model_id: Optional[str] = None,
+    lookback_hours: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Legge GDB EasyRetail e upsert in pos_receipts."""
+    from . import easyretail_gdb_service as gdb
+
+    cfg = gdb.gdb_config_from_env()
+    path = (dsn or cfg["dsn"] or "").strip()
+    if not path:
+        raise ValueError(
+            "Percorso/DSN GDB mancante. Imposta EASYRETAIL_GDB_PATH "
+            "(es. C:\\\\EasyRetail\\\\DBase\\\\DBRETAIL.GDB) oppure passalo nella richiesta."
+        )
+    rows, meta = gdb.fetch_receipts_from_gdb(
+        dsn=path,
+        user=cfg["user"],
+        password=cfg["password"],
+        fbclient=cfg.get("fbclient"),
+        charset=cfg.get("charset") or "WIN1252",
+        lookback_hours=int(lookback_hours or cfg["lookback_hours"]),
+        default_model_id=(model_id or cfg.get("model_id") or None),
+    )
+    stats = upsert_receipts(db, rows) if rows else {"inserted": 0, "updated": 0, "skipped_void": 0}
+    return {
+        "ok": True,
+        "parsed": len(rows),
+        **stats,
+        "gdb": meta,
+    }
+
+
 def csv_template() -> str:
     return (
         "DataOra;Negozio;NumeroScontrino;Totale\n"

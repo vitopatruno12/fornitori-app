@@ -88,7 +88,55 @@ async def lifespan(app: FastAPI):
         _check_critical_schema_columns()
     except Exception as e:  # pylint: disable=broad-except
         _log_startup_exception("Schema check fallito (non bloccante)", e)
+
+    sync_task = None
+    try:
+        from .services.easyretail_gdb_service import gdb_config_from_env
+
+        cfg = gdb_config_from_env()
+        if cfg.get("enabled") and cfg.get("dsn"):
+            import asyncio
+
+            from .database import SessionLocal
+            from .services import pos_receipts_service
+
+            async def _easyretail_gdb_loop():
+                interval = int(cfg.get("interval_sec") or 180)
+                logger.info(
+                    "EasyRetail GDB sync abilitata ogni %ss → %s",
+                    interval,
+                    cfg.get("dsn"),
+                )
+                await asyncio.sleep(5)
+                while True:
+                    try:
+                        db = SessionLocal()
+                        try:
+                            res = pos_receipts_service.sync_from_easyretail_gdb(db)
+                            logger.info(
+                                "EasyRetail GDB sync: parsed=%s inserted=%s updated=%s",
+                                res.get("parsed"),
+                                res.get("inserted"),
+                                res.get("updated"),
+                            )
+                        finally:
+                            db.close()
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logger.warning("EasyRetail GDB sync fallita: %s", exc)
+                    await asyncio.sleep(interval)
+
+            sync_task = asyncio.create_task(_easyretail_gdb_loop())
+    except Exception as e:  # pylint: disable=broad-except
+        _log_startup_exception("Avvio sync EasyRetail GDB fallito (non bloccante)", e)
+
     yield
+
+    if sync_task is not None:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except Exception:  # pylint: disable=broad-except
+            pass
 
 
 # Dietro Nginx/Caddy (/api → uvicorn): evita 307 verso /suppliers/ senza prefisso /api.
