@@ -9,7 +9,7 @@ class DeliveryItemCreate(BaseModel):
   product_description: Optional[str] = None
   weight_kg: Optional[Decimal] = None
   pieces: Optional[int] = None
-  unit_price: Decimal
+  unit_price: Decimal = Decimal("0")
   anomaly_note: Optional[str] = None
 
 

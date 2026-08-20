@@ -3,9 +3,9 @@ export const DELIVERY_ITEMS_WORKBOOK_TITLE = 'Prodotti consegnati'
 export const DELIVERY_ITEMS_WORKBOOK_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left', readonly: true },
   { id: 'product_description', label: 'Prodotto', width: 200, emphasis: true },
-  { id: 'weight_kg', label: 'Peso (kg)', numeric: true, width: 100 },
-  { id: 'pieces', label: 'Pezzi', numeric: true, width: 80 },
-  { id: 'unit_price', label: 'Prezzo unit. €', numeric: true, width: 120 },
+  { id: 'weight_kg', label: 'Peso kg (facolt.)', numeric: true, width: 110 },
+  { id: 'pieces', label: 'Pezzi / cassette', numeric: true, width: 110 },
+  { id: 'unit_price', label: 'Prezzo unit. € (facolt.)', numeric: true, width: 130 },
   { id: 'line_total', label: 'Tot. riga (imp.)', numeric: true, width: 120, readonly: true },
   { id: 'list_price', label: 'Listino €', numeric: true, width: 100, readonly: true },
   { id: 'price_diff', label: 'Diff. listino', numeric: true, width: 110, readonly: true },

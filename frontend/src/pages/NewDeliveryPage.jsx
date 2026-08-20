@@ -427,10 +427,11 @@ export default function NewDeliveryPage({ operatorMode = false }) {
           return rowNote || anomaly || null
         })(),
       }))
-      .filter((it) => (it.weight_kg > 0 || it.pieces > 0) && it.unit_price > 0)
+      // Allo scarico bastano merce + eventuali cassette/pezzi: peso e prezzo non sono obbligatori.
+      .filter((it) => Boolean(it.product_description))
 
     if (validItems.length === 0) {
-      setError('Aggiungi almeno una merce con peso o pezzi e prezzo unitario')
+      setError('Aggiungi almeno una merce (peso e prezzo sono facoltativi: puoi indicare solo le cassette/pezzi)')
       return
     }
 
@@ -502,14 +503,15 @@ export default function NewDeliveryPage({ operatorMode = false }) {
             <p className="staff-page-lead">
               {operatorMode ? (
                 <>
-                  Registra scarichi merce con DDT e righe prodotto. I dati vengono salvati nel gestionale ATLAS come nel modulo
-                  completo.
+                  Registra scarichi merce con DDT e righe prodotto. <strong>Peso e prezzo non sono obbligatori</strong>: in
+                  magazzino puoi indicare solo merce e cassette/pezzi. I dati vengono salvati nel gestionale ATLAS.
                 </>
               ) : (
                 <>
-                  Registra DDT, data di consegna e righe merce. Il confronto con il listino è calcolato in base al prezzario del
-                  fornitore (stessa descrizione prodotto). Sotto puoi inserire liberamente la <strong>destinazione scarico /
-                  spedizione</strong>, che viene registrata nelle note della consegna.
+                  Registra DDT, data di consegna e righe merce. <strong>Peso e prezzo unitario non sono obbligatori</strong>{' '}
+                  allo scarico (es. solo cassette/pezzi senza bilancia o listino). Il confronto listino è facoltativo e usa
+                  il prezzario del fornitore. Sotto puoi inserire la <strong>destinazione scarico / spedizione</strong>,
+                  registrata nelle note della consegna.
                 </>
               )}
             </p>
