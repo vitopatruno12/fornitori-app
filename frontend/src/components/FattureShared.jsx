@@ -1,5 +1,5 @@
 import React from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, Navigate, NavLink } from 'react-router-dom'
 
 export const FATTURE_NAV_ITEMS = [
   { to: '/fatture', label: 'Dashboard', end: true },
@@ -14,6 +14,35 @@ export const FATTURE_NAV_ITEMS = [
   { to: '/fatture/impostazioni', label: 'Impostazioni fatture' },
   { to: '/pagamenti', label: 'Pagamenti' },
 ]
+
+/** Base path fatture: `/fatture` nel gestionale, oppure `/operatore-consegne/fatture` in postazione carrier. */
+export const FattureNavBaseContext = React.createContext('/fatture')
+
+export function FattureNavBaseProvider({ base = '/fatture', children }) {
+  const normalized = String(base || '/fatture').replace(/\/+$/, '') || '/fatture'
+  return <FattureNavBaseContext.Provider value={normalized}>{children}</FattureNavBaseContext.Provider>
+}
+
+/** Risolve un path assoluto `/fatture/...` rispetto alla base corrente. */
+export function useFattureTo(to) {
+  const base = React.useContext(FattureNavBaseContext)
+  const raw = String(to || '').trim()
+  if (!raw || raw === '/pagamenti' || raw.startsWith('/pagamenti?')) return raw || base
+  if (raw === '/fatture' || raw === '/fatture/') return base
+  if (raw.startsWith('/fatture/')) return `${base}/${raw.slice('/fatture/'.length)}`
+  if (raw.startsWith('/')) return raw
+  return `${base}/${raw.replace(/^\//, '')}`
+}
+
+export function FattureLink({ to, ...props }) {
+  const resolved = useFattureTo(to)
+  return <Link to={resolved} {...props} />
+}
+
+export function FattureNavigate({ to, ...props }) {
+  const resolved = useFattureTo(to)
+  return <Navigate to={resolved} {...props} />
+}
 
 export function eur(n) {
   if (n == null || n === '') return '—'
@@ -56,9 +85,17 @@ export function PaymentBadge({ status, ignored }) {
 }
 
 export function FattureSubnav() {
+  const base = React.useContext(FattureNavBaseContext)
+  const embedded = base !== '/fatture'
+  const items = FATTURE_NAV_ITEMS.filter((item) => !(embedded && item.to === '/pagamenti')).map((item) => {
+    if (item.to === '/pagamenti') return item
+    if (item.to === '/fatture') return { ...item, to: base }
+    return { ...item, to: `${base}/${item.to.slice('/fatture/'.length)}` }
+  })
+
   return (
     <nav className="fatture-subnav" aria-label="Sezioni Amministrazione">
-      {FATTURE_NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}

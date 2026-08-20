@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
 import {
+  FattureLink,
+  FattureNavigate,
   FatturePageShell,
   FattureStubCard,
   PaymentBadge,
@@ -192,9 +193,9 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
           <button type="button" className="btn btn-primary" onClick={() => load()} disabled={loading}>
             {loading ? 'Aggiornamento…' : 'Aggiorna inbox'}
           </button>
-          <Link className="btn btn-secondary" to="/fatture/importa-xml">
+          <FattureLink className="btn btn-secondary" to="/fatture/importa-xml">
             Importa XML
-          </Link>
+          </FattureLink>
         </div>
       </div>
       {error && <div className="alert alert-danger">{error}</div>}
@@ -273,18 +274,18 @@ export function FattureDashboardPage() {
             <h2 className="fatture-panel-title">Andamento mensile (6 mesi)</h2>
             <SeriesBars rows={data.flussi_mensili || []} />
             <div className="analisi-panel-actions" style={{ marginTop: '0.85rem' }}>
-              <Link className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
                 Fatture ricevute
-              </Link>
-              <Link className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
+              </FattureLink>
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
                 Da registrare
-              </Link>
-              <Link className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
+              </FattureLink>
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
                 Scadenziario
-              </Link>
-              <Link className="btn btn-secondary btn-sm" to="/fatture/sincronizzazione">
+              </FattureLink>
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/sincronizzazione">
                 Sincronizza
-              </Link>
+              </FattureLink>
             </div>
           </section>
 
@@ -365,9 +366,9 @@ export function FattureRicevutePage() {
       lead="Fatture elettroniche importate in Atlas (XML / canale SDI): fornitore, imponibile, IVA e righe."
       actions={
         <>
-          <Link className="btn btn-secondary btn-sm" to="/fatture/importa-xml">
+          <FattureLink className="btn btn-secondary btn-sm" to="/fatture/importa-xml">
             Importa XML
-          </Link>
+          </FattureLink>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -501,7 +502,7 @@ export function FattureRicevutePage() {
           {selected.atlas_invoice_id ? (
             <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
               Collegata anche in{' '}
-              <Link to="/fatture/registrate">Fatture registrate</Link> (id {selected.atlas_invoice_id}).
+              <FattureLink to="/fatture/registrate">Fatture registrate</FattureLink> (id {selected.atlas_invoice_id}).
             </p>
           ) : null}
         </section>
@@ -516,7 +517,7 @@ export function FattureRicevutePage() {
 
 /** @deprecated usa FattureRicevutePage — redirect da /fatture/passive */
 export function FatturePassivePage() {
-  return <Navigate to="/fatture/ricevute" replace />
+  return <FattureNavigate to="/fatture/ricevute" replace />
 }
 
 export function FattureDaRegistrarePage() {
@@ -582,9 +583,9 @@ export function FattureDaRegistrarePage() {
                     <PaymentBadge status={inv.payment_status} ignored={inv.ignored} />
                   </td>
                   <td>
-                    <Link className="btn btn-secondary btn-sm" to="/fatture/registrate">
+                    <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
                       Apri elenco
-                    </Link>
+                    </FattureLink>
                   </td>
                 </tr>
               ))}
@@ -759,7 +760,7 @@ export function FattureSincronizzazionePage() {
           <li>Endpoint push: {status?.receive_endpoint || '/sdi/receive'}</li>
           <li>
             Per popolare l&apos;inbox: carica XML da Fatture e Corrispettivi / canale accreditato, oppure usa{' '}
-            <Link to="/fatture/importa-xml">Importa XML</Link>.
+            <FattureLink to="/fatture/importa-xml">Importa XML</FattureLink>.
           </li>
         </ul>
       </section>
@@ -842,9 +843,9 @@ export function FattureImportXmlPage() {
       title="Importa XML"
       lead="Carica una FatturaPA XML in Atlas: crea/aggiorna fornitore per P.IVA e registra la fattura ricevuta."
       actions={
-        <Link className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+        <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
           Fatture ricevute
-        </Link>
+        </FattureLink>
       }
     >
       <section className="card fatture-panel">

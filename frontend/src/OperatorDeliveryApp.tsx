@@ -1,14 +1,31 @@
 import React from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import OperatorSatelliteShell from './components/OperatorSatelliteShell.tsx'
+import { FattureNavBaseProvider } from './components/FattureShared.jsx'
 import HomePage from './pages/HomePage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
+import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
+import InvoicesPage from './pages/InvoicesPage.jsx'
 import {
+  FattureConservazionePage,
+  FattureDaRegistrarePage,
+  FattureDashboardPage,
+  FattureImpostazioniPage,
+  FattureImportXmlPage,
+  FattureLogPage,
+  FatturePassivePage,
+  FattureRicevutePage,
+  FattureScadenziarioPage,
+  FattureSincronizzazionePage,
+} from './pages/FatturePages.jsx'
+import {
+  getOperatorDeliveryRouterPath,
   getOperatorDeliveryView,
-  syncOperatorDeliveryViewInUrl,
+  OPERATOR_DELIVERY_FATTURE_PATH,
   type OperatorDeliveryView,
 } from './utils/operatorMode.ts'
 import { applyContextPwaManifest, markCarrierPwaLaunchPreferred } from './utils/pwaManifest.ts'
@@ -18,7 +35,13 @@ const DELIVERY_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'magazzino', label: 'Magazzino' },
 ]
 
+const ADMIN_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
+  { id: 'fatturazione', label: 'Fatturazione' },
+  { id: 'prima-nota', label: 'Prima Nota' },
+]
+
 const DELIVERY_MENU_VIEWS: OperatorDeliveryView[] = ['new-delivery', 'magazzino', 'trasportatori']
+const ADMIN_MENU_VIEWS: OperatorDeliveryView[] = ['fatturazione', 'prima-nota']
 
 const TITLES: Record<OperatorDeliveryView, string> = {
   overview: 'Panoramica',
@@ -27,22 +50,90 @@ const TITLES: Record<OperatorDeliveryView, string> = {
   history: 'Storico consegne',
   magazzino: 'Magazzino',
   trasportatori: 'Trasportatori',
+  fatturazione: 'Fatturazione',
+  'prima-nota': 'Prima Nota',
+}
+
+function DeliveryFattureRoutes() {
+  return (
+    <FattureNavBaseProvider base={OPERATOR_DELIVERY_FATTURE_PATH}>
+      <Routes>
+        <Route index element={<FattureDashboardPage />} />
+        <Route path="ricevute" element={<FattureRicevutePage />} />
+        <Route path="passive" element={<FatturePassivePage />} />
+        <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
+        <Route path="registrate" element={<InvoicesPage />} />
+        <Route path="scadenziario" element={<FattureScadenziarioPage />} />
+        <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
+        <Route path="conservazione" element={<FattureConservazionePage />} />
+        <Route path="importa-xml" element={<FattureImportXmlPage />} />
+        <Route path="log" element={<FattureLogPage />} />
+        <Route path="impostazioni" element={<FattureImpostazioniPage />} />
+        <Route path="*" element={<Navigate to="." replace />} />
+      </Routes>
+    </FattureNavBaseProvider>
+  )
+}
+
+function DeliveryMainContent({
+  view,
+  onOperatorNavigate,
+  setDeliveryView,
+}: {
+  view: OperatorDeliveryView
+  onOperatorNavigate: (section: string) => void
+  setDeliveryView: (next: OperatorDeliveryView) => void
+}) {
+  if (view === 'overview') {
+    return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
+  }
+  if (view === 'suppliers') {
+    return <SuppliersPage />
+  }
+  if (view === 'magazzino') {
+    return <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+  }
+  if (view === 'trasportatori') {
+    return <TrasportatoriPage operatorMode />
+  }
+  if (view === 'new-delivery') {
+    return <NewDeliveryPage operatorMode />
+  }
+  if (view === 'prima-nota') {
+    return <PrimaNotaPage operatorMode />
+  }
+  if (view === 'fatturazione') {
+    return <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
+  }
+  return <DeliveriesHistoryPage operatorMode />
 }
 
 export default function OperatorDeliveryApp() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [view, setView] = React.useState<OperatorDeliveryView>(() => getOperatorDeliveryView())
+
+  const onFatturePath =
+    location.pathname === OPERATOR_DELIVERY_FATTURE_PATH ||
+    location.pathname.startsWith(`${OPERATOR_DELIVERY_FATTURE_PATH}/`)
 
   React.useEffect(() => {
     markCarrierPwaLaunchPreferred()
     applyContextPwaManifest()
   }, [])
 
-  const setDeliveryView = React.useCallback((next: OperatorDeliveryView) => {
-    setView(next)
-    syncOperatorDeliveryViewInUrl(next)
-  }, [])
+  React.useEffect(() => {
+    setView(getOperatorDeliveryView())
+  }, [location.pathname, location.search])
 
-  /** Home panoramica può chiedere sezioni della postazione piena: mappiamo alle voci disponibili qui. */
+  const setDeliveryView = React.useCallback(
+    (next: OperatorDeliveryView) => {
+      setView(next)
+      navigate(getOperatorDeliveryRouterPath(next))
+    },
+    [navigate],
+  )
+
   const onOperatorNavigate = React.useCallback(
     (section: string) => {
       if (section === 'suppliers' || section === 'fornitori') {
@@ -65,47 +156,42 @@ export default function OperatorDeliveryApp() {
         setDeliveryView('trasportatori')
         return
       }
+      if (section === 'fatturazione' || section === 'fatture') {
+        setDeliveryView('fatturazione')
+        return
+      }
+      if (section === 'prima-nota') {
+        setDeliveryView('prima-nota')
+        return
+      }
       setDeliveryView('overview')
     },
     [setDeliveryView],
   )
 
-  const headerTitle = TITLES[view] || 'Postazione trasportatore'
-  const deliveryMenuActive = DELIVERY_MENU_VIEWS.includes(view)
-
-  let content: React.ReactNode
-  if (view === 'overview') {
-    content = <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
-  } else if (view === 'suppliers') {
-    content = <SuppliersPage />
-  } else if (view === 'magazzino') {
-    content = <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
-  } else if (view === 'trasportatori') {
-    content = <TrasportatoriPage operatorMode />
-  } else if (view === 'new-delivery') {
-    content = <NewDeliveryPage operatorMode />
-  } else {
-    content = <DeliveriesHistoryPage operatorMode />
-  }
+  const effectiveView: OperatorDeliveryView = onFatturePath ? 'fatturazione' : view
+  const headerTitle = TITLES[effectiveView] || 'Postazione trasportatore'
+  const deliveryMenuActive = DELIVERY_MENU_VIEWS.includes(effectiveView)
+  const adminMenuActive = ADMIN_MENU_VIEWS.includes(effectiveView)
 
   return (
     <OperatorSatelliteShell
       authMode="carrier"
       documentTitle={`ATLAS — ${headerTitle} (trasportatore)`}
-      loginHint="Accesso postazione trasportatore (credenziali Simone) — panoramica, fornitori, nuova consegna e storico"
+      loginHint="Accesso postazione trasportatore (credenziali Simone) — panoramica, fornitori, consegne, fatturazione e Prima Nota"
       headerTitle="Postazione trasportatore"
       headerSubtitle=""
       nav={[
         {
           id: 'overview',
           label: 'Panoramica',
-          active: view === 'overview',
+          active: effectiveView === 'overview',
           onClick: () => setDeliveryView('overview'),
         },
         {
           id: 'suppliers',
           label: 'Fornitori',
-          active: view === 'suppliers',
+          active: effectiveView === 'suppliers',
           onClick: () => setDeliveryView('suppliers'),
         },
         {
@@ -116,19 +202,43 @@ export default function OperatorDeliveryApp() {
           items: DELIVERY_SUBMENU.map((item) => ({
             id: item.id,
             label: item.label,
-            active: view === item.id,
+            active: effectiveView === item.id,
             onClick: () => setDeliveryView(item.id),
           })),
         },
         {
           id: 'history',
           label: 'Storico consegne',
-          active: view === 'history',
+          active: effectiveView === 'history',
           onClick: () => setDeliveryView('history'),
+        },
+        {
+          id: 'admin-menu',
+          label: 'Amministrazione',
+          active: adminMenuActive,
+          onClick: () => setDeliveryView('fatturazione'),
+          items: ADMIN_SUBMENU.map((item) => ({
+            id: item.id,
+            label: item.label,
+            active: effectiveView === item.id,
+            onClick: () => setDeliveryView(item.id),
+          })),
         },
       ]}
     >
-      {content}
+      <Routes>
+        <Route path="fatture/*" element={<DeliveryFattureRoutes />} />
+        <Route
+          path="*"
+          element={
+            <DeliveryMainContent
+              view={view}
+              onOperatorNavigate={onOperatorNavigate}
+              setDeliveryView={setDeliveryView}
+            />
+          }
+        />
+      </Routes>
     </OperatorSatelliteShell>
   )
 }

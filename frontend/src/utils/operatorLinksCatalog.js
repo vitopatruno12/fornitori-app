@@ -19,7 +19,7 @@ export function buildOperatorLinksCatalog() {
       section: 'Postazione trasportatore',
       label: 'Panoramica trasportatore',
       description:
-        'Link ATLAS per il trasportatore: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino) e Storico consegne.',
+        'Link ATLAS per il trasportatore: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatturazione, Prima Nota).',
       url: deliveryBase,
     },
     {

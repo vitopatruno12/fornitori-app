@@ -21,6 +21,11 @@ export type OperatorDeliveryView =
   | 'history'
   | 'magazzino'
   | 'trasportatori'
+  | 'fatturazione'
+  | 'prima-nota'
+
+/** Sotto-percorso fatture nella postazione trasportatore (resta autenticato carrier). */
+export const OPERATOR_DELIVERY_FATTURE_PATH = `${OPERATOR_DELIVERY_PATH}/fatture`
 export type OperatorStationView =
   | 'overview'
   | 'suppliers'
@@ -98,7 +103,8 @@ export function isOperatorOrderMode(): boolean {
 
 export function isOperatorDeliveryMode(): boolean {
   if (typeof window === 'undefined') return false
-  if (pathMatches(OPERATOR_DELIVERY_PATH)) return true
+  const path = normalizePathname()
+  if (path === OPERATOR_DELIVERY_PATH || path.startsWith(`${OPERATOR_DELIVERY_PATH}/`)) return true
   if (hashMatches('operatore-consegne')) return true
   return queryMatches('operatore-consegne')
 }
@@ -228,6 +234,10 @@ const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
   trasportatori: 'trasportatori',
   trasportatore: 'trasportatori',
   corrieri: 'trasportatori',
+  fatturazione: 'fatturazione',
+  fatture: 'fatturazione',
+  'prima-nota': 'prima-nota',
+  primanota: 'prima-nota',
 }
 
 const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
@@ -237,12 +247,17 @@ const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
   history: 'storico',
   magazzino: 'magazzino',
   trasportatori: 'trasportatori',
+  fatturazione: null,
+  'prima-nota': 'prima-nota',
 }
 
 export function getOperatorDeliveryView(): OperatorDeliveryView {
   if (typeof window === 'undefined') return 'overview'
   const path = normalizePathname()
   const hash = normalizeHash()
+  if (path === OPERATOR_DELIVERY_FATTURE_PATH || path.startsWith(`${OPERATOR_DELIVERY_FATTURE_PATH}/`)) {
+    return 'fatturazione'
+  }
   if (
     path.endsWith(`${OPERATOR_DELIVERY_PATH}${OPERATOR_DELIVERY_HISTORY_SUFFIX}`) ||
     hash === 'operatore-consegne/storico' ||
@@ -264,11 +279,20 @@ export function getOperatorOrderPublicUrl(): string {
 
 /** Link postazione trasportatore (panoramica / fornitori / consegne). */
 export function getOperatorDeliveryPublicUrl(view: OperatorDeliveryView = 'overview'): string {
+  if (view === 'fatturazione') return buildPublicUrl(OPERATOR_DELIVERY_FATTURE_PATH)
   const base = buildPublicUrl(OPERATOR_DELIVERY_PATH)
   const pagina = DELIVERY_PAGINA_BY_VIEW[view]
   if (!pagina) return base
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}pagina=${pagina}`
+}
+
+/** Path relativo per React Router sulla postazione trasportatore. */
+export function getOperatorDeliveryRouterPath(view: OperatorDeliveryView = 'overview'): string {
+  if (view === 'fatturazione') return OPERATOR_DELIVERY_FATTURE_PATH
+  const pagina = DELIVERY_PAGINA_BY_VIEW[view]
+  if (!pagina) return OPERATOR_DELIVERY_PATH
+  return `${OPERATOR_DELIVERY_PATH}?pagina=${pagina}`
 }
 
 export function getOperatorPrimaNotaPublicUrl(): string {
