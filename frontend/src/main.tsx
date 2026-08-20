@@ -75,6 +75,7 @@ import {
   setOperatorStationLock,
   shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
+import { prefersOperatorPwaLaunch, shouldRedirectStandaloneToOperatorStation } from './utils/pwaManifest.ts'
 
 const ATLAS_MAIN_SESSION_KEY = 'atlasAuthMain'
 
@@ -748,6 +749,15 @@ function App() {
               {isLoggingIn ? 'Accesso...' : 'Accedi'}
             </button>
           </form>
+          {(typeof window !== 'undefined' &&
+            (window.matchMedia('(display-mode: standalone)').matches ||
+              Boolean((navigator as Navigator & { standalone?: boolean }).standalone))) && (
+            <p className="operator-order-login-hint" style={{ marginTop: '0.85rem' }}>
+              Stai cercando la <strong>postazione operativa</strong>?{' '}
+              <a href={OPERATOR_STATION_PATH}>Apri login operatore</a>
+              {' '}(credenziali lemaniinpasta… / brunetti)
+            </p>
+          )}
         </div>
       </div>
     )
@@ -1018,16 +1028,19 @@ function App() {
 function MainAppGate() {
   const location = useLocation()
   const isStandalone =
-    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
+      Boolean((navigator as Navigator & { standalone?: boolean }).standalone))
 
   if (isOperatorStationLocked()) {
     return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
   }
 
+  // App installata (standalone): se era postazione operativa, non aprire il login gestionale.
   if (
-    shouldOpenOperatorStation() &&
     isStandalone &&
-    (location.pathname === '/' || location.pathname === '')
+    (location.pathname === '/' || location.pathname === '') &&
+    (shouldOpenOperatorStation() || prefersOperatorPwaLaunch() || shouldRedirectStandaloneToOperatorStation(location.pathname))
   ) {
     return <Navigate to={getOperatorStationPublicUrl(getOperatorStationView())} replace />
   }

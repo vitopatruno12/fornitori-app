@@ -135,10 +135,12 @@ export function setOperatorStationLock(active: boolean): void {
   try {
     if (active) {
       sessionStorage.setItem(OPERATOR_STATION_LOCK_KEY, '1')
+      // Preferenza PWA permanente: non va cancellata al logout, altrimenti
+      // l'app installata riparte sul gestionale grande (credenziali michele).
       localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, 'station')
     } else {
       sessionStorage.removeItem(OPERATOR_STATION_LOCK_KEY)
-      localStorage.removeItem(OPERATOR_ENTRY_POINT_KEY)
+      // Non rimuovere OPERATOR_ENTRY_POINT_KEY: serve alla PWA chiusa/riaperta.
     }
   } catch {
     // ignore

@@ -18,6 +18,7 @@ import {
   syncOperatorStationViewInUrl,
   type OperatorStationView,
 } from './utils/operatorMode.ts'
+import { applyContextPwaManifest, markOperatorPwaLaunchPreferred } from './utils/pwaManifest.ts'
 
 type StationSection = { id: OperatorStationView; label: string; title: string }
 
@@ -59,6 +60,8 @@ export default function OperatorStationApp() {
 
   React.useEffect(() => {
     markOperatorStationEntryPoint()
+    markOperatorPwaLaunchPreferred()
+    applyContextPwaManifest()
     setOperatorStationLock(true)
 
     const blockFullAppNavigation = (e: Event) => {

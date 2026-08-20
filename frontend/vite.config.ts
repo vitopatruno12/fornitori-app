@@ -56,8 +56,10 @@ export default defineConfig(({ mode }) => {
         'atlas-login-bg.png',
         'atlas-api-fetch-fix.js',
         'favicon.svg',
+        'manifest-operator.webmanifest',
       ],
       manifest: {
+        id: '/',
         name: 'ATLAS — Gestionale',
         short_name: 'ATLAS',
         description: 'Gestionale fornitori, ordini, Prima Nota e Personale. Funziona anche offline dopo l\'installazione.',
