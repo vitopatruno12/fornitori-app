@@ -84,7 +84,7 @@ function openWhatsAppWithMessage(phone, message) {
   return { url }
 }
 
-/** Apre più chat WhatsApp nello stesso click (fornitore + trasportatore). */
+/** Apre una o più chat WhatsApp nello stesso click (es. più trasportatori). */
 function openWhatsAppUrlsNow(urls) {
   const list = (Array.isArray(urls) ? urls : []).map((u) => String(u || '').trim()).filter(Boolean)
   const stamp = Date.now()
@@ -473,7 +473,7 @@ export default function NewOrderPage({ operatorMode = false }) {
     }
     if (sendCopyToCourier) {
       if (!courierPhonesForSend.length) {
-        w.push('Nessun cellulare trasportatore valido: WhatsApp andrà solo al fornitore (controlla «In servizio» e «Attivo»).')
+        w.push('Nessun cellulare trasportatore valido: «WhatsApp trasportatore» non potrà aprire la chat (controlla «In servizio» e «Attivo»).')
       }
       if (!courierEmailsForSend.length) {
         w.push('Email corriere assente: l’email andrà solo al fornitore (senza copia).')
@@ -1117,14 +1117,9 @@ export default function NewOrderPage({ operatorMode = false }) {
     saveOrderCourierContact({ sendCopyToCourier, carriers: couriers })
   }
 
-  function openSupplierAndCouriersWhatsApp({ supplierPhone, supplierName, supplierMessage, courierMessage }) {
+  function openCourierWhatsAppOnly({ courierMessage }) {
     persistTransporterContact()
-    const supplierMsg = String(supplierMessage || '').trim()
     const courierMsg = String(courierMessage || '').trim()
-    if (!supplierMsg) {
-      setError('Impossibile preparare WhatsApp per il fornitore: manca il testo ordine.')
-      return false
-    }
     if (!courierMsg) {
       setError('Impossibile preparare WhatsApp per il trasportatore: manca il messaggio ritiro.')
       return false
@@ -1137,18 +1132,18 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Seleziona un trasportatore in servizio (o attivo) con cellulare valido')
       return false
     }
-    const supplierUrl = buildWhatsAppUrl(supplierPhone, supplierMsg)
     const courierUrls = courierList.map((c) => buildWhatsAppUrl(c.phone, courierMsg))
-    const opened = openWhatsAppUrlsNow([supplierUrl, ...courierUrls])
-    const fornitore = supplierName || supplierLabel || 'fornitore'
+    const opened = openWhatsAppUrlsNow(courierUrls)
     const trasportatori = courierList.map((c) => c.name || c.phone).join(', ')
     if (opened.length && opened.every(Boolean)) {
-      setSuccess(`Aperte ${opened.length} chat WhatsApp: ${fornitore} e ${trasportatori}.`)
+      setSuccess(
+        opened.length === 1
+          ? `WhatsApp aperto per il trasportatore: ${trasportatori}.`
+          : `Aperte ${opened.length} chat WhatsApp trasportatore: ${trasportatori}.`,
+      )
       return true
     }
-    setSuccess(
-      `WhatsApp aperto (fornitore + trasportatore). Se manca una scheda, consenti i popup per questo sito nel browser.`,
-    )
+    setSuccess(`WhatsApp trasportatore aperto (${trasportatori}).`)
     return true
   }
 
@@ -1157,20 +1152,8 @@ export default function NewOrderPage({ operatorMode = false }) {
     setSuccess('')
     setSuccessDetail(null)
     if (!validateOrderDraftForSend()) return
-    const supplierMessage = buildWhatsAppMessage()
-    if (sendCopyToCourier && courierPhonesForSend.length) {
-      openSupplierAndCouriersWhatsApp({
-        supplierPhone: selectedSupplier?.phone,
-        supplierName: selectedSupplier?.name || supplierLabel,
-        supplierMessage,
-        courierMessage: buildCourierMessageFromDraft(),
-      })
-      return
-    }
-    openWhatsAppWithMessage(selectedSupplier?.phone, supplierMessage)
-    if (sendCopyToCourier && !courierPhonesForSend.length) {
-      setSuccess('WhatsApp aperto per il fornitore. Seleziona un trasportatore in servizio con cellulare valido.')
-    }
+    openWhatsAppWithMessage(selectedSupplier?.phone, buildWhatsAppMessage())
+    setSuccess('WhatsApp aperto per il fornitore.')
   }
 
   function handleWhatsAppWithCourier() {
@@ -1182,10 +1165,7 @@ export default function NewOrderPage({ operatorMode = false }) {
       setError('Seleziona un trasportatore in servizio (o attivo) con cellulare valido')
       return
     }
-    openSupplierAndCouriersWhatsApp({
-      supplierPhone: selectedSupplier?.phone,
-      supplierName: selectedSupplier?.name || supplierLabel,
-      supplierMessage: buildWhatsAppMessage(),
+    openCourierWhatsAppOnly({
       courierMessage: buildCourierMessageFromDraft(),
     })
   }
@@ -1242,6 +1222,7 @@ export default function NewOrderPage({ operatorMode = false }) {
 
   async function handleWhatsAppSavedOrder(order) {
     setError('')
+    setSuccess('')
     let full = order
     if (!order.items || order.items.length === 0) {
       try {
@@ -1252,24 +1233,13 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    const supplierMessage = buildWhatsAppTextFromOrder(full)
-    if (sendCopyToCourier && courierPhonesForSend.length) {
-      openSupplierAndCouriersWhatsApp({
-        supplierPhone: sup?.phone,
-        supplierName: full.supplier_name || sup?.name,
-        supplierMessage,
-        courierMessage: buildCourierMessageFromOrder(full, sup),
-      })
-      return
-    }
-    openWhatsAppWithMessage(sup?.phone, supplierMessage)
-    if (sendCopyToCourier && !courierPhonesForSend.length) {
-      setSuccess('WhatsApp aperto per il fornitore. Spunta WhatsApp e seleziona un trasportatore con cellulare.')
-    }
+    openWhatsAppWithMessage(sup?.phone, buildWhatsAppTextFromOrder(full))
+    setSuccess('WhatsApp aperto per il fornitore.')
   }
 
   async function handleWhatsAppSavedOrderWithCourier(order) {
     setError('')
+    setSuccess('')
     if (!courierPhonesForSend.length) {
       setError('Seleziona un trasportatore in servizio (o attivo) con cellulare valido')
       return
@@ -1284,10 +1254,7 @@ export default function NewOrderPage({ operatorMode = false }) {
       }
     }
     const sup = supplierById[full.supplier_id]
-    openSupplierAndCouriersWhatsApp({
-      supplierPhone: sup?.phone,
-      supplierName: full.supplier_name || sup?.name,
-      supplierMessage: buildWhatsAppTextFromOrder(full),
+    openCourierWhatsAppOnly({
       courierMessage: buildCourierMessageFromOrder(full, sup),
     })
   }
@@ -1346,7 +1313,7 @@ export default function NewOrderPage({ operatorMode = false }) {
       const full = await fetchSupplierOrder(orderId)
       await handleWhatsAppSavedOrderWithCourier(full)
     } catch {
-      setError('Impossibile aprire WhatsApp con copia trasportatore')
+      setError('Impossibile aprire WhatsApp trasportatore')
     }
   }
 
@@ -1643,9 +1610,13 @@ export default function NewOrderPage({ operatorMode = false }) {
                     style={{ marginLeft: '0.35rem' }}
                     disabled={!canWhatsAppWithCourier}
                     onClick={() => handleWhatsAppAfterSaveWithCourier(successDetail.id)}
-                    title={canWhatsAppWithCourier ? 'Apre 2 chat WhatsApp: fornitore e trasportatore' : 'Imposta un trasportatore in servizio con cellulare valido'}
+                    title={
+                      canWhatsAppWithCourier
+                        ? 'Apre solo la chat WhatsApp del trasportatore'
+                        : 'Imposta un trasportatore in servizio con cellulare valido'
+                    }
                   >
-                    WhatsApp + trasportatore
+                    WhatsApp trasportatore
                   </button>
                   <button
                     type="button"
@@ -2097,7 +2068,7 @@ export default function NewOrderPage({ operatorMode = false }) {
                 onChange={(e) => setSendCopyToCourier(e.target.checked)}
               />
               <span style={{ fontSize: '0.9rem' }}>
-                Includi trasportatore su WhatsApp ed email: con la spunta attiva si aprono <strong>2 chat WhatsApp</strong> (fornitore + trasportatore «In servizio»).
+                Includi trasportatore in email (CC + testo ritiro). Per WhatsApp usa i bottoni separati: fornitore oppure trasportatore.
               </span>
             </label>
           </div>
@@ -2226,11 +2197,11 @@ export default function NewOrderPage({ operatorMode = false }) {
               disabled={!supplierId || !canWhatsAppWithCourier}
               title={
                 canWhatsAppWithCourier
-                  ? 'Apre 2 chat WhatsApp: fornitore e trasportatore'
+                  ? 'Apre solo la chat WhatsApp del trasportatore (messaggio ritiro)'
                   : 'Imposta un trasportatore in servizio con cellulare valido'
               }
             >
-              WhatsApp fornitore + trasportatore
+              WhatsApp trasportatore
             </button>
             <button type="button" className="btn btn-secondary" onClick={(e) => handleEmail(e)} disabled={!supplierId}>
               Invia ordine via email
@@ -2263,7 +2234,7 @@ export default function NewOrderPage({ operatorMode = false }) {
           )}
           {canWhatsAppWithCourier && (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.45rem', marginBottom: 0 }}>
-              <strong>WhatsApp fornitore + trasportatore</strong> apre due schede insieme. Se il browser ne blocca una, consenti i popup per questo sito.
+              <strong>WhatsApp al fornitore</strong> e <strong>WhatsApp trasportatore</strong> aprono una chat per volta.
             </p>
           )}
         </form>
@@ -2369,11 +2340,11 @@ export default function NewOrderPage({ operatorMode = false }) {
                     disabled={!canWhatsAppWithCourier}
                     title={
                       canWhatsAppWithCourier
-                        ? 'Apre 2 chat WhatsApp: fornitore e trasportatore'
+                        ? 'Apre solo la chat WhatsApp del trasportatore'
                         : 'Imposta un trasportatore in servizio con cellulare valido'
                     }
                   >
-                    WA + trasport.
+                    WA trasport.
                   </button>
                   <button
                     type="button"
