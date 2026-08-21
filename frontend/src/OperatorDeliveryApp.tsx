@@ -178,7 +178,7 @@ export default function OperatorDeliveryApp() {
     <OperatorSatelliteShell
       authMode="carrier"
       documentTitle={`ATLAS — ${headerTitle} (trasportatore)`}
-      loginHint="Accesso postazione trasportatore (credenziali Simone) — panoramica, fornitori, consegne, fatturazione e Prima Nota"
+      loginHint=""
       headerTitle="Postazione trasportatore"
       headerSubtitle=""
       nav={[

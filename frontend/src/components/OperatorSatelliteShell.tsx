@@ -158,7 +158,8 @@ function OperatorSatelliteNavDropdown({
 
 type OperatorSatelliteShellProps = {
   documentTitle: string
-  loginHint: string
+  /** Testo sotto il logo / sopra il form; se vuoto non viene mostrato. */
+  loginHint?: string
   headerTitle: string
   headerSubtitle?: string
   nav?: OperatorNavItem[]
@@ -170,7 +171,7 @@ type OperatorSatelliteShellProps = {
 
 export default function OperatorSatelliteShell({
   documentTitle,
-  loginHint,
+  loginHint = '',
   headerTitle,
   headerSubtitle = 'Collegato al gestionale ATLAS — salvataggio sullo stesso database',
   nav,
@@ -248,7 +249,7 @@ export default function OperatorSatelliteShell({
         <div className="atlas-login-overlay" />
         <div className="atlas-login-shell">
           <img src="/atlas-login-bg.png" alt="ATLAS" className="atlas-login-hero" />
-          <p className="operator-order-login-hint">{loginHint}</p>
+          {loginHint.trim() ? <p className="operator-order-login-hint">{loginHint}</p> : null}
           <form className="atlas-login-form" onSubmit={handleLoginSubmit}>
             <input
               type="text"
