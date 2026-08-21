@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryLine, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
@@ -136,6 +136,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
   const [editDocumentNote, setEditDocumentNote] = useState('')
   const [editAnomalyNote, setEditAnomalyNote] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+  const editPanelRef = useRef(null)
 
   const [anSupplierId, setAnSupplierId] = useState('')
   const [anProduct, setAnProduct] = useState('')
@@ -150,6 +151,14 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
     loadSuppliers()
     loadDeliveries()
   }, [])
+
+  useEffect(() => {
+    if (editingDeliveryId == null) return
+    const t = window.setTimeout(() => {
+      editPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 80)
+    return () => window.clearTimeout(t)
+  }, [editingDeliveryId])
 
   async function loadSuppliers() {
     try {
@@ -239,6 +248,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
 
   function openEditNotes(row) {
     const parsed = splitDeliveryNote(row?.note)
+    setSelectedDeliveryId(row?.id != null ? String(row.id) : '')
     setEditingDeliveryId(row?.id ?? null)
     setEditProductDescription(row?.product_description || '')
     setEditWeightKg(row?.weight_kg != null && row.weight_kg !== '' ? String(row.weight_kg) : '')
@@ -334,6 +344,96 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
       return
     }
     await handleDeleteDeliveryRow(row)
+  }
+
+  function renderEditFormFields() {
+    return (
+      <>
+        <p className="delivery-history-edit-lead">
+          Correggi la denominazione prodotto (es. da «ricola» a «rucola»), quantità, prezzo e note.
+        </p>
+        <div className="form-row" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div className="form-group" style={{ flex: '2 1 280px' }}>
+            <label>Prodotto / merce *</label>
+            <input
+              className="form-control"
+              value={editProductDescription}
+              onChange={(e) => setEditProductDescription(e.target.value)}
+              placeholder="es. rucola"
+            />
+          </div>
+          <div className="form-group" style={{ flex: '1 1 110px' }}>
+            <label>Pezzi</label>
+            <input
+              className="form-control"
+              type="number"
+              inputMode="numeric"
+              value={editPieces}
+              onChange={(e) => setEditPieces(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{ flex: '1 1 120px' }}>
+            <label>Peso kg</label>
+            <input
+              className="form-control"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              value={editWeightKg}
+              onChange={(e) => setEditWeightKg(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{ flex: '1 1 120px' }}>
+            <label>Prezzo unit. €</label>
+            <input
+              className="form-control"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={editUnitPrice}
+              onChange={(e) => setEditUnitPrice(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group" style={{ flex: '1 1 260px' }}>
+            <label>Destinazione</label>
+            <input
+              className="form-control"
+              value={editDestinationNote}
+              onChange={(e) => setEditDestinationNote(e.target.value)}
+              placeholder="es. Via Roma 10, magazzino"
+            />
+          </div>
+          <div className="form-group" style={{ flex: '2 1 340px' }}>
+            <label>Note documento</label>
+            <textarea
+              className="form-control"
+              value={editDocumentNote}
+              onChange={(e) => setEditDocumentNote(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="form-group" style={{ flex: '2 1 340px' }}>
+            <label>Note anomalie</label>
+            <textarea
+              className="form-control"
+              value={editAnomalyNote}
+              onChange={(e) => setEditAnomalyNote(e.target.value)}
+              rows={2}
+            />
+          </div>
+        </div>
+        <div className="btn-group">
+          <button type="button" className="btn btn-primary" onClick={handleSaveNotes} disabled={savingNotes}>
+            {savingNotes ? 'Salvataggio...' : 'Salva modifiche'}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={closeEditNotes} disabled={savingNotes}>
+            Annulla
+          </button>
+        </div>
+      </>
+    )
   }
 
   return (
@@ -448,93 +548,14 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
         </div>
 
         {editingDeliveryId != null && (
-          <div className="card" style={{ marginTop: '0.85rem', marginBottom: '0.4rem', padding: '0.85rem' }}>
+          <div
+            className="card delivery-history-edit-panel delivery-history-edit-desktop"
+            style={{ marginTop: '0.85rem', marginBottom: '0.4rem', padding: '0.85rem' }}
+          >
             <h3 className="page-subheader" style={{ marginTop: 0 }}>
               Modifica riga consegna #{editingDeliveryId}
             </h3>
-            <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-              Qui correggi la denominazione prodotto (es. da «ricola» a «rucola»), quantità, prezzo e note.
-            </p>
-            <div className="form-row" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
-              <div className="form-group" style={{ flex: '2 1 280px' }}>
-                <label>Prodotto / merce *</label>
-                <input
-                  className="form-control"
-                  value={editProductDescription}
-                  onChange={(e) => setEditProductDescription(e.target.value)}
-                  placeholder="es. rucola"
-                />
-              </div>
-              <div className="form-group" style={{ flex: '1 1 110px' }}>
-                <label>Pezzi</label>
-                <input
-                  className="form-control"
-                  type="number"
-                  inputMode="numeric"
-                  value={editPieces}
-                  onChange={(e) => setEditPieces(e.target.value)}
-                />
-              </div>
-              <div className="form-group" style={{ flex: '1 1 120px' }}>
-                <label>Peso kg</label>
-                <input
-                  className="form-control"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.001"
-                  value={editWeightKg}
-                  onChange={(e) => setEditWeightKg(e.target.value)}
-                />
-              </div>
-              <div className="form-group" style={{ flex: '1 1 120px' }}>
-                <label>Prezzo unit. €</label>
-                <input
-                  className="form-control"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  value={editUnitPrice}
-                  onChange={(e) => setEditUnitPrice(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group" style={{ flex: '1 1 260px' }}>
-                <label>Destinazione</label>
-                <input
-                  className="form-control"
-                  value={editDestinationNote}
-                  onChange={(e) => setEditDestinationNote(e.target.value)}
-                  placeholder="es. Via Roma 10, magazzino"
-                />
-              </div>
-              <div className="form-group" style={{ flex: '2 1 340px' }}>
-                <label>Note documento</label>
-                <textarea
-                  className="form-control"
-                  value={editDocumentNote}
-                  onChange={(e) => setEditDocumentNote(e.target.value)}
-                  rows={2}
-                />
-              </div>
-              <div className="form-group" style={{ flex: '2 1 340px' }}>
-                <label>Note anomalie</label>
-                <textarea
-                  className="form-control"
-                  value={editAnomalyNote}
-                  onChange={(e) => setEditAnomalyNote(e.target.value)}
-                  rows={2}
-                />
-              </div>
-            </div>
-            <div className="btn-group">
-              <button type="button" className="btn btn-primary" onClick={handleSaveNotes} disabled={savingNotes}>
-                {savingNotes ? 'Salvataggio...' : 'Salva modifiche'}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={closeEditNotes} disabled={savingNotes}>
-                Annulla
-              </button>
-            </div>
+            {renderEditFormFields()}
           </div>
         )}
 
@@ -662,65 +683,91 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
               ) : (
                 deliveryList.map((d, rowIndex) => {
                   const selected = String(selectedDeliveryId) === String(d.id)
+                  const editing = String(editingDeliveryId) === String(d.id)
                   const parsed = splitDeliveryNote(d.note)
                   return (
                     <article
                       key={d.id}
-                      className={`delivery-history-card${selected ? ' is-selected' : ''}`}
-                      onClick={() => setSelectedDeliveryId(String(d.id))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          setSelectedDeliveryId(String(d.id))
-                        }
-                      }}
-                      role="button"
-                      tabIndex={0}
+                      className={`delivery-history-card${selected ? ' is-selected' : ''}${editing ? ' is-editing' : ''}`}
                     >
-                      <header className="delivery-history-card-head">
-                        <strong>
-                          #{rowIndex + 1} · {formatDate(d.delivery_date)}
-                        </strong>
-                        {selected ? <span className="delivery-history-card-badge">Selezionata</span> : null}
-                      </header>
-                      <p className="delivery-history-card-title">{d.product_description || '—'}</p>
-                      <dl className="delivery-history-card-meta">
-                        <div>
-                          <dt>DDT</dt>
-                          <dd>{d.ddt_number || '—'}</dd>
-                        </div>
-                        <div>
-                          <dt>Fornitore</dt>
-                          <dd>{d.supplier_name || d.supplier_id || '—'}</dd>
-                        </div>
-                        <div>
-                          <dt>Pezzi</dt>
-                          <dd>{d.pieces != null && Number(d.pieces) > 0 ? d.pieces : '—'}</dd>
-                        </div>
-                        <div>
-                          <dt>Peso</dt>
-                          <dd>{d.weight_kg != null && Number(d.weight_kg) > 0 ? `${formatAmount(d.weight_kg)} kg` : '—'}</dd>
-                        </div>
-                        <div>
-                          <dt>Prezzo</dt>
-                          <dd>{d.unit_price != null ? `${formatAmount(d.unit_price)} €` : '—'}</dd>
-                        </div>
-                        <div>
-                          <dt>Totale</dt>
-                          <dd>{d.total != null ? `${formatAmount(d.total)} €` : '—'}</dd>
-                        </div>
-                      </dl>
-                      {parsed.destination ? (
-                        <p className="delivery-history-card-note">Destinazione: {parsed.destination}</p>
-                      ) : null}
-                      <div className="delivery-history-card-actions" onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEditNotes(d)}>
+                      <button
+                        type="button"
+                        className="delivery-history-card-select"
+                        onClick={() => setSelectedDeliveryId(String(d.id))}
+                      >
+                        <header className="delivery-history-card-head">
+                          <strong>
+                            #{rowIndex + 1} · {formatDate(d.delivery_date)}
+                          </strong>
+                          {selected ? <span className="delivery-history-card-badge">Selezionata</span> : null}
+                        </header>
+                        <p className="delivery-history-card-title">{d.product_description || '—'}</p>
+                        <dl className="delivery-history-card-meta">
+                          <div>
+                            <dt>DDT</dt>
+                            <dd>{d.ddt_number || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Fornitore</dt>
+                            <dd>{d.supplier_name || d.supplier_id || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Pezzi</dt>
+                            <dd>{d.pieces != null && Number(d.pieces) > 0 ? d.pieces : '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Peso</dt>
+                            <dd>
+                              {d.weight_kg != null && Number(d.weight_kg) > 0
+                                ? `${formatAmount(d.weight_kg)} kg`
+                                : '—'}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Prezzo</dt>
+                            <dd>{d.unit_price != null ? `${formatAmount(d.unit_price)} €` : '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Totale</dt>
+                            <dd>{d.total != null ? `${formatAmount(d.total)} €` : '—'}</dd>
+                          </div>
+                        </dl>
+                        {parsed.destination ? (
+                          <p className="delivery-history-card-note">Destinazione: {parsed.destination}</p>
+                        ) : null}
+                      </button>
+                      <div className="delivery-history-card-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            openEditNotes(d)
+                          }}
+                        >
                           Modifica
                         </button>
-                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDeleteDeliveryRow(d)}>
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            handleDeleteDeliveryRow(d)
+                          }}
+                        >
                           Elimina
                         </button>
                       </div>
+                      {editing ? (
+                        <div ref={editPanelRef} className="delivery-history-edit-inline">
+                          <h3 className="page-subheader" style={{ marginTop: 0 }}>
+                            Modifica riga
+                          </h3>
+                          {renderEditFormFields()}
+                        </div>
+                      ) : null}
                     </article>
                   )
                 })

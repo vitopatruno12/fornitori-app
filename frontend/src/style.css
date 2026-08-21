@@ -2549,13 +2549,25 @@ select.form-control {
   padding: 0.75rem;
   margin: 0.65rem;
   background: #fff;
-  cursor: pointer;
 }
 
 .delivery-history-card.is-selected {
   border-color: var(--accent, #2563eb);
   box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.25);
   background: #f8fbff;
+}
+
+.delivery-history-card-select {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
 }
 
 .delivery-history-card-head {
@@ -2613,6 +2625,32 @@ select.form-control {
   flex-wrap: wrap;
   gap: 0.45rem;
   margin-top: 0.7rem;
+  position: relative;
+  z-index: 2;
+}
+
+.delivery-history-card-actions .btn {
+  flex: 1 1 auto;
+  min-height: 2.5rem;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.delivery-history-edit-lead {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.delivery-history-edit-inline {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border, #d1d5db);
+  scroll-margin-top: 5.5rem;
+}
+
+.delivery-history-edit-desktop {
+  scroll-margin-top: 5.5rem;
 }
 
 .deliveries-history-mobile-hint {
@@ -2640,6 +2678,10 @@ select.form-control {
 
   .deliveries-history-mobile {
     display: block;
+  }
+
+  .delivery-history-edit-desktop {
+    display: none !important;
   }
 
   .pagamenti-workbook-card:has(.deliveries-history-mobile) {
