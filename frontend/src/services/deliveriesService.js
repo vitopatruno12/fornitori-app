@@ -60,3 +60,8 @@ export async function updateDeliveryNotes(id, payload) {
   })
 }
 
+/** Aggiorna denominazione prodotto (e opzionalmente quantità/prezzo/note) di una riga salvata. */
+export async function updateDeliveryLine(id, payload) {
+  return updateDeliveryNotes(id, payload)
+}
+

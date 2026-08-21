@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryNotes, deleteDelivery } from '../services/deliveriesService'
+import { fetchDeliveries, deleteAllDeliveries, fetchPriceAnalytics, updateDeliveryLine, deleteDelivery } from '../services/deliveriesService'
 import { fetchSuppliers } from '../services/suppliersService'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
@@ -128,6 +128,10 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
   const [deletingAll, setDeletingAll] = useState(false)
   const [selectedDeliveryId, setSelectedDeliveryId] = useState('')
   const [editingDeliveryId, setEditingDeliveryId] = useState(null)
+  const [editProductDescription, setEditProductDescription] = useState('')
+  const [editWeightKg, setEditWeightKg] = useState('')
+  const [editPieces, setEditPieces] = useState('')
+  const [editUnitPrice, setEditUnitPrice] = useState('')
   const [editDestinationNote, setEditDestinationNote] = useState('')
   const [editDocumentNote, setEditDocumentNote] = useState('')
   const [editAnomalyNote, setEditAnomalyNote] = useState('')
@@ -236,6 +240,10 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
   function openEditNotes(row) {
     const parsed = splitDeliveryNote(row?.note)
     setEditingDeliveryId(row?.id ?? null)
+    setEditProductDescription(row?.product_description || '')
+    setEditWeightKg(row?.weight_kg != null && row.weight_kg !== '' ? String(row.weight_kg) : '')
+    setEditPieces(row?.pieces != null && row.pieces !== '' ? String(row.pieces) : '')
+    setEditUnitPrice(row?.unit_price != null && row.unit_price !== '' ? String(row.unit_price) : '')
     setEditDestinationNote(parsed.destination || '')
     setEditDocumentNote(parsed.documentNote || '')
     setEditAnomalyNote(row?.anomaly_note || '')
@@ -243,6 +251,10 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
 
   function closeEditNotes() {
     setEditingDeliveryId(null)
+    setEditProductDescription('')
+    setEditWeightKg('')
+    setEditPieces('')
+    setEditUnitPrice('')
     setEditDestinationNote('')
     setEditDocumentNote('')
     setEditAnomalyNote('')
@@ -250,11 +262,20 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
 
   async function handleSaveNotes() {
     if (!editingDeliveryId) return
+    const product = editProductDescription.trim()
+    if (!product) {
+      setError('Inserisci la denominazione del prodotto')
+      return
+    }
     try {
       setSavingNotes(true)
       setError('')
       setSuccess('')
-      const updated = await updateDeliveryNotes(editingDeliveryId, {
+      const updated = await updateDeliveryLine(editingDeliveryId, {
+        product_description: product,
+        weight_kg: editWeightKg === '' ? null : Number(editWeightKg),
+        pieces: editPieces === '' ? null : Number(editPieces),
+        unit_price: editUnitPrice === '' ? null : Number(editUnitPrice),
         destination_note: editDestinationNote.trim() || null,
         note: editDocumentNote.trim() || null,
         anomaly_note: editAnomalyNote.trim() || null,
@@ -264,10 +285,10 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
           d.id === editingDeliveryId ? { ...d, ...updated } : d,
         ),
       )
-      setSuccess('Note consegna aggiornate')
+      setSuccess('Riga consegna aggiornata (prodotto e note)')
       closeEditNotes()
     } catch (e) {
-      setError('Errore nel salvataggio delle note consegna')
+      setError(e?.message || 'Errore nel salvataggio della riga consegna')
     } finally {
       setSavingNotes(false)
     }
@@ -291,7 +312,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
 
   function handleOpenSelectedNotes() {
     if (!selectedDeliveryId) {
-      setError('Seleziona una riga consegna prima di modificare le note')
+      setError('Seleziona una riga consegna prima di modificarla')
       return
     }
     const row = deliveryList.find((d) => String(d.id) === String(selectedDeliveryId))
@@ -322,8 +343,9 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
       <p className="staff-page-lead">
         {operatorMode ? (
           <>
-            Consulta e filtra le consegne registrate. Per inserire un nuovo scarico usa la scheda{' '}
-            <strong>Nuova consegna</strong> in alto.
+            Consulta e filtra le consegne. Per correggere un prodotto dopo il salvataggio (es. «ricola» → «rucola»),
+            seleziona la riga e premi <strong>Modifica riga</strong>. Nuovo scarico dalla scheda{' '}
+            <strong>Nuova consegna</strong>.
           </>
         ) : (
           <>
@@ -413,7 +435,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
             disabled={!deliveryList.length}
             onClick={handleOpenSelectedNotes}
           >
-            Modifica note
+            Modifica riga
           </button>
           <button
             type="button"
@@ -427,7 +449,55 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
 
         {editingDeliveryId != null && (
           <div className="card" style={{ marginTop: '0.85rem', marginBottom: '0.4rem', padding: '0.85rem' }}>
-            <h3 className="page-subheader" style={{ marginTop: 0 }}>Modifica note consegna #{editingDeliveryId}</h3>
+            <h3 className="page-subheader" style={{ marginTop: 0 }}>
+              Modifica riga consegna #{editingDeliveryId}
+            </h3>
+            <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+              Qui correggi la denominazione prodotto (es. da «ricola» a «rucola»), quantità, prezzo e note.
+            </p>
+            <div className="form-row" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div className="form-group" style={{ flex: '2 1 280px' }}>
+                <label>Prodotto / merce *</label>
+                <input
+                  className="form-control"
+                  value={editProductDescription}
+                  onChange={(e) => setEditProductDescription(e.target.value)}
+                  placeholder="es. rucola"
+                />
+              </div>
+              <div className="form-group" style={{ flex: '1 1 110px' }}>
+                <label>Pezzi</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  inputMode="numeric"
+                  value={editPieces}
+                  onChange={(e) => setEditPieces(e.target.value)}
+                />
+              </div>
+              <div className="form-group" style={{ flex: '1 1 120px' }}>
+                <label>Peso kg</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.001"
+                  value={editWeightKg}
+                  onChange={(e) => setEditWeightKg(e.target.value)}
+                />
+              </div>
+              <div className="form-group" style={{ flex: '1 1 120px' }}>
+                <label>Prezzo unit. €</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={editUnitPrice}
+                  onChange={(e) => setEditUnitPrice(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="form-row">
               <div className="form-group" style={{ flex: '1 1 260px' }}>
                 <label>Destinazione</label>
@@ -459,7 +529,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
             </div>
             <div className="btn-group">
               <button type="button" className="btn btn-primary" onClick={handleSaveNotes} disabled={savingNotes}>
-                {savingNotes ? 'Salvataggio...' : 'Salva note'}
+                {savingNotes ? 'Salvataggio...' : 'Salva modifiche'}
               </button>
               <button type="button" className="btn btn-secondary" onClick={closeEditNotes} disabled={savingNotes}>
                 Annulla
@@ -481,47 +551,87 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
         </div>
         {loading && <AnalisiLoadingBar active label="Caricamento storico consegne" variant="subtle" />}
         {!loading && !error && (
-          <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap deliveries-grid-wrap">
-            <table className="app-table excel-table pagamenti-grid workbook-grid deliveries-grid">
-              <colgroup>
-                {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
-                  <col key={col.id} style={{ minWidth: col.width }} />
-                ))}
-                <col style={{ minWidth: 110 }} />
-              </colgroup>
-              <thead>
-                <tr>
+          <>
+            <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap deliveries-grid-wrap deliveries-history-desktop">
+              <table className="app-table excel-table pagamenti-grid workbook-grid deliveries-grid">
+                <colgroup>
                   {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
-                    <th
-                      key={col.id}
-                      className={[
-                        col.numeric ? 'text-end' : '',
-                        col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
-                      ].filter(Boolean).join(' ')}
-                    >
-                      {col.label}
-                    </th>
+                    <col key={col.id} style={{ minWidth: col.width }} />
                   ))}
-                  <th className="sup-actions-col">Stato</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliveryList.map((d, rowIndex) => (
-                  <tr
-                    key={d.id}
-                    className={[
-                      'workbook-grid-row',
-                      'pn-row-click',
-                      String(selectedDeliveryId) === String(d.id) ? 'workbook-row-selected' : '',
-                    ].filter(Boolean).join(' ')}
-                    onClick={() => setSelectedDeliveryId(String(d.id))}
-                    title="Seleziona riga consegna"
-                  >
-                    {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => {
-                      const diffTone = col.id === 'price_diff_vs_list' ? deliveryHistoryDiffTone(d) : ''
-                      return (
+                  <col style={{ minWidth: 110 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
+                      <th
+                        key={col.id}
+                        className={[
+                          col.numeric ? 'text-end' : '',
+                          col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                        ].filter(Boolean).join(' ')}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="sup-actions-col">Stato</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveryList.map((d, rowIndex) => (
+                    <tr
+                      key={d.id}
+                      className={[
+                        'workbook-grid-row',
+                        'pn-row-click',
+                        String(selectedDeliveryId) === String(d.id) ? 'workbook-row-selected' : '',
+                      ].filter(Boolean).join(' ')}
+                      onClick={() => setSelectedDeliveryId(String(d.id))}
+                      title="Seleziona riga consegna"
+                    >
+                      {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => {
+                        const diffTone = col.id === 'price_diff_vs_list' ? deliveryHistoryDiffTone(d) : ''
+                        return (
+                          <td
+                            key={col.id}
+                            className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                          >
+                            <input
+                              className={[
+                                'excel-cell',
+                                'pagamenti-cell-readonly',
+                                col.numeric ? 'excel-cell-num' : '',
+                                col.emphasis ? 'workbook-cell-emphasis' : '',
+                                diffTone,
+                              ].filter(Boolean).join(' ')}
+                              value={deliveryHistoryWorkbookCellValue(d, col, { rowIndex })}
+                              readOnly
+                              tabIndex={-1}
+                              aria-label={`${col.label} riga ${rowIndex + 1}`}
+                            />
+                          </td>
+                        )
+                      })}
+                      <td className="sup-actions-col">
+                        <input
+                          className="excel-cell pagamenti-cell-readonly"
+                          value={String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : ''}
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                  {deliveryList.length === 0 ? (
+                    <tr>
+                      <td colSpan={DELIVERIES_HISTORY_WORKBOOK_COLUMNS.length + 1} className="empty-state">
+                        Nessuna consegna registrata.
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr className="workbook-row-totals">
+                      {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
                         <td
-                          key={col.id}
+                          key={`tot-${col.id}`}
                           className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
                         >
                           <input
@@ -529,59 +639,100 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                               'excel-cell',
                               'pagamenti-cell-readonly',
                               col.numeric ? 'excel-cell-num' : '',
-                              col.emphasis ? 'workbook-cell-emphasis' : '',
-                              diffTone,
+                              'workbook-cell-total',
                             ].filter(Boolean).join(' ')}
-                            value={deliveryHistoryWorkbookCellValue(d, col, { rowIndex })}
+                            value={deliveryHistoryWorkbookTotalsLabel(col.id, deliveryTotals)}
                             readOnly
                             tabIndex={-1}
-                            aria-label={`${col.label} riga ${rowIndex + 1}`}
                           />
                         </td>
-                      )
-                    })}
-                    <td className="sup-actions-col">
-                      <input
-                        className="excel-cell pagamenti-cell-readonly"
-                        value={String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : ''}
-                        readOnly
-                        tabIndex={-1}
-                      />
-                    </td>
-                  </tr>
-                ))}
-                {deliveryList.length === 0 ? (
-                  <tr>
-                    <td colSpan={DELIVERIES_HISTORY_WORKBOOK_COLUMNS.length + 1} className="empty-state">
-                      Nessuna consegna registrata.
-                    </td>
-                  </tr>
-                ) : (
-                  <tr className="workbook-row-totals">
-                    {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
-                      <td
-                        key={`tot-${col.id}`}
-                        className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
-                      >
-                        <input
-                          className={[
-                            'excel-cell',
-                            'pagamenti-cell-readonly',
-                            col.numeric ? 'excel-cell-num' : '',
-                            'workbook-cell-total',
-                          ].filter(Boolean).join(' ')}
-                          value={deliveryHistoryWorkbookTotalsLabel(col.id, deliveryTotals)}
-                          readOnly
-                          tabIndex={-1}
-                        />
-                      </td>
-                    ))}
-                    <td className="sup-actions-col" />
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      ))}
+                      <td className="sup-actions-col" />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="deliveries-history-mobile" aria-label="Storico consegne (vista telefono)">
+              {deliveryList.length === 0 ? (
+                <p className="empty-state" style={{ margin: '0.75rem' }}>
+                  Nessuna consegna registrata.
+                </p>
+              ) : (
+                deliveryList.map((d, rowIndex) => {
+                  const selected = String(selectedDeliveryId) === String(d.id)
+                  const parsed = splitDeliveryNote(d.note)
+                  return (
+                    <article
+                      key={d.id}
+                      className={`delivery-history-card${selected ? ' is-selected' : ''}`}
+                      onClick={() => setSelectedDeliveryId(String(d.id))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSelectedDeliveryId(String(d.id))
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <header className="delivery-history-card-head">
+                        <strong>
+                          #{rowIndex + 1} · {formatDate(d.delivery_date)}
+                        </strong>
+                        {selected ? <span className="delivery-history-card-badge">Selezionata</span> : null}
+                      </header>
+                      <p className="delivery-history-card-title">{d.product_description || '—'}</p>
+                      <dl className="delivery-history-card-meta">
+                        <div>
+                          <dt>DDT</dt>
+                          <dd>{d.ddt_number || '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>Fornitore</dt>
+                          <dd>{d.supplier_name || d.supplier_id || '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>Pezzi</dt>
+                          <dd>{d.pieces != null && Number(d.pieces) > 0 ? d.pieces : '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>Peso</dt>
+                          <dd>{d.weight_kg != null && Number(d.weight_kg) > 0 ? `${formatAmount(d.weight_kg)} kg` : '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>Prezzo</dt>
+                          <dd>{d.unit_price != null ? `${formatAmount(d.unit_price)} €` : '—'}</dd>
+                        </div>
+                        <div>
+                          <dt>Totale</dt>
+                          <dd>{d.total != null ? `${formatAmount(d.total)} €` : '—'}</dd>
+                        </div>
+                      </dl>
+                      {parsed.destination ? (
+                        <p className="delivery-history-card-note">Destinazione: {parsed.destination}</p>
+                      ) : null}
+                      <div className="delivery-history-card-actions" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEditNotes(d)}>
+                          Modifica
+                        </button>
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDeleteDeliveryRow(d)}>
+                          Elimina
+                        </button>
+                      </div>
+                    </article>
+                  )
+                })
+              )}
+              {deliveryList.length > 0 ? (
+                <p className="deliveries-history-mobile-hint">
+                  Totali: imponibile {deliveryTotals.imponibile} € · IVA {deliveryTotals.vat_amount} € · totale{' '}
+                  {deliveryTotals.total} €
+                </p>
+              ) : null}
+            </div>
+          </>
         )}
       </section>
 

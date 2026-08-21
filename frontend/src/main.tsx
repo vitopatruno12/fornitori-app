@@ -780,21 +780,6 @@ function App() {
               {isLoggingIn ? 'Accesso...' : 'Accedi'}
             </button>
           </form>
-          {(typeof window !== 'undefined' &&
-            (window.matchMedia('(display-mode: standalone)').matches ||
-              Boolean((navigator as Navigator & { standalone?: boolean }).standalone))) && (
-            <div style={{ marginTop: '0.85rem', textAlign: 'center' }}>
-              <p className="operator-order-login-hint" style={{ marginBottom: '0.55rem' }}>
-                Questa schermata è il <strong>gestionale grande</strong> (michele… / andiamo).
-              </p>
-              <button type="button" className="btn btn-primary" onClick={goToOperatorStationLogin}>
-                Apri postazione operativa
-              </button>
-              <p className="operator-order-login-hint" style={{ marginTop: '0.45rem', fontSize: '0.8rem' }}>
-                Credenziali: lemaniinpasta.abba42@gmail.com / brunetti
-              </p>
-            </div>
-          )}
         </div>
       </div>
     )

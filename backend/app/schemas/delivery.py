@@ -49,9 +49,15 @@ class DeliveryBatchCreate(BaseModel):
 
 
 class DeliveryNotesUpdate(BaseModel):
+  """Aggiorna note e/o denominazione prodotto di una riga già salvata."""
+
+  product_description: Optional[str] = None
   destination_note: Optional[str] = None
   note: Optional[str] = None
   anomaly_note: Optional[str] = None
+  weight_kg: Optional[Decimal] = None
+  pieces: Optional[int] = None
+  unit_price: Optional[Decimal] = None
 
 
 class DeliveryRead(DeliveryBase):

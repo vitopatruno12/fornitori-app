@@ -1,6 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
+import re
 
 from sqlalchemy import func, or_
 from fastapi import HTTPException
@@ -44,6 +45,28 @@ def _merge_delivery_note(destination_note: Optional[str], document_note: Optiona
     if doc:
         parts.append(doc)
     return "\n\n".join(parts) if parts else None
+
+
+def _split_delivery_note(note: Optional[str]) -> dict:
+    raw = str(note or "").strip()
+    if not raw:
+        return {"destination": "", "document_note": ""}
+    m = re.match(r"^Destinazione\s+scarico:\s*(.+)$", raw, flags=re.IGNORECASE | re.MULTILINE)
+    destination = str(m.group(1) or "").strip() if m else ""
+    if not destination:
+        return {"destination": "", "document_note": raw}
+    lines = raw.splitlines()
+    skipping = True
+    rest = []
+    for ln in lines:
+        t = ln.strip()
+        if skipping and re.match(r"^Destinazione\s+scarico:", t, flags=re.IGNORECASE):
+            continue
+        if skipping and t == "":
+            continue
+        skipping = False
+        rest.append(ln)
+    return {"destination": destination, "document_note": "\n".join(rest).strip()}
 
 
 def _ensure_supplier_ddt_unique(db: Session, supplier_id: int, ddt_number: Optional[str]) -> None:
@@ -297,14 +320,62 @@ def update_delivery_notes(db: Session, delivery_id: int, data: DeliveryNotesUpda
     if not delivery:
         raise HTTPException(status_code=404, detail="Consegna non trovata")
 
-    payload = data.model_dump()
-    destination_note = (payload.get("destination_note") or "").strip()
-    document_note = (payload.get("note") or "").strip()
-    anomaly_note = payload.get("anomaly_note")
-    anomaly_note = anomaly_note.strip() if isinstance(anomaly_note, str) else anomaly_note
+    payload = data.model_dump(exclude_unset=True)
 
-    delivery.note = _merge_delivery_note(destination_note, document_note)
-    delivery.anomaly_note = anomaly_note or None
+    if "product_description" in payload:
+        desc = payload.get("product_description")
+        delivery.product_description = (str(desc).strip() if desc is not None else "") or None
+
+    if "destination_note" in payload or "note" in payload:
+        current = _split_delivery_note(delivery.note)
+        if "destination_note" in payload:
+            destination_note = str(payload.get("destination_note") or "").strip()
+        else:
+            destination_note = current.get("destination") or ""
+        if "note" in payload:
+            document_note = str(payload.get("note") or "").strip()
+        else:
+            document_note = current.get("document_note") or ""
+        delivery.note = _merge_delivery_note(destination_note, document_note)
+
+    if "anomaly_note" in payload:
+        anomaly_note = payload.get("anomaly_note")
+        anomaly_note = anomaly_note.strip() if isinstance(anomaly_note, str) else anomaly_note
+        delivery.anomaly_note = anomaly_note or None
+
+    qty_changed = False
+    if "weight_kg" in payload:
+        w = payload.get("weight_kg")
+        delivery.weight_kg = Decimal(str(w)) if w is not None and str(w) != "" else None
+        qty_changed = True
+    if "pieces" in payload:
+        p = payload.get("pieces")
+        delivery.pieces = int(p) if p is not None and str(p) != "" else None
+        qty_changed = True
+    if "unit_price" in payload:
+        up = payload.get("unit_price")
+        if up is not None and str(up) != "":
+            delivery.unit_price = Decimal(str(up))
+            qty_changed = True
+
+    if qty_changed or "product_description" in payload:
+        weight_kg = Decimal(str(delivery.weight_kg or 0))
+        pieces = delivery.pieces or 0
+        unit_price = Decimal(str(delivery.unit_price or 0))
+        vat_percent = Decimal(str(delivery.vat_percent or "23.0"))
+        if weight_kg > 0:
+            imponibile = (weight_kg * unit_price).quantize(Decimal("0.01"))
+        else:
+            imponibile = (Decimal(str(pieces)) * unit_price).quantize(Decimal("0.01"))
+        vat_amount, total = calculate_vat(imponibile, vat_percent)
+        delivery.imponibile = imponibile
+        delivery.vat_amount = vat_amount
+        delivery.total = total
+        list_u, diff = _resolve_listino(
+            db, delivery.supplier_id, delivery.product_description, unit_price
+        )
+        delivery.list_unit_price = list_u
+        delivery.price_diff_vs_list = diff
 
     db.add(delivery)
     db.commit()
