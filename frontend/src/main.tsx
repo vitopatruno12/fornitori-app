@@ -520,7 +520,7 @@ function App() {
       ],
       'staff-operator-links': [
         'Quale link devo dare all’operatore per gli ordini?',
-        'Differenza tra postazione operativa e solo Prima Nota',
+        'Quale link devo dare al trasportatore?',
       ],
       'staff-locale-codes': [
         'Come recupero il codice di Bar-momento?',

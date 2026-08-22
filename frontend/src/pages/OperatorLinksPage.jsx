@@ -38,8 +38,8 @@ export default function OperatorLinksPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link operatori</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Tutti gli indirizzi da condividere con le postazioni operative: sezione, descrizione e pulsanti per copiare o aprire il link.
-          Gli ordini e i movimenti salvati restano sullo stesso database del gestionale completo.
+          Due link PWA unificati da condividere: <strong>/operatore-postazione</strong> (operatori e capi area) e{' '}
+          <strong>/operatore-consegne</strong> (trasportatore). I vecchi link singoli e le pagine standalone sono stati rimossi.
         </p>
       </section>
 
