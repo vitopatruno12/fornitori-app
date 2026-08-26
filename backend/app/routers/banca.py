@@ -2,6 +2,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -42,6 +43,12 @@ class BankOtpBody(BaseModel):
   otp: str = Field(..., min_length=4, max_length=12)
 
 
+class EnableBankingAuthBody(BaseModel):
+  aspsp_name: Optional[str] = None
+  aspsp_country: Optional[str] = None
+  psu_type: Optional[str] = "personal"
+
+
 @router.get("/dashboard")
 def banca_dashboard(db: Session = Depends(get_db)) -> Dict[str, Any]:
   return banca_service.get_dashboard(db)
@@ -50,8 +57,96 @@ def banca_dashboard(db: Session = Depends(get_db)) -> Dict[str, Any]:
 @router.get("/connect-profile")
 def banca_connect_profile() -> Dict[str, Any]:
   from ..services.bank_connect_otp_service import get_bank_env_profile
+  from ..services.enable_banking_service import get_enable_banking_config
 
-  return get_bank_env_profile()
+  profile = get_bank_env_profile()
+  profile["enable_banking"] = get_enable_banking_config()
+  return profile
+
+
+@router.get("/enable-banking/status")
+def banca_enable_banking_status() -> Dict[str, Any]:
+  from ..services.enable_banking_service import get_application, get_enable_banking_config
+
+  cfg = get_enable_banking_config()
+  out: Dict[str, Any] = {"config": cfg}
+  if cfg.get("configured"):
+    try:
+      out["application"] = get_application()
+    except Exception as e:
+      out["application_error"] = str(e)
+  return out
+
+
+@router.get("/enable-banking/aspsps")
+def banca_enable_banking_aspsps(country: Optional[str] = Query(None)) -> Dict[str, Any]:
+  from ..services.enable_banking_service import list_aspsps
+
+  try:
+    return {"items": list_aspsps(country=country)}
+  except RuntimeError as e:
+    raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.post("/accounts/{account_id}/enable-banking/auth")
+def banca_enable_banking_auth(
+  account_id: int,
+  body: Optional[EnableBankingAuthBody] = None,
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """Avvia POST /auth Enable Banking e restituisce l'URL di login banca."""
+  from ..services.enable_banking_service import begin_enable_banking_connect
+
+  payload = body or EnableBankingAuthBody()
+  try:
+    return begin_enable_banking_connect(
+      db,
+      account_id,
+      aspsp_name=payload.aspsp_name,
+      aspsp_country=payload.aspsp_country,
+    )
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e)) from e
+  except RuntimeError as e:
+    raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/callback")
+def banca_enable_banking_callback(
+  code: Optional[str] = Query(None),
+  state: Optional[str] = Query(None),
+  error: Optional[str] = Query(None),
+  error_description: Optional[str] = Query(None),
+  db: Session = Depends(get_db),
+):
+  """Callback OAuth: scambia code → session e importa conti/movimenti."""
+  from ..services.enable_banking_service import (
+    complete_enable_banking_callback,
+    frontend_error_redirect,
+  )
+
+  if error:
+    msg = error_description or error or "Autorizzazione annullata"
+    return RedirectResponse(url=frontend_error_redirect(str(msg)), status_code=302)
+  try:
+    result = complete_enable_banking_callback(db, code=code or "", state=state)
+    return RedirectResponse(url=result["redirect_to"], status_code=302)
+  except (ValueError, RuntimeError) as e:
+    return RedirectResponse(url=frontend_error_redirect(str(e)), status_code=302)
+  except Exception as e:
+    return RedirectResponse(url=frontend_error_redirect(f"Errore inatteso: {e}"), status_code=302)
+
+
+@router.post("/accounts/{account_id}/enable-banking/sync")
+def banca_enable_banking_sync(account_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+  from ..services.enable_banking_service import sync_enable_banking_account
+
+  try:
+    return sync_enable_banking_account(db, account_id)
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e)) from e
+  except RuntimeError as e:
+    raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.get("/accounts")

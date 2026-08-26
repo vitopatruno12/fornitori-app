@@ -47,6 +47,11 @@ def _account_out(row: BankAccount) -> Dict[str, Any]:
     "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
     "is_active": bool(row.is_active),
     "notes": row.notes,
+    "eb_session_id": getattr(row, "eb_session_id", None),
+    "eb_account_uid": getattr(row, "eb_account_uid", None),
+    "eb_aspsp_name": getattr(row, "eb_aspsp_name", None),
+    "eb_aspsp_country": getattr(row, "eb_aspsp_country", None),
+    "enable_banking_connected": bool(getattr(row, "eb_account_uid", None)),
   }
 
 
@@ -134,6 +139,8 @@ def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any
   row.connection_status = "connected" if connect else "disconnected"
   if not connect:
     row.last_sync_at = None
+    row.eb_session_id = None
+    row.eb_account_uid = None
   db.commit()
   db.refresh(row)
   return _account_out(row)

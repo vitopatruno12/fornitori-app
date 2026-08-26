@@ -32,6 +32,26 @@ export async function fetchBancaConnectProfile() {
   return apiFetch('/banca/connect-profile')
 }
 
+export async function startEnableBankingAuth(accountId, payload = {}) {
+  return apiFetch(`/banca/accounts/${accountId}/enable-banking/auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      aspsp_name: payload.aspsp_name || undefined,
+      aspsp_country: payload.aspsp_country || undefined,
+      psu_type: payload.psu_type || 'personal',
+    }),
+  })
+}
+
+export async function syncEnableBankingAccount(id) {
+  return apiFetch(`/banca/accounts/${id}/enable-banking/sync`, { method: 'POST' })
+}
+
+export async function fetchEnableBankingStatus() {
+  return apiFetch('/banca/enable-banking/status')
+}
+
 export async function disconnectBancaAccount(id) {
   return apiFetch(`/banca/accounts/${id}/disconnect`, { method: 'POST' })
 }

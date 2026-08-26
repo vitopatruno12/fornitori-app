@@ -1067,6 +1067,13 @@ def _ensure_bank_module_tables() -> None:
             "CREATE INDEX IF NOT EXISTS ix_bank_movements_status ON bank_movements (reconciliation_status)",
             label="Index bank_movements.reconciliation_status",
         )
+        for col_sql in (
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_session_id VARCHAR(64)",
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_account_uid VARCHAR(64)",
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_aspsp_name VARCHAR(120)",
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_aspsp_country VARCHAR(2)",
+        ):
+            _safe_exec_sql(col_sql, label=f"bank_accounts Enable Banking: {col_sql.split()[-1]}")
     except Exception as e:
         logger.warning("Impossibile verificare/creare tabelle banca: %s", e)
 

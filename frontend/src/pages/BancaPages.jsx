@@ -20,7 +20,9 @@ import {
   fetchBancaRiconciliazione,
   importBanMovements,
   postBancaRiconcilia,
+  startEnableBankingAuth,
   syncBancaAccount,
+  syncEnableBankingAccount,
 } from '../services/bancaService'
 import { SeriesBars } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
@@ -333,6 +335,29 @@ export function BancaContiPage() {
     reload()
   }, [])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search || '')
+    const eb = params.get('eb')
+    if (!eb) return
+    if (eb === 'ok') {
+      const n = params.get('imported')
+      setSuccess(
+        n != null
+          ? `Enable Banking collegato: ${n} movimenti importati.`
+          : 'Enable Banking collegato correttamente.',
+      )
+    } else if (eb === 'error') {
+      setError(params.get('msg') || 'Collegamento Enable Banking non riuscito')
+    }
+    params.delete('eb')
+    params.delete('msg')
+    params.delete('imported')
+    params.delete('account_id')
+    const qs = params.toString()
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`
+    window.history.replaceState({}, '', next)
+  }, [])
+
   async function onCreate(e) {
     e.preventDefault()
     setError('')
@@ -408,6 +433,36 @@ export function BancaContiPage() {
     }
   }
 
+  async function startEnableBanking(accountId) {
+    setBusyId(accountId)
+    setError('')
+    setSuccess('')
+    try {
+      const account = items.find((x) => x.id === accountId)
+      const bank = String(account?.bank_name || '').toLowerCase()
+      let payload = {}
+      if (bank.includes('unicredit')) {
+        payload = { aspsp_name: 'UniCredit', aspsp_country: 'IT' }
+      } else if (bank.includes('bbva')) {
+        payload = { aspsp_name: 'BBVA', aspsp_country: 'IT' }
+      } else if (bank.includes('bppb') || bank.includes('puglia')) {
+        // BPPB non è in sandbox Enable Banking: in produzione andrà il nome ASPSP reale
+        payload = { aspsp_name: 'Banca Popolare di Puglia e Basilicata', aspsp_country: 'IT' }
+      }
+      const res = await startEnableBankingAuth(accountId, payload)
+      if (res?.url) {
+        setSuccess(res.message || 'Reindirizzamento alla banca…')
+        window.location.assign(res.url)
+        return
+      }
+      setError('Enable Banking non ha restituito l’URL di login')
+    } catch (err) {
+      setError(err?.message || 'Impossibile avviare Enable Banking')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function startConnect(accountId) {
     setBusyId(accountId)
     setError('')
@@ -470,7 +525,19 @@ export function BancaContiPage() {
       {success && <div className="alert alert-success">{success}</div>}
       {connectProfile && (
         <p className="fatture-note">
-          Login banca da <code>.env</code>:{' '}
+          Enable Banking:{' '}
+          {connectProfile.enable_banking?.configured ? (
+            <>
+              attivo ({connectProfile.enable_banking.environment || 'sandbox'})
+              {connectProfile.enable_banking.aspsp_name
+                ? ` · test ASPSP: ${connectProfile.enable_banking.aspsp_name} (${connectProfile.enable_banking.aspsp_country})`
+                : ''}
+            </>
+          ) : (
+            <strong>non configurato</strong>
+          )}
+          {' · '}
+          Login .env + OTP:{' '}
           {connectProfile.credentials_configured ? (
             <>
               configurato ({connectProfile.username_hint || 'user'})
@@ -479,7 +546,7 @@ export function BancaContiPage() {
           ) : (
             <strong>mancano BANK_USERNAME / BANK_PASSWORD</strong>
           )}
-          . Il collegamento richiede OTP sul telefono.
+          .
         </p>
       )}
 
@@ -568,7 +635,8 @@ export function BancaContiPage() {
           Premendo «Collega conto» il conto viene creato e i movimenti vengono importati.
           <br />
           <strong>Importa BAN</strong> = movimenti reali dall’estratto. <strong>Sync Prima Nota</strong> = solo movimenti
-          già registrati in Prima Nota. <strong>Collega</strong> = login con credenziali <code>.env</code> + OTP.
+          già registrati in Prima Nota. <strong>Enable Banking</strong> = SCA banca + sync API (sandbox/produzione).{' '}
+          <strong>Collega OTP</strong> = login con credenziali <code>.env</code> + OTP.
           {pendingMovements.length > 0 ? (
             <>
               {' '}
@@ -605,7 +673,7 @@ export function BancaContiPage() {
             actionsHeader="Azioni"
             renderActions={(a) => (
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-                {a.connection_status === 'connected' ? (
+                {a.enable_banking_connected || a.connection_status === 'connected' ? (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -614,7 +682,29 @@ export function BancaContiPage() {
                   >
                     Disconnetti
                   </button>
+                ) : null}
+                {a.enable_banking_connected ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={busyId === a.id}
+                    title="Scarica saldi e movimenti da Enable Banking"
+                    onClick={() => run(a.id, syncEnableBankingAccount, 'Sync Enable Banking completato')}
+                  >
+                    {busyId === a.id ? '…' : 'Sync EB'}
+                  </button>
                 ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={busyId === a.id || !connectProfile?.enable_banking?.configured}
+                    onClick={() => startEnableBanking(a.id)}
+                    title="Collega via Enable Banking (SCA + consenso API)"
+                  >
+                    Enable Banking
+                  </button>
+                )}
+                {!a.enable_banking_connected && a.connection_status !== 'connected' ? (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -622,9 +712,9 @@ export function BancaContiPage() {
                     onClick={() => startConnect(a.id)}
                     title="Login con BANK_USERNAME/PASSWORD da .env + OTP"
                   >
-                    {a.connection_status === 'pending' ? 'Reinvia OTP' : 'Collega'}
+                    {a.connection_status === 'pending' ? 'Reinvia OTP' : 'Collega OTP'}
                   </button>
-                )}
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -639,7 +729,7 @@ export function BancaContiPage() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn-primary btn-sm"
+                  className="btn btn-secondary btn-sm"
                   disabled={busyId === a.id}
                   title="Importa da Prima Nota i movimenti con conto banca/bonifico (non collega la banca reale)"
                   onClick={() => run(a.id, syncBancaAccount, 'Sincronizzazione completata')}

@@ -18,6 +18,9 @@ frontend/.env.local
 frontend/.env.production.local
 backend/.access_code_otp_store.json
 backend/.bank_connect_otp_store.json
+backend/keys/*.pem
+backend/keys/*.env.fragment
+!backend/keys/.gitkeep
 
 # Backup DB / dump
 *.sql.gz

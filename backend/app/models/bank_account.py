@@ -16,6 +16,11 @@ class BankAccount(Base):
   saldo_contabile = Column(Numeric(14, 2), nullable=False, default=0)
   connection_status = Column(String(32), nullable=False, default="disconnected")  # connected|disconnected|pending|error
   last_sync_at = Column(DateTime(timezone=True), nullable=True)
+  # Enable Banking (AIS)
+  eb_session_id = Column(String(64), nullable=True)
+  eb_account_uid = Column(String(64), nullable=True)
+  eb_aspsp_name = Column(String(120), nullable=True)
+  eb_aspsp_country = Column(String(2), nullable=True)
   is_active = Column(Boolean, nullable=False, default=True)
   notes = Column(Text, nullable=True)
   created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
