@@ -764,6 +764,40 @@ export function FattureSincronizzazionePage() {
           </li>
         </ul>
       </section>
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">Passcom agent (Playwright)</h2>
+        <p style={{ marginTop: 0 }}>
+          Scarico automatico delle fatture ricevute da Passcom Live (Docuvision → Fatture elettroniche →
+          Fatture ricevute) e invio a Atlas su <code>/sdi/receive</code>. Gira su un PC Windows, non nel
+          browser.
+        </p>
+        <ul className="fatture-suggestions">
+          <li>
+            Install: <code>pip install -r backend/requirements-passcom-agent.txt</code> poi{' '}
+            <code>playwright install chromium</code>
+          </li>
+          <li>
+            Script: <code>backend/scripts/passcom_sync_agent.py</code>
+          </li>
+          <li>
+            Env: <code>PASSCOM_DOMAIN</code>, <code>PASSCOM_USERNAME</code>, <code>PASSCOM_PASSWORD</code>,{' '}
+            <code>ATLAS_API_BASE</code>, <code>SDI_RECEIVE_TOKEN</code> (stesso token di questa pagina)
+          </li>
+          <li>
+            Task Scheduler (es. ogni ora): <code>python C:\AtlasSync\passcom_sync_agent.py</code> con{' '}
+            <code>.env</code> accanto allo script
+          </li>
+          <li>
+            Opzionale: <code>PASSCOM_XML_DROP_DIR</code> se esporti XML in una cartella;{' '}
+            <code>PASSCOM_HEADLESS=0</code> e screenshot in <code>PASSCOM_DEBUG_DIR</code> per calibrare i
+            click canvas
+          </li>
+          <li>
+            L&apos;UI Passcom è a canvas: se cambia il layout, ricalibra <code>PASSCOM_CLICK_*</code> o usa la
+            cartella drop
+          </li>
+        </ul>
+      </section>
       <AdeSdiInvoicesPanel title="Inbox SDI" showAssign />
       <section className="card fatture-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
@@ -898,6 +932,7 @@ export function FattureImpostazioniPage() {
           <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
           <li>SDI_DEST_ABBA_KEYWORDS / SDI_DEST_ZANARDELLI_KEYWORDS</li>
           <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received</li>
+          <li>Passcom agent: backend/scripts/passcom_sync_agent.py (Playwright → stesso /sdi/receive)</li>
         </ul>
         <p className="fatture-note">La modifica da UI arriverà in una fase successiva; ora si configura nel .env del server.</p>
       </section>

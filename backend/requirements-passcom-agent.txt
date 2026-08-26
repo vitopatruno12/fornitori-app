@@ -1,0 +1,5 @@
+# Dipendenze solo per l'agent Passcom sul PC (non richieste sul server Atlas).
+#   pip install -r requirements-passcom-agent.txt
+#   playwright install chromium
+playwright>=1.49.0
+python-dotenv>=1.0.0

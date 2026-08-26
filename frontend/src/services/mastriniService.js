@@ -77,7 +77,9 @@ function pushMovement(list, accountCode, raw, amount, side) {
   list.push({
     accountCode,
     date: raw.date || '',
+    documentDate: raw.documentDate || raw.date || '',
     registrationNumber: raw.registrationNumber || '',
+    causale: raw.causale || '',
     description: raw.description || '',
     documentLabel: raw.documentLabel || '',
     documentType: raw.documentType || '',
@@ -91,6 +93,11 @@ function pushMovement(list, accountCode, raw, amount, side) {
     avere: side === 'avere' ? val : 0,
     center: raw.center || '',
     source: raw.source || '',
+    linkedInvoiceId: raw.linkedInvoiceId || '',
+    linkedCashEntryId: raw.linkedCashEntryId || '',
+    linkedBankMovementId: raw.linkedBankMovementId || '',
+    relatedDocumentPath: raw.relatedDocumentPath || '',
+    relatedDocumentLabel: raw.relatedDocumentLabel || '',
   })
 }
 
@@ -115,7 +122,9 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
     const invNum = linkedInv ? invoiceNumber(linkedInv) : ''
     const meta = {
       date: isoDate(row?.entry_date),
+      documentDate: isoDate(row?.entry_date),
       registrationNumber: `PN-${row?.id ?? ''}`,
+      causale: row?.type === 'entrata' ? 'INC' : 'PAG',
       description: linkedInv
         ? `Prima Nota pagamento fattura ${invNum} — ${row?.description || 'Movimento'}`.trim()
         : row?.description || 'Movimento Prima Nota',
@@ -128,6 +137,10 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
       relatedDocumentPath: linkedInv ? '/prima-nota' : '',
       relatedDocumentLabel: linkedInv ? `Prima Nota PN-${row?.id ?? ''}` : '',
       center: row?.activity || '',
+      counterparty:
+        linkedInv?.supplier_name ||
+        (row?.supplier_id ? `Supplier #${row.supplier_id}` : '') ||
+        (row?.customer_id ? `Cliente #${row.customer_id}` : ''),
       supplier: linkedInv?.supplier_name || (row?.supplier_id ? `Supplier #${row.supplier_id}` : ''),
       customer: row?.customer_id ? `Cliente #${row.customer_id}` : '',
       source: 'prima_nota',
@@ -162,7 +175,9 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
     const invId = Number(inv?.id)
     const base = {
       date: isoDate(inv?.created_at || inv?.issue_date || inv?.invoice_date || inv?.due_date),
+      documentDate: isoDate(inv?.issue_date || inv?.invoice_date || inv?.created_at || inv?.due_date),
       registrationNumber: `FA-${inv?.id ?? ''}`,
+      causale: 'FE',
       description: `Registrazione fattura ${number}`.trim(),
       documentLabel: `Fattura ${number}`.trim(),
       documentType: 'fattura_fornitore',
@@ -214,7 +229,9 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
     const supplierName = matchedInv?.supplier_name || row?.matched_invoice?.supplier_name || row?.counterparty || ''
     const base = {
       date: isoDate(row?.movement_date),
+      documentDate: isoDate(row?.movement_date),
       registrationNumber: `BA-${row?.id ?? ''}`,
+      causale: movementType === 'entrata' ? 'BIN' : isCommission ? 'COM' : 'BOU',
       description: matchedInv
         ? `Pagamento bancario fattura ${matchedNum} — ${desc}`.trim()
         : desc,
@@ -386,12 +403,20 @@ export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
     ...mapCashEntries(cashEntries, invoicesById),
     ...mapInvoices(invoices, bankMatchedInvoiceIds, cashLinkedInvoiceIds),
     ...mapBankMovements(bankMovements, invoicesById),
-  ]
+  ].filter((m) => {
+    const d = String(m.date || '')
+    if (dateFrom && d && d < dateFrom) return false
+    if (dateTo && d && d > dateTo) return false
+    return true
+  })
   const ledger = buildLedger(movements)
   const partitario = buildPartitario(movements)
   return {
     ...ledger,
+    accountPlan: ACCOUNT_PLAN,
     partitario,
     warnings,
   }
 }
+
+export { ACCOUNT_PLAN }

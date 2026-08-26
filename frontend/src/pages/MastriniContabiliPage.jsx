@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AmministrazionePageShell, eur, formatDate } from '../components/BancaShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
-import { fetchMastriniData } from '../services/mastriniService'
+import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
 
 function statusBadge(status) {
   if (status === 'pareggio') return <span style={{ color: '#0f766e', fontWeight: 700 }}>Pareggio</span>
@@ -208,20 +208,25 @@ function partitarioDetailCellValue(row, col) {
 }
 
 const MASTRO_DETAIL_COLUMNS = [
-  { id: 'date', label: 'Data', width: 10, fluid: true },
-  { id: 'registrationNumber', label: 'N. registrazione', width: 12, fluid: true, mono: true },
-  { id: 'description', label: 'Descrizione', width: 28, fluid: true, emphasis: true },
-  { id: 'documentLabel', label: 'Documento collegato', width: 18, fluid: true },
-  { id: 'dare', label: 'Dare', width: 10, fluid: true, numeric: true },
-  { id: 'avere', label: 'Avere', width: 10, fluid: true, numeric: true },
-  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 12, fluid: true, numeric: true },
+  { id: 'date', label: 'Data registrazione', width: 9, fluid: true },
+  { id: 'causale', label: 'Causale', width: 7, fluid: true, mono: true },
+  { id: 'registrationNumber', label: 'Numero', width: 10, fluid: true, mono: true },
+  { id: 'documentDate', label: 'Data documento', width: 9, fluid: true },
+  { id: 'description', label: 'Descrizione operazione', width: 22, fluid: true, emphasis: true },
+  { id: 'counterparty', label: 'Contropartita', width: 14, fluid: true },
+  { id: 'dare', label: 'Dare', width: 9, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 9, fluid: true, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 11, fluid: true, numeric: true },
 ]
 
 function mastroDetailCellValue(row, col) {
   if (!row) return ''
   if (col.id === 'date') return formatDate(row.date)
+  if (col.id === 'documentDate') return formatDate(row.documentDate || row.date)
+  if (col.id === 'causale') return row.causale || '—'
   if (col.id === 'registrationNumber') return row.registrationNumber || '—'
   if (col.id === 'description') return row.description || '—'
+  if (col.id === 'counterparty') return row.counterparty || row.supplier || row.customer || '—'
   if (col.id === 'documentLabel') return row.documentLabel || '—'
   if (col.id === 'dare') return row.dare ? eur(row.dare) : '—'
   if (col.id === 'avere') return row.avere ? eur(row.avere) : '—'
@@ -229,14 +234,25 @@ function mastroDetailCellValue(row, col) {
   return ''
 }
 
+function sortMovementsNewestFirst(movements = []) {
+  return [...movements].sort((a, b) => {
+    const da = String(a.date || '')
+    const db = String(b.date || '')
+    if (da !== db) return db.localeCompare(da)
+    return String(b.registrationNumber || '').localeCompare(String(a.registrationNumber || ''))
+  })
+}
+
 export default function MastriniContabiliPage() {
-  const [viewMode, setViewMode] = useState('mastrini')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const year = new Date().getFullYear()
+  const [viewMode, setViewMode] = useState('selezione')
+  const [dateFrom, setDateFrom] = useState(`${year}-01-01`)
+  const [dateTo, setDateTo] = useState(`${year}-12-31`)
   const [category, setCategory] = useState('')
   const [statementType, setStatementType] = useState('')
   const [center, setCenter] = useState('')
   const [advancedSearch, setAdvancedSearch] = useState('')
+  const [accountCode, setAccountCode] = useState(ACCOUNT_PLAN[0]?.code || '1000')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState([])
@@ -244,20 +260,23 @@ export default function MastriniContabiliPage() {
   const [selectedCode, setSelectedCode] = useState('')
   const [selectedPartyKey, setSelectedPartyKey] = useState('')
 
-  async function load() {
+  async function load(opts = {}) {
     setLoading(true)
     setError('')
     try {
       const res = await fetchMastriniData({
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        dateFrom: (opts.dateFrom ?? dateFrom) || undefined,
+        dateTo: (opts.dateTo ?? dateTo) || undefined,
       })
       setData(res)
       setWarnings(Array.isArray(res?.warnings) ? res.warnings : [])
-      if (!selectedCode && res?.accounts?.[0]) setSelectedCode(res.accounts[0].code)
+      const firstCode = res?.accounts?.[0]?.code
+      if (!selectedCode && firstCode) setSelectedCode(firstCode)
       if (!selectedPartyKey && res?.partitario?.parties?.[0]) setSelectedPartyKey(res.partitario.parties[0].key)
+      return res
     } catch (e) {
       setError(e?.message || 'Errore caricamento mastrini contabili')
+      return null
     } finally {
       setLoading(false)
     }
@@ -269,8 +288,8 @@ export default function MastriniContabiliPage() {
   }, [])
 
   const periodLabel = useMemo(() => {
-    if (!dateFrom && !dateTo) return 'Tutto'
-    if (dateFrom && dateTo) return `${dateFrom} - ${dateTo}`
+    if (!dateFrom && !dateTo) return 'Esercizio corrente'
+    if (dateFrom && dateTo) return `${dateFrom} → ${dateTo}`
     return dateFrom || dateTo
   }, [dateFrom, dateTo])
 
@@ -290,7 +309,7 @@ export default function MastriniContabiliPage() {
         r.description,
         r.category,
         ...r.movements.map((m) =>
-          [m.description, m.documentLabel, m.counterparty, m.supplier, m.customer, m.registrationNumber].join(' '),
+          [m.description, m.documentLabel, m.counterparty, m.supplier, m.customer, m.registrationNumber, m.causale].join(' '),
         ),
       ]
         .join(' ')
@@ -299,15 +318,52 @@ export default function MastriniContabiliPage() {
     })
   }, [data, category, statementType, center, advancedSearch])
 
-  const selected = useMemo(() => filteredAccounts.find((r) => r.code === selectedCode) || filteredAccounts[0], [filteredAccounts, selectedCode])
+  const selected = useMemo(
+    () => filteredAccounts.find((r) => r.code === selectedCode) || filteredAccounts[0],
+    [filteredAccounts, selectedCode],
+  )
+
+  const schedaAccount = useMemo(() => {
+    const rows = Array.isArray(data?.accounts) ? data.accounts : []
+    return rows.find((r) => r.code === (selectedCode || accountCode)) || null
+  }, [data, selectedCode, accountCode])
+
+  const schedaRows = useMemo(() => {
+    if (!schedaAccount) return []
+    const q = String(advancedSearch || '').trim().toLowerCase()
+    let rows = sortMovementsNewestFirst(schedaAccount.movements || [])
+    if (center) {
+      rows = rows.filter((m) => String(m.center || '').toLowerCase().includes(center.toLowerCase()))
+    }
+    if (!q) return rows
+    return rows.filter((m) => {
+      const blob = [
+        schedaAccount.code,
+        m.causale,
+        m.description,
+        m.documentLabel,
+        m.counterparty,
+        m.supplier,
+        m.customer,
+        m.registrationNumber,
+        m.amount,
+        m.center,
+      ]
+        .join(' ')
+        .toLowerCase()
+      return blob.includes(q)
+    })
+  }, [schedaAccount, advancedSearch, center])
 
   const advancedRows = useMemo(() => {
     if (!selected) return []
     const q = String(advancedSearch || '').trim().toLowerCase()
-    if (!q) return selected.movements
-    return selected.movements.filter((m) => {
+    const rows = sortMovementsNewestFirst(selected.movements || [])
+    if (!q) return rows
+    return rows.filter((m) => {
       const blob = [
         selected.code,
+        m.causale,
         m.description,
         m.documentLabel,
         m.counterparty,
@@ -350,6 +406,22 @@ export default function MastriniContabiliPage() {
     [parties, selectedPartyKey],
   )
 
+  async function openScheda(e) {
+    e?.preventDefault?.()
+    if (!accountCode) {
+      setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
+      return
+    }
+    const res = await load()
+    const found = (res?.accounts || []).find((a) => a.code === accountCode)
+    if (!found && res) {
+      setError(`Conto ${accountCode} non trovato nel piano Atlas.`)
+      return
+    }
+    setSelectedCode(accountCode)
+    setViewMode('scheda')
+  }
+
   function exportListExcel() {
     const rows = [
       ['Codice', 'Descrizione', 'Categoria', 'Dare', 'Avere', 'Saldo', 'Stato'],
@@ -358,25 +430,27 @@ export default function MastriniContabiliPage() {
     downloadFile('mastrini_elenco.csv', toCsv(rows), 'text/csv;charset=utf-8')
   }
 
+  const accountOptions = data?.accountPlan || ACCOUNT_PLAN
+
   return (
     <AmministrazionePageShell
-      title="Mastrini contabili"
-      lead="Dashboard, elenco conti, dettaglio mastro, collegamenti automatici e stampe."
+      title="Schede contabili / Mastrini"
+      lead="Flusso tipo Passcom: seleziona il conto e il periodo, poi apri la scheda Dare/Avere con saldo progressivo."
       actions={
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading}>
             {loading ? 'Aggiorno…' : 'Aggiorna'}
           </button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={exportListExcel} disabled={!filteredAccounts.length}>
-            Mastro Excel
+            Elenco Excel
           </button>
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => selected && printMastro(selected, periodLabel)}
-            disabled={!selected}
+            onClick={() => schedaAccount && printMastro(schedaAccount, periodLabel)}
+            disabled={!schedaAccount || viewMode === 'selezione'}
           >
-            Mastro PDF
+            Stampa scheda
           </button>
         </div>
       }
@@ -388,33 +462,29 @@ export default function MastriniContabiliPage() {
         </div>
       ))}
 
-      <div className="ui-kpi-row">
-        <div className="ui-kpi-card">
-          <div className="ui-kpi-card-label">Numero totale mastrini</div>
-          <div className="ui-kpi-card-value">{data?.metrics?.totalAccounts ?? '—'}</div>
-        </div>
-        <div className="ui-kpi-card">
-          <div className="ui-kpi-card-label">Saldo Dare</div>
-          <div className="ui-kpi-card-value">{eur(data?.metrics?.totalDare)}</div>
-        </div>
-        <div className="ui-kpi-card">
-          <div className="ui-kpi-card-label">Saldo Avere</div>
-          <div className="ui-kpi-card-value">{eur(data?.metrics?.totalAvere)}</div>
-        </div>
-        <div className="ui-kpi-card">
-          <div className="ui-kpi-card-label">Saldo finale</div>
-          <div className="ui-kpi-card-value">{eur(data?.metrics?.finalBalance)}</div>
-        </div>
-      </div>
-
       <section className="card fatture-panel">
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             type="button"
-            className={`btn btn-sm ${viewMode === 'mastrini' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewMode('mastrini')}
+            className={`btn btn-sm ${viewMode === 'selezione' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewMode('selezione')}
           >
-            Vista mastrini
+            Selezione scheda
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${viewMode === 'scheda' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewMode('scheda')}
+            disabled={!schedaAccount && !selected}
+          >
+            Scheda contabile
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${viewMode === 'elenco' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewMode('elenco')}
+          >
+            Piano dei conti
           </button>
           <button
             type="button"
@@ -426,67 +496,273 @@ export default function MastriniContabiliPage() {
         </div>
       </section>
 
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Ricerca avanzata e filtri</h2>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            load()
-          }}
-          style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}
-        >
-          <label>
-            Periodo da
-            <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </label>
-          <label>
-            a
-            <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </label>
-          <label>
-            Piano dei conti
-            <select className="form-control" value={statementType} onChange={(e) => setStatementType(e.target.value)}>
-              <option value="">Tutti</option>
-              <option value="stato_patrimoniale">Stato patrimoniale</option>
-              <option value="conto_economico">Conto economico</option>
-            </select>
-          </label>
-          <label>
-            Categoria
-            <select className="form-control" value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">Tutte</option>
-              <option value="Patrimoniale">Patrimoniale</option>
-              <option value="Economico">Economico</option>
-            </select>
-          </label>
-          <label>
-            Centro di costo
-            <input className="form-control" value={center} onChange={(e) => setCenter(e.target.value)} placeholder="Es. risacca" />
-          </label>
-          <label style={{ minWidth: 220 }}>
-            Ricerca avanzata
+      {viewMode === 'selezione' ? (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">Selezione scheda contabile</h2>
+          <p className="fatture-note" style={{ marginTop: 0 }}>
+            Come in Passcom (Contabilità → Schede contabili): scegli il codice conto e l&apos;intervallo date, poi conferma.
+          </p>
+          <form
+            onSubmit={openScheda}
+            style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}
+          >
+            <label>
+              Codice conto <span style={{ color: '#b91c1c' }}>*</span>
+              <select
+                className="form-control"
+                value={accountCode}
+                onChange={(e) => setAccountCode(e.target.value)}
+                required
+              >
+                {accountOptions.map((a) => (
+                  <option key={a.code} value={a.code}>
+                    {a.code} — {a.description}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <label style={{ flex: '1 1 180px' }}>
+                Da data
+                <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label style={{ flex: '1 1 180px' }}>
+                A data
+                <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+            </div>
+            <label>
+              Centro di costo / ricavo (opzionale)
+              <input
+                className="form-control"
+                value={center}
+                onChange={(e) => setCenter(e.target.value)}
+                placeholder="Es. risacca, abba…"
+              />
+            </label>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                OK — Apri scheda
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setDateFrom(`${year}-01-01`)
+                  setDateTo(`${year}-12-31`)
+                  setCenter('')
+                  setAdvancedSearch('')
+                }}
+              >
+                Reset esercizio
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {viewMode === 'scheda' && schedaAccount ? (
+        <section className="card fatture-panel mastrini-fit-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'start' }}>
+            <div>
+              <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                Scheda contabile {schedaAccount.code} — {schedaAccount.description}
+              </h2>
+              <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                Periodo: {periodLabel} · Ordinamento: data registrazione (più recente in alto)
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setViewMode('selezione')}>
+                Selezioni scheda
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => exportMastroCsv(schedaAccount, periodLabel)}
+              >
+                Estratto CSV
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => printMastro(schedaAccount, periodLabel)}
+              >
+                Stampa scheda
+              </button>
+            </div>
+          </div>
+
+          <div className="ui-kpi-row" style={{ marginTop: '0.75rem' }}>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo iniziale</div>
+              <div className="ui-kpi-card-value">{eur(schedaAccount.openingBalance)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Totale Dare</div>
+              <div className="ui-kpi-card-value">{eur(schedaAccount.totalDare)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Totale Avere</div>
+              <div className="ui-kpi-card-value">{eur(schedaAccount.totalAvere)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo progressivo</div>
+              <div className="ui-kpi-card-value">{eur(schedaAccount.finalBalance)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Stato</div>
+              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
+                {statusBadge(schedaAccount.status)}
+              </div>
+            </div>
+          </div>
+
+          <label style={{ display: 'block', margin: '0.75rem 0', maxWidth: 420 }}>
+            Ricerca in scheda
             <input
               className="form-control"
               value={advancedSearch}
               onChange={(e) => setAdvancedSearch(e.target.value)}
-              placeholder="Conto, cliente, fornitore, documento, importo…"
+              placeholder="Causale, descrizione, contropartita, documento…"
             />
           </label>
-          <button type="submit" className="btn btn-primary">
-            Applica
-          </button>
-        </form>
-      </section>
 
-      {viewMode === 'mastrini' ? (
+          <WorkbookGrid
+            title={`Scheda ${schedaAccount.code}`}
+            sheetLabel={`${schedaRows.length} registrazioni`}
+            columns={MASTRO_DETAIL_COLUMNS}
+            rows={schedaRows}
+            cellValue={mastroDetailCellValue}
+            emptyMessage="Nessuna registrazione nel periodo per questo conto."
+            gridClassName="mastrini-fit-grid"
+            rowKey={(row, idx) => `${schedaAccount.code}-${row.registrationNumber || 'reg'}-${idx}`}
+            actionsHeader="Documento"
+            renderActions={(row) => documentoLink(row)}
+            totals={{
+              dare: schedaRows.reduce((acc, m) => acc + (Number(m.dare) || 0), 0),
+              avere: schedaRows.reduce((acc, m) => acc + (Number(m.avere) || 0), 0),
+              progressiveBalance: schedaAccount.finalBalance,
+            }}
+            totalsLabel={(colId, totals) => {
+              if (colId === 'description') return 'TOTALI'
+              if (colId === 'dare') return eur(totals?.dare)
+              if (colId === 'avere') return eur(totals?.avere)
+              if (colId === 'progressiveBalance') return eur(totals?.progressiveBalance)
+              return ''
+            }}
+            getCellTitle={(row, col) =>
+              col.id === 'description'
+                ? String(row?.description || '')
+                : col.id === 'counterparty'
+                  ? String(row?.counterparty || row?.supplier || '')
+                  : ''
+            }
+          />
+          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+            Fonti Atlas: Prima Nota, fatture fornitori, movimenti banca (mappati sul piano semplificato).
+            Non è ancora un piano dei conti editabile come Passcom; i conti sono i 7 mastri operativi Atlas.
+          </p>
+        </section>
+      ) : null}
+
+      {viewMode === 'scheda' && !schedaAccount ? (
+        <section className="card fatture-panel">
+          <p className="fatture-note">Nessuna scheda aperta. Torna a Selezione scheda e conferma un conto.</p>
+          <button type="button" className="btn btn-primary" onClick={() => setViewMode('selezione')}>
+            Vai alla selezione
+          </button>
+        </section>
+      ) : null}
+
+      {viewMode === 'elenco' || viewMode === 'partitario' ? (
+        <>
+          <div className="ui-kpi-row">
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Numero totale mastrini</div>
+              <div className="ui-kpi-card-value">{data?.metrics?.totalAccounts ?? '—'}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo Dare</div>
+              <div className="ui-kpi-card-value">{eur(data?.metrics?.totalDare)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo Avere</div>
+              <div className="ui-kpi-card-value">{eur(data?.metrics?.totalAvere)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo finale</div>
+              <div className="ui-kpi-card-value">{eur(data?.metrics?.finalBalance)}</div>
+            </div>
+          </div>
+
+          <section className="card fatture-panel">
+            <h2 className="fatture-panel-title">Filtri elenco</h2>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                load()
+              }}
+              style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}
+            >
+              <label>
+                Periodo da
+                <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label>
+                a
+                <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+              <label>
+                Piano
+                <select className="form-control" value={statementType} onChange={(e) => setStatementType(e.target.value)}>
+                  <option value="">Tutti</option>
+                  <option value="stato_patrimoniale">Stato patrimoniale</option>
+                  <option value="conto_economico">Conto economico</option>
+                </select>
+              </label>
+              <label>
+                Categoria
+                <select className="form-control" value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option value="">Tutte</option>
+                  <option value="Patrimoniale">Patrimoniale</option>
+                  <option value="Economico">Economico</option>
+                </select>
+              </label>
+              <label style={{ minWidth: 220 }}>
+                Ricerca
+                <input
+                  className="form-control"
+                  value={advancedSearch}
+                  onChange={(e) => setAdvancedSearch(e.target.value)}
+                  placeholder="Conto, cliente, fornitore…"
+                />
+              </label>
+              <button type="submit" className="btn btn-primary">
+                Applica
+              </button>
+            </form>
+          </section>
+        </>
+      ) : null}
+
+      {viewMode === 'elenco' ? (
       <section className="card fatture-panel mastrini-fit-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
           <h2 className="fatture-panel-title" style={{ margin: 0 }}>
-            Elenco mastrini
+            Piano dei conti (mastrini Atlas)
           </h2>
           {selected ? (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportMastroCsv(selected, periodLabel)}>
-              Estratto conto del conto
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                setAccountCode(selected.code)
+                setSelectedCode(selected.code)
+                setViewMode('scheda')
+              }}
+            >
+              Apri scheda {selected.code}
             </button>
           ) : null}
         </div>
@@ -499,8 +775,13 @@ export default function MastriniContabiliPage() {
           emptyMessage="Nessun mastro nel filtro."
           gridClassName="mastrini-fit-grid"
           rowKey={(row) => row.code}
-          onRowClick={(row) => setSelectedCode(row.code)}
+          onRowClick={(row) => {
+            setSelectedCode(row.code)
+            setAccountCode(row.code)
+            setViewMode('scheda')
+          }}
           getRowClassName={(row) => (selected?.code === row.code ? 'workbook-row-selected' : '')}
+          rowClickTitle="Apri scheda contabile"
           totals={{
             dare: filteredAccounts.reduce((acc, r) => acc + (Number(r.totalDare) || 0), 0),
             avere: filteredAccounts.reduce((acc, r) => acc + (Number(r.totalAvere) || 0), 0),
@@ -518,28 +799,12 @@ export default function MastriniContabiliPage() {
           }
         />
       </section>
-      ) : (
+      ) : null}
+
+      {viewMode === 'partitario' ? (
         <>
           <section className="card fatture-panel mastrini-fit-panel">
             <h2 className="fatture-panel-title">Partitario per soggetto</h2>
-            <div className="ui-kpi-row">
-              <div className="ui-kpi-card">
-                <div className="ui-kpi-card-label">Soggetti totali</div>
-                <div className="ui-kpi-card-value">{data?.partitario?.metrics?.totalParties ?? '—'}</div>
-              </div>
-              <div className="ui-kpi-card">
-                <div className="ui-kpi-card-label">Totale Dare partitario</div>
-                <div className="ui-kpi-card-value">{eur(data?.partitario?.metrics?.totalDare)}</div>
-              </div>
-              <div className="ui-kpi-card">
-                <div className="ui-kpi-card-label">Totale Avere partitario</div>
-                <div className="ui-kpi-card-value">{eur(data?.partitario?.metrics?.totalAvere)}</div>
-              </div>
-              <div className="ui-kpi-card">
-                <div className="ui-kpi-card-label">Saldo complessivo</div>
-                <div className="ui-kpi-card-value">{eur(data?.partitario?.metrics?.finalBalance)}</div>
-              </div>
-            </div>
             <WorkbookGrid
               title="Partitario clienti/fornitori"
               sheetLabel={`${parties.length} soggetti`}
@@ -610,38 +875,11 @@ export default function MastriniContabiliPage() {
             </section>
           ) : null}
         </>
-      )}
+      ) : null}
 
-      {viewMode === 'mastrini' && selected ? (
+      {viewMode === 'elenco' && selected ? (
         <section className="card fatture-panel mastrini-fit-panel">
-          <h2 className="fatture-panel-title">Dettaglio mastro {selected.code}</h2>
-          <div className="ui-kpi-row">
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Descrizione</div>
-              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
-                {selected.description}
-              </div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Tipo conto</div>
-              <div className="ui-kpi-card-value" style={{ fontSize: '1.05rem' }}>
-                {selected.type}
-              </div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Saldo iniziale</div>
-              <div className="ui-kpi-card-value">{eur(selected.openingBalance)}</div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Totale Dare / Avere</div>
-              <div className="ui-kpi-card-value">{`${eur(selected.totalDare)} / ${eur(selected.totalAvere)}`}</div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Saldo finale</div>
-              <div className="ui-kpi-card-value">{eur(selected.finalBalance)}</div>
-            </div>
-          </div>
-
+          <h2 className="fatture-panel-title">Anteprima mastro {selected.code}</h2>
           <WorkbookGrid
             title={`Dettaglio mastro ${selected.code}`}
             sheetLabel={`${advancedRows.length} movimenti`}
@@ -656,10 +894,7 @@ export default function MastriniContabiliPage() {
             totals={{
               dare: advancedRows.reduce((acc, m) => acc + (Number(m.dare) || 0), 0),
               avere: advancedRows.reduce((acc, m) => acc + (Number(m.avere) || 0), 0),
-              progressiveBalance:
-                advancedRows.length > 0
-                  ? Number(advancedRows[advancedRows.length - 1].progressiveBalance) || 0
-                  : 0,
+              progressiveBalance: selected.finalBalance,
             }}
             totalsLabel={(colId, totals) => {
               if (colId === 'description') return 'TOTALI'
@@ -668,31 +903,10 @@ export default function MastriniContabiliPage() {
               if (colId === 'progressiveBalance') return eur(totals?.progressiveBalance)
               return ''
             }}
-            getCellTitle={(row, col) =>
-              col.id === 'description'
-                ? String(row?.description || '')
-                : col.id === 'documentLabel'
-                  ? String(row?.documentLabel || '')
-                  : ''
-            }
           />
-          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-            Collegamenti automatici attivi: Prima Nota, fatture fornitori/clienti, movimenti bancari, incassi e pagamenti.
-            Ogni riga apre la sezione origine del documento.
-          </p>
         </section>
       ) : null}
-
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Automazioni</h2>
-        <ul className="fatture-suggestions">
-          <li>Registrazione fattura → aggiorna debiti fornitori e costi.</li>
-          <li>Movimento Prima Nota → aggiorna cassa e ricavi/costi.</li>
-          <li>Movimento bancario riconciliato con fattura → collegamento visibile in mastrini e movimenti banca.</li>
-          <li>Movimento bancario riconciliato → aggiorna banca e conto collegato.</li>
-          <li>Incassi/Pagamenti → aggiornano crediti/debiti e banca.</li>
-        </ul>
-      </section>
     </AmministrazionePageShell>
   )
 }
+
