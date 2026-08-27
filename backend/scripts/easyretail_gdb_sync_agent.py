@@ -25,8 +25,16 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Permette import servizi se lanciato dalla root repo
-ROOT = Path(__file__).resolve().parents[1]
+# Root = cartella che contiene `app/`
+# - repo: backend/scripts/agent.py → backend/
+# - PC cassa flat: C:\AtlasSync\agent.py → C:\AtlasSync\ (con app\ accanto)
+_HERE = Path(__file__).resolve().parent
+if (_HERE / "app").is_dir():
+    ROOT = _HERE
+elif (_HERE.parent / "app").is_dir():
+    ROOT = _HERE.parent
+else:
+    ROOT = _HERE.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

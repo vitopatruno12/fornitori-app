@@ -1,9 +1,9 @@
 export const OPERATOR_LINKS_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left' },
-  { id: 'section', label: 'Sezione', width: 150, emphasis: true },
-  { id: 'label', label: 'Link', width: 180, emphasis: true },
-  { id: 'description', label: 'A cosa serve', width: 420 },
-  { id: 'url', label: 'Indirizzo', width: 360, mono: true },
+  { id: 'role', label: 'Ruolo', width: 170, emphasis: true },
+  { id: 'sede', label: 'Sede', width: 200, emphasis: true },
+  { id: 'description', label: 'A cosa serve', width: 380 },
+  { id: 'url', label: 'Indirizzo', width: 340, mono: true },
 ]
 
 function text(value) {
@@ -21,10 +21,10 @@ export function operatorLinkCellValue(row, column, ctx = {}) {
   switch (column.id) {
     case 'row':
       return String(rowIndex + 1)
-    case 'section':
-      return text(row.section)
-    case 'label':
-      return text(row.label)
+    case 'role':
+      return text(row.role)
+    case 'sede':
+      return text(row.sede)
     case 'description':
       return text(row.description)
     case 'url':

@@ -13,47 +13,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from ..models.pos_receipt import PosReceipt
-
-SOURCE_EASYRETAIL = "easyretail"
-
-# Allineato ai modelli VNE in routers/vne.py
-POS_STORE_CATALOG = [
-    {
-        "model_id": "model-1",
-        "model_label": "La Risacca",
-        "aliases": ("risacca", "la risacca", "model-1", "model1", "1"),
-    },
-    {
-        "model_id": "model-2",
-        "model_label": "Mani in Pasta",
-        "aliases": (
-            "mani",
-            "pasta",
-            "mani in pasta",
-            "lemaninpasta",
-            "le mani in pasta",
-            "model-2",
-            "model2",
-            "2",
-            "abba",
-            "via abba",
-        ),
-    },
-    {
-        "model_id": "model-3",
-        "model_label": "Le Mucche Volanti",
-        "aliases": (
-            "mucche",
-            "volanti",
-            "le mucche",
-            "le mucche volanti",
-            "model-3",
-            "model3",
-            "3",
-            "momento",
-        ),
-    },
-]
+from .pos_store_catalog import (  # noqa: F401 — re-export
+    POS_STORE_CATALOG,
+    SOURCE_EASYRETAIL,
+    _norm_header,
+    resolve_store,
+)
 
 _DATE_HEADERS = (
     "dataora",
@@ -111,40 +76,11 @@ _STORE_HEADERS = (
 _VOID_HEADERS = ("annullato", "void", "logicdelete", "cancellato", "storno")
 
 
-def _norm_header(h: str) -> str:
-    s = str(h or "").strip().lower()
-    s = s.replace("à", "a").replace("è", "e").replace("é", "e").replace("ì", "i").replace("ò", "o").replace("ù", "u")
-    s = re.sub(r"[^a-z0-9]+", "_", s)
-    return s.strip("_")
-
-
 def _pick(row: Dict[str, str], headers: Tuple[str, ...]) -> str:
     for h in headers:
         if h in row and str(row[h] or "").strip():
             return str(row[h]).strip()
     return ""
-
-
-def resolve_store(raw: str, fallback_model_id: Optional[str] = None) -> Tuple[str, str, str]:
-    """Ritorna (store_key, model_id, model_label)."""
-    text = str(raw or "").strip()
-    key = _norm_header(text)
-    if not key and fallback_model_id:
-        for item in POS_STORE_CATALOG:
-            if item["model_id"] == fallback_model_id:
-                return item["model_id"], item["model_id"], item["model_label"]
-    for item in POS_STORE_CATALOG:
-        aliases = {_norm_header(a) for a in item["aliases"]}
-        aliases.add(_norm_header(item["model_label"]))
-        aliases.add(item["model_id"])
-        if key in aliases or any(a and a in key for a in aliases if len(a) >= 4):
-            return item["model_id"], item["model_id"], item["model_label"]
-    if fallback_model_id:
-        for item in POS_STORE_CATALOG:
-            if item["model_id"] == fallback_model_id:
-                return item["model_id"], item["model_id"], item["model_label"]
-    store_key = key or "unknown"
-    return store_key, None if store_key == "unknown" else store_key, text or store_key
 
 
 def _parse_amount(raw: str) -> Optional[Decimal]:
@@ -386,6 +322,22 @@ def pos_receipt_stats(db: Session) -> Dict[str, Any]:
             {"model_id": x["model_id"], "model_label": x["model_label"]} for x in POS_STORE_CATALOG
         ],
     }
+
+
+def purge_receipts_by_model(
+    db: Session,
+    *,
+    model_id: str,
+    source: str = SOURCE_EASYRETAIL,
+) -> Dict[str, Any]:
+    """Elimina scontrini per model_id (es. cleanup import errato)."""
+    mid = (model_id or "").strip()
+    if mid not in ("model-1", "model-2", "model-3"):
+        raise ValueError("model_id deve essere model-1|model-2|model-3")
+    q = db.query(PosReceipt).filter(PosReceipt.source == source, PosReceipt.model_id == mid)
+    deleted = q.delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": int(deleted), "model_id": mid, "source": source}
 
 
 def load_pos_visit_buckets(

@@ -12,6 +12,7 @@ import {
   resolveAnalisiVneSemaphoreLight,
   eur,
 } from '../components/AnalisiShared.jsx'
+import { AnalisiTrendToolbar, useAnalisiMachineFilter } from '../components/AnalisiMachineFilter.jsx'
 import {
   fetchAnalyticsDaily,
   fetchAnalyticsHourly,
@@ -322,20 +323,26 @@ export function AnalisiDashboardPage() {
 }
 
 export function AnalisiGiornalieroPage() {
+  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    'daily:days=30',
-    () => fetchAnalyticsDaily({ days: 30 }),
-    [],
+    `daily:days=30:${modelId}`,
+    () => fetchAnalyticsDaily({ days: 30, modelId }),
+    [modelId],
   )
   return (
     <AnalisiPageShell
-      title="Andamento giornaliero"
-      lead="Incassi giorno per giorno da chiusure cassa VNE (e operazioni se mancano chiusure)."
+      title={`Andamento giornaliero — ${machineLabel}`}
+      lead={`Incassi giorno per giorno da chiusure cassa VNE della macchina ${machineLabel}.`}
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
-          {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
-        </button>
+        <AnalisiTrendToolbar
+          selectId="analisi-daily-machine"
+          modelId={modelId}
+          onModelChange={setModelId}
+          onRefresh={refreshNow}
+          refreshing={refreshing}
+          loading={loading}
+        />
       }
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
@@ -343,8 +350,9 @@ export function AnalisiGiornalieroPage() {
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
+          <h2 className="analisi-panel-title">Flusso giornaliero · {machineLabel}</h2>
           <p className="analisi-total">
-            Totale periodo: <strong>{eur(data.total_incasso)}</strong>
+            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
           </p>
           <SeriesBars
             rows={(data.rows || []).map((r) => ({
@@ -359,20 +367,26 @@ export function AnalisiGiornalieroPage() {
 }
 
 export function AnalisiSettimanalePage() {
+  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    'weekly:weeks=12',
-    () => fetchAnalyticsWeekly({ weeks: 12 }),
-    [],
+    `weekly:weeks=12:${modelId}`,
+    () => fetchAnalyticsWeekly({ weeks: 12, modelId }),
+    [modelId],
   )
   return (
     <AnalisiPageShell
-      title="Andamento settimanale"
-      lead="Confronto settimane da dati VNE."
+      title={`Andamento settimanale — ${machineLabel}`}
+      lead={`Confronto settimane da dati VNE della macchina ${machineLabel}.`}
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
-          {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
-        </button>
+        <AnalisiTrendToolbar
+          selectId="analisi-weekly-machine"
+          modelId={modelId}
+          onModelChange={setModelId}
+          onRefresh={refreshNow}
+          refreshing={refreshing}
+          loading={loading}
+        />
       }
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
@@ -380,8 +394,9 @@ export function AnalisiSettimanalePage() {
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
+          <h2 className="analisi-panel-title">Flusso settimanale · {machineLabel}</h2>
           <p className="analisi-total">
-            Totale periodo: <strong>{eur(data.total_incasso)}</strong>
+            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
           </p>
           <SeriesBars rows={data.rows || []} labelKey="label" />
         </section>
@@ -391,20 +406,26 @@ export function AnalisiSettimanalePage() {
 }
 
 export function AnalisiMensilePage() {
+  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    'monthly:months=6',
-    () => fetchAnalyticsMonthly({ months: 6 }),
-    [],
+    `monthly:months=6:${modelId}`,
+    () => fetchAnalyticsMonthly({ months: 6, modelId }),
+    [modelId],
   )
   return (
     <AnalisiPageShell
-      title="Andamento mensile"
-      lead="Incassi mensili aggregati da chiusure/operazioni VNE."
+      title={`Andamento mensile — ${machineLabel}`}
+      lead={`Incassi mensili da chiusure/operazioni VNE della macchina ${machineLabel}.`}
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
-          {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
-        </button>
+        <AnalisiTrendToolbar
+          selectId="analisi-monthly-machine"
+          modelId={modelId}
+          onModelChange={setModelId}
+          onRefresh={refreshNow}
+          refreshing={refreshing}
+          loading={loading}
+        />
       }
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
@@ -412,8 +433,9 @@ export function AnalisiMensilePage() {
       <DataNote text={data?.data_note} />
       {data && (
         <section className="card analisi-panel">
+          <h2 className="analisi-panel-title">Flusso mensile · {machineLabel}</h2>
           <p className="analisi-total">
-            Totale periodo: <strong>{eur(data.total_incasso)}</strong>
+            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
           </p>
           <SeriesBars rows={data.rows || []} labelKey="month_label" />
         </section>

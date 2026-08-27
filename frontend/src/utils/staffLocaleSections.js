@@ -26,16 +26,16 @@ export function defaultSectionsForLocale(localeName) {
     .replace(/[\s_\-]+/g, '')
   if (!key) return ['Generale']
   if (key.includes('zanardelli')) {
-    return ['Mediazione', 'Banco', 'Cucina', 'Forno']
+    return ['Mediazione', 'Banco', 'Cucina', 'Forno', 'Pulizie']
   }
   if (key.includes('abba')) {
-    return ['Mediazione', 'Banco', 'Cucina', 'Forno']
+    return ['Mediazione', 'Banco', 'Cucina', 'Forno', 'Pulizie']
   }
-  return ['Banco', 'Cucina', 'Forno']
+  return ['Banco', 'Cucina', 'Forno', 'Pulizie']
 }
 
 /** Piani sempre disponibili nella pianificazione turni. */
-export const CORE_PLANNING_SECTIONS = ['Banco', 'Cucina', 'Forno']
+export const CORE_PLANNING_SECTIONS = ['Banco', 'Cucina', 'Forno', 'Pulizie']
 
 /**
  * Unisce sezioni salvate, sezioni presenti sui dipendenti e default del locale.

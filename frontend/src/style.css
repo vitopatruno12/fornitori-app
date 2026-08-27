@@ -4953,6 +4953,98 @@ select.form-control {
   box-shadow: var(--shadow);
 }
 
+.staff-pulizie-coverage-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.staff-pulizie-coverage-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(92px, 0.9fr) auto minmax(92px, 0.9fr) auto minmax(72px, 0.7fr);
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.staff-pulizie-coverage-label,
+.staff-pulizie-coverage-target-label {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+}
+
+.staff-pulizie-coverage-sep {
+  color: var(--text-muted, #64748b);
+  font-size: 0.85rem;
+}
+
+.staff-pulizie-coverage-target {
+  max-width: 5.5rem;
+}
+
+.staff-pulizie-day-summary {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.staff-pulizie-band-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #99f6e4;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.staff-pulizie-band-chip.is-short {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+.staff-pulizie-band-chip strong {
+  font-size: 0.78rem;
+  color: #0f766e;
+}
+
+.staff-pulizie-band-chip.is-short strong {
+  color: #c2410c;
+}
+
+.staff-pulizie-time-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.staff-pulizie-time-group {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0f766e;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+}
+
+@media (max-width: 720px) {
+  .staff-pulizie-coverage-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .staff-pulizie-coverage-label {
+    grid-column: 1 / -1;
+  }
+
+  .staff-pulizie-coverage-sep {
+    display: none;
+  }
+}
+
 
 /* Personale: modale report PDF */
 .staff-report-modal-backdrop {
@@ -6595,6 +6687,33 @@ select.form-control {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.analisi-trend-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+}
+
+.analisi-machine-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: min(100%, 240px);
+}
+
+.analisi-machine-filter label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.analisi-machine-filter-select {
+  min-width: 220px;
 }
 
 .analisi-subnav {

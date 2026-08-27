@@ -58,6 +58,14 @@ import {
   sectionCompareKey,
 } from '../utils/staffLocaleSections.js'
 import {
+  DEFAULT_PULIZIE_COVERAGE_BANDS,
+  groupShiftsByExactTimeBand,
+  isPulizieSection,
+  loadPulizieCoverageBands,
+  savePulizieCoverageBands,
+  summarizeBandCoverage,
+} from '../utils/staffPlanningBands.js'
+import {
   generateLocaleAccessCode,
   isValidLocaleAccessCode,
   normalizeLocaleAccessCode,
@@ -1169,6 +1177,7 @@ export default function StaffPage({ operatorMode = false }) {
   const [formNotes, setFormNotes] = useState('')
   const [formGenere, setFormGenere] = useState('')
   const [planningSection, setPlanningSection] = useState('')
+  const [pulizieCoverageBands, setPulizieCoverageBands] = useState(() => [...DEFAULT_PULIZIE_COVERAGE_BANDS])
   const [loadPlanMenuOpen, setLoadPlanMenuOpen] = useState(false)
   const [refreshPlanMenuOpen, setRefreshPlanMenuOpen] = useState(false)
   const [copyPlanMenuOpen, setCopyPlanMenuOpen] = useState(false)
@@ -1768,6 +1777,27 @@ export default function StaffPage({ operatorMode = false }) {
     }))
   }, [planningSection, planningSectionOptions, shifts, members, localeSections])
 
+  const showPuliziePlanning = useMemo(
+    () => planningSectionOptions.some((section) => isPulizieSection(section)),
+    [planningSectionOptions],
+  )
+
+  useEffect(() => {
+    if (!localeStaffName) {
+      setPulizieCoverageBands([...DEFAULT_PULIZIE_COVERAGE_BANDS])
+      return
+    }
+    setPulizieCoverageBands(loadPulizieCoverageBands(localeStaffName))
+  }, [localeStaffName])
+
+  function updatePulizieCoverageBand(index, patch) {
+    setPulizieCoverageBands((prev) => {
+      const next = prev.map((band, i) => (i === index ? { ...band, ...patch } : band))
+      if (localeStaffName) savePulizieCoverageBands(localeStaffName, next)
+      return next
+    })
+  }
+
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
     const to = toYMD(endDate)
@@ -2058,7 +2088,7 @@ export default function StaffPage({ operatorMode = false }) {
     return `${name} — ${kindIt}${times}${extra}`
   }
 
-  function openDayAndInsertShift(d) {
+  function openDayAndInsertShift(d, sectionName = planningSection) {
     const picked = new Date(d.getFullYear(), d.getMonth(), d.getDate())
     setPlanView('day')
     setDayFocus(picked)
@@ -2066,8 +2096,14 @@ export default function StaffPage({ operatorMode = false }) {
     setFormDate(toYMD(picked))
     setWeekLoadDays(weekLoadDaysForSingleDate(picked))
     setFormKind('shift')
-    setFormStart('08:00')
-    setFormEnd('16:00')
+    if (isPulizieSection(sectionName) && pulizieCoverageBands[0]) {
+      setFormGenere(sectionName)
+      setFormStart(pulizieCoverageBands[0].start)
+      setFormEnd(pulizieCoverageBands[0].end)
+    } else {
+      setFormStart('08:00')
+      setFormEnd('16:00')
+    }
     window.setTimeout(scrollToShiftForm, 80)
   }
 
@@ -5617,6 +5653,47 @@ export default function StaffPage({ operatorMode = false }) {
 
         {loading && <AnalisiLoadingBar active label="Caricamento personale" variant="subtle" />}
 
+        {!loading && !periodTooLong && showPuliziePlanning ? (
+          <div className="card staff-pulizie-coverage-card" style={{ marginBottom: '0.85rem', padding: '0.85rem 1rem' }}>
+            <h3 className="page-subheader" style={{ marginTop: 0, marginBottom: '0.35rem' }}>
+              Copertura Pulizie per fascia
+            </h3>
+            <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              Imposta quante persone servono in mattina, pomeriggio e chiusura. Nella griglia compare il conteggio
+              assegnato (es. 4 nella prima parte, 2 nella seconda, 1 in chiusura).
+            </p>
+            <div className="staff-pulizie-coverage-grid">
+              {pulizieCoverageBands.map((band, index) => (
+                <div key={band.id} className="staff-pulizie-coverage-row">
+                  <label className="staff-pulizie-coverage-label">{band.label}</label>
+                  <input
+                    type="time"
+                    className="form-control"
+                    value={band.start}
+                    onChange={(e) => updatePulizieCoverageBand(index, { start: e.target.value })}
+                  />
+                  <span className="staff-pulizie-coverage-sep">→</span>
+                  <input
+                    type="time"
+                    className="form-control"
+                    value={band.end}
+                    onChange={(e) => updatePulizieCoverageBand(index, { end: e.target.value })}
+                  />
+                  <label className="staff-pulizie-coverage-target-label">Persone</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="form-control staff-pulizie-coverage-target"
+                    value={band.target}
+                    onChange={(e) => updatePulizieCoverageBand(index, { target: Number(e.target.value) || 0 })}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {!loading && !periodTooLong && (
           <div className="staff-planning-sections">
             {planningWeekBlocks.map((block) => (
@@ -5667,7 +5744,7 @@ export default function StaffPage({ operatorMode = false }) {
                             style={{ padding: '0.2rem 0.5rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
                             onClick={() => {
                               applyPlanningSection(block.section)
-                              openDayAndInsertShift(d)
+                              openDayAndInsertShift(d, block.section)
                             }}
                             disabled={shiftBusy}
                             title={`Apri questo giorno nel piano ${block.sectionLabel}`}
@@ -5675,6 +5752,32 @@ export default function StaffPage({ operatorMode = false }) {
                             Apri giorno
                           </button>
                         </div>
+                        {isPulizieSection(block.section) ? (
+                          <div className="staff-pulizie-day-summary">
+                            {summarizeBandCoverage(list, pulizieCoverageBands).map((band) => (
+                              <div
+                                key={band.id}
+                                className={`staff-pulizie-band-chip${band.ok ? '' : ' is-short'}`}
+                              >
+                                <strong>{band.label}</strong>
+                                <span>
+                                  {fmtTime(band.start)}–{fmtTime(band.end)} · {band.assigned}/{band.target || '—'} persone
+                                  {!band.ok && band.gap > 0 ? ` · mancano ${band.gap}` : ''}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {isPulizieSection(block.section) && groupShiftsByExactTimeBand(list).length > 0 ? (
+                          <div className="staff-pulizie-time-groups">
+                            {groupShiftsByExactTimeBand(list).map((group) => (
+                              <div key={`${group.start}-${group.end}`} className="staff-pulizie-time-group">
+                                {fmtTime(group.start)}–{fmtTime(group.end)} · {group.shifts.length}{' '}
+                                {group.shifts.length === 1 ? 'persona' : 'persone'}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                         <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.88rem', lineHeight: 1.45 }}>
                           {list.map((s) => (
                             <li key={s.id} style={{ marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'flex-start' }}>
@@ -5712,11 +5815,13 @@ export default function StaffPage({ operatorMode = false }) {
           <div className="staff-shift-form-hint" role="note">
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
             <p className="staff-shift-form-hint-list" style={{ margin: 0 }}>
-              Scegli il <strong>Genere</strong> (Banco, Cucina, Forno… dalla sezione del dipendente), i{' '}
+              Scegli il <strong>Genere</strong> (Banco, Cucina, Forno, Pulizie… dalla sezione del dipendente), i{' '}
               <strong>Dipendenti</strong> e i <strong>Giorni settimana</strong>, imposta il <strong>Tipo</strong>
               {isAllDayKind(formKind)
                 ? ' (ferie, assenza, malattia e riposo non richiedono orari)'
-                : ' e gli orari'}
+                : isPulizieSection(formGenere)
+                  ? ' e gli orari (per Pulizie puoi caricare più persone con fasce diverse: mattina, pomeriggio, chiusura)'
+                  : ' e gli orari'}
               , poi clicca <strong>Carica</strong>. Inserisce le voci nella settimana di quella sezione.
             </p>
           </div>

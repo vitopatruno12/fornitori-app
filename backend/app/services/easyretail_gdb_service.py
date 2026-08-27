@@ -328,7 +328,7 @@ def fetch_receipts_from_gdb(
     limit: int = 20000,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Legge scontrini recenti dal GDB. Ritorna (rows, meta)."""
-    from .pos_receipts_service import SOURCE_EASYRETAIL, resolve_store
+    from .pos_store_catalog import SOURCE_EASYRETAIL, resolve_store
 
     con = connect_gdb(dsn, user=user, password=password, fbclient=fbclient, charset=charset)
     try:

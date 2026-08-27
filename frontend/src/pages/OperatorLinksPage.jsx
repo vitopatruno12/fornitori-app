@@ -38,8 +38,8 @@ export default function OperatorLinksPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link operatori</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Due link PWA unificati da condividere: <strong>/operatore-postazione</strong> (operatori e capi area) e{' '}
-          <strong>/operatore-consegne</strong> (trasportatore). I vecchi link singoli e le pagine standalone sono stati rimossi.
+          Link PWA per sede: tre postazioni operative (<strong>/operatore-postazione</strong>) e trasportatore guidatore (
+          <strong>/operatore-consegne</strong>). Stesso indirizzo PWA per le sedi Mediazione Abba, Zanardelli e Via Lattea.
         </p>
       </section>
 

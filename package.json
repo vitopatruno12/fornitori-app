@@ -9,7 +9,7 @@
     "preview": "cd frontend && npm run preview",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:frontend:wait": "wait-on -t 120000 http-get://127.0.0.1:8004/health && npm run dev:frontend",
-    "dev:backend": "cd backend && .\\\\.venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload --host 127.0.0.1 --port 8004",
+    "dev:backend": "cd backend && .\\\\.venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload --reload-exclude .venv --host 127.0.0.1 --port 8004",
     "dev:backend-nest": "cd backend-nest && npm run start:dev"
   },
   "devDependencies": {

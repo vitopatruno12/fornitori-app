@@ -94,6 +94,11 @@ class SyncGdbBody(BaseModel):
     lookback_hours: Optional[int] = None
 
 
+class PurgeModelBody(BaseModel):
+    model_id: str = Field(..., description="model-1|model-2|model-3 da eliminare")
+    confirm: str = Field(..., description='Deve essere esattamente "DELETE"')
+
+
 @router.post("/ingest")
 def ingest_pos_receipts(
     body: IngestBody,
@@ -146,3 +151,20 @@ def pos_receipts_sync_status():
         "sync_token_configured": token_set,
         "mode": "server-gdb" if cfg["enabled"] and cfg["dsn"] else "agent-push",
     }
+
+
+@router.post("/purge-model")
+def purge_pos_receipts_model(
+    body: PurgeModelBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_sync_token),
+):
+    """Elimina scontrini di un model_id (cleanup import con model sbagliato)."""
+    if (body.confirm or "").strip() != "DELETE":
+        raise HTTPException(status_code=400, detail='confirm deve essere "DELETE"')
+    try:
+        return pos_receipts_service.purge_receipts_by_model(db, model_id=body.model_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Purge fallita: {e}") from e
