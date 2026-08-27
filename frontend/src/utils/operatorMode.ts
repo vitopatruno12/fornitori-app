@@ -1,6 +1,7 @@
 import type { OperatorStationId } from './atlasAuth'
 import { ensureHttpsUrl } from './urlSecurity'
 
+export type { OperatorStationId }
 export { ensureHttpsUrl }
 
 /** Percorso pubblico: solo Nuovo ordine. */
