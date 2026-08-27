@@ -1,20 +1,35 @@
 import {
+  entryPointToStationId,
+  getLockedOperatorStationId,
+  getOperatorStationBasePath,
   isOperatorDeliveryMode,
   isOperatorStationMode,
   OPERATOR_DELIVERY_PATH,
   OPERATOR_STATION_PATH,
+  resolveOperatorStationIdFromPath,
+  stationIdToEntryPoint,
+  type OperatorStationId,
 } from './operatorMode.ts'
 
-const OPERATOR_MANIFEST_HREF = '/manifest-operator.webmanifest'
+const OPERATOR_MANIFEST_BY_STATION: Record<OperatorStationId, string> = {
+  abba: '/manifest-operator.webmanifest',
+  zanardelli: '/manifest-operator-zanardelli.webmanifest',
+  lattea: '/manifest-operator-lattea.webmanifest',
+}
+
 const CARRIER_MANIFEST_HREF = '/manifest-carrier.webmanifest'
 const PWA_LAUNCH_KEY = 'atlasPwaLaunchTarget'
 
-export type PwaLaunchTarget = 'station' | 'carrier'
+export type PwaLaunchTarget = 'station' | 'station-zanardelli' | 'station-lattea' | 'carrier'
+
+function stationIdToPwaTarget(stationId: OperatorStationId): PwaLaunchTarget {
+  return stationIdToEntryPoint(stationId) as PwaLaunchTarget
+}
 
 /** Preferenza di avvio PWA: postazione operativa (non si cancella al logout). */
-export function markOperatorPwaLaunchPreferred(): void {
+export function markOperatorPwaLaunchPreferred(stationId: OperatorStationId = 'abba'): void {
   try {
-    localStorage.setItem(PWA_LAUNCH_KEY, 'station')
+    localStorage.setItem(PWA_LAUNCH_KEY, stationIdToPwaTarget(stationId))
   } catch {
     /* ignore */
   }
@@ -39,9 +54,17 @@ export function clearOperatorPwaLaunchPreferred(): void {
 
 export function prefersOperatorPwaLaunch(): boolean {
   try {
-    return localStorage.getItem(PWA_LAUNCH_KEY) === 'station'
+    return entryPointToStationId(localStorage.getItem(PWA_LAUNCH_KEY)) != null
   } catch {
     return false
+  }
+}
+
+export function preferredOperatorStationId(): OperatorStationId {
+  try {
+    return entryPointToStationId(localStorage.getItem(PWA_LAUNCH_KEY)) || getLockedOperatorStationId()
+  } catch {
+    return 'abba'
   }
 }
 
@@ -96,21 +119,27 @@ export function applyContextPwaManifest(): void {
   }
 
   if (isOperatorStationMode()) {
-    setManifestHref(OPERATOR_MANIFEST_HREF)
+    const stationId = resolveOperatorStationIdFromPath() || 'abba'
+    setManifestHref(OPERATOR_MANIFEST_BY_STATION[stationId])
     document.title = document.title.includes('postazione') ? document.title : 'ATLAS — Postazione operativa'
     const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
     if (appleTitle) appleTitle.setAttribute('content', 'ATLAS Postazione')
-    markOperatorPwaLaunchPreferred()
+    markOperatorPwaLaunchPreferred(stationId)
   }
 }
 
-/** Se la PWA installata riparte da / ma è la postazione, manda a /operatore-postazione. */
+/** Se la PWA installata riparte da / ma è la postazione, manda al path sede corretto. */
 export function shouldRedirectStandaloneToOperatorStation(pathname: string): boolean {
   if (!isStandaloneDisplay()) return false
   const path = (pathname || '/').replace(/\/$/, '') || '/'
+  if (resolveOperatorStationIdFromPath(path)) return false
   if (path === OPERATOR_STATION_PATH || path.endsWith(OPERATOR_STATION_PATH)) return false
   if (path !== '/' && path !== '') return false
   return prefersOperatorPwaLaunch() || isOperatorStationMode()
+}
+
+export function getStandaloneOperatorStationPath(): string {
+  return getOperatorStationBasePath(preferredOperatorStationId())
 }
 
 /** Se la PWA installata riparte da / ma è la postazione trasportatore, manda a /operatore-consegne. */

@@ -1,3 +1,8 @@
+import type { OperatorStationId } from './atlasAuth'
+import { ensureHttpsUrl } from './urlSecurity'
+
+export { ensureHttpsUrl }
+
 /** Percorso pubblico: solo Nuovo ordine. */
 export const OPERATOR_ORDER_PATH = '/operatore-ordine'
 
@@ -8,10 +13,21 @@ export const OPERATOR_DELIVERY_HISTORY_SUFFIX = '/storico'
 /** Percorso pubblico: Prima Nota di cassa (per locale / attività). */
 export const OPERATOR_PRIMA_NOTA_PATH = '/operatore-prima-nota'
 
-/** Postazione operativa: Personale, Ordini e Prima Nota in un solo link (PWA). */
+/** Postazione operativa Abba 42. */
 export const OPERATOR_STATION_PATH = '/operatore-postazione'
+/** Postazione operativa Zanardelli 19. */
+export const OPERATOR_STATION_ZANARDELLI_PATH = '/operatore-postazione-zanardelli'
+/** Postazione operativa Via Lattea. */
+export const OPERATOR_STATION_LATTEA_PATH = '/operatore-postazione-lattea'
+
+export const OPERATOR_STATION_PATHS: Record<OperatorStationId, string> = {
+  abba: OPERATOR_STATION_PATH,
+  zanardelli: OPERATOR_STATION_ZANARDELLI_PATH,
+  lattea: OPERATOR_STATION_LATTEA_PATH,
+}
 
 const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
+const OPERATOR_STATION_ID_KEY = 'atlasOperatorStationId'
 const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
 export type OperatorDeliveryView =
@@ -26,6 +42,7 @@ export type OperatorDeliveryView =
 
 /** Sotto-percorso fatture nella postazione trasportatore (resta autenticato carrier). */
 export const OPERATOR_DELIVERY_FATTURE_PATH = `${OPERATOR_DELIVERY_PATH}/fatture`
+
 export type OperatorStationView =
   | 'overview'
   | 'suppliers'
@@ -38,10 +55,7 @@ export type OperatorStationView =
   | 'stipendi'
   | 'prima-nota'
   | 'trasportatori'
-
-import { ensureHttpsUrl } from './urlSecurity'
-
-export { ensureHttpsUrl }
+  | 'fatture'
 
 /** Origine pubblica per link satelliti (sempre https in produzione se VITE_PUBLIC_APP_URL è impostato). */
 export function getPublicAppOrigin(): string {
@@ -94,6 +108,44 @@ function queryMatches(value: string): boolean {
   return new URLSearchParams(window.location.search).get('modalita') === value
 }
 
+export function getOperatorStationBasePath(stationId: OperatorStationId = 'abba'): string {
+  return OPERATOR_STATION_PATHS[stationId] || OPERATOR_STATION_PATH
+}
+
+export function getOperatorStationFatturePath(stationId: OperatorStationId = 'abba'): string {
+  return `${getOperatorStationBasePath(stationId)}/fatture`
+}
+
+export function resolveOperatorStationIdFromPath(pathname?: string): OperatorStationId | null {
+  const path = (pathname || normalizePathname()).replace(/\/$/, '') || '/'
+  if (path === OPERATOR_STATION_ZANARDELLI_PATH || path.startsWith(`${OPERATOR_STATION_ZANARDELLI_PATH}/`)) {
+    return 'zanardelli'
+  }
+  if (path === OPERATOR_STATION_LATTEA_PATH || path.startsWith(`${OPERATOR_STATION_LATTEA_PATH}/`)) {
+    return 'lattea'
+  }
+  if (path === OPERATOR_STATION_PATH || path.startsWith(`${OPERATOR_STATION_PATH}/`)) {
+    return 'abba'
+  }
+  return null
+}
+
+export function entryPointToStationId(raw: string | null | undefined): OperatorStationId | null {
+  const value = String(raw || '')
+    .trim()
+    .toLowerCase()
+  if (value === 'station' || value === 'station-abba') return 'abba'
+  if (value === 'station-zanardelli') return 'zanardelli'
+  if (value === 'station-lattea') return 'lattea'
+  return null
+}
+
+export function stationIdToEntryPoint(stationId: OperatorStationId): string {
+  if (stationId === 'zanardelli') return 'station-zanardelli'
+  if (stationId === 'lattea') return 'station-lattea'
+  return 'station'
+}
+
 export function isOperatorOrderMode(): boolean {
   if (typeof window === 'undefined') return false
   if (pathMatches(OPERATOR_ORDER_PATH)) return true
@@ -118,9 +170,15 @@ export function isOperatorPrimaNotaMode(): boolean {
 
 export function isOperatorStationMode(): boolean {
   if (typeof window === 'undefined') return false
-  if (pathMatches(OPERATOR_STATION_PATH)) return true
+  if (resolveOperatorStationIdFromPath()) return true
   if (hashMatches('operatore-postazione')) return true
-  return queryMatches('operatore-postazione')
+  if (hashMatches('operatore-postazione-zanardelli')) return true
+  if (hashMatches('operatore-postazione-lattea')) return true
+  return (
+    queryMatches('operatore-postazione') ||
+    queryMatches('operatore-postazione-zanardelli') ||
+    queryMatches('operatore-postazione-lattea')
+  )
 }
 
 export function isOperatorStationLocked(): boolean {
@@ -132,26 +190,41 @@ export function isOperatorStationLocked(): boolean {
   }
 }
 
+export function getLockedOperatorStationId(): OperatorStationId {
+  if (typeof window === 'undefined') return 'abba'
+  try {
+    const fromSession = entryPointToStationId(sessionStorage.getItem(OPERATOR_STATION_ID_KEY))
+    if (fromSession) return fromSession
+    const fromEntry = entryPointToStationId(localStorage.getItem(OPERATOR_ENTRY_POINT_KEY))
+    if (fromEntry) return fromEntry
+  } catch {
+    // ignore
+  }
+  return 'abba'
+}
+
 export function shouldOpenOperatorStation(): boolean {
   if (isOperatorStationLocked()) return true
   if (typeof window === 'undefined') return false
   try {
-    return localStorage.getItem(OPERATOR_ENTRY_POINT_KEY) === 'station'
+    return entryPointToStationId(localStorage.getItem(OPERATOR_ENTRY_POINT_KEY)) != null
   } catch {
     return false
   }
 }
 
-export function setOperatorStationLock(active: boolean): void {
+export function setOperatorStationLock(active: boolean, stationId: OperatorStationId = 'abba'): void {
   if (typeof window === 'undefined') return
   try {
     if (active) {
       sessionStorage.setItem(OPERATOR_STATION_LOCK_KEY, '1')
+      sessionStorage.setItem(OPERATOR_STATION_ID_KEY, stationId)
       // Preferenza PWA permanente: non va cancellata al logout, altrimenti
       // l'app installata riparte sul gestionale grande (credenziali michele).
-      localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, 'station')
+      localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, stationIdToEntryPoint(stationId))
     } else {
       sessionStorage.removeItem(OPERATOR_STATION_LOCK_KEY)
+      sessionStorage.removeItem(OPERATOR_STATION_ID_KEY)
       // Non rimuovere OPERATOR_ENTRY_POINT_KEY: serve alla PWA chiusa/riaperta.
     }
   } catch {
@@ -159,16 +232,17 @@ export function setOperatorStationLock(active: boolean): void {
   }
 }
 
-export function markOperatorStationEntryPoint(): void {
+export function markOperatorStationEntryPoint(stationId: OperatorStationId = 'abba'): void {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, 'station')
+    localStorage.setItem(OPERATOR_ENTRY_POINT_KEY, stationIdToEntryPoint(stationId))
+    sessionStorage.setItem(OPERATOR_STATION_ID_KEY, stationId)
   } catch {
     // ignore
   }
 }
 
-const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview'>, string> = {
+const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview' | 'fatture'>, string> = {
   suppliers: 'fornitori',
   orders: 'ordini',
   delivery: 'consegna',
@@ -206,13 +280,19 @@ const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
   trasportatori: 'trasportatori',
   trasportatore: 'trasportatori',
   corrieri: 'trasportatori',
+  fatture: 'fatture',
+  fatturazione: 'fatture',
+  'fatture-fornitori': 'fatture',
   panoramica: 'overview',
   overview: 'overview',
   dashboard: 'overview',
 }
 
-export function getOperatorStationView(): OperatorStationView {
+export function getOperatorStationView(stationId: OperatorStationId = 'abba'): OperatorStationView {
   if (typeof window === 'undefined') return 'orders'
+  const fatturePath = getOperatorStationFatturePath(stationId)
+  const path = normalizePathname()
+  if (path === fatturePath || path.startsWith(`${fatturePath}/`)) return 'fatture'
   const q = new URLSearchParams(window.location.search)
   const raw = String(q.get('sezione') || '').trim().toLowerCase()
   if (raw && STATION_VIEW_ALIASES[raw]) return STATION_VIEW_ALIASES[raw]
@@ -299,8 +379,13 @@ export function getOperatorPrimaNotaPublicUrl(): string {
   return buildPublicUrl(OPERATOR_PRIMA_NOTA_PATH)
 }
 
-export function getOperatorStationPublicUrl(view: OperatorStationView = 'overview'): string {
-  const base = buildPublicUrl(OPERATOR_STATION_PATH)
+export function getOperatorStationPublicUrl(
+  view: OperatorStationView = 'overview',
+  stationId: OperatorStationId = 'abba',
+): string {
+  const basePath = getOperatorStationBasePath(stationId)
+  if (view === 'fatture') return buildPublicUrl(getOperatorStationFatturePath(stationId))
+  const base = buildPublicUrl(basePath)
   if (view === 'overview') return base
   const section = STATION_SECTION_BY_VIEW[view]
   const sep = base.includes('?') ? '&' : '?'
@@ -308,16 +393,24 @@ export function getOperatorStationPublicUrl(view: OperatorStationView = 'overvie
 }
 
 /** Path relativo per React Router (non URL assoluta https://…). */
-export function getOperatorStationRouterPath(view: OperatorStationView = 'overview'): string {
-  if (view === 'overview') return OPERATOR_STATION_PATH
+export function getOperatorStationRouterPath(
+  view: OperatorStationView = 'overview',
+  stationId: OperatorStationId = 'abba',
+): string {
+  const basePath = getOperatorStationBasePath(stationId)
+  if (view === 'fatture') return getOperatorStationFatturePath(stationId)
+  if (view === 'overview') return basePath
   const section = STATION_SECTION_BY_VIEW[view]
-  return `${OPERATOR_STATION_PATH}?sezione=${section}`
+  return `${basePath}?sezione=${section}`
 }
 
 /** Aggiorna l’URL (senza ricaricare) quando l’operatore cambia sezione. */
-export function syncOperatorStationViewInUrl(view: OperatorStationView): void {
+export function syncOperatorStationViewInUrl(
+  view: OperatorStationView,
+  stationId: OperatorStationId = 'abba',
+): void {
   if (typeof window === 'undefined') return
-  const url = getOperatorStationPublicUrl(view)
+  const url = getOperatorStationPublicUrl(view, stationId)
   window.history.replaceState(null, '', url)
 }
 

@@ -1,6 +1,10 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { type OperatorAuthMode, validateOperatorAuthMode } from '../utils/atlasAuth'
+import {
+  type OperatorAuthMode,
+  type OperatorStationId,
+  validateOperatorAuthMode,
+} from '../utils/atlasAuth'
 import { setOperatorStationLock } from '../utils/operatorMode.ts'
 import OfflineBanner from './OfflineBanner.jsx'
 import PwaInstallPrompt from './PwaInstallPrompt.jsx'
@@ -8,6 +12,8 @@ import AtlasUpdateButton from './AtlasUpdateButton.jsx'
 
 const SESSION_KEY_BY_MODE: Record<OperatorAuthMode, string> = {
   operator: 'atlasAuthOperator',
+  'operator-zanardelli': 'atlasAuthOperatorZanardelli',
+  'operator-lattea': 'atlasAuthOperatorLattea',
   carrier: 'atlasAuthCarrier',
 }
 
@@ -164,7 +170,9 @@ type OperatorSatelliteShellProps = {
   headerSubtitle?: string
   nav?: OperatorNavItem[]
   stationOnly?: boolean
-  /** Credenziali: postazione operativa oppure postazione trasportatore. */
+  /** Sede postazione (per lock/redirect PWA). */
+  stationId?: OperatorStationId
+  /** Credenziali: postazione operativa (per sede) oppure postazione trasportatore. */
   authMode?: OperatorAuthMode
   children: React.ReactNode
 }
@@ -176,6 +184,7 @@ export default function OperatorSatelliteShell({
   headerSubtitle = 'Collegato al gestionale ATLAS — salvataggio sullo stesso database',
   nav,
   stationOnly = false,
+  stationId = 'abba',
   authMode = 'operator',
   children,
 }: OperatorSatelliteShellProps) {
@@ -233,14 +242,14 @@ export default function OperatorSatelliteShell({
       setIsAuthenticated(true)
       setLoginPassword('')
       setIsLoggingIn(false)
-      if (stationOnly) setOperatorStationLock(true)
+      if (stationOnly) setOperatorStationLock(true, stationId)
     }, 260)
   }
 
   function handleLogout() {
     setIsAuthenticated(false)
     setLoginPassword('')
-    if (stationOnly) setOperatorStationLock(false)
+    if (stationOnly) setOperatorStationLock(false, stationId)
   }
 
   if (!isAuthenticated) {

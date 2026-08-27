@@ -353,7 +353,11 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                 <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={() => onNavigate?.('invoices')}>
                   Apri fatture
                 </button>
-              ) : null}
+              ) : (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={() => onOperatorNavigate?.('fatture')}>
+                  Apri fatture
+                </button>
+              )}
             </div>
             <div className="dashboard-kpi dashboard-kpi--danger">
               <div className="dashboard-kpi-label">Fatture scadute</div>
@@ -363,7 +367,11 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                 <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={openInvoicesOverdue}>
                   Apri fatture scadute
                 </button>
-              ) : null}
+              ) : (
+                <button type="button" className="btn btn-secondary btn-sm dashboard-kpi-link" onClick={() => onOperatorNavigate?.('fatture')}>
+                  Apri fatture scadute
+                </button>
+              )}
             </div>
           </section>
 

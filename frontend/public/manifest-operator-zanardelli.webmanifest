@@ -1,14 +1,14 @@
 {
-  "id": "/operatore-postazione",
-  "name": "ATLAS — Postazione operativa",
-  "short_name": "ATLAS Postazione",
-  "description": "Postazione operativa ATLAS: fornitori, ordini, consegne, personale e fatture. Usa le credenziali operatore.",
+  "id": "/operatore-postazione-zanardelli",
+  "name": "ATLAS — Postazione Zanardelli",
+  "short_name": "ATLAS Zanardelli",
+  "description": "Postazione operativa ATLAS Via Zanardelli 19: fornitori, ordini, consegne, personale e fatture.",
   "theme_color": "#0d9488",
   "background_color": "#0f172a",
   "display": "standalone",
   "orientation": "any",
   "scope": "/",
-  "start_url": "/operatore-postazione",
+  "start_url": "/operatore-postazione-zanardelli",
   "lang": "it",
   "icons": [
     {

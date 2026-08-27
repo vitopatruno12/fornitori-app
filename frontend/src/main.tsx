@@ -1,6 +1,10 @@
 import React from 'react'
 import { createPortal } from 'react-dom'
-import { validateAtlasMainLogin, looksLikeCarrierCredentials, looksLikeOperatorCredentials } from './utils/atlasAuth'
+import {
+  validateAtlasMainLogin,
+  looksLikeCarrierCredentials,
+  matchOperatorStationCredentials,
+} from './utils/atlasAuth'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './style.css'
@@ -68,7 +72,10 @@ import {
   OPERATOR_DELIVERY_PATH,
   OPERATOR_ORDER_PATH,
   OPERATOR_PRIMA_NOTA_PATH,
+  OPERATOR_STATION_LATTEA_PATH,
   OPERATOR_STATION_PATH,
+  OPERATOR_STATION_ZANARDELLI_PATH,
+  getLockedOperatorStationId,
   getOperatorStationRouterPath,
   getOperatorStationView,
   isOperatorStationLocked,
@@ -77,6 +84,7 @@ import {
   shouldOpenOperatorStation,
 } from './utils/operatorMode.ts'
 import {
+  getStandaloneOperatorStationPath,
   markCarrierPwaLaunchPreferred,
   markOperatorPwaLaunchPreferred,
   prefersCarrierPwaLaunch,
@@ -673,11 +681,11 @@ function App() {
     setAiOpen(false)
   }
 
-  function goToOperatorStationLogin() {
-    markOperatorStationEntryPoint()
-    markOperatorPwaLaunchPreferred()
-    setOperatorStationLock(true)
-    navigate(getOperatorStationRouterPath('overview'), { replace: true })
+  function goToOperatorStationLogin(stationId: 'abba' | 'zanardelli' | 'lattea' = 'abba') {
+    markOperatorStationEntryPoint(stationId)
+    markOperatorPwaLaunchPreferred(stationId)
+    setOperatorStationLock(true, stationId)
+    navigate(getOperatorStationRouterPath('overview', stationId), { replace: true })
   }
 
   function goToCarrierDeliveryLogin() {
@@ -695,9 +703,10 @@ function App() {
       return
     }
     // Se digiti le credenziali della postazione sul login gestionale, apri la postazione.
-    if (looksLikeOperatorCredentials(u, p)) {
+    const matchedStation = matchOperatorStationCredentials(u, p)
+    if (matchedStation) {
       setLoginError('')
-      goToOperatorStationLogin()
+      goToOperatorStationLogin(matchedStation)
       return
     }
     if (looksLikeCarrierCredentials(u, p)) {
@@ -1055,7 +1064,8 @@ function MainAppGate() {
       Boolean((navigator as Navigator & { standalone?: boolean }).standalone))
 
   if (isOperatorStationLocked()) {
-    return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
+    const stationId = getLockedOperatorStationId()
+    return <Navigate to={getOperatorStationRouterPath(getOperatorStationView(stationId), stationId)} replace />
   }
 
   // App installata (standalone): se era postazione operativa / trasportatore, non aprire il login gestionale.
@@ -1071,7 +1081,7 @@ function MainAppGate() {
       prefersOperatorPwaLaunch() ||
       shouldRedirectStandaloneToOperatorStation(location.pathname)
     ) {
-      return <Navigate to={getOperatorStationRouterPath(getOperatorStationView())} replace />
+      return <Navigate to={getStandaloneOperatorStationPath()} replace />
     }
   }
 
@@ -1087,7 +1097,12 @@ function RootRouter() {
             <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
             <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
             <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
-            <Route path={OPERATOR_STATION_PATH} element={<OperatorStationApp />} />
+            <Route
+              path={`${OPERATOR_STATION_ZANARDELLI_PATH}/*`}
+              element={<OperatorStationApp stationId="zanardelli" />}
+            />
+            <Route path={`${OPERATOR_STATION_LATTEA_PATH}/*`} element={<OperatorStationApp stationId="lattea" />} />
+            <Route path={`${OPERATOR_STATION_PATH}/*`} element={<OperatorStationApp stationId="abba" />} />
             <Route path="/*" element={<MainAppGate />} />
           </Routes>
         </BrowserRouter>

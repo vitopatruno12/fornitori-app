@@ -12,10 +12,18 @@ interface ImportMetaEnv {
   readonly VITE_ATLAS_LOGIN_USER?: string
   /** Password login ATLAS */
   readonly VITE_ATLAS_LOGIN_PASSWORD?: string
-  /** Username login satelliti / postazione operativa */
+  /** Username login postazione Abba 42 (/operatore-postazione) */
   readonly VITE_OPERATOR_LOGIN_USER?: string
-  /** Password login satelliti / postazione operativa */
+  /** Password login postazione Abba 42 */
   readonly VITE_OPERATOR_LOGIN_PASSWORD?: string
+  /** Username login postazione Zanardelli 19 */
+  readonly VITE_OPERATOR_ZANARDELLI_LOGIN_USER?: string
+  /** Password login postazione Zanardelli 19 */
+  readonly VITE_OPERATOR_ZANARDELLI_LOGIN_PASSWORD?: string
+  /** Username login postazione Via Lattea */
+  readonly VITE_OPERATOR_LATTEA_LOGIN_USER?: string
+  /** Password login postazione Via Lattea */
+  readonly VITE_OPERATOR_LATTEA_LOGIN_PASSWORD?: string
   /** Username login postazione trasportatore (/operatore-consegne) */
   readonly VITE_CARRIER_LOGIN_USER?: string
   /** Password login postazione trasportatore */

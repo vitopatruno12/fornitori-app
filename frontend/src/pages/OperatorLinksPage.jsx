@@ -38,8 +38,10 @@ export default function OperatorLinksPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Link operatori</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: 0, maxWidth: 760, lineHeight: 1.5 }}>
-          Link PWA per sede: tre postazioni operative (<strong>/operatore-postazione</strong>) e trasportatore guidatore (
-          <strong>/operatore-consegne</strong>). Stesso indirizzo PWA per le sedi Mediazione Abba, Zanardelli e Via Lattea.
+          Link PWA per sede: tre postazioni operative con URL e credenziali distinti (
+          <strong>/operatore-postazione</strong>, <strong>/operatore-postazione-zanardelli</strong>,{' '}
+          <strong>/operatore-postazione-lattea</strong>) e trasportatore guidatore (
+          <strong>/operatore-consegne</strong>). Ogni sede ha Fatture fornitori.
         </p>
       </section>
 
