@@ -32,6 +32,29 @@ import {
   dashboardPriceIncreaseTotalsLabel,
 } from '../utils/dashboardWorkbook.js'
 const DASHBOARD_CACHE_PATH = '/dashboard/summary'
+const HOME_CASSA_LOCALE_STORAGE_KEY = 'homeSaldoCassaLocale'
+const HOME_CASSA_LOCALE_TUTTI = 'tutti'
+
+/** Locali mostrati nel KPI Saldo cassa (slug Prima Nota → etichetta Home). */
+const HOME_CASSA_LOCALI = [
+  { id: 'risacca', label: 'Risacca' },
+  { id: 'via_abba', label: 'Mani_In_Pasta_Abba' },
+  { id: 'via_zanardelli', label: 'Mani_in_pasta_Z.delli' },
+  { id: 'via_lattea', label: 'La Via Lattea Registro' },
+]
+
+function readStoredCassaLocale() {
+  try {
+    const raw = sessionStorage.getItem(HOME_CASSA_LOCALE_STORAGE_KEY)
+    if (!raw) return 'risacca'
+    if (raw === HOME_CASSA_LOCALE_TUTTI) return HOME_CASSA_LOCALE_TUTTI
+    if (HOME_CASSA_LOCALI.some((l) => l.id === raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  // Default Risacca: il saldo storico globale nasce da movimenti risacca / senza activity.
+  return 'risacca'
+}
 
 function formatCachedAt(ts) {
   if (!ts) return ''
@@ -172,6 +195,44 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   const [cachedAt, setCachedAt] = useState(null)
   const [windowMonths, setWindowMonths] = useState('6')
   const [analisiSnap, setAnalisiSnap] = useState(null)
+  const [cassaLocale, setCassaLocale] = useState(readStoredCassaLocale)
+
+  const saldiCassaLocali = useMemo(() => {
+    const fromApi = Array.isArray(data?.saldi_cassa_locali) ? data.saldi_cassa_locali : []
+    const byId = new Map(fromApi.map((row) => [String(row.activity || '').toLowerCase(), row]))
+    return HOME_CASSA_LOCALI.map((loc) => {
+      const hit = byId.get(loc.id)
+      return {
+        id: loc.id,
+        label: hit?.label || loc.label,
+        saldo: hit?.saldo != null ? Number(hit.saldo) : null,
+      }
+    })
+  }, [data])
+
+  const saldoCassaDisplayed = useMemo(() => {
+    if (!data) return null
+    if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) return data.saldo_cassa
+    const hit = saldiCassaLocali.find((l) => l.id === cassaLocale)
+    return hit?.saldo != null ? hit.saldo : data.saldo_cassa
+  }, [data, cassaLocale, saldiCassaLocali])
+
+  const cassaLocaleHint = useMemo(() => {
+    if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) {
+      return 'Totale movimenti non bancari (tutti i locali)'
+    }
+    const hit = HOME_CASSA_LOCALI.find((l) => l.id === cassaLocale)
+    return hit ? `Saldo cassa · ${hit.label}` : 'Movimenti non bancari (cassa / contanti default)'
+  }, [cassaLocale])
+
+  function onCassaLocaleChange(next) {
+    setCassaLocale(next)
+    try {
+      sessionStorage.setItem(HOME_CASSA_LOCALE_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -328,9 +389,27 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
 
           <section className="dashboard-kpi-grid">
             <div className="dashboard-kpi dashboard-kpi--primary">
-              <div className="dashboard-kpi-label">Saldo cassa</div>
-              <div className="dashboard-kpi-value">{eur(data.saldo_cassa)}</div>
-              <div className="dashboard-kpi-hint">Movimenti non bancari (cassa / contanti default)</div>
+              <div className="dashboard-kpi-label-row">
+                <div className="dashboard-kpi-label">Saldo cassa</div>
+                <label className="dashboard-kpi-locale-label" htmlFor="home-saldo-cassa-locale">
+                  <span className="sr-only">Locale</span>
+                  <select
+                    id="home-saldo-cassa-locale"
+                    className="dashboard-kpi-locale-select"
+                    value={cassaLocale}
+                    onChange={(e) => onCassaLocaleChange(e.target.value)}
+                  >
+                    <option value={HOME_CASSA_LOCALE_TUTTI}>Tutti i locali</option>
+                    {HOME_CASSA_LOCALI.map((loc) => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="dashboard-kpi-value">{eur(saldoCassaDisplayed)}</div>
+              <div className="dashboard-kpi-hint">{cassaLocaleHint}</div>
             </div>
             <div className="dashboard-kpi dashboard-kpi--secondary">
               <div className="dashboard-kpi-label">Saldo banca</div>

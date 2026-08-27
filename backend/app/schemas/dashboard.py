@@ -61,6 +61,14 @@ class DashboardPendingOrderSnippet(BaseModel):
     merchandise_summary: Optional[str] = None
 
 
+class DashboardLocaleSaldo(BaseModel):
+    """Saldo cassa cumulativo per locale / registro Prima Nota."""
+
+    activity: str
+    label: str
+    saldo: Decimal
+
+
 class DashboardSummary(BaseModel):
     month_label: str
     saldo_cassa: Decimal
@@ -80,3 +88,4 @@ class DashboardSummary(BaseModel):
     costi_per_fornitore: List[DashboardBreakdownItem]
     andamento_spese_6_mesi: List[DashboardBreakdownItem]
     ordini_consegna_in_ritardo: List[DashboardPendingOrderSnippet] = []
+    saldi_cassa_locali: List[DashboardLocaleSaldo] = []

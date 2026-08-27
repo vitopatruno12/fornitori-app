@@ -1,11 +1,12 @@
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import extract, func, or_, desc, not_
 from sqlalchemy.orm import Session
 
+from ..constants.prima_nota import DEFAULT_PRIMA_NOTA_ACTIVITY
 from ..models.cash_entry import CashEntry
 from ..models.delivery import Delivery
 from ..models.category import Category
@@ -15,14 +16,24 @@ from ..schemas.dashboard import (
     DashboardCashMovement,
     DashboardDeliveryRow,
     DashboardInvoiceSnippet,
+    DashboardLocaleSaldo,
     DashboardMonthlyFlow,
     DashboardPendingOrderSnippet,
     DashboardPriceIncrease,
     DashboardSummary,
 )
 from . import supplier_order_service
-from .cash_service import NON_FISCALE_CONTO
+from .cash_service import NON_FISCALE_CONTO, _activity_filter
 from .invoice_service import list_invoices
+
+# Etichette Home per i registri cassa (slug = cash_entries.activity).
+HOME_CASSA_LOCALI = (
+    (DEFAULT_PRIMA_NOTA_ACTIVITY, "Risacca"),
+    ("via_abba", "Mani_In_Pasta_Abba"),
+    ("via_zanardelli", "Mani_in_pasta_Z.delli"),
+    ("via_lattea", "La Via Lattea Registro"),
+)
+
 
 
 def _fiscale_filter():
@@ -43,8 +54,11 @@ def _banca_conto_sql():
     )
 
 
-def _saldo_bucket(db: Session, banca: bool) -> Decimal:
-    """Saldo cumulativo entrate - uscite per cassa (default) o banca."""
+def _saldo_bucket(db: Session, banca: bool, activity: Optional[str] = None) -> Decimal:
+    """Saldo cumulativo entrate - uscite per cassa (default) o banca.
+
+    Se ``activity`` è impostato, filtra per locale Prima Nota (stesso criterio di cash_service).
+    """
     ent_e = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
         _fiscale_filter(),
         CashEntry.type == "entrata",
@@ -60,9 +74,25 @@ def _saldo_bucket(db: Session, banca: bool) -> Decimal:
         ent_e = ent_e.filter(not_(_banca_conto_sql()))
         usc_e = usc_e.filter(not_(_banca_conto_sql()))
 
+    if activity is not None:
+        act_clause = _activity_filter(activity)
+        ent_e = ent_e.filter(act_clause)
+        usc_e = usc_e.filter(act_clause)
+
     ent = Decimal(str(ent_e.scalar() or 0))
     usc = Decimal(str(usc_e.scalar() or 0))
     return (ent - usc).quantize(Decimal("0.01"))
+
+
+def _saldi_cassa_per_locale(db: Session) -> List[DashboardLocaleSaldo]:
+    return [
+        DashboardLocaleSaldo(
+            activity=activity,
+            label=label,
+            saldo=_saldo_bucket(db, banca=False, activity=activity),
+        )
+        for activity, label in HOME_CASSA_LOCALI
+    ]
 
 
 def _month_bounds(now: datetime) -> Tuple[datetime, datetime, str]:
@@ -155,6 +185,7 @@ def get_summary(db: Session) -> DashboardSummary:
 
     saldo_cassa = _saldo_bucket(db, banca=False)
     saldo_banca = _saldo_bucket(db, banca=True)
+    saldi_cassa_locali = _saldi_cassa_per_locale(db)
     entrate_mese, uscite_mese = _month_entrate_uscite(db, start_m, end_m)
 
     all_inv = list_invoices(db)
@@ -391,4 +422,5 @@ def get_summary(db: Session) -> DashboardSummary:
         costi_per_fornitore=costi_per_fornitore,
         andamento_spese_6_mesi=andamento_spese_6_mesi,
         ordini_consegna_in_ritardo=ordini_ritardo,
+        saldi_cassa_locali=saldi_cassa_locali,
     )

@@ -1,7 +1,7 @@
 /** Locali predefiniti (slug salvato in DB su cash_entries.activity). */
 export const DEFAULT_PRIMA_NOTA_LOCALES = [
   { id: 'risacca', label: 'Risacca', builtin: true },
-  { id: 'via_lattea', label: 'La Via Lattea', builtin: true },
+  { id: 'via_lattea', label: 'La Via Lattea Registro', builtin: true },
   { id: 'via_abba', label: 'Mediazione Via Abba', builtin: true },
   { id: 'via_zanardelli', label: 'Mediazione Via Zanardelli', builtin: true },
 ]

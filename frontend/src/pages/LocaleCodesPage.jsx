@@ -45,7 +45,8 @@ function isBareActivitySlug(value) {
 const LOCATION_ORDER = [
   'br risacca',
   'risacca',
-  'la via lattea mediazione',
+  'la via lattea registro',
+  'mucche volanti',
   'la via lattea',
   'via lattea',
   'via abba mediazione',
@@ -68,8 +69,8 @@ function locationRank(value) {
 const FALLBACK_LOCALE_OPTIONS = [
   { value: 'BR Risacca', label: 'BR Risacca · Registro', source: 'prima_nota' },
   { value: 'Risacca', label: 'BR Risacca · Personale', source: 'personale' },
-  { value: 'Via Lattea', label: 'La Via Lattea Mediazione · Registro', source: 'prima_nota' },
-  { value: 'La Via Lattea', label: 'La Via Lattea Mediazione · Personale', source: 'personale' },
+  { value: 'Via Lattea', label: 'La Via Lattea Registro · Registro', source: 'prima_nota' },
+  { value: 'La Via Lattea', label: 'Mucche Volanti · Personale', source: 'personale' },
   { value: 'Via Abba', label: 'Via Abba Mediazione · Registro', source: 'prima_nota' },
   { value: 'Mediazione via abba', label: 'Via Abba Mediazione · Personale', source: 'personale' },
   { value: 'Via Zanardelli', label: 'Via Zanardelli Mediazione · Registro', source: 'prima_nota' },
@@ -77,13 +78,18 @@ const FALLBACK_LOCALE_OPTIONS = [
   { value: 'Bar-momento', label: 'Bar-momento · Personale', source: 'personale' },
 ]
 
-function displayNameFor(value) {
+function displayNameFor(value, source = '') {
   const key = localeKey(value)
   if (key.includes('risacca') || key === 'br risacca') return 'BR Risacca'
-  if (key.includes('lattea')) return 'La Via Lattea Mediazione'
   if (key.includes('abba')) return 'Via Abba Mediazione'
   if (key.includes('zanardelli')) return 'Via Zanardelli Mediazione'
   if (key.includes('bar momento') || key.includes('bar-momento')) return 'Bar-momento'
+  // Via Lattea: Registro → «La Via Lattea Registro»; Personale → Mucche Volanti
+  if (key.includes('mucche')) return 'Mucche Volanti'
+  if (key.includes('lattea')) {
+    if (source === 'personale') return 'Mucche Volanti'
+    return 'La Via Lattea Registro'
+  }
   const raw = String(value || '').trim()
   return raw || '—'
 }
@@ -99,7 +105,7 @@ function mergeLocaleOptions(staffRows, primaNotaRows) {
 
     const source = option.source || 'personale'
     const kind = source === 'prima_nota' ? 'registro' : 'personale'
-    const baseName = displayNameFor(option.label || value)
+    const baseName = displayNameFor(option.label || value, source)
     const dedupeKey = `${localeKey(baseName)}::${kind}`
     if (merged.has(dedupeKey)) return
 
