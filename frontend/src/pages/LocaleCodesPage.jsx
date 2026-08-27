@@ -23,7 +23,7 @@ async function copyText(value) {
 
 function sourceLabel(source) {
   if (source === 'personale') return 'Personale'
-  if (source === 'prima_nota') return 'Prima Nota'
+  if (source === 'prima_nota') return 'Registro'
   return source || '—'
 }
 
@@ -35,17 +35,58 @@ function localeKey(value) {
     .replace(/\s+/g, ' ')
 }
 
+/** Solo slug grezzi (via_abba), non etichette umane (Via Abba / Mediazione via abba). */
+function isBareActivitySlug(value) {
+  const raw = String(value || '').trim()
+  return /^(via_abba|via_lattea|via_zanardelli|risacca)$/i.test(raw)
+}
+
+/** Ordine sedi note: per ogni sede Registro poi Personale. */
+const LOCATION_ORDER = [
+  'br risacca',
+  'risacca',
+  'la via lattea mediazione',
+  'la via lattea',
+  'via lattea',
+  'via abba mediazione',
+  'mediazione via abba',
+  'via abba',
+  'via zanardelli mediazione',
+  'mediazione via zanardelli',
+  'la mediazione via zanardelli',
+  'via zanardelli',
+  'bar momento',
+]
+
+function locationRank(value) {
+  const key = localeKey(value)
+  const idx = LOCATION_ORDER.findIndex((k) => key === k || key.includes(k) || k.includes(key))
+  return idx === -1 ? 500 : idx
+}
+
 /** Locali/registri noti (fallback se l’API non risponde o il pack non esiste ancora). */
 const FALLBACK_LOCALE_OPTIONS = [
-  { value: 'Bar-momento', label: 'Bar-momento', source: 'personale' },
-  { value: 'La mediazione via zanardelli', label: 'La mediazione via zanardelli', source: 'personale' },
-  { value: 'Mediazione via abba', label: 'Mediazione via abba', source: 'personale' },
-  { value: 'La Via Lattea', label: 'La Via Lattea', source: 'personale' },
-  { value: 'Risacca', label: 'Risacca', source: 'prima_nota' },
-  { value: 'Via Zanardelli', label: 'Via Zanardelli', source: 'prima_nota' },
-  { value: 'Via Abba', label: 'Via Abba', source: 'prima_nota' },
-  { value: 'Via Lattea', label: 'Via Lattea', source: 'prima_nota' },
+  { value: 'BR Risacca', label: 'BR Risacca · Registro', source: 'prima_nota' },
+  { value: 'Risacca', label: 'BR Risacca · Personale', source: 'personale' },
+  { value: 'Via Lattea', label: 'La Via Lattea Mediazione · Registro', source: 'prima_nota' },
+  { value: 'La Via Lattea', label: 'La Via Lattea Mediazione · Personale', source: 'personale' },
+  { value: 'Via Abba', label: 'Via Abba Mediazione · Registro', source: 'prima_nota' },
+  { value: 'Mediazione via abba', label: 'Via Abba Mediazione · Personale', source: 'personale' },
+  { value: 'Via Zanardelli', label: 'Via Zanardelli Mediazione · Registro', source: 'prima_nota' },
+  { value: 'La mediazione via zanardelli', label: 'Via Zanardelli Mediazione · Personale', source: 'personale' },
+  { value: 'Bar-momento', label: 'Bar-momento · Personale', source: 'personale' },
 ]
+
+function displayNameFor(value) {
+  const key = localeKey(value)
+  if (key.includes('risacca') || key === 'br risacca') return 'BR Risacca'
+  if (key.includes('lattea')) return 'La Via Lattea Mediazione'
+  if (key.includes('abba')) return 'Via Abba Mediazione'
+  if (key.includes('zanardelli')) return 'Via Zanardelli Mediazione'
+  if (key.includes('bar momento') || key.includes('bar-momento')) return 'Bar-momento'
+  const raw = String(value || '').trim()
+  return raw || '—'
+}
 
 function mergeLocaleOptions(staffRows, primaNotaRows) {
   const merged = new Map()
@@ -53,46 +94,55 @@ function mergeLocaleOptions(staffRows, primaNotaRows) {
   function addOption(option) {
     const value = String(option?.value || '').trim()
     if (!value) return
-    const key = localeKey(value)
-    if (!key || merged.has(key)) return
-    merged.set(key, {
+    // Niente voci duplicate tipo via_abba / via_lattea / via_zanardelli
+    if (isBareActivitySlug(value)) return
+
+    const source = option.source || 'personale'
+    const kind = source === 'prima_nota' ? 'registro' : 'personale'
+    const baseName = displayNameFor(option.label || value)
+    const dedupeKey = `${localeKey(baseName)}::${kind}`
+    if (merged.has(dedupeKey)) return
+
+    const suffix = kind === 'registro' ? 'Registro' : 'Personale'
+    merged.set(dedupeKey, {
       value,
-      label: String(option.label || value).trim(),
-      source: option.source || 'personale',
+      label: `${baseName} · ${suffix}`,
+      source,
+      sortLocation: locationRank(baseName),
+      sortKind: kind === 'registro' ? 0 : 1,
     })
   }
 
   for (const row of staffRows || []) {
     const name = String(row?.locale_name || '').trim()
     if (!name) continue
+    if (isBareActivitySlug(name)) continue
     addOption({
       value: name,
-      label: row?.requires_access_code ? `${name} (Personale)` : name,
+      label: name,
       source: 'personale',
     })
   }
 
   for (const row of primaNotaRows || []) {
-    const slug = String(row?.activity_slug || '').trim()
-    const label = String(row?.label || slug).trim()
+    const label = String(row?.label || row?.activity_slug || '').trim()
     if (!label) continue
+    if (isBareActivitySlug(label)) continue
+    // Solo etichetta umana (es. BR Risacca): non aggiungere lo slug come seconda voce
     addOption({
       value: label,
-      label: row?.requires_access_code ? `${label} (Prima Nota)` : `${label} (Prima Nota)`,
+      label,
       source: 'prima_nota',
     })
-    if (slug && localeKey(slug) !== localeKey(label)) {
-      addOption({
-        value: slug,
-        label: `${slug} (registro)`,
-        source: 'prima_nota',
-      })
-    }
   }
 
   for (const option of FALLBACK_LOCALE_OPTIONS) addOption(option)
 
-  return Array.from(merged.values()).sort((a, b) => a.label.localeCompare(b.label, 'it'))
+  return Array.from(merged.values()).sort((a, b) => {
+    if (a.sortLocation !== b.sortLocation) return a.sortLocation - b.sortLocation
+    if (a.sortKind !== b.sortKind) return a.sortKind - b.sortKind
+    return a.label.localeCompare(b.label, 'it')
+  })
 }
 
 export default function LocaleCodesPage() {
@@ -228,7 +278,7 @@ export default function LocaleCodesPage() {
                 {optionsLoading ? 'Caricamento locali…' : '— Seleziona locale o registro —'}
               </option>
               {localeOptions.map((option) => (
-                <option key={`${option.source}-${option.value}`} value={option.value}>
+                <option key={`${option.source}-${option.value}-${option.label}`} value={option.value}>
                   {option.label}
                 </option>
               ))}
@@ -265,7 +315,7 @@ export default function LocaleCodesPage() {
           ) : null}
         </form>
         <p style={{ margin: '0.75rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-          Esempi validi: <strong>Bar-momento</strong>, <strong>Risacca</strong>, <strong>Via Zanardelli</strong>.
+          Esempi: <strong>BR Risacca · Registro</strong>, <strong>Via Abba Mediazione · Personale</strong>.
           Dopo <strong>Mostra</strong> vedi il codice a 6 cifre; la password viene azzerata.
         </p>
       </section>
