@@ -765,6 +765,42 @@ export function FattureSincronizzazionePage() {
         </ul>
       </section>
       <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">AdE agent (chiavetta CNS)</h2>
+        <p style={{ marginTop: 0 }}>
+          Scarico fatture ricevute da Agenzia delle Entrate (Fatture e Corrispettivi) sul PC agenzia
+          con chiavetta, poi push su Atlas <code>/sdi/receive</code>. Profili per sede: Via Abba, Via
+          Lattea, Risacca, Via Zanardelli.
+        </p>
+        <ul className="fatture-suggestions">
+          <li>
+            Install: <code>pip install -r backend/requirements-ade-agent.txt</code> poi{' '}
+            <code>playwright install chrome</code>
+          </li>
+          <li>
+            Script: <code>backend/scripts/ade_sync_agent.py</code>
+          </li>
+          <li>
+            Profili: copia <code>backend/app/integrations/ade/profiles.example.json</code>, abilita le
+            sedi, imposta CF/P.IVA e <code>ADE_PROFILES_PATH</code>
+          </li>
+          <li>
+            Env: <code>ADE_HEADLESS=0</code>, <code>ADE_USE_SYSTEM_CHROME=1</code>,{' '}
+            <code>ATLAS_API_BASE</code>, <code>SDI_RECEIVE_TOKEN</code>
+          </li>
+          <li>
+            Prima run: inserisci PIN della chiavetta nella dialog Windows; la sessione si salva in{' '}
+            <code>storage_state</code>
+          </li>
+          <li>
+            Piano B: esporta XML in <code>drop_dir</code> del profilo / <code>ADE_XML_DROP_DIR</code> —
+            l&apos;agent li importa comunque
+          </li>
+          <li>
+            Task Scheduler (PC agenzia): <code>python C:\AtlasSync\ade_sync_agent.py</code>
+          </li>
+        </ul>
+      </section>
+      <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Passcom agent (Playwright)</h2>
         <p style={{ marginTop: 0 }}>
           Scarico automatico delle fatture ricevute da Passcom Live (Docuvision → Fatture elettroniche →
@@ -932,6 +968,7 @@ export function FattureImpostazioniPage() {
           <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
           <li>SDI_DEST_ABBA_KEYWORDS / SDI_DEST_ZANARDELLI_KEYWORDS</li>
           <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received</li>
+          <li>AdE agent: backend/scripts/ade_sync_agent.py (chiavetta CNS → /sdi/receive)</li>
           <li>Passcom agent: backend/scripts/passcom_sync_agent.py (Playwright → stesso /sdi/receive)</li>
         </ul>
         <p className="fatture-note">La modifica da UI arriverà in una fase successiva; ora si configura nel .env del server.</p>

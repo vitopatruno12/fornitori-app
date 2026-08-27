@@ -1,0 +1,6 @@
+# Dipendenze solo per l'agent AdE sul PC agenzia (chiavetta CNS).
+#   pip install -r requirements-ade-agent.txt
+#   playwright install chrome
+# Usa Chrome di sistema (channel=chrome) per certificato smart card.
+playwright>=1.49.0
+python-dotenv>=1.0.0

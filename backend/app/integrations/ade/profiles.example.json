@@ -1,0 +1,46 @@
+[
+  {
+    "id": "via_abba",
+    "label": "Mediazione Via Abba",
+    "sede": "via_abba",
+    "codice_fiscale": "",
+    "partita_iva": "",
+    "auth_mode": "cns",
+    "drop_dir": "C:/AtlasSync/ade/via_abba",
+    "storage_state_path": "C:/AtlasSync/ade/state_via_abba.json",
+    "enabled": false
+  },
+  {
+    "id": "via_lattea",
+    "label": "La Via Lattea",
+    "sede": "via_lattea",
+    "codice_fiscale": "",
+    "partita_iva": "",
+    "auth_mode": "cns",
+    "drop_dir": "C:/AtlasSync/ade/via_lattea",
+    "storage_state_path": "C:/AtlasSync/ade/state_via_lattea.json",
+    "enabled": false
+  },
+  {
+    "id": "risacca",
+    "label": "Risacca",
+    "sede": "risacca",
+    "codice_fiscale": "",
+    "partita_iva": "",
+    "auth_mode": "cns",
+    "drop_dir": "C:/AtlasSync/ade/risacca",
+    "storage_state_path": "C:/AtlasSync/ade/state_risacca.json",
+    "enabled": false
+  },
+  {
+    "id": "via_zanardelli",
+    "label": "Mediazione Via Zanardelli",
+    "sede": "via_zanardelli",
+    "codice_fiscale": "",
+    "partita_iva": "",
+    "auth_mode": "cns",
+    "drop_dir": "C:/AtlasSync/ade/via_zanardelli",
+    "storage_state_path": "C:/AtlasSync/ade/state_via_zanardelli.json",
+    "enabled": false
+  }
+]
