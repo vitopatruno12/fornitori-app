@@ -41,6 +41,8 @@ export const APP_PATHS = {
   'support-tech': '/support-tech',
   trasportatori: '/trasportatori',
   magazzino: '/magazzino',
+  'gestione-locali': '/gestione-locali',
+  'gestione-locali-gazza': '/gestione-locali/gazza-ladra',
 } as const
 
 export type PageKey = keyof typeof APP_PATHS

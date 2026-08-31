@@ -30,6 +30,11 @@ class PosReceipt(Base):
     external_id = Column(String(120), nullable=False)  # numero scontrino / id univoco
     receipt_at = Column(DateTime(timezone=True), nullable=False, index=True)
     amount_eur = Column(Numeric(12, 2), nullable=True)
+    payment_type = Column(String(16), nullable=True, index=True)  # cash|card|mixed|other|unknown
+    cash_amount_eur = Column(Numeric(12, 2), nullable=True)
+    card_amount_eur = Column(Numeric(12, 2), nullable=True)
+    payment_label = Column(String(120), nullable=True)
+    payment_raw = Column(String(255), nullable=True)
     is_void = Column(Integer, nullable=False, default=0)  # 0|1
     raw_store = Column(String(120), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

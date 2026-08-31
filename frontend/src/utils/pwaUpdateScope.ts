@@ -114,8 +114,10 @@ export function scopeHashChanged(
   if (running) return running !== remote
 
   const local = readStoredSectionVersion(scope)
-  if (!local) return true
-  return local !== remote
+  if (local) return local !== remote
+
+  // Nessun hash locale: non forzare badge (evita falsi positivi al primo avvio)
+  return false
 }
 
 /** True se il server ha un deploy più recente per l’ambito corrente. */
@@ -129,18 +131,15 @@ export function updateAvailableForScope(
   const runningBuild = getRunningBuildId()
   const scopes = payload?.scopes || {}
 
+  if (!remoteBuild) return false
+
   if (runningBuild && runningBuild !== 'dev') {
-    if (!remoteBuild) return scopeHashChanged(scope, scopes)
-    if (runningBuild !== remoteBuild) {
-      return scopeHashChanged(scope, scopes)
-    }
-    return false
+    if (runningBuild === remoteBuild) return false
+    return scopeHashChanged(scope, scopes)
   }
 
-  if (!remoteBuild) return scopeHashChanged(scope, scopes)
-
   const storedBuild = readStoredBuildId()
-  if (!storedBuild) return scopeHashChanged(scope, scopes)
   if (storedBuild === remoteBuild) return false
+  if (!storedBuild) return scopeHashChanged(scope, scopes)
   return scopeHashChanged(scope, scopes)
 }

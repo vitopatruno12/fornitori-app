@@ -647,9 +647,11 @@ export function PopularTimesChart({
         </label>
       </div>
       <p className="analisi-machine-scope" style={{ marginBottom: '0.45rem' }}>
-        {cells.some((c) => c?.visit_source === 'pos')
-          ? 'Visite da scontrini EasyRetail (registratore)'
-          : 'Visite stimate dalle operazioni VNE'}
+        {cells.some((c) => c?.visit_source === 'vne+pos')
+          ? 'Visite stimate da operazioni VNE + scontrini EasyRetail'
+          : cells.some((c) => c?.visit_source === 'pos')
+            ? 'Visite da scontrini EasyRetail (registratore)'
+            : 'Visite stimate dalle operazioni VNE'}
         {peakHour.hour != null && peakHour.v > 0
           ? ` · picco alle ${String(peakHour.hour).padStart(2, '0')}:00`
           : ''}

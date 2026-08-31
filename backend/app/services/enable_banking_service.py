@@ -353,6 +353,7 @@ def begin_enable_banking_connect(
   *,
   aspsp_name: Optional[str] = None,
   aspsp_country: Optional[str] = None,
+  psu_type: str = "personal",
 ) -> Dict[str, Any]:
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
@@ -361,6 +362,7 @@ def begin_enable_banking_connect(
     account_id=account_id,
     aspsp_name=aspsp_name or None,
     aspsp_country=aspsp_country or None,
+    psu_type=psu_type,
   )
   row.connection_status = "pending"
   if auth.get("aspsp_name"):

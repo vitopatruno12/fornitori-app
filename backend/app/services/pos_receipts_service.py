@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from ..models.pos_receipt import PosReceipt
+from .pos_payment_classifier import classify_payment, merge_payment_fields
 from .pos_store_catalog import (  # noqa: F401 — re-export
     POS_STORE_CATALOG,
     SOURCE_EASYRETAIL,
@@ -74,6 +75,33 @@ _STORE_HEADERS = (
     "macchina",
 )
 _VOID_HEADERS = ("annullato", "void", "logicdelete", "cancellato", "storno")
+_PAYMENT_TYPE_HEADERS = (
+    "tipopagamento",
+    "tipo_pagamento",
+    "formapagamento",
+    "forma_pagamento",
+    "modalitapagamento",
+    "pagamento",
+    "payment_type",
+)
+_CASH_AMOUNT_HEADERS = (
+    "importocontanti",
+    "contanti",
+    "cash",
+    "cash_amount",
+    "importo_contanti",
+)
+_CARD_AMOUNT_HEADERS = (
+    "importocarta",
+    "carta",
+    "bancomat",
+    "pos",
+    "card",
+    "card_amount",
+    "importo_carta",
+    "pagamento_elettronico",
+)
+_PAYMENT_LABEL_HEADERS = ("descrizione_pagamento", "payment_label", "nome_pagamento")
 
 
 def _pick(row: Dict[str, str], headers: Tuple[str, ...]) -> str:
@@ -206,6 +234,15 @@ def parse_receipts_csv(
         amount = _parse_amount(_pick(row, _AMOUNT_HEADERS))
         void_raw = _pick(row, _VOID_HEADERS)
         is_void = _parse_boolish(void_raw) if void_raw else False
+        cash_raw = _parse_amount(_pick(row, _CASH_AMOUNT_HEADERS))
+        card_raw = _parse_amount(_pick(row, _CARD_AMOUNT_HEADERS))
+        payment_label = _pick(row, _PAYMENT_LABEL_HEADERS) or _pick(row, _PAYMENT_TYPE_HEADERS) or None
+        ptype, cash_amt, card_amt = classify_payment(
+            cash_amount=cash_raw,
+            card_amount=card_raw,
+            total_amount=amount,
+            label=payment_label,
+        )
         out.append(
             {
                 "source": SOURCE_EASYRETAIL,
@@ -215,6 +252,10 @@ def parse_receipts_csv(
                 "external_id": external[:120],
                 "receipt_at": when,
                 "amount_eur": amount,
+                "payment_type": ptype,
+                "cash_amount_eur": cash_amt,
+                "card_amount_eur": card_amt,
+                "payment_label": payment_label[:120] if payment_label else None,
                 "is_void": 1 if is_void else 0,
                 "raw_store": store_raw or None,
             }
@@ -232,6 +273,15 @@ def parse_receipts_csv(
             "Nessuna colonna negozio/cassa: assegna il locale in import oppure aggiungi la colonna nel CSV."
         )
     return out, warnings
+
+
+def _apply_payment_fields(existing: PosReceipt, row: Dict[str, Any]) -> None:
+    merged = merge_payment_fields(row)
+    existing.payment_type = merged.get("payment_type")
+    existing.cash_amount_eur = merged.get("cash_amount_eur")
+    existing.card_amount_eur = merged.get("card_amount_eur")
+    existing.payment_label = merged.get("payment_label")
+    existing.payment_raw = merged.get("payment_raw")
 
 
 def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, int]:
@@ -272,9 +322,11 @@ def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, in
             existing.model_label = row.get("model_label")
             existing.raw_store = row.get("raw_store")
             existing.is_void = 0
+            _apply_payment_fields(existing, row)
             updated += 1
         else:
-            db.add(PosReceipt(**row))
+            merged = merge_payment_fields(row)
+            db.add(PosReceipt(**merged))
             inserted += 1
     db.commit()
     return {"inserted": inserted, "updated": updated, "skipped_void": skipped_void}
@@ -303,11 +355,27 @@ def pos_receipt_stats(db: Session) -> Dict[str, Any]:
     q = db.query(PosReceipt).filter(PosReceipt.is_void == 0)
     total = q.count()
     by_store: Dict[str, int] = defaultdict(int)
+    by_payment: Dict[str, int] = defaultdict(int)
+    cash_total = 0.0
+    card_total = 0.0
+    with_payment = 0
     latest = None
     earliest = None
     for r in q.all():
         label = r.model_label or r.store_key
         by_store[label] += 1
+        ptype = (r.payment_type or "unknown").strip() or "unknown"
+        by_payment[ptype] += 1
+        if ptype != "unknown":
+            with_payment += 1
+        if r.cash_amount_eur is not None:
+            cash_total += float(r.cash_amount_eur)
+        elif ptype == "cash" and r.amount_eur is not None:
+            cash_total += float(r.amount_eur)
+        if r.card_amount_eur is not None:
+            card_total += float(r.card_amount_eur)
+        elif ptype == "card" and r.amount_eur is not None:
+            card_total += float(r.amount_eur)
         if r.receipt_at:
             if latest is None or r.receipt_at > latest:
                 latest = r.receipt_at
@@ -316,6 +384,10 @@ def pos_receipt_stats(db: Session) -> Dict[str, Any]:
     return {
         "total": total,
         "by_store": dict(by_store),
+        "by_payment_type": dict(by_payment),
+        "cash_total_eur": round(cash_total, 2),
+        "card_total_eur": round(card_total, 2),
+        "with_payment_type": with_payment,
         "from": earliest.isoformat() if earliest else None,
         "to": latest.isoformat() if latest else None,
         "catalog": [
@@ -332,8 +404,8 @@ def purge_receipts_by_model(
 ) -> Dict[str, Any]:
     """Elimina scontrini per model_id (es. cleanup import errato)."""
     mid = (model_id or "").strip()
-    if mid not in ("model-1", "model-2", "model-3"):
-        raise ValueError("model_id deve essere model-1|model-2|model-3")
+    if mid not in ("model-1", "model-2", "model-3", "model-4"):
+        raise ValueError("model_id deve essere model-1|model-2|model-3|model-4")
     q = db.query(PosReceipt).filter(PosReceipt.source == source, PosReceipt.model_id == mid)
     deleted = q.delete(synchronize_session=False)
     db.commit()
@@ -346,8 +418,11 @@ def load_pos_visit_buckets(
     date_from: date,
     date_to: date,
     model_id: Optional[str] = None,
+    store_keys: Optional[Iterable[str]] = None,
 ) -> Dict[Tuple[str, int, int], Dict[str, float]]:
     """Ritorna {(model_id|all, weekday, hour): {visits, amount}} da scontrini POS."""
+    from .pos_store_catalog import POS_REVENUE_MODEL_ID, POS_REVENUE_STORE_KEYS
+
     start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
     end = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
     q = (
@@ -358,12 +433,19 @@ def load_pos_visit_buckets(
     )
     if model_id and model_id not in ("all", "*", ""):
         q = q.filter(PosReceipt.model_id == model_id)
+    allowed_store_keys = frozenset(store_keys) if store_keys else None
 
     buckets: Dict[Tuple[str, int, int], Dict[str, float]] = defaultdict(
         lambda: {"visits": 0.0, "amount": 0.0, "days": set()}  # type: ignore
     )
     for r in q.all():
         if not r.receipt_at:
+            continue
+        sk = (r.store_key or "").strip()
+        if allowed_store_keys is not None:
+            if sk not in allowed_store_keys:
+                continue
+        elif model_id == POS_REVENUE_MODEL_ID and sk and sk not in POS_REVENUE_STORE_KEYS:
             continue
         local = r.receipt_at
         mid = r.model_id or "unknown"
@@ -395,6 +477,84 @@ def load_pos_visit_buckets(
     return out
 
 
+def load_pos_daily_incasso(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+    model_id: Optional[str] = None,
+    store_keys: Optional[Iterable[str]] = None,
+) -> Dict[date, Dict[str, Any]]:
+    """Incasso e movimenti giornalieri da scontrini POS (Abba / Gazza Ladra / …)."""
+    from .pos_store_catalog import (
+        GAZZA_LADRA_MODEL_ID,
+        GAZZA_LADRA_STORE_KEYS,
+        POS_ONLY_MODEL_IDS,
+        POS_REVENUE_MODEL_ID,
+        POS_REVENUE_STORE_KEYS,
+    )
+
+    mid = (model_id or "").strip() or POS_REVENUE_MODEL_ID
+    if mid in ("all", "*"):
+        mid = POS_REVENUE_MODEL_ID
+    allowed_models = {POS_REVENUE_MODEL_ID} | set(POS_ONLY_MODEL_IDS)
+    if mid not in allowed_models:
+        return {}
+
+    if store_keys is not None:
+        allowed_store_keys = frozenset(store_keys)
+    elif mid == GAZZA_LADRA_MODEL_ID:
+        allowed_store_keys = GAZZA_LADRA_STORE_KEYS
+    else:
+        allowed_store_keys = POS_REVENUE_STORE_KEYS
+
+    start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+    q = (
+        db.query(PosReceipt)
+        .filter(PosReceipt.is_void == 0)
+        .filter(PosReceipt.model_id == mid)
+        .filter(PosReceipt.receipt_at >= start)
+        .filter(PosReceipt.receipt_at <= end)
+    )
+
+    by_day: Dict[date, Dict[str, Any]] = defaultdict(
+        lambda: {
+            "incasso": Decimal("0.00"),
+            "movimenti": 0,
+            "cash_eur": Decimal("0.00"),
+            "card_eur": Decimal("0.00"),
+        }
+    )
+    for r in q.all():
+        if not r.receipt_at:
+            continue
+        sk = (r.store_key or "").strip()
+        if sk and sk not in allowed_store_keys:
+            continue
+        if not sk and mid == GAZZA_LADRA_MODEL_ID:
+            # Accetta anche scontrini senza store_key se model_id è Gazza
+            pass
+        elif not sk and allowed_store_keys not in (POS_REVENUE_STORE_KEYS, GAZZA_LADRA_STORE_KEYS):
+            continue
+        day = r.receipt_at.date()
+        by_day[day]["movimenti"] += 1
+        amount = Decimal(str(r.amount_eur or 0)).quantize(Decimal("0.01"))
+        if r.amount_eur is not None:
+            by_day[day]["incasso"] = (by_day[day]["incasso"] + amount).quantize(Decimal("0.01"))
+        ptype = (r.payment_type or "unknown").strip() or "unknown"
+        cash = Decimal(str(r.cash_amount_eur)) if r.cash_amount_eur is not None else Decimal("0.00")
+        card = Decimal(str(r.card_amount_eur)) if r.card_amount_eur is not None else Decimal("0.00")
+        if ptype == "cash" and cash <= 0 and amount > 0:
+            cash = amount
+        elif ptype == "card" and card <= 0 and amount > 0:
+            card = amount
+        by_day[day]["cash_eur"] = (by_day[day]["cash_eur"] + cash).quantize(Decimal("0.01"))
+        by_day[day]["card_eur"] = (by_day[day]["card_eur"] + card).quantize(Decimal("0.01"))
+
+    return dict(by_day)
+
+
 def ingest_receipt_dicts(db: Session, items: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """Upsert da lista JSON (agent GDB / integrazioni)."""
     rows: List[Dict[str, Any]] = []
@@ -420,6 +580,22 @@ def ingest_receipt_dicts(db: Session, items: Iterable[Dict[str, Any]]) -> Dict[s
         amount = raw.get("amount_eur")
         if amount is not None and not isinstance(amount, Decimal):
             amount = _parse_amount(str(amount))
+        cash_amount = raw.get("cash_amount_eur")
+        if cash_amount is not None and not isinstance(cash_amount, Decimal):
+            cash_amount = _parse_amount(str(cash_amount))
+        card_amount = raw.get("card_amount_eur")
+        if card_amount is not None and not isinstance(card_amount, Decimal):
+            card_amount = _parse_amount(str(card_amount))
+        payment_label = str(raw.get("payment_label") or "").strip() or None
+        payment_type = str(raw.get("payment_type") or "").strip() or None
+        if not payment_type:
+            payment_type, cash_amount, card_amount = classify_payment(
+                cash_amount=cash_amount,
+                card_amount=card_amount,
+                total_amount=amount,
+                label=payment_label,
+                type_code=raw.get("payment_raw"),
+            )
         is_void = 1 if raw.get("is_void") in (1, True, "1", "true") else 0
         rows.append(
             {
@@ -430,6 +606,11 @@ def ingest_receipt_dicts(db: Session, items: Iterable[Dict[str, Any]]) -> Dict[s
                 "external_id": external[:120],
                 "receipt_at": when,
                 "amount_eur": amount,
+                "payment_type": payment_type,
+                "cash_amount_eur": cash_amount,
+                "card_amount_eur": card_amount,
+                "payment_label": payment_label,
+                "payment_raw": str(raw.get("payment_raw") or "")[:255] or None,
                 "is_void": is_void,
                 "raw_store": store_raw or None,
             }
@@ -473,10 +654,97 @@ def sync_from_easyretail_gdb(
     }
 
 
+def payment_summary(
+    db: Session,
+    *,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    model_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Riepilogo incassi contanti vs carta/POS da scontrini."""
+    q = db.query(PosReceipt).filter(PosReceipt.is_void == 0)
+    if date_from:
+        start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        q = q.filter(PosReceipt.receipt_at >= start)
+    if date_to:
+        end = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+        q = q.filter(PosReceipt.receipt_at <= end)
+    if model_id and model_id not in ("all", "*", ""):
+        q = q.filter(PosReceipt.model_id == model_id)
+
+    totals = {
+        "receipts": 0,
+        "amount_eur": 0.0,
+        "cash_eur": 0.0,
+        "card_eur": 0.0,
+        "mixed_eur": 0.0,
+        "unknown_eur": 0.0,
+        "other_eur": 0.0,
+    }
+    by_type: Dict[str, int] = defaultdict(int)
+    by_store: Dict[str, Dict[str, float]] = defaultdict(
+        lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0}
+    )
+    by_day: Dict[str, Dict[str, float]] = defaultdict(
+        lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0}
+    )
+
+    for r in q.all():
+        totals["receipts"] += 1
+        amount = float(r.amount_eur or 0)
+        totals["amount_eur"] += amount
+        ptype = (r.payment_type or "unknown").strip() or "unknown"
+        by_type[ptype] += 1
+
+        cash = float(r.cash_amount_eur) if r.cash_amount_eur is not None else 0.0
+        card = float(r.card_amount_eur) if r.card_amount_eur is not None else 0.0
+        if ptype == "cash" and cash <= 0 and amount > 0:
+            cash = amount
+        elif ptype == "card" and card <= 0 and amount > 0:
+            card = amount
+        elif ptype == "mixed" and cash <= 0 and card <= 0 and amount > 0:
+            cash = amount / 2
+            card = amount / 2
+
+        totals["cash_eur"] += cash
+        totals["card_eur"] += card
+        if ptype == "mixed":
+            totals["mixed_eur"] += amount
+        elif ptype == "unknown":
+            totals["unknown_eur"] += amount
+        elif ptype == "other":
+            totals["other_eur"] += amount
+
+        store_label = r.model_label or r.store_key or "unknown"
+        day_key = r.receipt_at.date().isoformat() if r.receipt_at else "unknown"
+        for bucket in (by_store[store_label], by_day[day_key]):
+            bucket["receipts"] += 1
+            bucket["amount_eur"] += amount
+            bucket["cash_eur"] += cash
+            bucket["card_eur"] += card
+
+    for key in totals:
+        if isinstance(totals[key], float):
+            totals[key] = round(totals[key], 2)
+
+    return {
+        "ok": True,
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "model_id": model_id,
+        "totals": totals,
+        "by_payment_type": dict(by_type),
+        "by_store": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in by_store.items()},
+        "by_day": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in sorted(by_day.items())},
+    }
+
+
 def csv_template() -> str:
     return (
-        "DataOra;Negozio;NumeroScontrino;Totale\n"
-        "15/08/2026 12:35;Mani in Pasta;1042;18,50\n"
-        "15/08/2026 12:41;La Risacca;2201;9,00\n"
-        "15/08/2026 13:02;Le Mucche Volanti;881;22,30\n"
+        "DataOra;Negozio;NumeroScontrino;Totale;TipoPagamento;ImportoContanti;ImportoCarta\n"
+        "15/08/2026 12:35;Mani in Pasta;1042;18,50;Contanti;18,50;\n"
+        "15/08/2026 12:41;La Risacca;2201;9,00;Bancomat;;9,00\n"
+        "15/08/2026 13:02;Le Mucche Volanti;881;22,30;Misto;10,00;12,30\n"
+        "15/08/2026 13:15;Gazza Ladra;501;14,00;Contanti;14,00;\n"
+        "15/08/2026 13:22;Gazza Ladra;502;21,50;Pagamento elettronico;;21,50\n"
     )

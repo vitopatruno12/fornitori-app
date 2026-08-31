@@ -246,22 +246,176 @@ class AdePlaywrightClient:
       raw = str(self.debug_dir / "storage_state.json")
     return Path(raw)
 
-  def _wait_logged_in(self, page: Any, shots: List[str]) -> bool:
-    """Attende area autenticata dopo CNS/SPID/CIE."""
-    deadline = time.time() + max(60, self.login_timeout_sec)
-    pin_deadline = time.time() + max(30, self.cns_pin_wait_sec)
+  def _open_login_page(self, page: Any, shots: List[str]) -> None:
+    """Landing area-riservata → clic «Accedi all'area riservata»."""
+    page.goto(self.portal_url, wait_until="domcontentloaded", timeout=90000)
+    self._shot(page, "01_portal", shots)
+    for label in (
+      r"Accedi all'area riservata",
+      r"Accedi all’area riservata",
+      r"Accedi all.area riservata",
+    ):
+      try:
+        btn = page.get_by_role("link", name=re.compile(label, re.I))
+        if btn.count() == 0:
+          btn = page.get_by_role("button", name=re.compile(label, re.I))
+        if btn.count() > 0:
+          btn.first.click(timeout=8000)
+          page.wait_for_timeout(2000)
+          self._shot(page, "01a_accedi_area", shots)
+          return
+      except Exception:
+        try:
+          page.get_by_text(re.compile(label, re.I)).first.click(timeout=5000)
+          page.wait_for_timeout(2000)
+          self._shot(page, "01a_accedi_area", shots)
+          return
+        except Exception:
+          continue
 
-    # Se siamo sulla pagina scelta CNS, clicca «Entra con CNS»
+  def _select_auth_tab(self, page: Any, mode: str) -> None:
+    """Seleziona tab CNS o Fisconline/Entratel."""
+    mode_l = (mode or "").lower()
+    if mode_l == "fisconline":
+      patterns = (r"Fisconline", r"Entratel", r"Fisconline/Entratel")
+    else:
+      patterns = (r"CNS",)
+    for pat in patterns:
+      try:
+        tab = page.get_by_role("tab", name=re.compile(pat, re.I))
+        if tab.count() > 0:
+          tab.first.click(timeout=5000)
+          page.wait_for_timeout(800)
+          return
+      except Exception:
+        pass
+      try:
+        page.get_by_text(re.compile(f"^{pat}$", re.I)).first.click(timeout=3000)
+        page.wait_for_timeout(800)
+        return
+      except Exception:
+        continue
+
+  def _login_fisconline(self, page: Any, shots: List[str]) -> bool:
+    """
+    Login Fisconline/Entratel (form web): CF + password + PIN — completamente automatico.
+    Non usa la chiavetta CNS.
+    """
+    cf = (self.profile.codice_fiscale or self.profile.partita_iva or "").strip()
+    password = (self.profile.fisconline_password or _env("ADE_FISCONLINE_PASSWORD")).strip()
+    pin = (self.profile.fisconline_pin or _env("ADE_FISCONLINE_PIN")).strip()
+    if not cf or not password or not pin:
+      self._shot(page, "01_fisconline_missing_creds", shots)
+      return False
+
+    self._open_login_page(page, shots)
+    self._select_auth_tab(page, "fisconline")
+    self._shot(page, "01b_fisconline_tab", shots)
+
+    # Compila form (label tipiche AdE)
+    filled = False
     try:
-      if page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I)).count() > 0:
-        self._shot(page, "01b_cns_choice", shots)
-        page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I)).first.click(timeout=8000)
-        page.wait_for_timeout(2000)
-      elif page.get_by_text(re.compile(r"Entra con CNS", re.I)).count() > 0:
-        page.get_by_text(re.compile(r"Entra con CNS", re.I)).first.click(timeout=8000)
-        page.wait_for_timeout(2000)
+      for label_re, value in (
+        (r"codice fiscale|utente", cf),
+        (r"password", password),
+        (r"pin", pin),
+      ):
+        loc = page.get_by_label(re.compile(label_re, re.I))
+        if loc.count() > 0:
+          loc.first.fill(value, timeout=5000)
+          filled = True
+          continue
+        loc = page.locator(f'input[placeholder*="{label_re.split("|")[0]}"]')
+        if loc.count() > 0:
+          loc.first.fill(value, timeout=5000)
+          filled = True
     except Exception:
       pass
+
+  # fallback: ordine tipico CF, password, pin
+    try:
+      text_inputs = page.locator('input[type="text"], input[type="password"], input:not([type])')
+      n = text_inputs.count()
+      if n >= 3:
+        text_inputs.nth(0).fill(cf)
+        text_inputs.nth(1).fill(password)
+        text_inputs.nth(2).fill(pin)
+        filled = True
+      elif n >= 2:
+        text_inputs.nth(0).fill(cf)
+        text_inputs.nth(1).fill(password)
+        if pin:
+          page.keyboard.press("Tab")
+          page.keyboard.type(pin, delay=30)
+        filled = True
+    except Exception:
+      pass
+
+    if not filled:
+      self._shot(page, "01_fisconline_form_not_found", shots)
+      return False
+
+    # Invio
+    for btn_name in (r"Accedi", r"Entra", r"Login", r"Conferma"):
+      try:
+        page.get_by_role("button", name=re.compile(btn_name, re.I)).first.click(timeout=5000)
+        break
+      except Exception:
+        try:
+          page.get_by_text(re.compile(btn_name, re.I)).first.click(timeout=3000)
+          break
+        except Exception:
+          continue
+    else:
+      page.keyboard.press("Enter")
+
+    page.wait_for_timeout(3000)
+    self._shot(page, "01c_fisconline_submit", shots)
+    return self._wait_logged_in(page, shots, skip_cns_click=True)
+
+  def _login_cns(self, page: Any, shots: List[str]) -> bool:
+    """Login CNS: richiede PIN sulla dialog Windows (non automatizzabile)."""
+    self._open_login_page(page, shots)
+    self._select_auth_tab(page, "cns")
+    print(
+      f"[{self.profile.id}] CNS: inserisci PIN nella finestra Windows se compare "
+      "(non automatizzabile con chiavetta).",
+      flush=True,
+    )
+    return self._wait_logged_in(page, shots)
+
+  def _perform_login(self, page: Any, shots: List[str]) -> bool:
+    mode = (self.profile.auth_mode or "cns").lower()
+    if mode == "drop":
+      return True
+    if mode == "storage":
+      # Prova sessione salvata; se scaduta usa fisconline se configurato
+      if self._wait_logged_in(page, shots, skip_cns_click=True):
+        return True
+      if self.profile.fisconline_password and self.profile.fisconline_pin:
+        return self._login_fisconline(page, shots)
+      return self._login_cns(page, shots)
+    if mode == "fisconline":
+      return self._login_fisconline(page, shots)
+    return self._login_cns(page, shots)
+
+  def _wait_logged_in(self, page: Any, shots: List[str], *, skip_cns_click: bool = False) -> bool:
+    """Attende area autenticata dopo CNS/SPID/CIE."""
+    deadline = time.time() + max(60, self.login_timeout_sec)
+    pin_deadline = time.time() + max(120, self.cns_pin_wait_sec)
+
+    # Se siamo sulla pagina scelta CNS, clicca «Entra con CNS»
+    if not skip_cns_click:
+      try:
+        if page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I)).count() > 0:
+          self._shot(page, "01b_cns_choice", shots)
+          page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I)).first.click(timeout=8000)
+          page.wait_for_timeout(2000)
+        elif page.get_by_text(re.compile(r"Entra con CNS", re.I)).count() > 0:
+          page.get_by_text(re.compile(r"Entra con CNS", re.I)).first.click(timeout=8000)
+          page.wait_for_timeout(2000)
+      except Exception:
+        pass
 
     while time.time() < deadline:
       url = (page.url or "").lower()
@@ -517,6 +671,7 @@ class AdePlaywrightClient:
       if storage and storage.is_file() and (self.profile.auth_mode or "") in (
         "cns",
         "storage",
+        "fisconline",
       ):
         try:
           ctx_kwargs["storage_state"] = str(storage)
@@ -529,11 +684,15 @@ class AdePlaywrightClient:
       self._attach_download_handler(page)
 
       try:
-        page.goto(self.portal_url, wait_until="domcontentloaded", timeout=90000)
-        self._shot(page, "01_portal", shots)
-
-        # Se auth_mode=cns e non c'è sessione, l'utente inserisce PIN sulla dialog OS
-        login_ok = self._wait_logged_in(page, shots)
+        # Se c'è sessione salvata, prova prima senza rifare login
+        auth_mode = (self.profile.auth_mode or "cns").lower()
+        if storage and storage.is_file() and auth_mode in ("storage", "fisconline"):
+          page.goto(self.portal_url, wait_until="domcontentloaded", timeout=90000)
+          login_ok = self._wait_logged_in(page, shots, skip_cns_click=True)
+          if not login_ok:
+            login_ok = self._perform_login(page, shots)
+        else:
+          login_ok = self._perform_login(page, shots)
         if not login_ok:
           # prova comunque sweep drop
           self._sweep_drop_dir()
@@ -594,10 +753,12 @@ class AdePlaywrightClient:
           sede=self.profile.sede,
         )
       finally:
-        try:
-          self._logout(page, shots)
-        except Exception:
-          pass
+        keep_session = _env_bool("ADE_KEEP_SESSION", (self.profile.auth_mode or "").lower() == "fisconline")
+        if not keep_session:
+          try:
+            self._logout(page, shots)
+          except Exception:
+            pass
         try:
           context.close()
         except Exception:

@@ -22,6 +22,7 @@ import {
   fetchAnalyticsWeekly,
 } from '../services/analyticsService'
 import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
+import { AnalisiMachineCard } from '../components/AnalisiMachineCard.jsx'
 
 const ANALISI_CACHE_PREFIX = 'analisi_cache_v2:'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
@@ -200,7 +201,7 @@ export function AnalisiDashboardPage() {
   return (
     <AnalisiPageShell
       title="Dashboard Analitica"
-      lead="Incassi e traffico VNE divisi per macchina: La Risacca, Mani in Pasta, Le Mucche Volanti."
+      lead="Incassi e traffico per locale: VNE (Risacca, Mani in Pasta Via Zanardelli, Mucche Volanti) + scontrini EasyRetail (Mani Via Abba) + Gazza Ladra (POS Poste, struttura pronta)."
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing || loading}>
@@ -227,7 +228,7 @@ export function AnalisiDashboardPage() {
           <div className="dashboard-kpi dashboard-kpi--primary">
             <div className="dashboard-kpi-label">Totale incasso oggi</div>
             <div className="dashboard-kpi-value">{eur(snap.incasso_oggi)}</div>
-            <div className="dashboard-kpi-hint">Da chiusure di giornata (tutte le macchine)</div>
+            <div className="dashboard-kpi-hint">VNE + Abba + Gazza Ladra (quando importati)</div>
           </div>
           <div className="dashboard-kpi">
             <div className="dashboard-kpi-label">Operazioni oggi</div>
@@ -246,69 +247,9 @@ export function AnalisiDashboardPage() {
 
       {machines.length > 0 && (
         <div className="analisi-machine-grid">
-          {machines.map((m) => {
-            const s = m.snapshot || {}
-            return (
-              <section key={m.model_id} className="card analisi-panel analisi-machine-card">
-                <h2 className="analisi-panel-title">{m.model_label}</h2>
-                <div className="analisi-machine-kpis">
-                  <div>
-                    <div className="dashboard-kpi-label">Incasso oggi</div>
-                    <div className="dashboard-kpi-value" style={{ fontSize: '1.25rem' }}>
-                      {eur(s.incasso_oggi)}
-                    </div>
-                    <div className="dashboard-kpi-sub">chiusura giornata</div>
-                  </div>
-                  <div>
-                    <div className="dashboard-kpi-label">Operazioni</div>
-                    <div className="dashboard-kpi-value" style={{ fontSize: '1.25rem' }}>
-                      {s.movimenti_oggi ?? 0}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="dashboard-kpi-label">Picco</div>
-                    <div className="dashboard-kpi-value" style={{ fontSize: '1rem' }}>
-                      {s.picco_previsto?.slot_label || '—'}
-                    </div>
-                    <div className="dashboard-kpi-sub">
-                      {s.picco_previsto?.operatori_consigliati || 1} op. consigliati
-                    </div>
-                  </div>
-                </div>
-                <p className="analisi-home-peak" style={{ marginTop: '0.65rem' }}>
-                  {s.picco_previsto?.message || 'Nessun picco storico disponibile.'}
-                </p>
-                <PopularTimesChart
-                  cells={m.cells}
-                  hours={m.hours}
-                  weekdays={m.weekdays}
-                  title={`Orari di punta · ${m.model_label}`}
-                />
-                <p className="analisi-machine-scope">
-                  Fonte visite:{' '}
-                  <strong>{m.visits_source === 'pos' ? 'scontrini EasyRetail' : 'operazioni VNE (stima)'}</strong>
-                </p>
-                <h3 className="analisi-machine-subtitle">Fasce consigliate</h3>
-                <TopSlotsColumnChart
-                  suggestions={m.top_slots}
-                  emptyText="Pochi dati operazioni per questa macchina."
-                />
-                <h3 className="analisi-machine-subtitle">Andamento settimanale</h3>
-                <SeriesBars
-                  rows={(m.weekly?.rows || []).map((r) => ({ ...r, label: r.label }))}
-                  labelKey="label"
-                />
-                <div className="analisi-panel-actions">
-                  <Link className="btn btn-secondary btn-sm" to={`/analisi/oraria`}>
-                    Heatmap · {m.model_label}
-                  </Link>
-                  <Link className="btn btn-secondary btn-sm" to="/vne">
-                    Apri VNE
-                  </Link>
-                </div>
-              </section>
-            )
-          })}
+          {machines.map((m) => (
+            <AnalisiMachineCard key={m.model_id} machine={m} />
+          ))}
         </div>
       )}
 
@@ -323,11 +264,11 @@ export function AnalisiDashboardPage() {
 }
 
 export function AnalisiGiornalieroPage() {
-  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
+  const { modelId, setModelId, maniViewId, setManiViewId, location, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    `daily:days=30:${modelId}`,
-    () => fetchAnalyticsDaily({ days: 30, modelId }),
-    [modelId],
+    `daily:days=30:${modelId}:${maniViewId}`,
+    () => fetchAnalyticsDaily({ days: 30, modelId, location }),
+    [modelId, maniViewId],
   )
   return (
     <AnalisiPageShell
@@ -337,8 +278,11 @@ export function AnalisiGiornalieroPage() {
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-daily-machine"
+          maniSelectId="analisi-daily-mani-view"
           modelId={modelId}
           onModelChange={setModelId}
+          maniViewId={maniViewId}
+          onManiViewChange={setManiViewId}
           onRefresh={refreshNow}
           refreshing={refreshing}
           loading={loading}
@@ -367,22 +311,25 @@ export function AnalisiGiornalieroPage() {
 }
 
 export function AnalisiSettimanalePage() {
-  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
+  const { modelId, setModelId, maniViewId, setManiViewId, location, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    `weekly:weeks=12:${modelId}`,
-    () => fetchAnalyticsWeekly({ weeks: 12, modelId }),
-    [modelId],
+    `weekly:weeks=12:${modelId}:${maniViewId}`,
+    () => fetchAnalyticsWeekly({ weeks: 12, modelId, location }),
+    [modelId, maniViewId],
   )
   return (
     <AnalisiPageShell
       title={`Andamento settimanale — ${machineLabel}`}
-      lead={`Confronto settimane da dati VNE della macchina ${machineLabel}.`}
+      lead={`Confronto settimane per ${machineLabel} (VNE o scontrini a seconda della sede).`}
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-weekly-machine"
+          maniSelectId="analisi-weekly-mani-view"
           modelId={modelId}
           onModelChange={setModelId}
+          maniViewId={maniViewId}
+          onManiViewChange={setManiViewId}
           onRefresh={refreshNow}
           refreshing={refreshing}
           loading={loading}
@@ -406,22 +353,25 @@ export function AnalisiSettimanalePage() {
 }
 
 export function AnalisiMensilePage() {
-  const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
+  const { modelId, setModelId, maniViewId, setManiViewId, location, machineLabel } = useAnalisiMachineFilter()
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
-    `monthly:months=6:${modelId}`,
-    () => fetchAnalyticsMonthly({ months: 6, modelId }),
-    [modelId],
+    `monthly:months=6:${modelId}:${maniViewId}`,
+    () => fetchAnalyticsMonthly({ months: 6, modelId, location }),
+    [modelId, maniViewId],
   )
   return (
     <AnalisiPageShell
       title={`Andamento mensile — ${machineLabel}`}
-      lead={`Incassi mensili da chiusure/operazioni VNE della macchina ${machineLabel}.`}
+      lead={`Incassi mensili per ${machineLabel} (VNE Via Zanardelli o scontrini Via Abba).`}
       vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-monthly-machine"
+          maniSelectId="analisi-monthly-mani-view"
           modelId={modelId}
           onModelChange={setModelId}
+          maniViewId={maniViewId}
+          onManiViewChange={setManiViewId}
           onRefresh={refreshNow}
           refreshing={refreshing}
           loading={loading}

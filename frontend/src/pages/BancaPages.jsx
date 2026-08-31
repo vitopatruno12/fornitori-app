@@ -28,6 +28,32 @@ import { SeriesBars } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { parseBanFile } from '../utils/banFileParser'
 
+function resolveEnableBankingPayload(account) {
+  const bank = String(account?.bank_name || '').toLowerCase()
+  const label = `${bank} ${String(account?.account_name || '').toLowerCase()} ${String(account?.notes || '').toLowerCase()}`
+  if (bank.includes('unicredit')) {
+    return { aspsp_name: 'UniCredit', aspsp_country: 'IT', psu_type: 'personal' }
+  }
+  if (bank.includes('bbva')) {
+    return { aspsp_name: 'BBVA', aspsp_country: 'IT', psu_type: 'personal' }
+  }
+  if (bank.includes('bppb') || bank.includes('puglia')) {
+    return {
+      aspsp_name: 'Banca Popolare di Puglia e Basilicata',
+      aspsp_country: 'IT',
+      psu_type: 'business',
+    }
+  }
+  if (bank.includes('intesa') || bank.includes('sanpaolo')) {
+    return {
+      aspsp_name: 'Intesa Sanpaolo',
+      aspsp_country: 'IT',
+      psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal',
+    }
+  }
+  return { psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal' }
+}
+
 const BANK_LAST_MOVEMENTS_COLUMNS = [
   { id: 'date', label: 'Data', width: 14, fluid: true },
   { id: 'description', label: 'Descrizione', width: 42, fluid: true, emphasis: true },
@@ -439,16 +465,7 @@ export function BancaContiPage() {
     setSuccess('')
     try {
       const account = items.find((x) => x.id === accountId)
-      const bank = String(account?.bank_name || '').toLowerCase()
-      let payload = {}
-      if (bank.includes('unicredit')) {
-        payload = { aspsp_name: 'UniCredit', aspsp_country: 'IT' }
-      } else if (bank.includes('bbva')) {
-        payload = { aspsp_name: 'BBVA', aspsp_country: 'IT' }
-      } else if (bank.includes('bppb') || bank.includes('puglia')) {
-        // BPPB non è in sandbox Enable Banking: in produzione andrà il nome ASPSP reale
-        payload = { aspsp_name: 'Banca Popolare di Puglia e Basilicata', aspsp_country: 'IT' }
-      }
+      const payload = resolveEnableBankingPayload(account)
       const res = await startEnableBankingAuth(accountId, payload)
       if (res?.url) {
         setSuccess(res.message || 'Reindirizzamento alla banca…')

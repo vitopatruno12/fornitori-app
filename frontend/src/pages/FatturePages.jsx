@@ -765,11 +765,12 @@ export function FattureSincronizzazionePage() {
         </ul>
       </section>
       <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">AdE agent (chiavetta CNS)</h2>
+        <h2 className="fatture-panel-title">AdE agent (automatico)</h2>
         <p style={{ marginTop: 0 }}>
-          Scarico fatture ricevute da Agenzia delle Entrate (Fatture e Corrispettivi) sul PC agenzia
-          con chiavetta, poi push su Atlas <code>/sdi/receive</code>. Profili per sede: Via Abba, Via
-          Lattea, Risacca, Via Zanardelli.
+          Scarico fatture ricevute da Agenzia delle Entrate e push su Atlas{' '}
+          <code>/sdi/receive</code>. Per sync <strong>senza operatore</strong> usa{' '}
+          <code>auth_mode: fisconline</code> (CF + password + PIN Fisconline nel profilo/.env).
+          La chiavetta CNS richiede PIN Windows e non è automatizzabile.
         </p>
         <ul className="fatture-suggestions">
           <li>
@@ -777,26 +778,17 @@ export function FattureSincronizzazionePage() {
             <code>playwright install chrome</code>
           </li>
           <li>
-            Script: <code>backend/scripts/ade_sync_agent.py</code>
+            Script ufficio: <code>backend/scripts/run_ade_sync_ufficio.ps1</code>
           </li>
           <li>
-            Profili: copia <code>backend/app/integrations/ade/profiles.example.json</code>, abilita le
-            sedi, imposta CF/P.IVA e <code>ADE_PROFILES_PATH</code>
+            Automatico: <code>ADE_FISCONLINE_PASSWORD</code>, <code>ADE_FISCONLINE_PIN</code>, profilo con{' '}
+            <code>auth_mode: fisconline</code>
           </li>
           <li>
-            Env: <code>ADE_HEADLESS=0</code>, <code>ADE_USE_SYSTEM_CHROME=1</code>,{' '}
-            <code>ATLAS_API_BASE</code>, <code>SDI_RECEIVE_TOKEN</code>
+            Task Scheduler sul PC agenzia (ogni 1–2 ore), senza chiavetta se usi Fisconline
           </li>
           <li>
-            Prima run: inserisci PIN della chiavetta nella dialog Windows; la sessione si salva in{' '}
-            <code>storage_state</code>
-          </li>
-          <li>
-            Piano B: esporta XML in <code>drop_dir</code> del profilo / <code>ADE_XML_DROP_DIR</code> —
-            l&apos;agent li importa comunque
-          </li>
-          <li>
-            Task Scheduler (PC agenzia): <code>python C:\AtlasSync\ade_sync_agent.py</code>
+            Piano B: <code>auth_mode: drop</code> + XML in <code>drop_dir</code> (import automatico)
           </li>
         </ul>
       </section>

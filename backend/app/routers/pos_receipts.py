@@ -1,5 +1,6 @@
 import hmac
 import os
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
@@ -49,6 +50,49 @@ def _require_sync_token_or_server_gdb(x_atlas_sync_token: Optional[str] = Header
 @router.get("/stats")
 def pos_receipts_stats(db: Session = Depends(get_db)):
     return pos_receipts_service.pos_receipt_stats(db)
+
+
+@router.get("/payment-summary")
+def pos_receipts_payment_summary(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    model_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Incassi contanti vs carta/POS da scontrini sincronizzati."""
+    return pos_receipts_service.payment_summary(
+        db,
+        date_from=date_from,
+        date_to=date_to,
+        model_id=(model_id or "").strip() or None,
+    )
+
+
+@router.get("/gdb-probe")
+def probe_pos_gdb(
+    dsn: Optional[str] = None,
+    _: None = Depends(_require_sync_token_or_server_gdb),
+):
+    """Diagnostica flusso pagamenti nel database EasyRetail (PC cassa)."""
+    from ..services import easyretail_gdb_service as gdb
+
+    cfg = gdb.gdb_config_from_env()
+    path = (dsn or cfg["dsn"] or "").strip()
+    if not path:
+        raise HTTPException(
+            status_code=400,
+            detail="Imposta EASYRETAIL_GDB_PATH sul PC cassa o passa dsn= nella query.",
+        )
+    try:
+        return gdb.probe_gdb(
+            path,
+            user=cfg["user"],
+            password=cfg["password"],
+            fbclient=cfg.get("fbclient"),
+            charset=cfg.get("charset") or "WIN1252",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Probe GDB fallita: {e}") from e
 
 
 @router.get("/template.csv")

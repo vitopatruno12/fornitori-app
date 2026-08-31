@@ -9,6 +9,16 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..routers.vne import VneAnalyticsEvent, collect_analytics_events
+from .pos_store_catalog import (
+    GAZZA_LADRA_MODEL_ID,
+    GAZZA_LADRA_STORE_KEYS,
+    MANI_LOC_ABBA,
+    MANI_LOC_ZANARDELLI,
+    MANI_LOCATION_IDS,
+    POS_ONLY_MODEL_IDS,
+    POS_REVENUE_MODEL_ID,
+    analytics_pos_only_locales,
+)
 
 BUSINESS_HOURS = list(range(8, 23))  # 08–22
 WEEKDAY_LABELS_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
@@ -30,9 +40,165 @@ MONTH_LABELS_IT = [
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 _CACHE_TTL_SEC = float(__import__("os").getenv("ANALYTICS_CACHE_TTL_SEC", "1200"))
 DATA_NOTE = (
-    "Dati da macchine VNE: operazioni (traffico orario) e chiusure cassa (incasso giornaliero). "
-    "Orari di punta: preferisce scontrini EasyRetail (POS) se importati."
+    "Incassi: VNE (chiusure cassa) per Risacca, Mani in Pasta Via Zanardelli e Mucche Volanti; "
+    "scontrini EasyRetail per Mani in Pasta Via Abba; Gazza Ladra da scontrini POS Poste (API in arrivo). "
+    "Traffico orario: operazioni VNE; Mani in Pasta somma VNE (Zanardelli) + scontrini (Abba) negli orari di punta."
 )
+
+
+def _pos_bucket_hit(buckets, scope_key: str, wd: int, hr: int) -> Optional[Dict[str, Any]]:
+    if not buckets:
+        return None
+    return buckets.get((scope_key, wd, hr)) or buckets.get(("all", wd, hr))
+
+
+def _load_pos_heatmap_buckets(
+    date_from: date,
+    date_to: date,
+    model_id: Optional[str] = None,
+) -> Dict[Tuple[str, int, int], Dict[str, float]]:
+    try:
+        from ..database import SessionLocal
+        from .pos_receipts_service import load_pos_visit_buckets
+    except Exception:
+        return {}
+
+    db = SessionLocal()
+    try:
+        return load_pos_visit_buckets(db, date_from=date_from, date_to=date_to, model_id=model_id)
+    except Exception:
+        return {}
+    finally:
+        db.close()
+
+
+def _recalculate_heatmap_cells(cells: List[dict]) -> tuple[List[dict], float, float, List[dict]]:
+    max_avg = 0.0
+    max_avg_visits = 0.0
+    for cell in cells:
+        max_avg = max(max_avg, float(cell.get("avg_amount") or 0))
+        max_avg_visits = max(max_avg_visits, float(cell.get("avg_visits") or 0))
+
+    for cell in cells:
+        avg = float(cell.get("avg_amount") or 0)
+        avg_v = float(cell.get("avg_visits") or 0)
+        intensity = 0.0 if max_avg <= 0 else avg / max_avg
+        visit_intensity = 0.0 if max_avg_visits <= 0 else avg_v / max_avg_visits
+        cell["intensity"] = round(intensity, 3)
+        cell["visit_intensity"] = round(visit_intensity, 3)
+        cell["operatori_consigliati"] = _intensity_to_operators(avg, max_avg)
+        if intensity >= 0.75:
+            cell["level"] = "alto"
+        elif intensity >= 0.4:
+            cell["level"] = "medio"
+        elif intensity > 0:
+            cell["level"] = "basso"
+        else:
+            cell["level"] = "nullo"
+
+    ranked = sorted(cells, key=lambda c: float(c.get("avg_amount") or 0), reverse=True)
+    top = [c for c in ranked if float(c.get("avg_amount") or 0) > 0][:12]
+    suggestions = [
+        {
+            "weekday_label": c["weekday_label"],
+            "slot_label": c["slot_label"],
+            "operatori_consigliati": c["operatori_consigliati"],
+            "avg_amount": c["avg_amount"],
+            "message": (
+                f"Consigliati {c['operatori_consigliati']} operator"
+                f"{'i' if c['operatori_consigliati'] != 1 else 'e'} "
+                f"{c['weekday_label'].lower()} {c['slot_label']}"
+            ),
+        }
+        for c in top
+    ]
+    return cells, max_avg, max_avg_visits, suggestions
+
+
+def _merge_pos_into_heatmap(
+    heat: dict,
+    *,
+    date_from: date,
+    date_to: date,
+    model_id: Optional[str] = None,
+) -> dict:
+    """Mani in Pasta: somma visite/incassi POS (Abba) alle celle VNE (Zanardelli)."""
+    mid = _parse_model_id(model_id) or POS_REVENUE_MODEL_ID
+    buckets = _load_pos_heatmap_buckets(date_from, date_to, mid)
+    if not buckets:
+        return heat
+
+    scope_key = mid
+    cells = list(heat.get("cells") or [])
+    merged = 0
+    for cell in cells:
+        wd = int(cell.get("weekday") or 0)
+        hr = int(cell.get("hour") or 0)
+        hit = _pos_bucket_hit(buckets, scope_key, wd, hr)
+        if not hit:
+            continue
+        pos_avg_visits = float(hit.get("avg_visits") or 0)
+        pos_visits = float(hit.get("visits") or 0)
+        pos_days = max(1.0, float(hit.get("sample_days") or 1))
+        pos_avg_amount = float(hit.get("amount") or 0) / pos_days
+        vne_avg_visits = float(cell.get("avg_visits") or 0)
+        vne_avg_amount = float(cell.get("avg_amount") or 0)
+        had_vne = vne_avg_visits > 0 or vne_avg_amount > 0
+        had_pos = pos_avg_visits > 0 or pos_avg_amount > 0
+        if not had_pos:
+            continue
+        cell["avg_visits"] = round(vne_avg_visits + pos_avg_visits, 2)
+        cell["movimenti"] = int(cell.get("movimenti") or 0) + int(round(pos_visits))
+        cell["avg_amount"] = _dec(vne_avg_amount + pos_avg_amount)
+        cell["total_amount"] = _dec(float(cell.get("total_amount") or 0) + float(hit.get("amount") or 0))
+        cell["sample_days"] = int(max(float(cell.get("sample_days") or 1), pos_days))
+        if had_vne and had_pos:
+            cell["visit_source"] = "vne+pos"
+        elif had_pos:
+            cell["visit_source"] = "pos"
+        merged += 1
+
+    if merged <= 0:
+        return heat
+
+    cells, max_avg, max_avg_visits, suggestions = _recalculate_heatmap_cells(cells)
+    heat["cells"] = cells
+    heat["suggestions"] = suggestions
+    heat["max_avg_amount"] = _dec(max_avg)
+    heat["max_avg_visits"] = round(max_avg_visits, 2)
+    heat["visits_source"] = "vne+pos"
+    note = str(heat.get("data_note") or "")
+    if "VNE + scontrini" not in note:
+        heat["data_note"] = (
+            (note + " ").strip()
+            + " Orari di punta: VNE Via Zanardelli + scontrini Via Abba."
+        ).strip()
+    return heat
+
+
+def _merge_pos_into_peak_buckets(
+    bucket_amount: Dict[Tuple[int, int], Decimal],
+    bucket_count: Dict[Tuple[int, int], int],
+    *,
+    date_from: date,
+    date_to: date,
+    weekday: int,
+) -> None:
+    """Aggiunge scontrini Abba ai bucket orari del picco previsto (oggi)."""
+    buckets = _load_pos_heatmap_buckets(date_from, date_to, POS_REVENUE_MODEL_ID)
+    if not buckets:
+        return
+    for hr in BUSINESS_HOURS:
+        hit = _pos_bucket_hit(buckets, POS_REVENUE_MODEL_ID, weekday, hr)
+        if not hit:
+            continue
+        pos_days = max(1.0, float(hit.get("sample_days") or 1))
+        pos_avg_visits = float(hit.get("avg_visits") or 0)
+        pos_avg_amount = float(hit.get("amount") or 0) / pos_days
+        if pos_avg_visits <= 0 and pos_avg_amount <= 0:
+            continue
+        bucket_count[(weekday, hr)] = bucket_count.get((weekday, hr), 0) + int(round(pos_avg_visits))
+        bucket_amount[(weekday, hr)] = _dec(float(bucket_amount.get((weekday, hr), 0)) + pos_avg_amount)
 
 
 def _apply_pos_visits(
@@ -41,8 +207,12 @@ def _apply_pos_visits(
     date_from: date,
     date_to: date,
     model_id: Optional[str] = None,
+    merge: bool = False,
 ) -> dict:
-    """Sovrascrive avg_visits con scontrini POS EasyRetail quando disponibili."""
+    """Arricchisce heatmap con scontrini POS. merge=True somma VNE+POS (Mani in Pasta)."""
+    if merge and (_parse_model_id(model_id) or "") in ("", POS_REVENUE_MODEL_ID):
+        return _merge_pos_into_heatmap(heat, date_from=date_from, date_to=date_to, model_id=model_id)
+
     try:
         from ..database import SessionLocal
         from .pos_receipts_service import load_pos_visit_buckets
@@ -68,7 +238,7 @@ def _apply_pos_visits(
     for cell in cells:
         wd = int(cell.get("weekday") or 0)
         hr = int(cell.get("hour") or 0)
-        hit = buckets.get((scope_key, wd, hr)) or buckets.get(("all", wd, hr))
+        hit = _pos_bucket_hit(buckets, scope_key, wd, hr)
         if not hit:
             continue
         cell["avg_visits"] = round(float(hit["avg_visits"]), 2)
@@ -123,6 +293,52 @@ def _parse_model_id(model_id: Optional[str]) -> Optional[str]:
     if model_id is None or str(model_id).strip() in ("", "all", "*"):
         return None
     return str(model_id).strip()
+
+
+def _parse_mani_location(location: Optional[str]) -> Optional[str]:
+    loc = str(location or "").strip().lower()
+    if not loc or loc in ("combined", "totale", "all", "entrambe"):
+        return None
+    if loc in (MANI_LOC_ZANARDELLI, "zanardelli", "model-4"):
+        return MANI_LOC_ZANARDELLI
+    if loc in (MANI_LOC_ABBA, "abba", "model-2-abba"):
+        return MANI_LOC_ABBA
+    return None
+
+
+def _revenue_mode_for(model_id: Optional[str], location: Optional[str] = None) -> str:
+    """vne | pos | combined — Mani in Pasta usa pos/combined; Gazza Ladra solo pos."""
+    mid = _parse_model_id(model_id)
+    if mid in POS_ONLY_MODEL_IDS:
+        return "pos"
+    if mid != POS_REVENUE_MODEL_ID:
+        return "vne"
+    loc = _parse_mani_location(location)
+    if loc == MANI_LOC_ABBA:
+        return "pos"
+    if loc == MANI_LOC_ZANARDELLI:
+        return "vne"
+    return "combined"
+
+
+def _should_load_pos(model_id: Optional[str], revenue_mode: str) -> bool:
+    mid = _parse_model_id(model_id)
+    if mid in POS_ONLY_MODEL_IDS:
+        return True
+    if mid not in (None, POS_REVENUE_MODEL_ID):
+        return False
+    return revenue_mode in ("combined", "pos")
+
+
+def _pos_store_keys_for(model_id: Optional[str]) -> Optional[tuple]:
+    mid = _parse_model_id(model_id)
+    if mid == GAZZA_LADRA_MODEL_ID:
+        return tuple(GAZZA_LADRA_STORE_KEYS)
+    if mid == POS_REVENUE_MODEL_ID:
+        from .pos_store_catalog import POS_REVENUE_STORE_KEYS
+
+        return tuple(POS_REVENUE_STORE_KEYS)
+    return None
 
 
 def _cache_get(key: str):
@@ -194,6 +410,123 @@ def _day_movimenti(events: List[VneAnalyticsEvent], day: date) -> int:
     return sum(1 for e in _ops(events) if e.when.date() == day)
 
 
+def _pos_revenue_applies(model_id: Optional[str], revenue_mode: str = "combined") -> bool:
+    return _should_load_pos(model_id, revenue_mode)
+
+
+def _load_pos_daily_totals(
+    date_from: date,
+    date_to: date,
+    model_id: Optional[str] = None,
+    *,
+    revenue_mode: str = "combined",
+    store_keys: Optional[tuple] = None,
+) -> Dict[date, Dict[str, Any]]:
+    """Incasso giornaliero da scontrini (Via Abba / Gazza Ladra / …)."""
+    if not _should_load_pos(model_id, revenue_mode):
+        return {}
+    try:
+        from ..database import SessionLocal
+        from .pos_receipts_service import load_pos_daily_incasso
+    except Exception:
+        return {}
+
+    mid = _parse_model_id(model_id)
+    target_mid = mid if mid in POS_ONLY_MODEL_IDS else POS_REVENUE_MODEL_ID
+    keys = store_keys or _pos_store_keys_for(target_mid)
+
+    db = SessionLocal()
+    try:
+        return load_pos_daily_incasso(
+            db,
+            date_from=date_from,
+            date_to=date_to,
+            model_id=target_mid,
+            store_keys=keys,
+        )
+    except Exception:
+        return {}
+    finally:
+        db.close()
+
+
+def _payment_split_from_pos_daily(pos_daily: Dict[date, Dict[str, Any]]) -> dict:
+    cash = Decimal("0.00")
+    card = Decimal("0.00")
+    receipts = 0
+    for hit in (pos_daily or {}).values():
+        cash += _dec(hit.get("cash_eur", 0))
+        card += _dec(hit.get("card_eur", 0))
+        receipts += int(hit.get("movimenti") or 0)
+    return {
+        "receipts": receipts,
+        "cash_eur": cash,
+        "card_eur": card,
+        "amount_eur": _dec(cash + card),
+    }
+
+
+def _empty_peak_slot(today: date) -> dict:
+    today_wd = today.weekday()
+    now_hr = datetime.now().hour
+    return {
+        "picco_previsto": {
+            "weekday": today_wd,
+            "weekday_label": WEEKDAY_LABELS_IT[today_wd],
+            "hour": 12,
+            "slot_label": _slot_label(12),
+            "avg_amount": Decimal("0.00"),
+            "avg_movimenti": 0,
+            "operatori_consigliati": 1,
+            "message": "Picco da stimare quando arriveranno scontrini POS Poste.",
+        },
+        "fascia_corrente": {
+            "hour": now_hr,
+            "slot_label": _slot_label(now_hr) if now_hr in BUSINESS_HOURS else f"{now_hr:02d}:00",
+            "operatori_consigliati": 1,
+        },
+    }
+
+
+def _pos_day_incasso(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
+    hit = pos_daily.get(day) or {}
+    return _dec(hit.get("incasso", 0))
+
+
+def _pos_day_movimenti(pos_daily: Dict[date, Dict[str, Any]], day: date) -> int:
+    hit = pos_daily.get(day) or {}
+    return int(hit.get("movimenti") or 0)
+
+
+def _combined_day_incasso(
+    events: List[VneAnalyticsEvent],
+    day: date,
+    pos_daily: Dict[date, Dict[str, Any]],
+    *,
+    closings_only: bool = False,
+) -> Decimal:
+    vne = _day_incasso_chiusure(events, day) if closings_only else _day_incasso(events, day)
+    return _dec(vne + _pos_day_incasso(pos_daily, day))
+
+
+def _combined_day_movimenti(
+    events: List[VneAnalyticsEvent],
+    day: date,
+    pos_daily: Dict[date, Dict[str, Any]],
+) -> int:
+    return _day_movimenti(events, day) + _pos_day_movimenti(pos_daily, day)
+
+
+def _revenue_source(model_id: Optional[str], pos_daily: Dict[date, Dict[str, Any]], revenue_mode: str = "combined") -> str:
+    if revenue_mode == "pos":
+        return "pos"
+    if revenue_mode == "vne":
+        return "vne"
+    if _should_load_pos(model_id, "combined"):
+        return "vne+pos"
+    return "vne"
+
+
 def _filter_events_for_model(events: List[VneAnalyticsEvent], model_id: Optional[str]) -> List[VneAnalyticsEvent]:
     mid = _parse_model_id(model_id)
     if not mid:
@@ -207,23 +540,61 @@ def _snapshot_from_events(
     model_id: Optional[str],
     lookback_months: int,
     warnings: Optional[List[str]] = None,
+    pos_daily: Optional[Dict[date, Dict[str, Any]]] = None,
+    revenue_mode: str = "combined",
 ) -> dict:
     today = date.today()
     scoped = _filter_events_for_model(events, model_id)
     mid = _parse_model_id(model_id)
+    use_pos = _should_load_pos(model_id, revenue_mode)
+    pos_daily = pos_daily if use_pos else {}
 
-    # Dashboard: incasso oggi solo da chiusure di giornata (non dalle operazioni).
-    incasso_oggi = _day_incasso_chiusure(scoped, today)
-    movimenti_oggi = _day_movimenti(scoped, today)
-
-    bucket_amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
-    bucket_count: Dict[Tuple[int, int], int] = defaultdict(int)
-    for e in _ops(scoped):
-        wd, hr = e.when.weekday(), e.when.hour
-        if hr not in BUSINESS_HOURS:
-            continue
-        bucket_amount[(wd, hr)] += _dec(max(e.amount, 0))
-        bucket_count[(wd, hr)] += 1
+    if revenue_mode == "pos":
+        incasso_vne_oggi = Decimal("0.00")
+        incasso_pos_oggi = _pos_day_incasso(pos_daily, today)
+        incasso_oggi = incasso_pos_oggi
+        movimenti_oggi = _pos_day_movimenti(pos_daily, today)
+        bucket_amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
+        bucket_count: Dict[Tuple[int, int], int] = defaultdict(int)
+        hist_days = min(93, lookback_months * 31)
+        date_from_peak = today - timedelta(days=hist_days - 1)
+        peak_model = mid if mid in POS_ONLY_MODEL_IDS else POS_REVENUE_MODEL_ID
+        pos_buckets = _load_pos_heatmap_buckets(date_from_peak, today, peak_model)
+        today_wd_pre = today.weekday()
+        for hr in BUSINESS_HOURS:
+            hit = _pos_bucket_hit(pos_buckets, peak_model, today_wd_pre, hr)
+            if not hit:
+                continue
+            pos_days = max(1.0, float(hit.get("sample_days") or 1))
+            bucket_count[(today_wd_pre, hr)] = int(round(float(hit.get("avg_visits") or 0)))
+            bucket_amount[(today_wd_pre, hr)] = _dec(float(hit.get("amount") or 0) / pos_days)
+    else:
+        incasso_vne_oggi = _day_incasso_chiusure(scoped, today)
+        incasso_pos_oggi = _pos_day_incasso(pos_daily, today) if revenue_mode == "combined" else Decimal("0.00")
+        incasso_oggi = _dec(incasso_vne_oggi + incasso_pos_oggi)
+        movimenti_oggi = (
+            _combined_day_movimenti(scoped, today, pos_daily)
+            if revenue_mode == "combined"
+            else _day_movimenti(scoped, today)
+        )
+        bucket_amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
+        bucket_count: Dict[Tuple[int, int], int] = defaultdict(int)
+        for e in _ops(scoped):
+            wd, hr = e.when.weekday(), e.when.hour
+            if hr not in BUSINESS_HOURS:
+                continue
+            bucket_amount[(wd, hr)] += _dec(max(e.amount, 0))
+            bucket_count[(wd, hr)] += 1
+        if revenue_mode == "combined" and mid == POS_REVENUE_MODEL_ID:
+            hist_days = min(93, lookback_months * 31)
+            date_from_peak = today - timedelta(days=hist_days - 1)
+            _merge_pos_into_peak_buckets(
+                bucket_amount,
+                bucket_count,
+                date_from=date_from_peak,
+                date_to=today,
+                weekday=today.weekday(),
+            )
 
     today_wd = today.weekday()
     today_buckets = [
@@ -238,17 +609,36 @@ def _snapshot_from_events(
     current_ops = _intensity_to_operators(current_amt, max_amt)
 
     machines = sorted({e.model_label for e in scoped})
+    if mid == GAZZA_LADRA_MODEL_ID and "Gazza Ladra" not in machines:
+        machines = ["Gazza Ladra"]
     label_prefix = (machines[0] if len(machines) == 1 else "oggi")
+    pay_split = _payment_split_from_pos_daily(pos_daily) if use_pos else {
+        "receipts": 0,
+        "cash_eur": Decimal("0.00"),
+        "card_eur": Decimal("0.00"),
+        "amount_eur": Decimal("0.00"),
+    }
+    peak_message = (
+        f"Picco previsto {label_prefix}: {WEEKDAY_LABELS_IT[today_wd].lower()} "
+        f"{_slot_label(peak_hr)} · consigliati {operators} "
+        f"operator{'i' if operators != 1 else 'e'}"
+    )
+    if mid == GAZZA_LADRA_MODEL_ID and peak_amt <= 0 and peak_cnt <= 0:
+        peak_message = "Gazza Ladra: in attesa di scontrini POS Poste per stimare picchi e operatori."
     return {
         "date": today.isoformat(),
         "activity": mid or "all",
-        "source": "vne",
+        "source": _revenue_source(model_id, pos_daily, revenue_mode),
+        "revenue_source": _revenue_source(model_id, pos_daily, revenue_mode),
         "lookback_months": lookback_months,
         "incasso_oggi": incasso_oggi,
+        "incasso_vne": incasso_vne_oggi,
+        "incasso_pos": incasso_pos_oggi,
         "movimenti_oggi": movimenti_oggi,
         "totale_fiscale": Decimal("0.00"),
-        "totale_pos": Decimal("0.00"),
+        "totale_pos": incasso_pos_oggi,
         "totale_non_fiscale": Decimal("0.00"),
+        "payment_split": pay_split,
         "machines": machines,
         "warnings": list(warnings or []),
         "data_note": DATA_NOTE,
@@ -260,11 +650,7 @@ def _snapshot_from_events(
             "avg_amount": _dec(peak_amt),
             "avg_movimenti": peak_cnt,
             "operatori_consigliati": operators,
-            "message": (
-                f"Picco previsto {label_prefix}: {WEEKDAY_LABELS_IT[today_wd].lower()} "
-                f"{_slot_label(peak_hr)} · consigliati {operators} "
-                f"operator{'i' if operators != 1 else 'e'}"
-            ),
+            "message": peak_message,
         },
         "fascia_corrente": {
             "hour": now_hr,
@@ -280,11 +666,15 @@ def _weekly_from_events(
     weeks: int,
     model_id: Optional[str] = None,
     warnings: Optional[List[str]] = None,
+    pos_daily: Optional[Dict[date, Dict[str, Any]]] = None,
+    revenue_mode: str = "combined",
 ) -> dict:
     weeks = max(4, min(26, int(weeks or 12)))
     today = date.today()
     start_monday = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
     scoped = _filter_events_for_model(events, model_id)
+    use_pos = _should_load_pos(model_id, revenue_mode)
+    pos_daily = pos_daily if use_pos else {}
     rows = []
     for w in range(weeks):
         monday = start_monday + timedelta(weeks=w)
@@ -294,8 +684,15 @@ def _weekly_from_events(
         movimenti = 0
         d = monday
         while d <= end:
-            incasso += _day_incasso(scoped, d)
-            movimenti += _day_movimenti(scoped, d)
+            if revenue_mode == "pos":
+                incasso += _pos_day_incasso(pos_daily, d)
+                movimenti += _pos_day_movimenti(pos_daily, d)
+            elif revenue_mode == "vne":
+                incasso += _day_incasso(scoped, d)
+                movimenti += _day_movimenti(scoped, d)
+            else:
+                incasso += _combined_day_incasso(scoped, d, pos_daily)
+                movimenti += _combined_day_movimenti(scoped, d, pos_daily)
             d += timedelta(days=1)
         rows.append(
             {
@@ -308,7 +705,7 @@ def _weekly_from_events(
         )
     return {
         "activity": _parse_model_id(model_id) or "all",
-        "source": "vne",
+        "source": _revenue_source(model_id, pos_daily or {}, revenue_mode),
         "weeks": weeks,
         "total_incasso": _dec(sum((r["incasso"] for r in rows), Decimal("0.00"))),
         "rows": rows,
@@ -413,42 +810,324 @@ def _heatmap_from_events(
     }
 
 
-def get_snapshot(*, model_id: Optional[str] = None, months: int = 3) -> dict:
+def _heatmap_from_pos_receipts(
+    *,
+    date_from: date,
+    date_to: date,
+    store_keys: tuple,
+    months: int,
+    warnings: Optional[List[str]] = None,
+    model_id: Optional[str] = None,
+    model_label: str = "Mani in Pasta (Via Abba)",
+) -> dict:
+    """Heatmap traffico/incasso da scontrini POS (Abba / Gazza Ladra)."""
+    months = max(1, min(6, int(months or 3)))
+    target_mid = _parse_model_id(model_id) or POS_REVENUE_MODEL_ID
+    amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
+    count: Dict[Tuple[int, int], int] = defaultdict(int)
+    day_seen: Dict[Tuple[int, int], set] = defaultdict(set)
+
+    try:
+        from ..database import SessionLocal
+        from .pos_receipts_service import load_pos_visit_buckets
+
+        db = SessionLocal()
+        try:
+            buckets = load_pos_visit_buckets(
+                db,
+                date_from=date_from,
+                date_to=date_to,
+                model_id=target_mid,
+                store_keys=store_keys,
+            )
+        finally:
+            db.close()
+        for (mid, wd, hr), hit in buckets.items():
+            if mid == "all" or mid != target_mid:
+                continue
+            if hr not in BUSINESS_HOURS:
+                continue
+            visits = int(hit.get("visits") or 0)
+            amt = Decimal(str(hit.get("amount") or 0))
+            days_n = max(1, int(hit.get("sample_days") or 1))
+            amount[(wd, hr)] += _dec(amt)
+            count[(wd, hr)] += visits
+            day_seen[(wd, hr)].add(f"d{days_n}")
+    except Exception:
+        buckets = {}
+
+    cells = []
+    max_avg = 0.0
+    max_avg_visits = 0.0
+    for wd in range(7):
+        for hr in BUSINESS_HOURS:
+            days_n = max(1, len(day_seen[(wd, hr)]))
+            tot = float(amount[(wd, hr)])
+            avg = tot / days_n
+            avg_visits = count[(wd, hr)] / days_n
+            max_avg = max(max_avg, avg)
+            max_avg_visits = max(max_avg_visits, avg_visits)
+            cells.append(
+                {
+                    "weekday": wd,
+                    "weekday_label": WEEKDAY_LABELS_IT[wd],
+                    "hour": hr,
+                    "slot_label": _slot_label(hr),
+                    "total_amount": _dec(tot),
+                    "avg_amount": _dec(avg),
+                    "movimenti": count[(wd, hr)],
+                    "avg_visits": round(avg_visits, 2),
+                    "sample_days": len(day_seen[(wd, hr)]),
+                }
+            )
+
+    for cell in cells:
+        avg = float(cell["avg_amount"])
+        intensity = 0.0 if max_avg <= 0 else avg / max_avg
+        visit_intensity = 0.0 if max_avg_visits <= 0 else float(cell["avg_visits"]) / max_avg_visits
+        cell["intensity"] = round(intensity, 3)
+        cell["visit_intensity"] = round(visit_intensity, 3)
+        cell["operatori_consigliati"] = _intensity_to_operators(avg, max_avg)
+        if intensity >= 0.75:
+            cell["level"] = "alto"
+        elif intensity >= 0.4:
+            cell["level"] = "medio"
+        elif intensity > 0:
+            cell["level"] = "basso"
+        else:
+            cell["level"] = "nullo"
+
+    ranked = sorted(cells, key=lambda c: float(c["avg_amount"]), reverse=True)
+    top = [c for c in ranked if float(c["avg_amount"]) > 0][:12]
+    suggestions = [
+        {
+            "weekday_label": c["weekday_label"],
+            "slot_label": c["slot_label"],
+            "operatori_consigliati": c["operatori_consigliati"],
+            "avg_amount": c["avg_amount"],
+            "message": (
+                f"Consigliati {c['operatori_consigliati']} operator"
+                f"{'i' if c['operatori_consigliati'] != 1 else 'e'} "
+                f"{c['weekday_label'].lower()} {c['slot_label']}"
+            ),
+        }
+        for c in top
+    ]
+
+    return {
+        "activity": target_mid,
+        "source": "pos",
+        "months": months,
+        "hours": BUSINESS_HOURS,
+        "weekdays": WEEKDAY_LABELS_IT,
+        "max_avg_amount": _dec(max_avg),
+        "max_avg_visits": round(max_avg_visits, 2),
+        "cells": cells,
+        "suggestions": suggestions,
+        "machines": [model_label],
+        "warnings": list(warnings or []),
+        "data_note": DATA_NOTE,
+        "visits_source": "pos",
+    }
+
+
+def _build_mani_location_view(
+    events: List[VneAnalyticsEvent],
+    pos_daily: Dict[date, Dict[str, Any]],
+    *,
+    location_id: str,
+    location_label: str,
+    revenue_mode: str,
+    revenue_note: str,
+    lookback_months: int,
+    date_from: date,
+    date_to: date,
+    warnings: Optional[List[str]] = None,
+) -> dict:
+    from .pos_store_catalog import POS_REVENUE_STORE_KEYS
+
+    m_events = [e for e in events if e.model_id == POS_REVENUE_MODEL_ID]
+    m_warn = list(warnings or [])
+    use_pos = pos_daily if revenue_mode in ("combined", "pos") else {}
+
+    m_snap = _snapshot_from_events(
+        m_events,
+        model_id=POS_REVENUE_MODEL_ID,
+        lookback_months=lookback_months,
+        warnings=m_warn,
+        pos_daily=use_pos,
+        revenue_mode=revenue_mode,
+    )
+    m_snap["machines"] = [location_label]
+    m_weekly = _weekly_from_events(
+        m_events,
+        weeks=8,
+        model_id=POS_REVENUE_MODEL_ID,
+        warnings=m_warn,
+        pos_daily=use_pos,
+        revenue_mode=revenue_mode,
+    )
+    if revenue_mode == "pos":
+        m_heat = _heatmap_from_pos_receipts(
+            date_from=date_from,
+            date_to=date_to,
+            store_keys=tuple(POS_REVENUE_STORE_KEYS),
+            months=lookback_months,
+            warnings=m_warn,
+        )
+    else:
+        m_heat = _heatmap_from_events(
+            m_events,
+            months=lookback_months,
+            model_id=POS_REVENUE_MODEL_ID,
+            warnings=m_warn,
+        )
+        if revenue_mode == "combined":
+            m_heat = _apply_pos_visits(
+                m_heat,
+                date_from=date_from,
+                date_to=date_to,
+                model_id=POS_REVENUE_MODEL_ID,
+                merge=True,
+            )
+
+    return {
+        "location_id": location_id,
+        "location_label": location_label,
+        "revenue_source": _revenue_source(POS_REVENUE_MODEL_ID, use_pos, revenue_mode),
+        "revenue_note": revenue_note,
+        "snapshot": m_snap,
+        "weekly": m_weekly,
+        "top_slots": m_heat["suggestions"][:5],
+        "hours": m_heat["hours"],
+        "weekdays": m_heat["weekdays"],
+        "cells": m_heat["cells"],
+        "visits_source": m_heat.get("visits_source") or ("pos" if revenue_mode == "pos" else "vne"),
+    }
+
+
+def _build_pos_only_machine_entry(
+    *,
+    locale: dict,
+    lookback_months: int,
+    date_from: date,
+    date_to: date,
+) -> dict:
+    """Scheda analitica per locale senza VNE (es. Gazza Ladra / POS Poste)."""
+    model_id = locale["model_id"]
+    label = locale["model_label"]
+    store_keys = tuple(locale.get("store_keys") or ())
+    pos_daily = _load_pos_daily_totals(
+        date_from,
+        date_to,
+        model_id,
+        revenue_mode="pos",
+        store_keys=store_keys,
+    )
+    m_snap = _snapshot_from_events(
+        [],
+        model_id=model_id,
+        lookback_months=lookback_months,
+        warnings=[],
+        pos_daily=pos_daily,
+        revenue_mode="pos",
+    )
+    m_snap["machines"] = [label]
+    m_weekly = _weekly_from_events(
+        [],
+        weeks=8,
+        model_id=model_id,
+        warnings=[],
+        pos_daily=pos_daily,
+        revenue_mode="pos",
+    )
+    m_heat = _heatmap_from_pos_receipts(
+        date_from=date_from,
+        date_to=date_to,
+        store_keys=store_keys or tuple(GAZZA_LADRA_STORE_KEYS),
+        months=lookback_months,
+        warnings=[],
+        model_id=model_id,
+        model_label=label,
+    )
+    return {
+        "model_id": model_id,
+        "model_label": label,
+        "revenue_source": "pos",
+        "pos_provider": locale.get("pos_provider") or "poste",
+        "revenue_note": locale.get("revenue_note") or "Incasso da scontrini POS",
+        "snapshot": m_snap,
+        "weekly": m_weekly,
+        "top_slots": m_heat["suggestions"][:5],
+        "hours": m_heat["hours"],
+        "weekdays": m_heat["weekdays"],
+        "cells": m_heat["cells"],
+        "visits_source": "pos",
+        "payment_split": m_snap.get("payment_split") or {},
+        "locations": [],
+    }
+
+
+def get_snapshot(*, model_id: Optional[str] = None, months: int = 3, location: Optional[str] = None) -> dict:
     today = date.today()
     lookback_months = max(1, min(6, int(months or 3)))
     hist_days = min(93, lookback_months * 31)
     date_from = today - timedelta(days=hist_days - 1)
-    events, warnings = _load_events(date_from=date_from, date_to=today, model_id=model_id)
+    mid = _parse_model_id(model_id)
+    revenue_mode = _revenue_mode_for(model_id, location)
+    if mid in POS_ONLY_MODEL_IDS:
+        events, warnings = [], []
+    else:
+        events, warnings = _load_events(date_from=date_from, date_to=today, model_id=model_id)
+    pos_daily = _load_pos_daily_totals(date_from, today, model_id, revenue_mode=revenue_mode)
     return _snapshot_from_events(
         events,
         model_id=model_id,
         lookback_months=lookback_months,
         warnings=warnings,
+        pos_daily=pos_daily,
+        revenue_mode=revenue_mode,
     )
 
 
-def get_daily_series(*, days: int = 30, model_id: Optional[str] = None) -> dict:
+def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location: Optional[str] = None) -> dict:
     days = max(7, min(90, int(days or 30)))
     today = date.today()
     start_d = today - timedelta(days=days - 1)
-    events, warnings = _load_events(date_from=start_d, date_to=today, model_id=model_id)
+    mid = _parse_model_id(model_id)
+    revenue_mode = _revenue_mode_for(model_id, location)
+    if mid in POS_ONLY_MODEL_IDS:
+        events, warnings = [], []
+    else:
+        events, warnings = _load_events(date_from=start_d, date_to=today, model_id=model_id)
+    scoped = _filter_events_for_model(events, model_id)
+    pos_daily = _load_pos_daily_totals(start_d, today, model_id, revenue_mode=revenue_mode)
 
     rows = []
     for i in range(days):
         d = start_d + timedelta(days=i)
+        if revenue_mode == "pos":
+            incasso = _pos_day_incasso(pos_daily, d)
+            movimenti = _pos_day_movimenti(pos_daily, d)
+        elif revenue_mode == "vne":
+            incasso = _day_incasso(scoped, d)
+            movimenti = _day_movimenti(scoped, d)
+        else:
+            incasso = _combined_day_incasso(scoped, d, pos_daily)
+            movimenti = _combined_day_movimenti(scoped, d, pos_daily)
         rows.append(
             {
                 "date": d.isoformat(),
                 "weekday": d.weekday(),
                 "weekday_label": WEEKDAY_LABELS_IT[d.weekday()],
-                "incasso": _day_incasso(events, d),
-                "movimenti": _day_movimenti(events, d),
+                "incasso": incasso,
+                "movimenti": movimenti,
             }
         )
     total = sum((r["incasso"] for r in rows), Decimal("0.00"))
     return {
         "activity": _parse_model_id(model_id) or "all",
-        "source": "vne",
+        "source": _revenue_source(model_id, pos_daily, revenue_mode),
         "date_from": start_d.isoformat(),
         "date_to": today.isoformat(),
         "total_incasso": _dec(total),
@@ -458,15 +1137,28 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None) -> dict:
     }
 
 
-def get_weekly_series(*, weeks: int = 12, model_id: Optional[str] = None) -> dict:
+def get_weekly_series(*, weeks: int = 12, model_id: Optional[str] = None, location: Optional[str] = None) -> dict:
     weeks = max(4, min(26, int(weeks or 12)))
     today = date.today()
     start_monday = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
-    events, warnings = _load_events(date_from=start_monday, date_to=today, model_id=model_id)
-    return _weekly_from_events(events, weeks=weeks, model_id=model_id, warnings=warnings)
+    mid = _parse_model_id(model_id)
+    revenue_mode = _revenue_mode_for(model_id, location)
+    if mid in POS_ONLY_MODEL_IDS:
+        events, warnings = [], []
+    else:
+        events, warnings = _load_events(date_from=start_monday, date_to=today, model_id=model_id)
+    pos_daily = _load_pos_daily_totals(start_monday, today, model_id, revenue_mode=revenue_mode)
+    return _weekly_from_events(
+        events,
+        weeks=weeks,
+        model_id=model_id,
+        warnings=warnings,
+        pos_daily=pos_daily,
+        revenue_mode=revenue_mode,
+    )
 
 
-def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None) -> dict:
+def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, location: Optional[str] = None) -> dict:
     months = max(3, min(12, int(months or 6)))
     today = date.today()
     y, m = today.year, today.month
@@ -475,14 +1167,18 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None) -> di
         m += 12
         y -= 1
     start_d = date(y, m, 1)
-    # Mensile: più chiusure, meno pagine operazioni
-    events, warnings = _load_events(
-        date_from=start_d,
-        date_to=today,
-        model_id=model_id,
-        max_op_pages=6,
-        max_closing_pages=10,
-    )
+    mid = _parse_model_id(model_id)
+    revenue_mode = _revenue_mode_for(model_id, location)
+    if mid in POS_ONLY_MODEL_IDS:
+        events, warnings = [], []
+    else:
+        events, warnings = _load_events(
+            date_from=start_d,
+            date_to=today,
+            model_id=model_id,
+            max_op_pages=6,
+            max_closing_pages=10,
+        )
 
     buckets: Dict[str, Dict[str, Any]] = {}
     cy, cm = start_d.year, start_d.month
@@ -499,19 +1195,30 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None) -> di
             cm = 1
             cy += 1
 
-    # Incasso mensile da chiusure (o ops se mancano)
+    # Incasso mensile da chiusure VNE + scontrini (Abba / Gazza)
+    scoped = _filter_events_for_model(events, model_id)
+    pos_daily = _load_pos_daily_totals(start_d, today, model_id, revenue_mode=revenue_mode)
     d = start_d
     while d <= today:
         key = d.strftime("%Y-%m")
         if key in buckets:
-            buckets[key]["incasso"] = _dec(buckets[key]["incasso"] + _day_incasso(events, d))
-            buckets[key]["movimenti"] += _day_movimenti(events, d)
+            if revenue_mode == "pos":
+                inc = _pos_day_incasso(pos_daily, d)
+                mov = _pos_day_movimenti(pos_daily, d)
+            elif revenue_mode == "vne":
+                inc = _day_incasso(scoped, d)
+                mov = _day_movimenti(scoped, d)
+            else:
+                inc = _combined_day_incasso(scoped, d, pos_daily)
+                mov = _combined_day_movimenti(scoped, d, pos_daily)
+            buckets[key]["incasso"] = _dec(buckets[key]["incasso"] + inc)
+            buckets[key]["movimenti"] += mov
         d += timedelta(days=1)
 
     rows = list(buckets.values())
     return {
         "activity": _parse_model_id(model_id) or "all",
-        "source": "vne",
+        "source": _revenue_source(model_id, pos_daily, revenue_mode),
         "months": months,
         "total_incasso": _dec(sum((r["incasso"] for r in rows), Decimal("0.00"))),
         "rows": rows,
@@ -528,7 +1235,10 @@ def get_hourly_heatmap(*, months: int = 3, model_id: Optional[str] = None) -> di
     date_from = today - timedelta(days=min(93, months * 31) - 1)
     events, warnings = _load_events(date_from=date_from, date_to=today, model_id=model_id)
     heat = _heatmap_from_events(events, months=months, model_id=model_id, warnings=warnings)
-    heat = _apply_pos_visits(heat, date_from=date_from, date_to=today, model_id=model_id)
+    if _parse_model_id(model_id) in (None, POS_REVENUE_MODEL_ID):
+        heat = _apply_pos_visits(heat, date_from=date_from, date_to=today, model_id=model_id, merge=True)
+    else:
+        heat = _apply_pos_visits(heat, date_from=date_from, date_to=today, model_id=model_id)
 
     mid = _parse_model_id(model_id)
     machine_models = _models()
@@ -545,7 +1255,13 @@ def get_hourly_heatmap(*, months: int = 3, model_id: Optional[str] = None) -> di
             model_id=model.id,
             warnings=m_warn,
         )
-        m_heat = _apply_pos_visits(m_heat, date_from=date_from, date_to=today, model_id=model.id)
+        m_heat = _apply_pos_visits(
+            m_heat,
+            date_from=date_from,
+            date_to=today,
+            model_id=model.id,
+            merge=(model.id == POS_REVENUE_MODEL_ID),
+        )
         by_machine.append(
             {
                 "model_id": model.id,
@@ -633,22 +1349,59 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
 
     # Se chiede una sola macchina, resta filtrata; altrimenti carica tutte una volta.
     mid = _parse_model_id(model_id)
-    events, warnings = _load_events(
-        date_from=date_from,
-        date_to=today,
-        model_id=mid,
-        max_op_pages=4,
-        # Più pagine chiusure: l'incasso oggi della dashboard dipende da queste.
-        max_closing_pages=10,
-    )
+    if mid in POS_ONLY_MODEL_IDS:
+        events, warnings = [], []
+        revenue_mode = "pos"
+        abba_pos = {}
+        gazza_daily = _load_pos_daily_totals(date_from, today, mid, revenue_mode="pos")
+        pos_daily = dict(gazza_daily)
+    else:
+        events, warnings = _load_events(
+            date_from=date_from,
+            date_to=today,
+            model_id=mid,
+            max_op_pages=4,
+            max_closing_pages=10,
+        )
+        revenue_mode = "combined" if mid in (None, POS_REVENUE_MODEL_ID) else "vne"
+        abba_pos = _load_pos_daily_totals(date_from, today, mid, revenue_mode=revenue_mode)
+        gazza_daily = (
+            _load_pos_daily_totals(date_from, today, GAZZA_LADRA_MODEL_ID, revenue_mode="pos")
+            if mid is None
+            else {}
+        )
+        pos_daily = dict(abba_pos)
+        for day, hit in gazza_daily.items():
+            if day not in pos_daily:
+                pos_daily[day] = {
+                    "incasso": Decimal("0.00"),
+                    "movimenti": 0,
+                    "cash_eur": Decimal("0.00"),
+                    "card_eur": Decimal("0.00"),
+                }
+            pos_daily[day]["incasso"] = _dec(
+                Decimal(str(pos_daily[day].get("incasso") or 0)) + Decimal(str(hit.get("incasso") or 0))
+            )
+            pos_daily[day]["movimenti"] = int(pos_daily[day].get("movimenti") or 0) + int(
+                hit.get("movimenti") or 0
+            )
 
     snap = _snapshot_from_events(
         events,
         model_id=mid,
         lookback_months=lookback_months,
         warnings=warnings,
+        pos_daily=pos_daily,
+        revenue_mode=revenue_mode,
     )
-    weekly = _weekly_from_events(events, weeks=8, model_id=mid, warnings=warnings)
+    weekly = _weekly_from_events(
+        events,
+        weeks=8,
+        model_id=mid,
+        warnings=warnings,
+        pos_daily=pos_daily,
+        revenue_mode=revenue_mode,
+    )
     heat = _heatmap_from_events(events, months=lookback_months, model_id=mid, warnings=warnings)
 
     # Mensile dal medesimo dataset
@@ -671,13 +1424,15 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
     while d <= today:
         key = d.strftime("%Y-%m")
         if key in buckets:
-            buckets[key]["incasso"] = _dec(buckets[key]["incasso"] + _day_incasso(scoped_all, d))
-            buckets[key]["movimenti"] += _day_movimenti(scoped_all, d)
+            buckets[key]["incasso"] = _dec(
+                buckets[key]["incasso"] + _combined_day_incasso(scoped_all, d, pos_daily)
+            )
+            buckets[key]["movimenti"] += _combined_day_movimenti(scoped_all, d, pos_daily)
         d += timedelta(days=1)
     monthly_rows = list(buckets.values())
     monthly = {
         "activity": mid or "all",
-        "source": "vne",
+        "source": _revenue_source(mid, pos_daily, "combined"),
         "months": month_span,
         "total_incasso": _dec(sum((r["incasso"] for r in monthly_rows), Decimal("0.00"))),
         "rows": monthly_rows,
@@ -686,41 +1441,100 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
     }
 
     machine_models = _models()
-    if mid:
+    if mid in POS_ONLY_MODEL_IDS:
+        machine_models = []
+    elif mid:
         machine_models = [m for m in machine_models if m.id == mid]
 
     by_machine = []
     for model in machine_models:
         m_events = [e for e in events if e.model_id == model.id]
         m_warn = [w for w in warnings if model.label in w]
+        m_pos = abba_pos if model.id == POS_REVENUE_MODEL_ID else {}
         m_snap = _snapshot_from_events(
             m_events,
             model_id=model.id,
             lookback_months=lookback_months,
             warnings=m_warn,
+            pos_daily=m_pos,
+            revenue_mode="combined" if model.id == POS_REVENUE_MODEL_ID else "vne",
         )
         m_snap["machines"] = [model.label]
-        m_weekly = _weekly_from_events(m_events, weeks=8, model_id=model.id, warnings=m_warn)
+        m_weekly = _weekly_from_events(
+            m_events,
+            weeks=8,
+            model_id=model.id,
+            warnings=m_warn,
+            pos_daily=m_pos,
+            revenue_mode="combined" if model.id == POS_REVENUE_MODEL_ID else "vne",
+        )
         m_heat = _heatmap_from_events(
             m_events,
             months=lookback_months,
             model_id=model.id,
             warnings=m_warn,
         )
-        m_heat = _apply_pos_visits(m_heat, date_from=date_from, date_to=today, model_id=model.id)
-        by_machine.append(
-            {
-                "model_id": model.id,
-                "model_label": model.label,
-                "snapshot": m_snap,
-                "weekly": m_weekly,
-                "top_slots": m_heat["suggestions"][:5],
-                "hours": m_heat["hours"],
-                "weekdays": m_heat["weekdays"],
-                "cells": m_heat["cells"],
-                "visits_source": m_heat.get("visits_source") or "vne",
-            }
+        m_heat = _apply_pos_visits(
+            m_heat,
+            date_from=date_from,
+            date_to=today,
+            model_id=model.id,
+            merge=(model.id == POS_REVENUE_MODEL_ID),
         )
+        entry = {
+            "model_id": model.id,
+            "model_label": model.label,
+            "revenue_source": m_snap.get("revenue_source") or "vne",
+            "snapshot": m_snap,
+            "weekly": m_weekly,
+            "top_slots": m_heat["suggestions"][:5],
+            "hours": m_heat["hours"],
+            "weekdays": m_heat["weekdays"],
+            "cells": m_heat["cells"],
+            "visits_source": m_heat.get("visits_source") or "vne",
+        }
+        if model.id == POS_REVENUE_MODEL_ID:
+            entry["locations"] = [
+                _build_mani_location_view(
+                    events,
+                    m_pos,
+                    location_id=MANI_LOC_ZANARDELLI,
+                    location_label="Via Zanardelli",
+                    revenue_mode="vne",
+                    revenue_note="Incasso da chiusure cassa VNE",
+                    lookback_months=lookback_months,
+                    date_from=date_from,
+                    date_to=today,
+                    warnings=m_warn,
+                ),
+                _build_mani_location_view(
+                    events,
+                    m_pos,
+                    location_id=MANI_LOC_ABBA,
+                    location_label="Via Abba",
+                    revenue_mode="pos",
+                    revenue_note="Incasso da scontrini EasyRetail (senza VNE)",
+                    lookback_months=lookback_months,
+                    date_from=date_from,
+                    date_to=today,
+                    warnings=m_warn,
+                ),
+            ]
+        by_machine.append(entry)
+
+    # Locali senza VNE (Gazza Ladra / POS Poste): struttura pronta, dati da scontrini.
+    if mid is None or mid in POS_ONLY_MODEL_IDS:
+        for locale in analytics_pos_only_locales():
+            if mid and locale["model_id"] != mid:
+                continue
+            by_machine.append(
+                _build_pos_only_machine_entry(
+                    locale=locale,
+                    lookback_months=lookback_months,
+                    date_from=date_from,
+                    date_to=today,
+                )
+            )
 
     return {
         "snapshot": snap,
@@ -728,7 +1542,7 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
         "monthly": monthly,
         "top_slots": heat["suggestions"][:5],
         "by_machine": by_machine,
-        "source": "vne",
+        "source": _revenue_source(mid, pos_daily, "combined"),
         "data_note": DATA_NOTE,
         "warnings": list(dict.fromkeys(warnings)),
     }

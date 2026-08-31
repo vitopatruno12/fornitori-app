@@ -25,10 +25,12 @@ class AdeProfile:
   sede: str  # slug Atlas: via_abba | via_lattea | risacca | via_zanardelli | mediazione
   codice_fiscale: str = ""
   partita_iva: str = ""
-  # cns | storage | drop
+  # cns | fisconline | storage | drop
   auth_mode: str = "cns"
   drop_dir: str = ""
   storage_state_path: str = ""
+  fisconline_password: str = ""
+  fisconline_pin: str = ""
   enabled: bool = True
   # Se True: non forza assign; Atlas classifica da indirizzo XML (abba/zanardelli)
   auto_section: bool = False
@@ -95,8 +97,18 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
               partita_iva=str(item.get("partita_iva") or item.get("piva") or "").strip(),
               auth_mode=str(item.get("auth_mode") or "cns").strip().lower() or "cns",
               drop_dir=str(item.get("drop_dir") or "").strip(),
-              storage_state_path=str(item.get("storage_state_path") or "").strip(),
-              enabled=bool(item.get("enabled", True)),
+              fisconline_password=str(
+                item.get("fisconline_password")
+                or _env(f"ADE_PROFILE_{pid.upper()}_FISCONLINE_PASSWORD")
+                or _env("ADE_FISCONLINE_PASSWORD")
+                or ""
+              ).strip(),
+              fisconline_pin=str(
+                item.get("fisconline_pin")
+                or _env(f"ADE_PROFILE_{pid.upper()}_FISCONLINE_PIN")
+                or _env("ADE_FISCONLINE_PIN")
+                or ""
+              ).strip(),
               auto_section=bool(
                 item.get("auto_section")
                 or str(item.get("sede") or "").strip().lower() in ("auto", "mediazione")
@@ -123,6 +135,8 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
           auth_mode=_env(f"ADE_PROFILE_{i}_AUTH", "cns").lower() or "cns",
           drop_dir=_env(f"ADE_PROFILE_{i}_DROP_DIR"),
           storage_state_path=_env(f"ADE_PROFILE_{i}_STORAGE_STATE"),
+          fisconline_password=_env(f"ADE_PROFILE_{i}_FISCONLINE_PASSWORD") or _env("ADE_FISCONLINE_PASSWORD"),
+          fisconline_pin=_env(f"ADE_PROFILE_{i}_FISCONLINE_PIN") or _env("ADE_FISCONLINE_PIN"),
           enabled=_env(f"ADE_PROFILE_{i}_ENABLED", "1") not in ("0", "false", "no"),
           auto_section=_env(f"ADE_PROFILE_{i}_AUTO_SECTION", "0") in ("1", "true", "yes")
           or sede.lower() in ("auto", "mediazione"),

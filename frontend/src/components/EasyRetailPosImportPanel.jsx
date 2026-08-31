@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import {
+  fetchPosPaymentSummary,
   fetchPosReceiptStats,
   fetchPosReceiptSyncStatus,
   importPosReceiptsCsv,
@@ -10,13 +11,15 @@ import {
 const MODEL_OPTIONS = [
   { id: '', label: 'Auto (colonna Negozio/Cassa nel CSV)' },
   { id: 'model-1', label: 'La Risacca' },
-  { id: 'model-2', label: 'Mani in Pasta' },
-  { id: 'model-3', label: 'Le Mucche Volanti' },
+  { id: 'model-2', label: 'Mani in Pasta (Via Abba)' },
+  { id: 'model-3', label: 'Le Mucche Volanti (Via Lattea)' },
+  { id: 'model-4', label: 'Gazza Ladra (POS Poste)' },
 ]
 
 /** Import / sync scontrini EasyRetail → visite per Orari di punta. */
 export function EasyRetailPosImportPanel({ onImported } = {}) {
   const [stats, setStats] = useState(null)
+  const [paymentSummary, setPaymentSummary] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const [modelId, setModelId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,6 +34,12 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
       setStats(null)
     }
     try {
+      const pay = await fetchPosPaymentSummary({ modelId: modelId || undefined })
+      setPaymentSummary(pay)
+    } catch {
+      setPaymentSummary(null)
+    }
+    try {
       const st = await fetchPosReceiptSyncStatus()
       setSyncStatus(st)
     } catch {
@@ -40,7 +49,7 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
 
   useEffect(() => {
     void refreshStats()
-  }, [])
+  }, [modelId])
 
   async function onFileChange(e) {
     const file = e.target.files?.[0]
@@ -86,15 +95,18 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
   }
 
   const byStore = stats?.by_store && typeof stats.by_store === 'object' ? stats.by_store : {}
+  const byPayment = stats?.by_payment_type && typeof stats.by_payment_type === 'object' ? stats.by_payment_type : {}
+  const payTotals = paymentSummary?.totals && typeof paymentSummary.totals === 'object' ? paymentSummary.totals : null
   const mode = syncStatus?.mode || 'agent-push'
 
   return (
     <section className="card analisi-panel" style={{ marginBottom: '1rem' }}>
-      <h2 className="analisi-panel-title">Scontrini EasyRetail (visite)</h2>
+      <h2 className="analisi-panel-title">Scontrini EasyRetail (visite e pagamenti)</h2>
       <p className="analisi-machine-scope">
-        Per aggiornare gli Orari di punta quasi in tempo reale: sul <strong>PC cassa</strong> gira l’agent che legge il
-        database Firebird EasyRetail (<code>DBRETAIL.GDB</code>) ogni pochi minuti e invia gli scontrini ad ATLAS.
-        Resta disponibile anche l’import CSV manuale.
+        Sul <strong>PC cassa</strong> l’agent legge il database Firebird EasyRetail (<code>DBRETAIL.GDB</code>) ogni
+        pochi minuti e invia gli scontrini ad ATLAS, includendo la ripartizione <strong>contanti</strong> vs{' '}
+        <strong>carta/POS</strong> quando il GDB espone le forme di pagamento. Resta disponibile anche l’import CSV
+        manuale.
       </p>
       <p className="analisi-machine-scope" role="status">
         Modalità sync:{' '}
@@ -131,7 +143,29 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
       <p className="analisi-machine-scope" role="status">
         In archivio: <strong>{stats?.total ?? 0}</strong> scontrini
         {stats?.from && stats?.to ? ` · dal ${String(stats.from).slice(0, 10)} al ${String(stats.to).slice(0, 10)}` : ''}
+        {typeof stats?.with_payment_type === 'number'
+          ? ` · ${stats.with_payment_type} con tipo pagamento`
+          : ''}
       </p>
+      {payTotals ? (
+        <p className="analisi-machine-scope" role="status">
+          Incassi classificati: contanti <strong>{Number(payTotals.cash_eur || 0).toFixed(2)} €</strong>
+          {' · '}
+          carta/POS <strong>{Number(payTotals.card_eur || 0).toFixed(2)} €</strong>
+          {Number(payTotals.unknown_eur || 0) > 0
+            ? ` · non classificati ${Number(payTotals.unknown_eur).toFixed(2)} €`
+            : ''}
+        </p>
+      ) : null}
+      {Object.keys(byPayment).length > 0 ? (
+        <ul className="analisi-suggestions">
+          {Object.entries(byPayment).map(([ptype, n]) => (
+            <li key={ptype}>
+              {ptype}: {n} scontrini
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {Object.keys(byStore).length > 0 ? (
         <ul className="analisi-suggestions">
           {Object.entries(byStore).map(([label, n]) => (
@@ -158,6 +192,10 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
           </li>
           <li>
             Pianifica l’esecuzione ogni 2–5 minuti con Utilità di pianificazione Windows.
+          </li>
+          <li>
+            Per verificare come il GDB espone contanti/carta sul PC cassa:{' '}
+            <code>python easyretail_gdb_sync_agent.py --probe</code>
           </li>
         </ol>
       </details>

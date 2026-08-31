@@ -1111,6 +1111,15 @@ def _ensure_pos_receipts_table() -> None:
             ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_model_when ON pos_receipts (model_id, receipt_at)", "Index pos_receipts.model_when"),
         ):
             _safe_exec_sql(sql, label=label)
+        for col_sql, label in (
+            ("ALTER TABLE pos_receipts ADD COLUMN IF NOT EXISTS payment_type VARCHAR(16)", "pos_receipts.payment_type"),
+            ("ALTER TABLE pos_receipts ADD COLUMN IF NOT EXISTS cash_amount_eur NUMERIC(12, 2)", "pos_receipts.cash_amount_eur"),
+            ("ALTER TABLE pos_receipts ADD COLUMN IF NOT EXISTS card_amount_eur NUMERIC(12, 2)", "pos_receipts.card_amount_eur"),
+            ("ALTER TABLE pos_receipts ADD COLUMN IF NOT EXISTS payment_label VARCHAR(120)", "pos_receipts.payment_label"),
+            ("ALTER TABLE pos_receipts ADD COLUMN IF NOT EXISTS payment_raw VARCHAR(255)", "pos_receipts.payment_raw"),
+            ("CREATE INDEX IF NOT EXISTS ix_pos_receipts_payment_type ON pos_receipts (payment_type)", "Index pos_receipts.payment_type"),
+        ):
+            _safe_exec_sql(col_sql, label=label)
     except Exception as e:
         logger.warning("Impossibile verificare/creare pos_receipts: %s", e)
 

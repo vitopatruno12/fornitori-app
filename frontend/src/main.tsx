@@ -27,6 +27,7 @@ import MastriniContabiliPage from './pages/MastriniContabiliPage.jsx'
 import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
 import VnePage from './pages/VnePage.jsx'
+import GestioneLocaliPage, { GazzaLadraSalaPage } from './pages/GestioneLocaliPage.jsx'
 import {
   AnalisiDashboardPage,
   AnalisiGiornalieroPage,
@@ -839,10 +840,11 @@ function App() {
               items={[
                 { to: '/trasportatori', label: 'Trasportatori' },
                 { to: '/magazzino', label: 'Magazzino' },
+                { to: '/history', label: 'Storico consegne' },
               ]}
               onNavigate={() => setNavOpen(false)}
             />
-            <NavLink to="/history" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Storico consegne</NavLink>
+            <NavLink to="/gestione-locali" className={({ isActive }) => (isActive ? 'active' : '')} onClick={() => setNavOpen(false)}>Gestione locali</NavLink>
             <AppNavDropdown
               label="Amministrazione"
               to="/amministrazione"
@@ -932,6 +934,8 @@ function App() {
           <Route path="/trasportatori" element={<TrasportatoriPage />} />
           <Route path="/magazzino" element={<MagazzinoPage />} />
           <Route path="/history" element={<DeliveriesHistoryPage />} />
+          <Route path="/gestione-locali" element={<GestioneLocaliPage />} />
+          <Route path="/gestione-locali/gazza-ladra" element={<GazzaLadraSalaPage />} />
           <Route path="/amministrazione" element={<AmministrazioneDashboardPage />} />
           <Route path="/amministrazione/mastrini" element={<MastriniContabiliPage />} />
           <Route path="/amministrazione/impostazioni" element={<AmministrazioneImpostazioniPage />} />

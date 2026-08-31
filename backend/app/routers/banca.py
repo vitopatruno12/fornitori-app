@@ -104,6 +104,7 @@ def banca_enable_banking_auth(
       account_id,
       aspsp_name=payload.aspsp_name,
       aspsp_country=payload.aspsp_country,
+      psu_type=payload.psu_type or "personal",
     )
   except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e)) from e

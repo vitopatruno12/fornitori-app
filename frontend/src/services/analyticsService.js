@@ -5,43 +5,53 @@ import { formatApiError, parseApiJson } from '../offline/offlineApiHelpers'
 function qs(params = {}) {
   const sp = new URLSearchParams()
   Object.entries(params).forEach(([k, v]) => {
-    if (v == null || v === '' || v === 'all') return
+    if (v == null || v === '' || v === 'all' || v === 'combined') return
     sp.set(k, String(v))
   })
   const s = sp.toString()
   return s ? `?${s}` : ''
 }
 
-export async function fetchAnalyticsSnapshot({ modelId, months = 3 } = {}) {
-  return apiFetch(`/analytics/snapshot${qs({ model_id: modelId, months })}`)
+export async function fetchAnalyticsSnapshot({ modelId, months = 3, location } = {}) {
+  return apiFetch(`/analytics/snapshot${qs({ model_id: modelId, months, location })}`)
 }
 
 export async function fetchAnalyticsOverview({ modelId, months = 3 } = {}) {
   return apiFetch(`/analytics/overview${qs({ model_id: modelId, months })}`)
 }
 
-export async function fetchAnalyticsDaily({ modelId, days = 30 } = {}) {
-  return apiFetch(`/analytics/daily${qs({ model_id: modelId, days })}`)
+export async function fetchAnalyticsDaily({ modelId, days = 30, location } = {}) {
+  return apiFetch(`/analytics/daily${qs({ model_id: modelId, days, location })}`)
 }
 
-export async function fetchAnalyticsWeekly({ modelId, weeks = 12 } = {}) {
-  return apiFetch(`/analytics/weekly${qs({ model_id: modelId, weeks })}`)
+export async function fetchAnalyticsWeekly({ modelId, weeks = 12, location } = {}) {
+  return apiFetch(`/analytics/weekly${qs({ model_id: modelId, weeks, location })}`)
 }
 
-export async function fetchAnalyticsMonthly({ modelId, months = 6 } = {}) {
-  return apiFetch(`/analytics/monthly${qs({ model_id: modelId, months })}`)
+export async function fetchAnalyticsMonthly({ modelId, months = 6, location } = {}) {
+  return apiFetch(`/analytics/monthly${qs({ model_id: modelId, months, location })}`)
 }
 
-export async function fetchAnalyticsHourly({ modelId, months = 3 } = {}) {
-  return apiFetch(`/analytics/hourly${qs({ model_id: modelId, months })}`)
+export async function fetchAnalyticsHourly({ modelId, months = 3, location } = {}) {
+  return apiFetch(`/analytics/hourly${qs({ model_id: modelId, months, location })}`)
 }
 
-export async function fetchAnalyticsStaffing({ modelId, months = 3 } = {}) {
-  return apiFetch(`/analytics/staffing${qs({ model_id: modelId, months })}`)
+export async function fetchAnalyticsStaffing({ modelId, months = 3, location } = {}) {
+  return apiFetch(`/analytics/staffing${qs({ model_id: modelId, months, location })}`)
 }
 
 export async function fetchPosReceiptStats() {
   return apiFetch('/pos-receipts/stats')
+}
+
+export async function fetchPosPaymentSummary({ dateFrom, dateTo, modelId } = {}) {
+  return apiFetch(
+    `/pos-receipts/payment-summary${qs({
+      date_from: dateFrom,
+      date_to: dateTo,
+      model_id: modelId,
+    })}`,
+  )
 }
 
 export async function fetchPosReceiptSyncStatus() {

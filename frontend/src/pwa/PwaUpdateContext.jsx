@@ -9,6 +9,7 @@ import {
 } from '../utils/pwaUpdateScope.ts'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
+const VERIFIED_COOLDOWN_MS = 10 * 60 * 1000
 const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v3'
 const APPLY_FAILSAFE_MS = 4000
 
@@ -55,12 +56,16 @@ async function shouldPromptUpdateForScope(scope) {
     const remote = await fetchRemoteSectionVersions()
     return updateAvailableForScope(scope, remote)
   } catch {
-    return true
+    // Errore di rete / file mancante: non mostrare badge falso
+    return false
   }
 }
 
-async function probeRemoteVersions(setUpdateReady, pendingScopeRef, skipProbeRef) {
+async function probeRemoteVersions(setUpdateReady, pendingScopeRef, skipProbeRef, verifiedAtRef) {
   if (skipProbeRef?.current) return false
+  if (verifiedAtRef?.current && Date.now() - verifiedAtRef.current < VERIFIED_COOLDOWN_MS) {
+    return false
+  }
   const scope = detectPwaUpdateScope()
   const relevant = await shouldPromptUpdateForScope(scope)
   if (relevant) {
@@ -68,10 +73,12 @@ async function probeRemoteVersions(setUpdateReady, pendingScopeRef, skipProbeRef
     setUpdateReady(true)
     return true
   }
+  verifiedAtRef.current = Date.now()
+  setUpdateReady(false)
   return false
 }
 
-async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipProbeRef) {
+async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipProbeRef, verifiedAtRef) {
   if (skipProbeRef?.current) return false
   if (!reg?.waiting) return false
   const scope = detectPwaUpdateScope()
@@ -81,6 +88,8 @@ async function probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipProb
     setUpdateReady(true)
     return true
   }
+  verifiedAtRef.current = Date.now()
+  setUpdateReady(false)
   return false
 }
 
@@ -92,6 +101,7 @@ export function PwaUpdateProvider({ children }) {
   const registrationRef = useRef(null)
   const pendingScopeRef = useRef(null)
   const skipVersionProbeRef = useRef(false)
+  const verifiedAtRef = useRef(0)
   const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator
 
   const markVersionsInstalled = useCallback(async () => {
@@ -120,6 +130,7 @@ export function PwaUpdateProvider({ children }) {
     if (skipVersionProbeRef.current) {
       void markVersionsInstalled().finally(() => {
         skipVersionProbeRef.current = false
+        verifiedAtRef.current = Date.now()
         setUpdateReady(false)
         setApplying(false)
       })
@@ -128,6 +139,7 @@ export function PwaUpdateProvider({ children }) {
         const running = getRunningBuildId()
         if (running && remote.build && running === remote.build) {
           storeInstalledVersions(remote)
+          verifiedAtRef.current = Date.now()
           setUpdateReady(false)
         }
       })
@@ -141,6 +153,9 @@ export function PwaUpdateProvider({ children }) {
         if (relevant) {
           pendingScopeRef.current = scope
           setUpdateReady(true)
+        } else {
+          verifiedAtRef.current = Date.now()
+          setUpdateReady(false)
         }
       },
       onOfflineReady() {
@@ -155,9 +170,10 @@ export function PwaUpdateProvider({ children }) {
             setUpdateReady,
             pendingScopeRef,
             skipVersionProbeRef,
+            verifiedAtRef,
           )
           if (!waiting) {
-            await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+            await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef, verifiedAtRef)
           }
         })()
       },
@@ -173,27 +189,38 @@ export function PwaUpdateProvider({ children }) {
   useEffect(() => {
     if (!swSupported) return undefined
 
-    const tick = async () => {
+    const tick = async ({ forceServiceWorkerCheck = false } = {}) => {
       if (skipVersionProbeRef.current) return
       const reg = registrationRef.current
       if (!reg) {
-        await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+        await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef, verifiedAtRef)
         return
       }
-      await reg.update()
-      const waiting = await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+      if (forceServiceWorkerCheck) {
+        await reg.update()
+      }
+      const waiting = await probeWaitingWorker(
+        reg,
+        setUpdateReady,
+        pendingScopeRef,
+        skipVersionProbeRef,
+        verifiedAtRef,
+      )
       if (!waiting) {
-        await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+        await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef, verifiedAtRef)
       }
     }
 
-    void tick()
-    const intervalId = window.setInterval(() => void tick(), CHECK_INTERVAL_MS)
+    void tick({ forceServiceWorkerCheck: true })
+    const intervalId = window.setInterval(
+      () => void tick({ forceServiceWorkerCheck: true }),
+      CHECK_INTERVAL_MS,
+    )
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void tick()
+      if (document.visibilityState === 'visible') void tick({ forceServiceWorkerCheck: false })
     }
-    const onFocus = () => void tick()
+    const onFocus = () => void tick({ forceServiceWorkerCheck: false })
 
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
@@ -210,6 +237,7 @@ export function PwaUpdateProvider({ children }) {
       window.location.reload()
       return
     }
+    verifiedAtRef.current = 0
     setChecking(true)
     try {
       let found = false
@@ -217,16 +245,33 @@ export function PwaUpdateProvider({ children }) {
       if (reg) {
         registrationRef.current = reg
         await reg.update()
-        const waiting = await probeWaitingWorker(reg, setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+        const waiting = await probeWaitingWorker(
+          reg,
+          setUpdateReady,
+          pendingScopeRef,
+          skipVersionProbeRef,
+          verifiedAtRef,
+        )
         if (waiting) {
           found = true
         } else {
-          found = await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+          found = await probeRemoteVersions(
+            setUpdateReady,
+            pendingScopeRef,
+            skipVersionProbeRef,
+            verifiedAtRef,
+          )
         }
       } else {
-        found = await probeRemoteVersions(setUpdateReady, pendingScopeRef, skipVersionProbeRef)
+        found = await probeRemoteVersions(
+          setUpdateReady,
+          pendingScopeRef,
+          skipVersionProbeRef,
+          verifiedAtRef,
+        )
       }
       if (!found) {
+        verifiedAtRef.current = Date.now()
         setUpdateReady(false)
       }
     } finally {
@@ -273,6 +318,8 @@ export function PwaUpdateProvider({ children }) {
       }
 
       await clearWorkboxCaches()
+      await markVersionsInstalled()
+      verifiedAtRef.current = Date.now()
       window.clearTimeout(failsafeId)
       hardReloadPage()
     } catch {
@@ -280,7 +327,7 @@ export function PwaUpdateProvider({ children }) {
       setApplying(false)
       hardReloadPage()
     }
-  }, [swSupported])
+  }, [swSupported, markVersionsInstalled])
 
   const value = useMemo(
     () => ({

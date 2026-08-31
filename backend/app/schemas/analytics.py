@@ -25,12 +25,16 @@ class AnalyticsSnapshot(BaseModel):
     date: str
     activity: str = "all"
     source: str = "vne"
+    revenue_source: str = "vne"
     lookback_months: int = 3
     incasso_oggi: Decimal = Decimal("0")
+    incasso_vne: Decimal = Decimal("0")
+    incasso_pos: Decimal = Decimal("0")
     movimenti_oggi: int = 0
     totale_fiscale: Decimal = Decimal("0")
     totale_pos: Decimal = Decimal("0")
     totale_non_fiscale: Decimal = Decimal("0")
+    payment_split: Dict[str, Any] = Field(default_factory=dict)
     machines: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     data_note: str = ""
@@ -118,15 +122,35 @@ class AnalyticsStaffingResponse(BaseModel):
     data_note: str = ""
 
 
-class AnalyticsMachineOverview(BaseModel):
-    model_id: str
-    model_label: str
+class AnalyticsLocationOverview(BaseModel):
+    location_id: str
+    location_label: str
+    revenue_source: str = "vne"
+    revenue_note: str = ""
     snapshot: AnalyticsSnapshot
     weekly: Dict[str, Any] = Field(default_factory=dict)
     top_slots: List[AnalyticsSuggestion] = Field(default_factory=list)
     hours: List[int] = Field(default_factory=list)
     weekdays: List[str] = Field(default_factory=list)
     cells: List[AnalyticsHeatCell] = Field(default_factory=list)
+    visits_source: str = "vne"
+
+
+class AnalyticsMachineOverview(BaseModel):
+    model_id: str
+    model_label: str
+    revenue_source: str = "vne"
+    pos_provider: Optional[str] = None
+    revenue_note: str = ""
+    snapshot: AnalyticsSnapshot
+    weekly: Dict[str, Any] = Field(default_factory=dict)
+    top_slots: List[AnalyticsSuggestion] = Field(default_factory=list)
+    hours: List[int] = Field(default_factory=list)
+    weekdays: List[str] = Field(default_factory=list)
+    cells: List[AnalyticsHeatCell] = Field(default_factory=list)
+    visits_source: str = "vne"
+    payment_split: Dict[str, Any] = Field(default_factory=dict)
+    locations: List[AnalyticsLocationOverview] = Field(default_factory=list)
 
 
 class AnalyticsOverviewResponse(BaseModel):

@@ -1686,6 +1686,38 @@ select.form-control {
   max-height: min(72vh, 780px);
 }
 
+/* Gazza Ladra sala: tabella a larghezza piena, senza scroll orizzontale */
+.gazza-sala-grid-wrap {
+  overflow-x: hidden;
+  max-height: none;
+}
+
+.workbook-grid.gazza-sala-grid {
+  min-width: 0;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.gazza-sala-grid th {
+  white-space: normal;
+  line-height: 1.2;
+  padding: 0.4rem 0.35rem;
+  font-size: 0.72rem;
+}
+
+.gazza-sala-grid .excel-cell,
+.gazza-sala-grid .excel-cell-select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.gazza-sala-grid .workbook-col-sticky-left {
+  position: static;
+}
+
 .workbook-card-nested {
   margin-top: 1rem;
   border: 1px solid var(--border);
@@ -7592,6 +7624,23 @@ select.form-control {
 
 .analisi-machine-card {
   border-top: 3px solid var(--accent, #2563eb);
+}
+
+.analisi-machine-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.analisi-machine-card-head .analisi-panel-title {
+  margin-bottom: 0;
+}
+
+.analisi-mani-location-filter {
+  min-width: min(100%, 240px);
 }
 
 .analisi-machine-kpis {
