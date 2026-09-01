@@ -93,6 +93,12 @@ import {
 } from '../utils/staffPayrollWorkbook.js'
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
+const HIDDEN_PLANNING_SECTIONS = ['Pulizie', 'Mediazione']
+
+function isHiddenPlanningSection(section) {
+  const key = sectionCompareKey(section)
+  return HIDDEN_PLANNING_SECTIONS.some((name) => sectionCompareKey(name) === key)
+}
 const STAFF_LOCALE_SESSION_KEY = 'staffLocaleSessionOpen'
 
 function readStaffLocaleSessionOpenKeys() {
@@ -1763,7 +1769,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [localeSections])
 
   const planningGridSectionOptions = useMemo(
-    () => planningSectionOptions.filter((section) => sectionCompareKey(section) !== sectionCompareKey('Pulizie')),
+    () => planningSectionOptions.filter((section) => !isHiddenPlanningSection(section)),
     [planningSectionOptions],
   )
 
@@ -1774,9 +1780,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
   const planningWeekBlocks = useMemo(() => {
     const sections = planningSection ? [planningSection] : planningGridSectionOptions
-    if (!sections.length) {
-      return [{ section: 'Generale', sectionLabel: 'Tutti i dipendenti', shiftsByDate: groupShiftsByDate(shifts) }]
-    }
+    if (!sections.length) return []
     return sections.map((section) => ({
       section,
       sectionLabel: section,
@@ -1787,10 +1791,17 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [planningSection, planningGridSectionOptions, shifts, members, localeSections])
 
   useEffect(() => {
-    if (planningSection && sectionCompareKey(planningSection) === sectionCompareKey('Pulizie')) {
+    if (planningSection && isHiddenPlanningSection(planningSection)) {
       setPlanningSection('')
     }
   }, [planningSection])
+
+  useEffect(() => {
+    if (editingShiftId) return
+    if (formGenere && isHiddenPlanningSection(formGenere)) {
+      setFormGenere('')
+    }
+  }, [formGenere, editingShiftId])
 
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
@@ -5849,7 +5860,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           <div className="staff-shift-form-hint" role="note">
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
             <p className="staff-shift-form-hint-list" style={{ margin: 0 }}>
-              Scegli il <strong>Genere</strong> (Banco, Cucina, Forno, Pulizie… dalla sezione del dipendente), i{' '}
+              Scegli il <strong>Genere</strong> (Banco, Cucina, Forno… dalla sezione del dipendente), i{' '}
               <strong>Dipendenti</strong> e i <strong>Giorni settimana</strong>, imposta il <strong>Tipo</strong>
               {isAllDayKind(formKind)
                 ? ' (ferie, assenza, malattia e riposo non richiedono orari)'
@@ -5894,7 +5905,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               }}
             >
               <option value="">Tutte le sezioni</option>
-              {planningSectionOptions.map((section) => (
+              {planningGridSectionOptions.map((section) => (
                 <option key={section} value={section}>
                   {section}
                 </option>
