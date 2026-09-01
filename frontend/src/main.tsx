@@ -292,6 +292,8 @@ function App() {
     'staff-locale-codes': 'link codici',
     'support-tech': 'assistenza-tecnici',
     trasportatori: 'trasportatori',
+    'gestione-locali': 'gestione-locali',
+    'gestione-locali-gazza': 'gestione-locali-gazza',
   }
 
   async function runAi(promptOverride?: string) {
@@ -542,6 +544,14 @@ function App() {
       trasportatori: [
         'Quali trasportatori sono in servizio oggi?',
         'Come segno un furgone in riposo?',
+      ],
+      'gestione-locali': [
+        'Quali locali sono disponibili in gestione?',
+        'Apri il locale Gazza Ladra',
+      ],
+      'gestione-locali-gazza': [
+        'Come gestisco la sala Gazza Ladra?',
+        'Quali dati posso consultare per questo locale?',
       ],
     }
     return map[page] || []
