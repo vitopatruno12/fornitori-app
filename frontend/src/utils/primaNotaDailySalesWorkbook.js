@@ -14,7 +14,7 @@ function amountCell(value) {
 }
 
 /**
- * @param {{ fiscale: number, nonFiscale: number, pos: number, refill: number, totale: number }} totals
+ * @param {{ fiscale: number, nonFiscale: number, pos: number, refill: number, stackerSvuotamento: number, totale: number }} totals
  */
 export function buildPrimaNotaDailySalesRows(totals) {
   return [
@@ -27,9 +27,10 @@ export function buildPrimaNotaDailySalesRows(totals) {
     },
     { id: 'pos', label: 'Totale POS', amount: amountCell(totals.pos) },
     { id: 'refill', label: 'Totale Refill', amount: amountCell(totals.refill) },
+    { id: 'stacker_svuotamento', label: 'Totale svuotamento stacker', amount: amountCell(totals.stackerSvuotamento) },
     {
       id: 'totale',
-      label: 'Totale vendita (Fiscale + NC + POS + Refill)',
+      label: 'Totale vendita (Fiscale + NC + POS + Refill + Stacker)',
       amount: amountCell(totals.totale),
       rowClass: 'pagamenti-row-totals',
     },

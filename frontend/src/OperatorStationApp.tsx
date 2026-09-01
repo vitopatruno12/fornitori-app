@@ -14,6 +14,7 @@ import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
 import StipendiPage from './pages/StipendiPage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import InvoicesPage from './pages/InvoicesPage.jsx'
+import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
@@ -54,6 +55,10 @@ const PERSONALE_MENU: StationSection[] = [
   { id: 'staff', label: 'Dipendenti e turni', title: 'Personale' },
   { id: 'staff-report', label: 'Report personale', title: 'Report personale' },
   { id: 'stipendi', label: 'Stipendi', title: 'Stipendi' },
+]
+
+const ADMIN_MENU: StationSection[] = [
+  { id: 'fatture', label: 'Fatture fornitori', title: 'Fatture fornitori' },
   { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
 ]
 
@@ -63,11 +68,13 @@ const ALL_SECTIONS: StationSection[] = [
   { id: 'delivery-history', label: 'Storico consegne', title: 'Storico consegne' },
   ...DELIVERY_SUBMENU,
   ...PERSONALE_MENU,
-  { id: 'fatture', label: 'Fatture fornitori', title: 'Fatture fornitori' },
+  ...ADMIN_MENU,
+  { id: 'support-tech', label: 'Assistenza tecnici', title: 'Assistenza tecnici' },
 ]
 
 const DELIVERY_VIEWS: OperatorStationView[] = ['delivery', 'magazzino', 'trasportatori']
-const PERSONALE_VIEWS: OperatorStationView[] = ['staff', 'staff-report', 'stipendi', 'prima-nota']
+const PERSONALE_VIEWS: OperatorStationView[] = ['staff', 'staff-report', 'stipendi']
+const ADMIN_VIEWS: OperatorStationView[] = ['fatture', 'prima-nota']
 
 const STATION_LABELS: Record<OperatorStationId, string> = {
   abba: 'Abba 42',
@@ -94,6 +101,10 @@ const SECTION_ALIASES: Record<string, OperatorStationView> = {
   fatture: 'fatture',
   fatturazione: 'fatture',
   invoices: 'fatture',
+  'support-tech': 'support-tech',
+  'assistenza-tecnici': 'support-tech',
+  tecnici: 'support-tech',
+  assistenza: 'support-tech',
 }
 
 function resolveStationTitle(view: OperatorStationView): string {
@@ -123,10 +134,12 @@ function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
 
 function StationMainContent({
   view,
+  stationId,
   onOperatorNavigate,
   setStationView,
 }: {
   view: OperatorStationView
+  stationId: OperatorStationId
   onOperatorNavigate: (section: string) => void
   setStationView: (next: OperatorStationView) => void
 }) {
@@ -134,16 +147,16 @@ function StationMainContent({
     return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
   }
   if (view === 'staff') {
-    return <StaffPage operatorMode />
+    return <StaffPage operatorMode stationId={stationId} />
   }
   if (view === 'prima-nota') {
-    return <PrimaNotaPage operatorMode />
+    return <PrimaNotaPage operatorMode stationId={stationId} />
   }
   if (view === 'staff-report') {
-    return <ReportPersonalePage />
+    return <ReportPersonalePage operatorMode stationId={stationId} />
   }
   if (view === 'stipendi') {
-    return <StipendiPage />
+    return <StipendiPage operatorMode stationId={stationId} />
   }
   if (view === 'suppliers') {
     return <SuppliersPage />
@@ -159,6 +172,9 @@ function StationMainContent({
   }
   if (view === 'trasportatori') {
     return <TrasportatoriPage operatorMode />
+  }
+  if (view === 'support-tech') {
+    return <SupportTechniciansPage />
   }
   return <NewOrderPage operatorMode />
 }
@@ -219,7 +235,9 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
   const activeTitle = resolveStationTitle(effectiveView)
   const deliveryActive = DELIVERY_VIEWS.includes(effectiveView)
   const personaleActive = PERSONALE_VIEWS.includes(effectiveView)
+  const adminActive = ADMIN_VIEWS.includes(effectiveView)
   const personaleMain = PERSONALE_MENU.find((s) => s.id === effectiveView) || PERSONALE_MENU[0]
+  const adminMain = ADMIN_MENU.find((s) => s.id === effectiveView) || ADMIN_MENU[0]
 
   const nav = [
     ...TOP_SECTIONS.map((section) => ({
@@ -259,10 +277,22 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
       })),
     },
     {
-      id: 'fatture',
-      label: 'Fatture fornitori',
-      active: effectiveView === 'fatture',
-      onClick: () => setStationView('fatture'),
+      id: 'admin-menu',
+      label: 'Amministrazione',
+      active: adminActive,
+      onClick: () => setStationView(adminMain.id),
+      items: ADMIN_MENU.map((item) => ({
+        id: item.id,
+        label: item.label,
+        active: effectiveView === item.id,
+        onClick: () => setStationView(item.id),
+      })),
+    },
+    {
+      id: 'support-tech',
+      label: 'Assistenza tecnici',
+      active: effectiveView === 'support-tech',
+      onClick: () => setStationView('support-tech'),
     },
   ]
 
@@ -271,7 +301,7 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
       authMode={authMode}
       stationId={stationId}
       documentTitle={`ATLAS — ${activeTitle} (${sedeLabel})`}
-      loginHint={`Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, fatture`}
+      loginHint={`Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, amministrazione, assistenza tecnici`}
       headerTitle={`Postazione operativa · ${sedeLabel}`}
       headerSubtitle=""
       stationOnly
@@ -284,6 +314,7 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
           element={
             <StationMainContent
               view={onFatturePath ? 'overview' : view}
+              stationId={stationId}
               onOperatorNavigate={onOperatorNavigate}
               setStationView={setStationView}
             />

@@ -1,6 +1,7 @@
 const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
 const CONTO_REFILL = 'REFILL'
+const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
 
 export const PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE = 'Movimenti cassa'
 
@@ -14,6 +15,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'non_fiscale', label: 'NC', numeric: true, width: 110 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
+  { id: 'stacker_svuotamento', label: 'Stacker', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
   { id: 'cassa_mattina', label: 'Saldo attuale cassa', numeric: true, width: 130 },
   { id: 'cassa_sera', label: 'Cassa finale', numeric: true, width: 110 },
@@ -59,8 +61,12 @@ function isRefillEntry(entry) {
   return entry?.conto === CONTO_REFILL
 }
 
+function isStackerSvuotamentoEntry(entry) {
+  return entry?.conto === CONTO_STACKER_SVUOTAMENTO
+}
+
 export function isExtraCassaMovement(entry) {
-  return isPosEntry(entry) || isRefillEntry(entry)
+  return isPosEntry(entry) || isRefillEntry(entry) || isStackerSvuotamentoEntry(entry)
 }
 
 function movementDescription(entry) {
@@ -71,6 +77,7 @@ function movementDescription(entry) {
   if (isNonFiscaleEntry(entry)) text = text ? `${text} [NC]` : '[NC]'
   else if (isPosEntry(entry)) text = text ? `${text} [POS]` : '[POS]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
+  else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
   return text
 }
 
@@ -110,6 +117,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatAmountClean(entry.pos)
     case 'refill':
       return formatAmountClean(entry.refill)
+    case 'stacker_svuotamento':
+      return formatAmountClean(entry.stackerSvuotamento)
     case 'incasso':
       return formatAmount(entry.incasso)
     case 'cassa_mattina':
@@ -131,6 +140,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'non_fiscale') return formatAmount(totals.nonFiscale)
   if (columnId === 'pos') return formatAmount(totals.pos)
   if (columnId === 'refill') return formatAmount(totals.refill)
+  if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
   if (columnId === 'incasso') return formatAmount(totals.incasso)
   return ''
 }

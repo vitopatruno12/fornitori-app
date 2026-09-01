@@ -165,6 +165,7 @@ async function fetchRangeSummaryFallback(dateFrom, dateTo, activity, accessCode,
         acc.totale_non_fiscale += num(part?.totale_non_fiscale)
         acc.totale_pos += num(part?.totale_pos)
         acc.totale_refill += num(part?.totale_refill)
+        acc.totale_stacker_svuotamento += num(part?.totale_stacker_svuotamento)
         acc.totale_vendita += num(part?.totale_vendita)
         return acc
       },
@@ -176,6 +177,7 @@ async function fetchRangeSummaryFallback(dateFrom, dateTo, activity, accessCode,
         totale_non_fiscale: 0,
         totale_pos: 0,
         totale_refill: 0,
+        totale_stacker_svuotamento: 0,
         totale_vendita: 0,
       },
     )

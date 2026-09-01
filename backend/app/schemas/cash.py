@@ -54,6 +54,7 @@ class DailySummary(BaseModel):
     totale_non_fiscale: Decimal = Decimal("0")
     totale_pos: Decimal = Decimal("0")
     totale_refill: Decimal = Decimal("0")
+    totale_stacker_svuotamento: Decimal = Decimal("0")
     totale_vendita: Decimal = Decimal("0")
 
 
@@ -68,6 +69,7 @@ class PeriodSummary(BaseModel):
     totale_non_fiscale: Decimal = Decimal("0")
     totale_pos: Decimal = Decimal("0")
     totale_refill: Decimal = Decimal("0")
+    totale_stacker_svuotamento: Decimal = Decimal("0")
     totale_vendita: Decimal = Decimal("0")
 
 

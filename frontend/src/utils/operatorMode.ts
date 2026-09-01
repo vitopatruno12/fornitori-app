@@ -57,6 +57,7 @@ export type OperatorStationView =
   | 'prima-nota'
   | 'trasportatori'
   | 'fatture'
+  | 'support-tech'
 
 /** Origine pubblica per link satelliti (sempre https in produzione se VITE_PUBLIC_APP_URL è impostato). */
 export function getPublicAppOrigin(): string {
@@ -254,6 +255,7 @@ const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview' | 
   stipendi: 'stipendi',
   'prima-nota': 'prima-nota',
   trasportatori: 'trasportatori',
+  'support-tech': 'assistenza-tecnici',
 }
 
 const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
@@ -284,6 +286,10 @@ const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
   fatture: 'fatture',
   fatturazione: 'fatture',
   'fatture-fornitori': 'fatture',
+  'assistenza-tecnici': 'support-tech',
+  'support-tech': 'support-tech',
+  tecnici: 'support-tech',
+  assistenza: 'support-tech',
   panoramica: 'overview',
   overview: 'overview',
   dashboard: 'overview',

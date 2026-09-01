@@ -3,7 +3,7 @@ import { getOperatorDeliveryPublicUrl, getOperatorStationPublicUrl } from './ope
 export const OPERATOR_LINKS_WORKBOOK_TITLE = 'Link operatori'
 
 const STATION_DESCRIPTION =
-  'Postazione operativa PWA: Panoramica, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne, Personale (turni, report, stipendi, Prima Nota) e Fatture fornitori.'
+  'Postazione operativa PWA: Panoramica, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne, Personale (turni, report, stipendi), Amministrazione ▾ (Fatture fornitori, Prima Nota) e Assistenza tecnici.'
 
 const CARRIER_DESCRIPTION =
   'Postazione trasportatore PWA: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatturazione, Prima Nota).'

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   createStaffStipendiMonth,
@@ -9,6 +10,9 @@ import {
   updateStaffStipendiMonth,
 } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
+import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
+import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
 const MONTH_LABELS = [
   'Gennaio',
@@ -129,7 +133,14 @@ function moneyDisplay(n) {
   return v ? String(v).replace('.', ',') : ''
 }
 
-export default function StipendiPage() {
+export default function StipendiPage({ operatorMode = false, stationId = null }) {
+  const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
+    if (!operatorMode) return true
+    const sid = stationId || getLockedOperatorStationId()
+    const localeName = getOperatorStationStaffLocaleName(sid, [])
+    return isOperatorStationStaffSessionOpen(sid, localeName)
+  })
   const [yearMonth, setYearMonth] = useState(currentYearMonth)
   const [archives, setArchives] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -204,6 +215,10 @@ export default function StipendiPage() {
   )
 
   useEffect(() => {
+    if (operatorMode && !operatorSessionOpen) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
     ;(async () => {
       setLoading(true)
@@ -228,7 +243,7 @@ export default function StipendiPage() {
     return () => {
       cancelled = true
     }
-  }, [bootstrapFromMembers, loadArchives, openArchive])
+  }, [bootstrapFromMembers, loadArchives, openArchive, operatorMode, operatorSessionOpen])
 
   function updateDraft(field, value) {
     setDraft((prev) => {
@@ -419,7 +434,7 @@ export default function StipendiPage() {
     }
   }
 
-  return (
+  const stipendiBody = (
     <div className="pagamenti-page staff-report-page stipendi-page">
       <header className="staff-page-hero">
         <div>
@@ -661,4 +676,18 @@ export default function StipendiPage() {
       )}
     </div>
   )
+
+  if (operatorMode) {
+    return (
+      <OperatorStationStaffGate
+        stationId={operatorStationId}
+        title="Stipendi"
+        onSessionChange={setOperatorSessionOpen}
+      >
+        {stipendiBody}
+      </OperatorStationStaffGate>
+    )
+  }
+
+  return stipendiBody
 }

@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import { fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
+import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
+import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   buildStaffReportWorkbook,
   staffReportCellValue,
@@ -30,7 +34,14 @@ function defaultPeriod() {
   return { from: toYmd(startOfMonth(now)), to: toYmd(endOfMonth(now)) }
 }
 
-export default function ReportPersonalePage() {
+export default function ReportPersonalePage({ operatorMode = false, stationId = null }) {
+  const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
+    if (!operatorMode) return true
+    const sid = stationId || getLockedOperatorStationId()
+    const localeName = getOperatorStationStaffLocaleName(sid, [])
+    return isOperatorStationStaffSessionOpen(sid, localeName)
+  })
   const initial = defaultPeriod()
   const [dateFrom, setDateFrom] = useState(initial.from)
   const [dateTo, setDateTo] = useState(initial.to)
@@ -84,8 +95,9 @@ export default function ReportPersonalePage() {
   }, [dateFrom, dateTo])
 
   useEffect(() => {
+    if (operatorMode && !operatorSessionOpen) return
     void refreshReport()
-  }, [refreshReport])
+  }, [refreshReport, operatorMode, operatorSessionOpen])
 
   const currentSheet = useMemo(
     () => workbook.sheets.find((sheet) => sheet.name === activeSheet) || workbook.sheets[0],
@@ -116,7 +128,7 @@ export default function ReportPersonalePage() {
     window.print()
   }
 
-  return (
+  const reportBody = (
     <div className="pagamenti-page staff-report-page">
       <section className="staff-page-hero staff-report-no-print">
         <h1 className="page-header staff-page-title">Report personale</h1>
@@ -235,4 +247,18 @@ export default function ReportPersonalePage() {
       </section>
     </div>
   )
+
+  if (operatorMode) {
+    return (
+      <OperatorStationStaffGate
+        stationId={operatorStationId}
+        title="Report personale"
+        onSessionChange={setOperatorSessionOpen}
+      >
+        {reportBody}
+      </OperatorStationStaffGate>
+    )
+  }
+
+  return reportBody
 }

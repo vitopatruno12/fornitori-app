@@ -47,7 +47,12 @@ import {
   planningBackupServerKey,
   pickNewestSavedAt,
 } from '../utils/staffLocalBackup.js'
-import { readStaffLocaleStore, writeStaffLocaleStore, removeStaffLocaleFromStore } from '../utils/staffLocaleStore.js'
+import {
+  readStaffLocaleStore,
+  writeStaffLocaleStore,
+  removeStaffLocaleFromStore,
+  upsertStoredLocaleAccessCode,
+} from '../utils/staffLocaleStore.js'
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import {
   CORE_PLANNING_SECTIONS,
@@ -72,6 +77,13 @@ import {
   verifyLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
 import { DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS } from '../utils/primaNotaStaffLocaleLink.js'
+import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import {
+  closeOtherOperatorStationStaffSessions,
+  isOperatorStationStaffSessionOpen,
+  setOperatorStationStaffSession,
+} from '../utils/operatorStationStaffSession.js'
+import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
 import {
@@ -1120,7 +1132,8 @@ function expandDemoRows() {
   return out
 }
 
-export default function StaffPage({ operatorMode = false }) {
+export default function StaffPage({ operatorMode = false, stationId: stationIdProp = null }) {
+  const operatorStationId = operatorMode ? stationIdProp || getLockedOperatorStationId() : null
   const [members, setMembers] = useState([])
   const [shifts, setShifts] = useState([])
   /** True dopo «Carica piano» (o demo) finché non cambi date/vista. */
@@ -1814,9 +1827,28 @@ export default function StaffPage({ operatorMode = false }) {
     }
   }, [])
 
+  const clearStaffDataFromMemory = useCallback(() => {
+    setMembers([])
+    setShifts([])
+    setPlanningLoaded(false)
+    setMemberInfoId(null)
+    setEditingShiftId(null)
+    setEditingMemberId(null)
+    setFormMemberIds(new Set())
+    setPayrollShifts([])
+    setPayrollImporto({})
+  }, [])
+
+  const stationStaffLocaleName = useMemo(
+    () => (operatorStationId ? getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames) : ''),
+    [operatorStationId, savedLocaleNames],
+  )
+
   useEffect(() => {
-    refreshMembers()
-  }, [refreshMembers])
+    if (!operatorMode) {
+      refreshMembers()
+    }
+  }, [operatorMode, refreshMembers])
 
   useEffect(() => {
     const n = normalizeLocaleName(localeStaffName)
@@ -2553,6 +2585,9 @@ export default function StaffPage({ operatorMode = false }) {
   }
 
   function isStaffLocaleSessionOpen(localeName) {
+    if (operatorStationId) {
+      return isOperatorStationStaffSessionOpen(operatorStationId, localeName)
+    }
     const key = localeNameCompareKey(localeName)
     if (!key) return false
     return localeSessionOpenKeys.has(key)
@@ -2561,6 +2596,9 @@ export default function StaffPage({ operatorMode = false }) {
   function setStaffLocaleSessionOpen(localeName, open) {
     const key = localeNameCompareKey(localeName)
     if (!key) return
+    if (operatorStationId) {
+      setOperatorStationStaffSession(operatorStationId, localeName, open)
+    }
     setLocaleSessionOpenKeys((prev) => {
       const next = new Set([...prev])
       if (open) next.add(key)
@@ -2570,7 +2608,9 @@ export default function StaffPage({ operatorMode = false }) {
     })
   }
 
-  const activeLocaleSessionOpen = isStaffLocaleSessionOpen(localeStaffName)
+  const activeLocaleSessionOpen = operatorStationId
+    ? isOperatorStationStaffSessionOpen(operatorStationId, localeStaffName || stationStaffLocaleName)
+    : isStaffLocaleSessionOpen(localeStaffName)
 
   function findLocaleStoreKey(store, localeName) {
     const target = localeNameCompareKey(localeName)
@@ -2855,20 +2895,21 @@ export default function StaffPage({ operatorMode = false }) {
     if (!isValidLocaleAccessCode(code)) {
       return { ok: false, needsCode: true }
     }
+    const summaries = await listServerLocaleSummaries()
+    if (matchServerLocaleSummary(summaries, localeName)) {
+      try {
+        await fetchStaffLocalePack(localeName, code)
+        await upsertStoredLocaleAccessCode(localeName, code)
+        return { ok: true }
+      } catch {
+        return { ok: false, wrongCode: true }
+      }
+    }
     const stored = await readStoredLocaleAccessCode(localeName)
     if (stored && verifyLocaleAccessCode(stored, code)) {
       return { ok: true }
     }
-    const summaries = await listServerLocaleSummaries()
-    if (!matchServerLocaleSummary(summaries, localeName)) {
-      return { ok: false, wrongCode: true }
-    }
-    try {
-      await fetchStaffLocalePack(localeName, code)
-      return { ok: true }
-    } catch {
-      return { ok: false, wrongCode: true }
-    }
+    return { ok: false, wrongCode: true }
   }
 
   async function handleOpenLocaleSession() {
@@ -2895,6 +2936,9 @@ export default function StaffPage({ operatorMode = false }) {
       }
       setStaffLocaleSessionOpen(localeName, true)
       setMembersBackupLocale(localeName)
+      if (operatorMode) {
+        await loadMembersFromLocalePackSilently(localeName, code)
+      }
       setSuccess(`Locale «${localeName}» aperto. Usa Chiudi per bloccarlo di nuovo.`)
     } finally {
       setLocaleSessionBusy(false)
@@ -2912,6 +2956,9 @@ export default function StaffPage({ operatorMode = false }) {
     setLocaleAccessCode('')
     setLocaleSessionBusy(false)
     setError('')
+    if (operatorMode) {
+      clearStaffDataFromMemory()
+    }
     setSuccess(
       wasOpen
         ? `Locale «${localeName}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`
@@ -3107,6 +3154,27 @@ export default function StaffPage({ operatorMode = false }) {
       window.removeEventListener('focus', onPageShow)
     }
   }, [refreshSavedLocaleNames])
+
+  useEffect(() => {
+    if (!operatorMode || !operatorStationId) return
+    closeOtherOperatorStationStaffSessions(operatorStationId)
+    const linked = getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames)
+    if (!linked) return
+    setLocaleStaffName(linked)
+    setMembersBackupLocale(linked)
+    if (!isOperatorStationStaffSessionOpen(operatorStationId, linked)) {
+      clearStaffDataFromMemory()
+      return
+    }
+    void (async () => {
+      const stored = await readStoredLocaleAccessCode(linked)
+      const code = isValidLocaleAccessCode(stored) ? stored : normalizeLocaleAccessCode(localeAccessCode)
+      if (isValidLocaleAccessCode(code)) {
+        setLocaleAccessCode(code)
+      }
+      await loadMembersFromLocalePackSilently(linked, code)
+    })()
+  }, [operatorMode, operatorStationId, savedLocaleNames, clearStaffDataFromMemory])
 
   useEffect(() => {
     const onServerDataRefresh = () => {
@@ -3374,6 +3442,34 @@ export default function StaffPage({ operatorMode = false }) {
     }
     setMembers(list)
     return list
+  }
+
+  async function loadMembersFromLocalePackSilently(localeName, code) {
+    const pack = await resolveLocalePack(localeName, code)
+    if (pack?.denied) {
+      setStaffLocaleSessionOpen(localeName, false)
+      if (operatorStationId) {
+        setOperatorStationStaffSession(operatorStationId, localeName, false)
+      }
+      clearStaffDataFromMemory()
+      return []
+    }
+    if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
+      clearStaffDataFromMemory()
+      return []
+    }
+    const mem = await syncMembersFromLocalePack(
+      pack.members,
+      localeName,
+      isValidLocaleAccessCode(code) ? code : undefined,
+    )
+    applyLocaleSections(
+      Array.isArray(pack.sections) ? pack.sections : [],
+      Array.isArray(pack.sections) && pack.sections[0] ? pack.sections[0] : '',
+      mem,
+    )
+    markPlanningStale()
+    return mem
   }
 
   async function handleLoadMembersByLocale() {
@@ -4548,8 +4644,9 @@ export default function StaffPage({ operatorMode = false }) {
           <p className="staff-page-lead">
             {operatorMode ? (
               <>
-                Gestisci <strong>dipendenti</strong> e <strong>pianificazione turni</strong> per la postazione. Stessi dati e
-                salvataggio del gestionale ATLAS.
+                Personale della postazione: <strong>{stationStaffLocaleName || 'locale collegato'}</strong>. Inserisci il{' '}
+                <strong>codice a 6 cifre</strong> e clicca <strong>Accedi</strong> per vedere dipendenti e pianificazione di questo locale
+                (i dati di altre sedi non restano visibili).
               </>
             ) : (
               <>
@@ -4571,11 +4668,199 @@ export default function StaffPage({ operatorMode = false }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <section className="card" ref={memberFormSectionRef} style={{ order: 1, marginBottom: 0 }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
-          {editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
+          {operatorMode ? 'Accesso personale' : editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
         </h2>
+        {!operatorMode ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem', maxWidth: 720, lineHeight: 1.45 }}>
           Organizza i dipendenti per <strong>sezione</strong> (Banco, Cucina, Forno…). La colonna <strong>Ordine</strong> viene assegnata automaticamente e definisce la sequenza negli elenchi e nel menu a tendina della pianificazione.
         </p>
+        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.65rem',
+            alignItems: 'flex-end',
+            marginBottom: '1rem',
+            padding: '0.7rem',
+            border: '1px dashed var(--border)',
+            borderRadius: 'var(--radius)',
+            background: 'color-mix(in oklab, var(--bg-card) 92%, #0ea5e9 8%)',
+          }}
+        >
+          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 250px' }}>
+            <label>Nome locale</label>
+            <input
+              className="form-control"
+              value={operatorMode ? stationStaffLocaleName || localeStaffName : localeStaffName}
+              onChange={(e) => setLocaleStaffName(e.target.value)}
+              placeholder="Es. La Risacca"
+              disabled={operatorMode || shiftBusy || loading || demoLoading || reportLoading}
+              readOnly={operatorMode}
+              title={
+                operatorMode
+                  ? 'Locale fisso per questa postazione operativa'
+                  : 'Ogni nome locale è univoco: non puoi salvare la stessa lista dipendenti sotto un altro nome'
+              }
+            />
+          </div>
+          {!operatorMode ? (
+          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 240px', minWidth: 220 }}>
+            <label>Locali salvati</label>
+            <select
+              className="form-control"
+              value={
+                savedLocaleNames.find(
+                  (n) => localeNameCompareKey(n) === localeNameCompareKey(localeStaffName),
+                ) || ''
+              }
+              onChange={(e) => void handleSelectSavedLocale(e.target.value)}
+              disabled={shiftBusy || loading || demoLoading || reportLoading || savedLocaleNames.length === 0}
+            >
+              <option value="">{savedLocaleNames.length === 0 ? 'Nessun locale salvato' : 'Seleziona locale salvato'}</option>
+              {savedLocaleNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          ) : null}
+          <div className="form-group" style={{ marginBottom: 0, flex: '0 1 150px', minWidth: 140 }}>
+            <label>Codice zona (6 cifre)</label>
+            <input
+              className="form-control"
+              value={localeAccessCode}
+              onChange={(e) => setLocaleAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(ev) => {
+                if (ev.key !== 'Enter') return
+                if (activeLocaleSessionOpen || localeSessionBusy) {
+                  ev.preventDefault()
+                  return
+                }
+                const code = normalizeLocaleAccessCode(localeAccessCode)
+                if (!isValidLocaleAccessCode(code)) return
+                ev.preventDefault()
+                void handleOpenLocaleSession()
+              }}
+              placeholder="123456"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              disabled={
+                activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading || localeSessionBusy
+              }
+              readOnly={activeLocaleSessionOpen}
+              title="Obbligatorio per aprire il locale: ogni zona ha il suo codice."
+            />
+          </div>
+          <button
+            type="button"
+            className={`btn prima-nota-accedi-btn${activeLocaleSessionOpen ? ' is-register-open' : ''}`}
+            disabled={
+              localeSessionBusy ||
+              activeLocaleSessionOpen ||
+              shiftBusy ||
+              loading ||
+              demoLoading ||
+              reportLoading ||
+              !normalizeLocaleName(operatorMode ? stationStaffLocaleName || localeStaffName : localeStaffName)
+            }
+            onClick={() => void handleOpenLocaleSession()}
+            title={
+              activeLocaleSessionOpen
+                ? 'Locale già aperto: Accedi bloccato. Usa Chiudi per richiuderlo.'
+                : 'Inserisci il codice e apri il locale (come in Prima Nota).'
+            }
+          >
+            {localeSessionBusy ? 'Accesso…' : activeLocaleSessionOpen ? 'Bloccato' : 'Accedi'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-danger prima-nota-chiudi-btn"
+            onClick={() => handleCloseLocaleSession()}
+            disabled={localeSessionBusy}
+            title="Chiude il locale: servirà di nuovo il codice per Accedi."
+          >
+            Chiudi
+          </button>
+          {!operatorMode ? (
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            onClick={() => void handleGenerateLocaleCode()}
+            disabled={activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading}
+            title="Genera un nuovo codice da usare al prossimo salvataggio"
+          >
+            Genera codice
+          </button>
+          ) : null}
+          {(!operatorMode || activeLocaleSessionOpen) ? (
+          <>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void handleSaveMembersByLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Salva la lista dipendenti corrente associandola al nome locale"
+          >
+            Salva dipendenti
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void handleLoadMembersByLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Carica la lista dipendenti salvata per questo locale e sostituisce l'elenco attuale"
+          >
+            Carica dipendenti
+          </button>
+          {!operatorMode ? (
+          <button
+            type="button"
+            className="btn btn-outline-primary"
+            onClick={() => void handleCreateEmptyLocale()}
+            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            title="Crea un locale anche senza elenco dipendenti"
+          >
+            Aggiungi locale
+          </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            onClick={() => void handleDeleteLocaleName()}
+            disabled={
+              shiftBusy ||
+              loading ||
+              demoLoading ||
+              reportLoading ||
+              !normalizeLocaleName(localeStaffName)
+            }
+            title="Rimuove il locale selezionato: serve il codice zona a 6 cifre se il locale è protetto"
+          >
+            Elimina locale
+          </button>
+          </>
+          ) : null}
+          <p style={{ flex: '1 1 100%', margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            Stato locale:{' '}
+            <strong style={{ color: activeLocaleSessionOpen ? '#047857' : '#b45309' }}>
+              {activeLocaleSessionOpen ? 'APERTO' : 'CHIUSO'}
+            </strong>
+            {' — '}
+            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: apri con <strong>Accedi</strong> (come in Prima Nota) e
+            chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
+          </p>
+        </div>
+        {operatorMode && !activeLocaleSessionOpen ? (
+          <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
+            Il personale di <strong>{stationStaffLocaleName || 'questa postazione'}</strong> è nascosto finché non inserisci il codice e
+            clicchi <strong>Accedi</strong>.
+          </div>
+        ) : null}
+        {(!operatorMode || activeLocaleSessionOpen) ? (
+        <>
         <StaffSectionBackupBar
           sectionTitle="dipendenti"
           lastSavedAt={backupMeta.members}
@@ -4703,169 +4988,6 @@ export default function StaffPage({ operatorMode = false }) {
           >
             Elimina elenco dipendenti
           </button>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '0.65rem',
-            alignItems: 'flex-end',
-            marginBottom: '1rem',
-            padding: '0.7rem',
-            border: '1px dashed var(--border)',
-            borderRadius: 'var(--radius)',
-            background: 'color-mix(in oklab, var(--bg-card) 92%, #0ea5e9 8%)',
-          }}
-        >
-          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 250px' }}>
-            <label>Nome locale</label>
-            <input
-              className="form-control"
-              value={localeStaffName}
-              onChange={(e) => setLocaleStaffName(e.target.value)}
-              placeholder="Es. La Risacca"
-              disabled={shiftBusy || loading || demoLoading || reportLoading}
-              title="Ogni nome locale è univoco: non puoi salvare la stessa lista dipendenti sotto un altro nome"
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0, flex: '1 1 240px', minWidth: 220 }}>
-            <label>Locali salvati</label>
-            <select
-              className="form-control"
-              value={
-                savedLocaleNames.find(
-                  (n) => localeNameCompareKey(n) === localeNameCompareKey(localeStaffName),
-                ) || ''
-              }
-              onChange={(e) => void handleSelectSavedLocale(e.target.value)}
-              disabled={shiftBusy || loading || demoLoading || reportLoading || savedLocaleNames.length === 0}
-            >
-              <option value="">{savedLocaleNames.length === 0 ? 'Nessun locale salvato' : 'Seleziona locale salvato'}</option>
-              {savedLocaleNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-group" style={{ marginBottom: 0, flex: '0 1 150px', minWidth: 140 }}>
-            <label>Codice zona (6 cifre)</label>
-            <input
-              className="form-control"
-              value={localeAccessCode}
-              onChange={(e) => setLocaleAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              onKeyDown={(ev) => {
-                if (ev.key !== 'Enter') return
-                if (activeLocaleSessionOpen || localeSessionBusy) {
-                  ev.preventDefault()
-                  return
-                }
-                const code = normalizeLocaleAccessCode(localeAccessCode)
-                if (!isValidLocaleAccessCode(code)) return
-                ev.preventDefault()
-                void handleOpenLocaleSession()
-              }}
-              placeholder="123456"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={6}
-              disabled={
-                activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading || localeSessionBusy
-              }
-              readOnly={activeLocaleSessionOpen}
-              title="Obbligatorio per aprire il locale: ogni zona ha il suo codice."
-            />
-          </div>
-          <button
-            type="button"
-            className={`btn prima-nota-accedi-btn${activeLocaleSessionOpen ? ' is-register-open' : ''}`}
-            disabled={
-              localeSessionBusy ||
-              activeLocaleSessionOpen ||
-              shiftBusy ||
-              loading ||
-              demoLoading ||
-              reportLoading ||
-              !normalizeLocaleName(localeStaffName)
-            }
-            onClick={() => void handleOpenLocaleSession()}
-            title={
-              activeLocaleSessionOpen
-                ? 'Locale già aperto: Accedi bloccato. Usa Chiudi per richiuderlo.'
-                : 'Inserisci il codice e apri il locale (come in Prima Nota).'
-            }
-          >
-            {localeSessionBusy ? 'Accesso…' : activeLocaleSessionOpen ? 'Bloccato' : 'Accedi'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger prima-nota-chiudi-btn"
-            onClick={() => handleCloseLocaleSession()}
-            disabled={localeSessionBusy}
-            title="Chiude il locale: servirà di nuovo il codice per Accedi."
-          >
-            Chiudi
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            onClick={() => void handleGenerateLocaleCode()}
-            disabled={activeLocaleSessionOpen || shiftBusy || loading || demoLoading || reportLoading}
-            title="Genera un nuovo codice da usare al prossimo salvataggio"
-          >
-            Genera codice
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void handleSaveMembersByLocale()}
-            disabled={shiftBusy || loading || demoLoading || reportLoading}
-            title="Salva la lista dipendenti corrente associandola al nome locale"
-          >
-            Salva dipendenti
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => void handleLoadMembersByLocale()}
-            disabled={shiftBusy || loading || demoLoading || reportLoading}
-            title="Carica la lista dipendenti salvata per questo locale e sostituisce l'elenco attuale"
-          >
-            Carica dipendenti
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-primary"
-            onClick={() => void handleCreateEmptyLocale()}
-            disabled={shiftBusy || loading || demoLoading || reportLoading}
-            title="Crea un locale anche senza elenco dipendenti"
-          >
-            Aggiungi locale
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-danger"
-            onClick={() => void handleDeleteLocaleName()}
-            disabled={
-              shiftBusy ||
-              loading ||
-              demoLoading ||
-              reportLoading ||
-              !normalizeLocaleName(localeStaffName)
-            }
-            title="Rimuove il locale selezionato: serve il codice zona a 6 cifre se il locale è protetto"
-          >
-            Elimina locale
-          </button>
-          <p style={{ flex: '1 1 100%', margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-            Stato locale:{' '}
-            <strong style={{ color: activeLocaleSessionOpen ? '#047857' : '#b45309' }}>
-              {activeLocaleSessionOpen ? 'APERTO' : 'CHIUSO'}
-            </strong>
-            {' — '}
-            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: apri con <strong>Accedi</strong> (come in Prima Nota) e
-            chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
-          </p>
         </div>
         <div className="workbook-card-nested">
           <div className="pagamenti-workbook-toolbar">
@@ -5011,8 +5133,12 @@ export default function StaffPage({ operatorMode = false }) {
             </table>
           </div>
         </div>
+        </>
+        ) : null}
       </section>
 
+      {(!operatorMode || activeLocaleSessionOpen) ? (
+      <>
       <section className="card" style={{ order: 2, marginBottom: '1rem' }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           Ore lavorate e costo
@@ -6010,6 +6136,8 @@ export default function StaffPage({ operatorMode = false }) {
           </div>
         </form>
       </section>
+      </>
+      ) : null}
       </div>
 
       <WeeklyStaffReportModal

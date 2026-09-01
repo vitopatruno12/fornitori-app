@@ -43,6 +43,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
     entry.nonFiscale !== 0 ? eur(entry.nonFiscale) : '—',
     entry.pos !== 0 ? eur(entry.pos) : '—',
     entry.refill !== 0 ? eur(entry.refill) : '—',
+    entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento) : '—',
     eur(entry.incasso),
   ])
 
@@ -57,13 +58,14 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       eur(totals.nonFiscale),
       eur(totals.pos),
       eur(totals.refill),
+      eur(totals.stackerSvuotamento),
       eur(totals.incasso),
     ])
   }
 
   autoTable(doc, {
     startY: 32,
-    head: [['Data', 'N.', 'Operazioni', 'Entrata', 'Uscita', 'Fiscale', 'NC', 'POS', 'Refill', 'Totale']],
+    head: [['Data', 'N.', 'Operazioni', 'Entrata', 'Uscita', 'Fiscale', 'NC', 'POS', 'Refill', 'Stacker', 'Totale']],
     body,
     styles: { fontSize: 8, cellPadding: 1.8 },
     headStyles: { fillColor: [17, 76, 95], textColor: 255 },

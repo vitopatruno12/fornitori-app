@@ -90,6 +90,20 @@ export async function removeStaffLocaleFromStore(localeName) {
   return true
 }
 
+/** Aggiorna il codice accesso salvato in browser/PWA per un locale (sostituisce copie obsolete). */
+export async function upsertStoredLocaleAccessCode(localeName, accessCode) {
+  const code = String(accessCode || '').replace(/\D/g, '')
+  if (code.length !== 6) return false
+  const store = await readStaffLocaleStore()
+  const matchedKey = findStoreKeyByLocaleName(store, localeName) || String(localeName || '').trim()
+  if (!matchedKey) return false
+  const pack = store[matchedKey]
+  if (!pack || typeof pack !== 'object') return false
+  store[matchedKey] = { ...pack, access_code: code, saved_at: pack.saved_at || new Date().toISOString() }
+  await writeStaffLocaleStore(store)
+  return true
+}
+
 /** Salva su localStorage e IndexedDB per compatibilità browser + app installata. */
 export async function writeStaffLocaleStore(store) {
   const data = parseStore(store)
