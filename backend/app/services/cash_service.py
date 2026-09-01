@@ -329,9 +329,9 @@ def _get_period_summary_metrics(
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
     totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
-    totale_stacker_svuotamento = _entrata_amount_for_day(
-        db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO
-    )
+    totale_stacker_svuotamento = (
+        -_entrata_amount_for_day(db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO)
+    ).quantize(Decimal("0.01"))
     totale_vendita = (
         totale_fiscale
         + totale_non_fiscale

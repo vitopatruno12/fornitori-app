@@ -1274,7 +1274,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const nonFiscale = nonFiscaleTag ? (isEntrata ? amount : -amount) : 0
     const pos = posTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
-    const stackerSvuotamento = stackerTag && isEntrata ? amount : 0
+    const stackerSvuotamento = stackerTag ? -Math.abs(amount) : 0
     const totaleMovimento = !nonFiscaleTag && !extraCassaTag ? entrata - uscita : 0
     const affectsSaldo = !extraCassaTag
     const cashDelta = affectsSaldo ? entrata - uscita : 0
@@ -1488,8 +1488,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   const stackerSvuotamentoGiornoComputed = React.useMemo(() => {
     return entriesForSummary.reduce((acc, e) => {
-      if (e.conto !== CONTO_STACKER_SVUOTAMENTO || e.type !== 'entrata') return acc
-      return acc + Number(e.amount || 0)
+      if (e.conto !== CONTO_STACKER_SVUOTAMENTO) return acc
+      return acc - Math.abs(Number(e.amount || 0))
     }, 0)
   }, [entriesForSummary])
 
@@ -1728,7 +1728,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   className={formType === 'uscita' && !extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('uscita')}
                   disabled={extraCassaEntrataOnly}
-                  title={extraCassaEntrataOnly ? 'POS e svuotamento stacker registrano solo entrate' : undefined}
+                  title={extraCassaEntrataOnly ? 'POS registra solo entrate; lo svuotamento stacker è un prelievo VNE (segno negativo nelle vendite).' : undefined}
                 >
                   Cassa uscita
                 </button>
@@ -1737,7 +1737,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   {formFlowTag === 'pos'
                     ? 'POS: solo pagamenti ricevuti (cassa entrata).'
-                    : 'Svuotamento stacker: solo incasso banconote dallo stacker VNE (cassa entrata).'}
+                    : 'Svuotamento stacker: prelievo banconote dallo stacker VNE (es. 1000 € → -1000 nelle vendite, escluso dalla cassa fisica).'}
                 </p>
               ) : null}
             </div>
@@ -1786,7 +1786,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                     setFormFlowTag('stacker_svuotamento')
                     setFormType('entrata')
                   }}
-                  title="Svuotamento stacker VNE: banconote prelevate dallo stacker, registrate nelle vendite ma escluse dalla cassa fisica."
+                  title="Svuotamento stacker VNE: prelievo banconote dallo stacker, registrato in negativo nelle vendite ed escluso dalla cassa fisica."
                 >
                   Svuotamento stacker
                 </button>
@@ -2255,7 +2255,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 )}
               </p>
               <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isExtraCassa(drawerEntry) ? 'var(--text-muted)' : drawerEntry.type === 'entrata' ? 'var(--success)' : 'var(--danger)' }}>
-                € {formatAmount(drawerEntry.amount)}
+                € {formatAmount(
+                  isStackerSvuotamento(drawerEntry)
+                    ? -Math.abs(Number(drawerEntry.amount || 0))
+                    : drawerEntry.amount,
+                )}
               </p>
               <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 0.75rem', fontSize: '0.9rem' }}>
                 <dt style={{ color: 'var(--text-muted)' }}>Descrizione</dt>
