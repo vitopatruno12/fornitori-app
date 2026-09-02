@@ -20,23 +20,21 @@ logger = logging.getLogger(__name__)
 _table_ready = False
 
 DEFAULT_PRIMA_NOTA_ACTIVITY_ACCESS_CODES = {
-    "via_lattea": "050408",
+    "via_lattea": "910689",
 }
 
-LEGACY_PRIMA_NOTA_ACTIVITY_ACCESS_CODES = {
-    "via_lattea": frozenset({"910689"}),
-}
+RETIRED_PRIMA_NOTA_ACTIVITY_ACCESS_CODES = frozenset({"050408"})
 
 
 def _allowed_prima_nota_codes(activity_slug: str, stored_code: str) -> set[str]:
     slug = str(activity_slug or "").strip().lower()
     allowed: set[str] = set()
-    if stored_code:
+    if stored_code and stored_code not in RETIRED_PRIMA_NOTA_ACTIVITY_ACCESS_CODES:
         allowed.add(stored_code)
     default = _normalize_access_code(DEFAULT_PRIMA_NOTA_ACTIVITY_ACCESS_CODES.get(slug))
     if default:
         allowed.add(default)
-    allowed.update(LEGACY_PRIMA_NOTA_ACTIVITY_ACCESS_CODES.get(slug, ()))
+    allowed.difference_update(RETIRED_PRIMA_NOTA_ACTIVITY_ACCESS_CODES)
     return allowed
 
 

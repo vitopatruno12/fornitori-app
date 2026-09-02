@@ -1,18 +1,18 @@
 const STORAGE_KEY = 'primaNotaLocaleAccessCodes'
 
-/** Vecchio codice Via Lattea — sostituito da 050408. */
-const LEGACY_ACCESS_CODES = {
-  via_lattea: '910689',
+/** Codice ritirato — riscritto in 910689 (Via Lattea). */
+const RETIRED_ACCESS_CODES = {
+  via_lattea: '050408',
 }
 const CURRENT_ACCESS_CODES = {
-  via_lattea: '050408',
+  via_lattea: '910689',
 }
 
 function normalizeStoredCode(activitySlug, code) {
   const slug = String(activitySlug || '').trim().toLowerCase()
   const digits = String(code || '').replace(/\D/g, '')
   if (digits.length !== 6) return ''
-  if (LEGACY_ACCESS_CODES[slug] && digits === LEGACY_ACCESS_CODES[slug]) {
+  if (RETIRED_ACCESS_CODES[slug] && digits === RETIRED_ACCESS_CODES[slug]) {
     return CURRENT_ACCESS_CODES[slug] || digits
   }
   return digits

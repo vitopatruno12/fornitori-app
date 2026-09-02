@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Imposta il codice personale La Via Lattea a 050408 (sostituisce 910689 se presente)."""
+"""Imposta il codice personale La Via Lattea a 910689 (sostituisce 050408 se presente)."""
 from __future__ import annotations
 
 from app.constants.staff_locale_access_defaults import DEFAULT_STAFF_LOCALE_ACCESS_CODES
@@ -7,8 +7,8 @@ from app.constants.prima_nota_staff_locale import _locale_name_key
 from app.database import SessionLocal
 from app.models.staff_locale_pack import StaffLocalePack
 
-NEW_CODE = "050408"
-OLD_CODE = "910689"
+NEW_CODE = "910689"
+OLD_CODE = "050408"
 CANONICAL_NAME = "La Via Lattea"
 
 
