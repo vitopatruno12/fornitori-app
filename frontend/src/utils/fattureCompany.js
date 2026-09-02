@@ -22,8 +22,27 @@ export const FATTURE_COMPANY_LABELS = {
 const ACTIVITY_SLUG_TO_SDI_COMPANY = {
   via_abba: 'mediazione',
   via_zanardelli: 'mediazione',
+  mediazione: 'mediazione',
   via_lattea: 'via_lattea',
   risacca: 'risacca',
+  pg: 'pg',
+}
+
+/** Società → attività Prima Nota / centri di costo collegati. */
+export const COMPANY_TO_ACTIVITIES = {
+  mediazione: ['via_abba', 'via_zanardelli', 'mediazione'],
+  via_lattea: ['via_lattea'],
+  risacca: ['risacca'],
+  pg: ['pg'],
+}
+
+export const ACTIVITY_LABELS = {
+  via_abba: 'Via Abba',
+  via_zanardelli: 'Via Zanardelli',
+  mediazione: 'Mediazione',
+  via_lattea: 'Via Lattea',
+  risacca: 'Risacca',
+  pg: 'PG',
 }
 
 export function isGestionaleFattureContext(fattureBase = '/fatture') {
@@ -75,4 +94,21 @@ export async function fetchFattureCompanies() {
 export function companyLabel(companyId) {
   const id = String(companyId || '').trim()
   return FATTURE_COMPANY_LABELS[id] || id || '—'
+}
+
+export function activityLabel(activity) {
+  const id = String(activity || '').trim().toLowerCase()
+  return ACTIVITY_LABELS[id] || id || '—'
+}
+
+export function companyFromActivity(activity) {
+  const id = String(activity || '').trim().toLowerCase()
+  return ACTIVITY_SLUG_TO_SDI_COMPANY[id] || ''
+}
+
+/** Attività Prima Nota da caricare per una società (mastrini / registri). */
+export function activitiesForCompany(companyId) {
+  const id = String(companyId || '').trim().toLowerCase()
+  if (id === 'non_classificata') return []
+  return COMPANY_TO_ACTIVITIES[id] ? [...COMPANY_TO_ACTIVITIES[id]] : []
 }

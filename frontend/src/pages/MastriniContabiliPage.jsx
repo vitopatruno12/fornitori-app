@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AmministrazionePageShell, eur, formatDate } from '../components/BancaShared.jsx'
+import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
+import { companyLabel } from '../utils/fattureCompany.js'
 
 function statusBadge(status) {
   if (status === 'pareggio') return <span style={{ color: '#0f766e', fontWeight: 700 }}>Pareggio</span>
@@ -27,17 +30,29 @@ function downloadFile(filename, content, mime = 'text/plain;charset=utf-8') {
   URL.revokeObjectURL(url)
 }
 
-function exportMastroCsv(account, periodLabel) {
+function exportMastroCsv(account, periodLabel, companyName = '') {
   const rows = [
     ['Mastro', account.description],
     ['Codice conto', account.code],
+    ['Società', companyName || ''],
     ['Periodo', periodLabel],
     ['Saldo iniziale', account.openingBalance],
     ['Totale Dare', account.totalDare],
     ['Totale Avere', account.totalAvere],
     ['Saldo finale', account.finalBalance],
     [],
-    ['Data', 'Numero registrazione', 'Descrizione', 'Documento', 'Dare', 'Avere', 'Saldo progressivo', 'Centro costo'],
+    [
+      'Data',
+      'Numero registrazione',
+      'Descrizione',
+      'Documento',
+      'Dare',
+      'Avere',
+      'Saldo progressivo',
+      'Società',
+      'Locale',
+      'Centro costo',
+    ],
     ...account.movements.map((m) => [
       m.date || '',
       m.registrationNumber || '',
@@ -46,6 +61,8 @@ function exportMastroCsv(account, periodLabel) {
       m.dare || 0,
       m.avere || 0,
       m.progressiveBalance || 0,
+      m.companyLabel || '',
+      m.localeLabel || m.locale || '',
       m.center || '',
     ]),
   ]
@@ -188,11 +205,13 @@ function partitarioCellValue(row, col) {
 const PARTITARIO_DETAIL_COLUMNS = [
   { id: 'date', label: 'Data', width: 120 },
   { id: 'registrationNumber', label: 'N. registrazione', width: 150, mono: true },
-  { id: 'description', label: 'Descrizione', width: 280 },
-  { id: 'documentLabel', label: 'Documento collegato', width: 220 },
-  { id: 'dare', label: 'Dare', width: 130, numeric: true },
-  { id: 'avere', label: 'Avere', width: 130, numeric: true },
-  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 150, numeric: true },
+  { id: 'description', label: 'Descrizione', width: 240 },
+  { id: 'documentLabel', label: 'Documento collegato', width: 200 },
+  { id: 'companyLabel', label: 'Società', width: 120 },
+  { id: 'localeLabel', label: 'Locale', width: 120 },
+  { id: 'dare', label: 'Dare', width: 120, numeric: true },
+  { id: 'avere', label: 'Avere', width: 120, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 140, numeric: true },
 ]
 
 function partitarioDetailCellValue(row, col) {
@@ -201,6 +220,8 @@ function partitarioDetailCellValue(row, col) {
   if (col.id === 'registrationNumber') return row.registrationNumber || '—'
   if (col.id === 'description') return row.description || '—'
   if (col.id === 'documentLabel') return row.documentLabel || '—'
+  if (col.id === 'companyLabel') return row.companyLabel || companyLabel(row.company) || '—'
+  if (col.id === 'localeLabel') return row.localeLabel || row.locale || row.center || '—'
   if (col.id === 'dare') return row.dare ? eur(row.dare) : '—'
   if (col.id === 'avere') return row.avere ? eur(row.avere) : '—'
   if (col.id === 'progressiveBalance') return eur(row.progressiveBalance)
@@ -208,15 +229,17 @@ function partitarioDetailCellValue(row, col) {
 }
 
 const MASTRO_DETAIL_COLUMNS = [
-  { id: 'date', label: 'Data registrazione', width: 9, fluid: true },
-  { id: 'causale', label: 'Causale', width: 7, fluid: true, mono: true },
-  { id: 'registrationNumber', label: 'Numero', width: 10, fluid: true, mono: true },
-  { id: 'documentDate', label: 'Data documento', width: 9, fluid: true },
-  { id: 'description', label: 'Descrizione operazione', width: 22, fluid: true, emphasis: true },
-  { id: 'counterparty', label: 'Contropartita', width: 14, fluid: true },
-  { id: 'dare', label: 'Dare', width: 9, fluid: true, numeric: true },
-  { id: 'avere', label: 'Avere', width: 9, fluid: true, numeric: true },
-  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 11, fluid: true, numeric: true },
+  { id: 'date', label: 'Data registrazione', width: 8, fluid: true },
+  { id: 'causale', label: 'Causale', width: 6, fluid: true, mono: true },
+  { id: 'registrationNumber', label: 'Numero', width: 9, fluid: true, mono: true },
+  { id: 'documentDate', label: 'Data documento', width: 8, fluid: true },
+  { id: 'description', label: 'Descrizione operazione', width: 18, fluid: true, emphasis: true },
+  { id: 'counterparty', label: 'Contropartita', width: 12, fluid: true },
+  { id: 'companyLabel', label: 'Società', width: 9, fluid: true },
+  { id: 'localeLabel', label: 'Locale', width: 9, fluid: true },
+  { id: 'dare', label: 'Dare', width: 8, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 8, fluid: true, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 10, fluid: true, numeric: true },
 ]
 
 function mastroDetailCellValue(row, col) {
@@ -228,6 +251,8 @@ function mastroDetailCellValue(row, col) {
   if (col.id === 'description') return row.description || '—'
   if (col.id === 'counterparty') return row.counterparty || row.supplier || row.customer || '—'
   if (col.id === 'documentLabel') return row.documentLabel || '—'
+  if (col.id === 'companyLabel') return row.companyLabel || companyLabel(row.company) || '—'
+  if (col.id === 'localeLabel') return row.localeLabel || row.locale || row.center || '—'
   if (col.id === 'dare') return row.dare ? eur(row.dare) : '—'
   if (col.id === 'avere') return row.avere ? eur(row.avere) : '—'
   if (col.id === 'progressiveBalance') return eur(row.progressiveBalance)
@@ -245,6 +270,7 @@ function sortMovementsNewestFirst(movements = []) {
 
 export default function MastriniContabiliPage() {
   const year = new Date().getFullYear()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
   const [viewMode, setViewMode] = useState('selezione')
   const [dateFrom, setDateFrom] = useState(`${year}-01-01`)
   const [dateTo, setDateTo] = useState(`${year}-12-31`)
@@ -260,13 +286,24 @@ export default function MastriniContabiliPage() {
   const [selectedCode, setSelectedCode] = useState('')
   const [selectedPartyKey, setSelectedPartyKey] = useState('')
 
+  const selectedCompanyLabel =
+    companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId)
+
   async function load(opts = {}) {
+    const nextCompany = opts.company ?? companyId
+    if (!nextCompany) {
+      setData(null)
+      setWarnings([])
+      setLoading(false)
+      return null
+    }
     setLoading(true)
     setError('')
     try {
       const res = await fetchMastriniData({
         dateFrom: (opts.dateFrom ?? dateFrom) || undefined,
         dateTo: (opts.dateTo ?? dateTo) || undefined,
+        company: nextCompany,
       })
       setData(res)
       setWarnings(Array.isArray(res?.warnings) ? res.warnings : [])
@@ -285,13 +322,14 @@ export default function MastriniContabiliPage() {
   React.useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [companyId])
 
   const periodLabel = useMemo(() => {
-    if (!dateFrom && !dateTo) return 'Esercizio corrente'
-    if (dateFrom && dateTo) return `${dateFrom} → ${dateTo}`
-    return dateFrom || dateTo
-  }, [dateFrom, dateTo])
+    const companyPart = selectedCompanyLabel ? `${selectedCompanyLabel} · ` : ''
+    if (!dateFrom && !dateTo) return `${companyPart}Esercizio corrente`
+    if (dateFrom && dateTo) return `${companyPart}${dateFrom} → ${dateTo}`
+    return `${companyPart}${dateFrom || dateTo}`
+  }, [dateFrom, dateTo, selectedCompanyLabel])
 
   const filteredAccounts = useMemo(() => {
     const rows = Array.isArray(data?.accounts) ? data.accounts : []
@@ -309,7 +347,19 @@ export default function MastriniContabiliPage() {
         r.description,
         r.category,
         ...r.movements.map((m) =>
-          [m.description, m.documentLabel, m.counterparty, m.supplier, m.customer, m.registrationNumber, m.causale].join(' '),
+          [
+            m.description,
+            m.documentLabel,
+            m.counterparty,
+            m.supplier,
+            m.customer,
+            m.registrationNumber,
+            m.causale,
+            m.companyLabel,
+            m.localeLabel,
+            m.locale,
+            m.center,
+          ].join(' '),
         ),
       ]
         .join(' ')
@@ -408,6 +458,10 @@ export default function MastriniContabiliPage() {
 
   async function openScheda(e) {
     e?.preventDefault?.()
+    if (!companyId) {
+      setError('Seleziona una società dal menu nel banner verde.')
+      return
+    }
     if (!accountCode) {
       setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
       return
@@ -435,20 +489,35 @@ export default function MastriniContabiliPage() {
   return (
     <AmministrazionePageShell
       title="Schede contabili / Mastrini"
-      lead="Flusso tipo Passcom: seleziona il conto e il periodo, poi apri la scheda Dare/Avere con saldo progressivo."
+      lead={
+        companyId
+          ? `Mastrini ${selectedCompanyLabel}: seleziona il conto e il periodo, poi apri la scheda Dare/Avere.`
+          : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
+      }
       actions={
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <FattureCompanySelect
+            companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+            value={companyId}
+            onChange={setCompanyId}
+            loading={loadingCompanies}
+          />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
             {loading ? 'Aggiorno…' : 'Aggiorna'}
           </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={exportListExcel} disabled={!filteredAccounts.length}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={exportListExcel}
+            disabled={!filteredAccounts.length || !companyId}
+          >
             Elenco Excel
           </button>
           <button
             type="button"
             className="btn btn-primary btn-sm"
             onClick={() => schedaAccount && printMastro(schedaAccount, periodLabel)}
-            disabled={!schedaAccount || viewMode === 'selezione'}
+            disabled={!schedaAccount || viewMode === 'selezione' || !companyId}
           >
             Stampa scheda
           </button>
@@ -462,6 +531,13 @@ export default function MastriniContabiliPage() {
         </div>
       ))}
 
+      {!companyId ? (
+        <p className="fatture-note">
+          Seleziona una società dal menu nel banner verde per vedere i mastrini contabili di quel registro.
+        </p>
+      ) : null}
+
+      {companyId ? (
       <section className="card fatture-panel">
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
@@ -495,8 +571,9 @@ export default function MastriniContabiliPage() {
           </button>
         </div>
       </section>
+      ) : null}
 
-      {viewMode === 'selezione' ? (
+      {companyId && viewMode === 'selezione' ? (
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Selezione scheda contabile</h2>
           <p className="fatture-note" style={{ marginTop: 0 }}>
@@ -561,7 +638,7 @@ export default function MastriniContabiliPage() {
         </section>
       ) : null}
 
-      {viewMode === 'scheda' && schedaAccount ? (
+      {companyId && viewMode === 'scheda' && schedaAccount ? (
         <section className="card fatture-panel mastrini-fit-panel">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'start' }}>
             <div>
@@ -579,7 +656,7 @@ export default function MastriniContabiliPage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => exportMastroCsv(schedaAccount, periodLabel)}
+                onClick={() => exportMastroCsv(schedaAccount, periodLabel, selectedCompanyLabel)}
               >
                 Estratto CSV
               </button>
@@ -660,13 +737,13 @@ export default function MastriniContabiliPage() {
             }
           />
           <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-            Fonti Atlas: Prima Nota, fatture fornitori, movimenti banca (mappati sul piano semplificato).
-            Non è ancora un piano dei conti editabile come Passcom; i conti sono i 7 mastri operativi Atlas.
+            Fonti Atlas: Prima Nota (locale), fatture fornitori e banca (collegati) della società selezionata.
+            Colonne Società/Locale mostrano a quale registro appartiene ogni riga.
           </p>
         </section>
       ) : null}
 
-      {viewMode === 'scheda' && !schedaAccount ? (
+      {companyId && viewMode === 'scheda' && !schedaAccount ? (
         <section className="card fatture-panel">
           <p className="fatture-note">Nessuna scheda aperta. Torna a Selezione scheda e conferma un conto.</p>
           <button type="button" className="btn btn-primary" onClick={() => setViewMode('selezione')}>
@@ -675,7 +752,7 @@ export default function MastriniContabiliPage() {
         </section>
       ) : null}
 
-      {viewMode === 'elenco' || viewMode === 'partitario' ? (
+      {companyId && (viewMode === 'elenco' || viewMode === 'partitario') ? (
         <>
           <div className="ui-kpi-row">
             <div className="ui-kpi-card">
@@ -746,7 +823,7 @@ export default function MastriniContabiliPage() {
         </>
       ) : null}
 
-      {viewMode === 'elenco' ? (
+      {companyId && viewMode === 'elenco' ? (
       <section className="card fatture-panel mastrini-fit-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
           <h2 className="fatture-panel-title" style={{ margin: 0 }}>
@@ -801,7 +878,7 @@ export default function MastriniContabiliPage() {
       </section>
       ) : null}
 
-      {viewMode === 'partitario' ? (
+      {companyId && viewMode === 'partitario' ? (
         <>
           <section className="card fatture-panel mastrini-fit-panel">
             <h2 className="fatture-panel-title">Partitario per soggetto</h2>
@@ -877,7 +954,7 @@ export default function MastriniContabiliPage() {
         </>
       ) : null}
 
-      {viewMode === 'elenco' && selected ? (
+      {companyId && viewMode === 'elenco' && selected ? (
         <section className="card fatture-panel mastrini-fit-panel">
           <h2 className="fatture-panel-title">Anteprima mastro {selected.code}</h2>
           <WorkbookGrid

@@ -1,6 +1,12 @@
 import { fetchBancaMovimenti } from './bancaService'
 import { fetchEntries } from './cashService'
 import { fetchInvoices } from './invoicesService'
+import {
+  activitiesForCompany,
+  activityLabel,
+  companyFromActivity,
+  companyLabel,
+} from '../utils/fattureCompany.js'
 
 const ACCOUNT_PLAN = [
   {
@@ -71,9 +77,21 @@ function signByType(accountType, dare, avere) {
   return a - d
 }
 
+function resolveCompanyMeta(companyId, locale = '') {
+  const company = String(companyId || '').trim() || 'non_classificata'
+  const localeId = String(locale || '').trim().toLowerCase()
+  return {
+    company,
+    companyLabel: company === 'non_classificata' ? 'Non classificate' : companyLabel(company),
+    locale: localeId,
+    localeLabel: localeId ? activityLabel(localeId) : '',
+  }
+}
+
 function pushMovement(list, accountCode, raw, amount, side) {
   const val = Math.abs(toNum(amount))
   if (val <= 0) return
+  const companyMeta = resolveCompanyMeta(raw.company, raw.locale || raw.center)
   list.push({
     accountCode,
     date: raw.date || '',
@@ -91,7 +109,11 @@ function pushMovement(list, accountCode, raw, amount, side) {
     amount: val,
     dare: side === 'dare' ? val : 0,
     avere: side === 'avere' ? val : 0,
-    center: raw.center || '',
+    center: raw.center || companyMeta.locale || '',
+    company: companyMeta.company,
+    companyLabel: companyMeta.companyLabel,
+    locale: companyMeta.locale,
+    localeLabel: companyMeta.localeLabel,
     source: raw.source || '',
     linkedInvoiceId: raw.linkedInvoiceId || '',
     linkedCashEntryId: raw.linkedCashEntryId || '',
@@ -113,6 +135,12 @@ function invoiceNumber(inv) {
   return inv?.invoice_number || inv?.number || inv?.id || ''
 }
 
+function invoiceCompany(inv) {
+  const fromField = String(inv?.company || '').trim()
+  if (fromField) return fromField
+  return companyFromActivity(inv?.section) || 'non_classificata'
+}
+
 function mapCashEntries(entries = [], invoicesById = new Map()) {
   const out = []
   for (const row of entries) {
@@ -120,6 +148,11 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
     if (!amount) continue
     const linkedInv = row?.invoice_id ? invoicesById.get(Number(row.invoice_id)) : null
     const invNum = linkedInv ? invoiceNumber(linkedInv) : ''
+    const activity = String(row?.activity || '').trim().toLowerCase()
+    const company =
+      (linkedInv ? invoiceCompany(linkedInv) : '') ||
+      companyFromActivity(activity) ||
+      'non_classificata'
     const meta = {
       date: isoDate(row?.entry_date),
       documentDate: isoDate(row?.entry_date),
@@ -136,7 +169,9 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
       linkedCashEntryId: row?.id ? String(row.id) : '',
       relatedDocumentPath: linkedInv ? '/prima-nota' : '',
       relatedDocumentLabel: linkedInv ? `Prima Nota PN-${row?.id ?? ''}` : '',
-      center: row?.activity || '',
+      center: activity,
+      locale: activity,
+      company,
       counterparty:
         linkedInv?.supplier_name ||
         (row?.supplier_id ? `Supplier #${row.supplier_id}` : '') ||
@@ -173,6 +208,8 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
     if (!amount) continue
     const number = invoiceNumber(inv)
     const invId = Number(inv?.id)
+    const company = invoiceCompany(inv)
+    const locale = String(inv?.section || '').trim().toLowerCase()
     const base = {
       date: isoDate(inv?.created_at || inv?.issue_date || inv?.invoice_date || inv?.due_date),
       documentDate: isoDate(inv?.issue_date || inv?.invoice_date || inv?.created_at || inv?.due_date),
@@ -185,7 +222,9 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
       documentPath: '/fatture/registrate',
       counterparty: inv?.supplier_name || '',
       supplier: inv?.supplier_name || '',
-      center: inv?.section || '',
+      center: locale || company,
+      locale,
+      company,
       source: 'fatture_fornitori',
     }
     pushMovement(out, '5000', base, amount, 'dare')
@@ -227,6 +266,7 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
       (row?.matched_invoice_id ? invoicesById.get(Number(row.matched_invoice_id)) : null)
     const matchedNum = matchedInv ? invoiceNumber(matchedInv) : ''
     const supplierName = matchedInv?.supplier_name || row?.matched_invoice?.supplier_name || row?.counterparty || ''
+    const company = matchedInv ? invoiceCompany(matchedInv) : 'non_classificata'
     const base = {
       date: isoDate(row?.movement_date),
       documentDate: isoDate(row?.movement_date),
@@ -248,6 +288,7 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
       relatedDocumentPath: matchedInv ? '/banca/movimenti' : '',
       relatedDocumentLabel: matchedInv ? `Movimento BA-${row?.id ?? ''}` : '',
       center: row?.account_label || '',
+      company,
       counterparty: supplierName,
       supplier: supplierName,
       source: matchedInv ? 'pagamento_fattura_banca' : movementType === 'entrata' ? 'incasso' : 'pagamento',
@@ -367,13 +408,49 @@ function buildPartitario(movements) {
   }
 }
 
-export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
+async function fetchCashEntriesForCompany({ dateFrom, dateTo, company }) {
+  const activities = activitiesForCompany(company)
+  if (!activities.length) {
+    if (!company) {
+      try {
+        const rows = await fetchEntries({
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        })
+        return Array.isArray(rows) ? rows : []
+      } catch {
+        return []
+      }
+    }
+    return []
+  }
+
+  const results = await Promise.allSettled(
+    activities.map((activity) =>
+      fetchEntries({
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        activity,
+      }),
+    ),
+  )
+
+  const byId = new Map()
+  for (const res of results) {
+    if (res.status !== 'fulfilled' || !Array.isArray(res.value)) continue
+    for (const row of res.value) {
+      if (row?.id != null) byId.set(Number(row.id), row)
+      else byId.set(`${row?.entry_date}-${row?.amount}-${row?.description}`, row)
+    }
+  }
+  return [...byId.values()]
+}
+
+export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
+  const companyId = String(company || '').trim()
   const [cashRes, invoiceRes, bankRes] = await Promise.allSettled([
-    fetchEntries({
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
-    }),
-    fetchInvoices(),
+    fetchCashEntriesForCompany({ dateFrom, dateTo, company: companyId }),
+    fetchInvoices(companyId ? { company: companyId } : {}),
     fetchBancaMovimenti({
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
@@ -387,9 +464,21 @@ export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
   const invoices = invoiceRes.status === 'fulfilled' && Array.isArray(invoiceRes.value) ? invoiceRes.value : []
   if (invoiceRes.status === 'rejected') warnings.push('Fatture non disponibili.')
 
-  const bankMovements =
+  let bankMovements =
     bankRes.status === 'fulfilled' && Array.isArray(bankRes.value?.items) ? bankRes.value.items : []
   if (bankRes.status === 'rejected') warnings.push('Movimenti bancari non disponibili.')
+
+  // Per società: movimenti banca solo se collegati a fattura della stessa società.
+  if (companyId) {
+    const invoiceIds = new Set(invoices.map((inv) => Number(inv.id)).filter((id) => Number.isFinite(id)))
+    bankMovements = bankMovements.filter((m) => {
+      const mid = Number(m?.matched_invoice_id)
+      if (!Number.isFinite(mid) || mid <= 0) {
+        return companyId === 'non_classificata'
+      }
+      return invoiceIds.has(mid)
+    })
+  }
 
   const invoicesById = buildInvoiceIndex(invoices)
   const bankMatchedInvoiceIds = new Set(
@@ -407,6 +496,7 @@ export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
     const d = String(m.date || '')
     if (dateFrom && d && d < dateFrom) return false
     if (dateTo && d && d > dateTo) return false
+    if (companyId && String(m.company || '') !== companyId) return false
     return true
   })
   const ledger = buildLedger(movements)
@@ -415,6 +505,12 @@ export async function fetchMastriniData({ dateFrom, dateTo } = {}) {
     ...ledger,
     accountPlan: ACCOUNT_PLAN,
     partitario,
+    company: companyId || '',
+    companyLabel: companyId
+      ? companyId === 'non_classificata'
+        ? 'Non classificate'
+        : companyLabel(companyId)
+      : '',
     warnings,
   }
 }
