@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import { fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { resolveOperatorStationMembers } from '../utils/operatorStaffReportData.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
@@ -29,8 +30,27 @@ function endOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0)
 }
 
-function defaultPeriod() {
+function startOfWeekMonday(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const day = x.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  x.setDate(x.getDate() + diff)
+  return x
+}
+
+function addDays(d, n) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  x.setDate(x.getDate() + n)
+  return x
+}
+
+function defaultPeriod(operatorMode = false) {
   const now = new Date()
+  if (operatorMode) {
+    const from = startOfWeekMonday(now)
+    const to = addDays(from, 6)
+    return { from: toYmd(from), to: toYmd(to) }
+  }
   return { from: toYmd(startOfMonth(now)), to: toYmd(endOfMonth(now)) }
 }
 
@@ -42,7 +62,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     const localeName = getOperatorStationStaffLocaleName(sid, [])
     return isOperatorStationStaffSessionOpen(sid, localeName)
   })
-  const initial = defaultPeriod()
+  const initial = defaultPeriod(operatorMode)
   const [dateFrom, setDateFrom] = useState(initial.from)
   const [dateTo, setDateTo] = useState(initial.to)
   const [workbook, setWorkbook] = useState(() =>
@@ -53,10 +73,37 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [generatedAt, setGeneratedAt] = useState('')
+  const dateFromRef = useRef(dateFrom)
+  const dateToRef = useRef(dateTo)
+  dateFromRef.current = dateFrom
+  dateToRef.current = dateTo
 
-  const refreshReport = useCallback(async () => {
-    const from = String(dateFrom || '').slice(0, 10)
-    const to = String(dateTo || '').slice(0, 10)
+  const loadReportData = useCallback(
+    async (from, to) => {
+      if (operatorMode && operatorStationId) {
+        const { members, memberIds } = await resolveOperatorStationMembers(operatorStationId)
+        const shiftOpts = memberIds.length ? { memberIds } : {}
+        const shiftsRaw = await fetchStaffShifts(from, to, shiftOpts)
+        return {
+          members,
+          shifts: Array.isArray(shiftsRaw) ? shiftsRaw : [],
+        }
+      }
+      const [membersRaw, shiftsRaw] = await Promise.all([
+        fetchStaffMembers(),
+        fetchStaffShifts(from, to),
+      ])
+      return {
+        members: Array.isArray(membersRaw) ? membersRaw : [],
+        shifts: Array.isArray(shiftsRaw) ? shiftsRaw : [],
+      }
+    },
+    [operatorMode, operatorStationId],
+  )
+
+  const runRefresh = useCallback(async () => {
+    const from = String(dateFromRef.current || '').slice(0, 10)
+    const to = String(dateToRef.current || '').slice(0, 10)
     if (!from || !to) {
       setError('Seleziona un intervallo date valido')
       return
@@ -69,12 +116,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     setError('')
     setSuccess('')
     try {
-      const [membersRaw, shiftsRaw] = await Promise.all([
-        fetchStaffMembers(),
-        fetchStaffShifts(from, to),
-      ])
-      const members = Array.isArray(membersRaw) ? membersRaw : []
-      const shifts = Array.isArray(shiftsRaw) ? shiftsRaw : []
+      const { members, shifts } = await loadReportData(from, to)
       const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
       setWorkbook(next)
       setGeneratedAt(
@@ -92,12 +134,18 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     } finally {
       setLoading(false)
     }
-  }, [dateFrom, dateTo])
+  }, [loadReportData])
 
   useEffect(() => {
     if (operatorMode && !operatorSessionOpen) return
-    void refreshReport()
-  }, [refreshReport, operatorMode, operatorSessionOpen])
+    void runRefresh()
+  }, [
+    operatorMode,
+    operatorSessionOpen,
+    runRefresh,
+    operatorMode ? undefined : dateFrom,
+    operatorMode ? undefined : dateTo,
+  ])
 
   const currentSheet = useMemo(
     () => workbook.sheets.find((sheet) => sheet.name === activeSheet) || workbook.sheets[0],
@@ -177,7 +225,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
               type="button"
               className="btn btn-secondary btn-sm"
               disabled={loading}
-              onClick={() => void refreshReport()}
+              onClick={() => void runRefresh()}
             >
               {loading ? 'Aggiornamento…' : 'Aggiorna'}
             </button>

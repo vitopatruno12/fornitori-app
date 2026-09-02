@@ -76,11 +76,12 @@ def delete_member(
 def list_shifts(
     date_from: date = Query(..., alias="from"),
     date_to: date = Query(..., alias="to"),
+    member_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db),
 ):
     if date_to < date_from:
         raise HTTPException(status_code=400, detail="Intervallo date non valido")
-    return staff_service.list_shifts_range(db, date_from, date_to)
+    return staff_service.list_shifts_range(db, date_from, date_to, member_ids=member_ids)
 
 
 @router.post("/shifts", response_model=staff_schema.StaffShiftRead, status_code=status.HTTP_201_CREATED)

@@ -243,19 +243,25 @@ def delete_shifts_between(db: Session, date_from: date, date_to: date) -> int:
     return int(n)
 
 
-def list_shifts_range(db: Session, date_from: date, date_to: date) -> List[staff_schema.StaffShiftRead]:
-    rows = (
+def list_shifts_range(
+    db: Session,
+    date_from: date,
+    date_to: date,
+    member_ids: Optional[List[int]] = None,
+) -> List[staff_schema.StaffShiftRead]:
+    q = (
         db.query(StaffShiftEntry, StaffMember.name)
         .join(StaffMember, StaffMember.id == StaffShiftEntry.staff_member_id)
         .filter(StaffShiftEntry.work_date >= date_from, StaffShiftEntry.work_date <= date_to)
-        .order_by(
-            StaffShiftEntry.work_date.asc(),
-            StaffMember.sort_order.asc(),
-            StaffMember.name.asc(),
-            StaffShiftEntry.time_start.asc(),
-        )
-        .all()
     )
+    if member_ids:
+        q = q.filter(StaffShiftEntry.staff_member_id.in_(member_ids))
+    rows = q.order_by(
+        StaffShiftEntry.work_date.asc(),
+        StaffMember.sort_order.asc(),
+        StaffMember.name.asc(),
+        StaffShiftEntry.time_start.asc(),
+    ).all()
     out: List[staff_schema.StaffShiftRead] = []
     for ent, mname in rows:
         out.append(

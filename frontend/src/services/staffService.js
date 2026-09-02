@@ -66,8 +66,12 @@ export function deleteAllStaffMembers(localeName, accessCode) {
   return apiFetch(`/staff/members/bulk${staffMemberDeleteQuery(localeName, accessCode)}`, { method: 'DELETE' })
 }
 
-export function fetchStaffShifts(from, to) {
+export function fetchStaffShifts(from, to, { memberIds } = {}) {
   const q = new URLSearchParams({ from, to })
+  const ids = Array.isArray(memberIds) ? memberIds.filter((id) => id != null) : []
+  for (const id of ids) {
+    q.append('member_ids', String(id))
+  }
   return apiFetch(`/staff/shifts?${q}`, SYNC_FETCH)
 }
 
