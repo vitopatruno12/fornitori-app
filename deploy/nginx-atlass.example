@@ -27,6 +27,20 @@ server {
     root /opt/fornitori-app/frontend/dist;
     index index.html;
 
+    # PWA / SPA: non cachare a lungo index, service worker e versioni (altrimenti gli aggiornamenti non arrivano)
+    location = /index.html {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+    location = /sw.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+    location = /section-versions.json {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+
     # IMPORTANTE: ^~ = priorità su location regex / SPA
     location ^~ /api/ {
         proxy_pass http://127.0.0.1:8000/;

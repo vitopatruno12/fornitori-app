@@ -73,6 +73,40 @@ git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
 log "Build frontend (file statici in frontend/dist)"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/build-frontend.sh"
 
+DIST_DIR="$APP_DIR/frontend/dist"
+SERVED_DIST=""
+if [[ -f "$APP_DIR/deploy/detect-served-dist.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$APP_DIR/deploy/detect-served-dist.sh"
+  SERVED_DIST="$(detect_served_dist_root 2>/dev/null || true)"
+fi
+if [[ -n "$SERVED_DIST" && "$SERVED_DIST" != "$DIST_DIR" && -d "$DIST_DIR" ]]; then
+  warn "Nginx/Caddy serve $SERVED_DIST ma il build è in $DIST_DIR"
+  log "Copia frontend/dist nella cartella servita dal web server"
+  mkdir -p "$SERVED_DIST"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete "$DIST_DIR/" "$SERVED_DIST/"
+  else
+    rm -rf "${SERVED_DIST:?}/"*
+    cp -a "$DIST_DIR/." "$SERVED_DIST/"
+  fi
+  log "Dist copiata in $SERVED_DIST"
+elif [[ -n "$SERVED_DIST" ]]; then
+  log "Web server root OK: $SERVED_DIST"
+fi
+
+if [[ -f "$DIST_DIR/section-versions.json" ]]; then
+  log "Build ID pubblicato: $(grep -o '"build": "[^"]*"' "$DIST_DIR/section-versions.json" | head -1)"
+fi
+
+if systemctl is-active --quiet nginx 2>/dev/null; then
+  log "Reload Nginx"
+  nginx -t && systemctl reload nginx
+elif systemctl is-active --quiet caddy 2>/dev/null; then
+  log "Reload Caddy"
+  systemctl reload caddy
+fi
+
 if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
   if [[ -f "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh" ]]; then
     log "Tabella codici Prima Nota (obbligatoria per salvare i codici locale)"
@@ -148,4 +182,5 @@ echo "  Backup completi in: $APP_DIR/backups/atlas_YYYYMMDD_HHMMSS.tar.gz"
 echo ""
 echo "  NON usare restore-db.sh per aggiornare: cancella tutti i dati!"
 echo "  Utenti: pulsante «Aggiornamento» nell'app per la nuova versione."
+echo "  Verifica: sudo APP_DIR=$APP_DIR bash $APP_DIR/deploy/verify-live-deploy.sh"
 echo "================================================================"
