@@ -84,6 +84,7 @@ function normalizeDateRange(from, to) {
 export default function PrimaNotaPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
   const operatorActivitySlug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
+  const operatorPrimaNotaBackupScope = operatorStationId ? String(operatorStationId).trim().toLowerCase() : ''
   const formatLocalIsoDate = (d) => {
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -174,7 +175,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [movementKind, setMovementKind] = useState('all')
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
   const dashboardPreFiltersRef = useRef(null)
-  const [backupMeta, setBackupMeta] = useState(() => getLatestPrimaNotaBackup()?.savedAt ?? null)
+  const [backupMeta, setBackupMeta] = useState(
+    () => getLatestPrimaNotaBackup(operatorPrimaNotaBackupScope)?.savedAt ?? null,
+  )
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
@@ -1076,7 +1079,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   function bumpBackupMeta() {
-    setBackupMeta(getLatestPrimaNotaBackup()?.savedAt ?? null)
+    setBackupMeta(getLatestPrimaNotaBackup(operatorPrimaNotaBackupScope)?.savedAt ?? null)
   }
 
   function serializeEntryForBackup(entry) {
@@ -1120,14 +1123,17 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         )
         return
       }
-      savePrimaNotaBackup({
-        activity: activeActivity,
-        activityLabel: activeActivityLabel,
-        periodFrom: from || null,
-        periodTo: to || null,
-        openingCashInput,
-        entries: list.map(serializeEntryForBackup),
-      })
+      savePrimaNotaBackup(
+        {
+          activity: activeActivity,
+          activityLabel: activeActivityLabel,
+          periodFrom: from || null,
+          periodTo: to || null,
+          openingCashInput,
+          entries: list.map(serializeEntryForBackup),
+        },
+        operatorPrimaNotaBackupScope,
+      )
       bumpBackupMeta()
       setSuccess(
         `Backup movimenti creato (${list.length} voci, ${activeActivityLabel}, solo su questo browser).`,
@@ -1140,7 +1146,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   async function handleRestoreMovementsBackup() {
-    const latest = getLatestPrimaNotaBackup()
+    const latest = getLatestPrimaNotaBackup(operatorPrimaNotaBackupScope)
     const rows = latest?.payload?.entries
     if (!rows?.length) {
       setError('Nessun backup movimenti da ripristinare.')

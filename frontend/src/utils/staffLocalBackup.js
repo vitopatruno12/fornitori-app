@@ -10,6 +10,44 @@ const MEMBERS_BY_LOCALE_KEY = 'atlas_staff_backup_members_by_locale_v1'
 
 const MAX_SNAPSHOTS = 5
 
+export const OPERATOR_BACKUP_SCOPE_PREFIX = 'station:'
+
+/** Prefisso backup condivisi per una postazione operativa (es. station:lattea). */
+export function operatorStaffBackupScope(stationId) {
+  const id = String(stationId || '').trim().toLowerCase()
+  return id ? `${OPERATOR_BACKUP_SCOPE_PREFIX}${id}` : ''
+}
+
+/** Chiave backup server/browser con scope postazione (gestionale: scope vuoto). */
+export function scopedStaffBackupKey(innerKey, scope = '') {
+  const inner = String(innerKey || '').trim()
+  const sc = String(scope || '').trim()
+  if (!inner) return ''
+  return sc ? `${sc}::${inner}` : inner
+}
+
+/** Rimuove il prefisso postazione dalla chiave backup. */
+export function unscopedStaffBackupKey(key, scope = '') {
+  const raw = String(key || '').trim()
+  const sc = String(scope || '').trim()
+  if (!sc) {
+    if (raw.startsWith(OPERATOR_BACKUP_SCOPE_PREFIX) && raw.includes('::')) {
+      return raw.slice(raw.indexOf('::') + 2)
+    }
+    return raw
+  }
+  const prefix = `${sc}::`
+  return raw.startsWith(prefix) ? raw.slice(prefix.length) : ''
+}
+
+/** True se la chiave appartiene allo scope (gestionale = solo chiavi senza prefisso postazione). */
+export function staffBackupKeyMatchesScope(backupKey, scope = '') {
+  const key = String(backupKey || '').trim()
+  const sc = String(scope || '').trim()
+  if (!sc) return !key.startsWith(OPERATOR_BACKUP_SCOPE_PREFIX)
+  return key.startsWith(`${sc}::`)
+}
+
 /** Slot fissi per backup pianificazione: 1ª–4ª settimana del mese. */
 export const PLANNING_WEEK_SLOT_COUNT = 4
 
@@ -29,27 +67,34 @@ function writeList(kind, list) {
 }
 
 /** @returns {{ savedAt: string, payload: object } | null} */
-export function getLatestStaffBackup(kind) {
-  const list = readList(kind)
+export function getLatestStaffBackup(kind, scope = undefined) {
+  const list = scope === undefined ? readList(kind) : listStaffBackups(kind, scope)
   return list[0] ?? null
 }
 
 /** @returns {{ savedAt: string, payload: object }[]} */
-export function listStaffBackups(kind) {
-  return readList(kind)
+export function listStaffBackups(kind, scope = undefined) {
+  const list = readList(kind)
+  if (scope === undefined) return list
+  if (!scope) {
+    return list.filter((entry) => !entry?.payload?.operatorBackupScope)
+  }
+  return list.filter((entry) => entry?.payload?.operatorBackupScope === scope)
 }
 
 /** @returns {{ savedAt: string, payload: object } | null} */
-export function getStaffBackupEntry(kind, index) {
-  const list = readList(kind)
+export function getStaffBackupEntry(kind, index, scope = undefined) {
+  const list = scope === undefined ? readList(kind) : listStaffBackups(kind, scope)
   const i = Number(index)
   if (!Number.isFinite(i) || i < 0 || i >= list.length) return null
   return list[i] ?? null
 }
 
-export function saveStaffBackup(kind, payload) {
+export function saveStaffBackup(kind, payload, scope = '') {
   const list = readList(kind)
-  const entry = { savedAt: new Date().toISOString(), payload }
+  const body = scope ? { ...payload, operatorBackupScope: scope } : { ...payload }
+  if (!scope && body.operatorBackupScope) delete body.operatorBackupScope
+  const entry = { savedAt: new Date().toISOString(), payload: body }
   list.unshift(entry)
   if (list.length > MAX_SNAPSHOTS) list.length = MAX_SNAPSHOTS
   writeList(kind, list)
@@ -139,33 +184,42 @@ function readPlanningWeekSlotsLegacy() {
 }
 
 /** @returns {{ savedAt: string, payload: object } | null} */
-export function getPlanningWeekBackup(monthYm, slotIndex) {
+export function getPlanningWeekBackup(monthYm, slotIndex, scope = '') {
   const ym = String(monthYm || '').trim()
   const i = Number(slotIndex)
   if (!ym || !Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
   const map = readPlanningBackupMap()
-  const key = planningBackupServerKey(ym, i)
+  const key = planningBackupServerKey(ym, i, scope)
   if (key && map[key]) return map[key]
 
-  const suffix = `:${i}`
-  const matches = Object.entries(map).filter(([k, v]) => k.endsWith(suffix) && v?.payload)
-  if (matches.length === 1) return matches[0][1]
+  if (!scope) {
+    const suffix = `:${i}`
+    const matches = Object.entries(map).filter(([k, v]) => k.endsWith(suffix) && v?.payload)
+    if (matches.length === 1) return matches[0][1]
+  }
   return null
 }
 
-export function savePlanningWeekBackup(monthYm, slotIndex, payload) {
+export function savePlanningWeekBackup(monthYm, slotIndex, payload, scope = '') {
   const ym = String(monthYm || monthYmFromPayload(payload) || '').trim()
   const i = Number(slotIndex)
   if (!ym || !Number.isFinite(i) || i < 0 || i >= PLANNING_WEEK_SLOT_COUNT) return null
   const map = readPlanningBackupMap()
-  const entry = { savedAt: new Date().toISOString(), payload: { ...payload, monthYm: ym } }
-  map[planningBackupServerKey(ym, i)] = entry
+  const entry = {
+    savedAt: new Date().toISOString(),
+    payload: {
+      ...payload,
+      monthYm: ym,
+      ...(scope ? { operatorBackupScope: scope } : {}),
+    },
+  }
+  map[planningBackupServerKey(ym, i, scope)] = entry
   writePlanningBackupMap(map)
   return entry
 }
 
-export function getPlanningWeekBackupSavedAt(monthYm, slotIndex) {
-  return getPlanningWeekBackup(monthYm, slotIndex)?.savedAt ?? null
+export function getPlanningWeekBackupSavedAt(monthYm, slotIndex, scope = '') {
+  return getPlanningWeekBackup(monthYm, slotIndex, scope)?.savedAt ?? null
 }
 
 function normalizeMembersLocaleKey(name) {
@@ -201,11 +255,12 @@ function writeMembersByLocaleMap(map) {
 }
 
 /** @returns {string[]} nomi locali con almeno un backup dipendenti salvato */
-export function listMembersLocaleBackupNames() {
+export function listMembersLocaleBackupNames(nameFilter = null) {
   const map = readMembersByLocaleMap()
   const dedup = new Map()
   for (const rawKey of Object.keys(map)) {
     if (!map[rawKey]?.payload?.members?.length) continue
+    if (typeof nameFilter === 'function' && !nameFilter(rawKey)) continue
     const key = membersLocaleCompareKey(rawKey)
     if (!key) continue
     if (!dedup.has(key)) dedup.set(key, rawKey)
@@ -253,10 +308,17 @@ export function deleteMembersLocaleBackup(localeName) {
   return true
 }
 
-/** Chiave server per backup pianificazione: mese + slot settimana (0–3). */
-export function planningBackupServerKey(monthYm, slotIndex) {
+/** Chiave server per backup pianificazione: mese + slot settimana (0–3), opz. scope postazione. */
+export function planningBackupServerKey(monthYm, slotIndex, scope = '') {
   const ym = String(monthYm || '').trim()
   const slot = Number(slotIndex)
   if (!ym || !Number.isFinite(slot)) return ''
-  return `${ym}:${slot}`
+  return scopedStaffBackupKey(`${ym}:${slot}`, scope)
+}
+
+/** Chiave server per backup ore/costi del mese, opz. scope postazione. */
+export function payrollBackupServerKey(monthYm, scope = '') {
+  const ym = String(monthYm || '').trim()
+  if (!ym) return ''
+  return scopedStaffBackupKey(ym, scope)
 }

@@ -1,7 +1,13 @@
 import { fetchStaffLocalePack, fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
 import { getOperatorStationActivitySlug, getOperatorStationStaffLocaleName } from './operatorStationLocale.js'
+import {
+  findLocalePackInStore,
+  localePackFetchCandidates,
+  memberNameKey,
+  membersFromPackAndDb,
+} from './operatorLocalePack.js'
 import { isOperatorStationStaffSessionOpen } from './operatorStationStaffSession.js'
-import { matchStaffLocaleName, staffLocaleCompareKey } from './primaNotaStaffLocaleLink.js'
+import { matchStaffLocaleName } from './primaNotaStaffLocaleLink.js'
 import { isValidLocaleAccessCode, normalizeLocaleAccessCode } from './staffLocaleAccessCode.js'
 import { readStaffLocaleStore, writeStaffLocaleStore } from './staffLocaleStore.js'
 
@@ -9,21 +15,8 @@ const MEMBERS_CACHE_MS = 10 * 60 * 1000
 const MAX_MEMBER_IDS_IN_QUERY = 40
 const membersCache = new Map()
 
-function memberNameKey(name) {
-  return String(name || '').trim().toLocaleLowerCase('it')
-}
-
-function findStoredLocalePackEntry(store, localeName) {
-  const target = staffLocaleCompareKey(localeName)
-  if (!target) return null
-  for (const [key, pack] of Object.entries(store || {})) {
-    if (staffLocaleCompareKey(key) === target) return { key, pack }
-  }
-  return null
-}
-
 function cacheKey(stationId, localeName) {
-  return `${String(stationId || '').trim().toLowerCase()}::${staffLocaleCompareKey(localeName)}`
+  return `${String(stationId || '').trim().toLowerCase()}::${memberNameKey(localeName)}`
 }
 
 function readMembersCache(stationId, localeName) {
@@ -53,68 +46,90 @@ export function invalidateOperatorStationMembersCache(stationId = null, localeNa
     return
   }
   const prefix = stationId ? `${String(stationId).trim().toLowerCase()}::` : ''
-  const localeKey = staffLocaleCompareKey(localeName)
   for (const key of [...membersCache.keys()]) {
-    if ((prefix && key.startsWith(prefix)) || (localeKey && key.endsWith(`::${localeKey}`))) {
+    if ((prefix && key.startsWith(prefix)) || (localeName && key.endsWith(`::${memberNameKey(localeName)}`))) {
       membersCache.delete(key)
     }
   }
 }
 
-async function readStoredAccessCode(store, localeName) {
-  const hit = findStoredLocalePackEntry(store, localeName)
+async function readStoredAccessCode(store, localeName, activitySlug = '') {
+  const hit = findLocalePackInStore(store, localeName, activitySlug)
   return normalizeLocaleAccessCode(hit?.pack?.access_code)
 }
 
+async function fetchRemoteLocalePack(stationId, localeName, code) {
+  const slug = getOperatorStationActivitySlug(stationId)
+  const candidates = localePackFetchCandidates(localeName, slug)
+  const seen = new Set()
+  for (const name of candidates) {
+    const key = memberNameKey(name)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    try {
+      const remote = await fetchStaffLocalePack(name, code)
+      if (remote && Array.isArray(remote.members)) {
+        return { canonicalName: name, remote }
+      }
+    } catch {
+      // prova il nome successivo (es. Mucche Volanti / La Via Lattea)
+    }
+  }
+  return null
+}
+
 async function resolvePackMembersForLocale(stationId, localeName) {
+  const slug = getOperatorStationActivitySlug(stationId)
   const store = await readStaffLocaleStore()
   const availableNames = Object.keys(store || {})
-  const slug = getOperatorStationActivitySlug(stationId)
   const canonicalName = matchStaffLocaleName(localeName, availableNames, slug) || localeName
-  const localHit = findStoredLocalePackEntry(store, canonicalName)
+  const localHit = findLocalePackInStore(store, canonicalName, slug)
   const localMembers = Array.isArray(localHit?.pack?.members) ? localHit.pack.members : []
-  if (localMembers.length) return { canonicalName, packMembers: localMembers }
+  if (localMembers.length) {
+    return { canonicalName: localHit?.canonicalName || canonicalName, packMembers: localMembers }
+  }
 
-  const code = await readStoredAccessCode(store, canonicalName)
+  const code = await readStoredAccessCode(store, canonicalName, slug)
   if (!isValidLocaleAccessCode(code) || !isOperatorStationStaffSessionOpen(stationId, canonicalName)) {
     return { canonicalName, packMembers: [] }
   }
 
   try {
-    const remote = await fetchStaffLocalePack(canonicalName, code)
-    const remoteMembers = Array.isArray(remote?.members) ? remote.members : []
-    if (!remoteMembers.length) return { canonicalName, packMembers: [] }
+    const remoteHit = await fetchRemoteLocalePack(stationId, canonicalName, code)
+    if (!remoteHit) return { canonicalName, packMembers: [] }
+    const remoteMembers = remoteHit.remote.members
+    if (!remoteMembers.length) return { canonicalName: remoteHit.canonicalName, packMembers: [] }
 
     const pack = {
-      saved_at: remote.saved_at || new Date().toISOString(),
+      saved_at: remoteHit.remote.saved_at || new Date().toISOString(),
       members: remoteMembers,
-      sections: Array.isArray(remote.sections) ? remote.sections : [],
-      access_code: normalizeLocaleAccessCode(remote.access_code) || code,
+      sections: Array.isArray(remoteHit.remote.sections) ? remoteHit.remote.sections : [],
+      access_code: normalizeLocaleAccessCode(remoteHit.remote.access_code) || code,
     }
-    const previousKey = localHit?.key || ''
-    if (previousKey && previousKey !== canonicalName) delete store[previousKey]
-    store[canonicalName] = pack
+    const saveKey = localHit?.key || remoteHit.canonicalName
+    if (localHit?.key && localHit.key !== saveKey) delete store[localHit.key]
+    store[saveKey] = pack
     await writeStaffLocaleStore(store)
-    return { canonicalName, packMembers: remoteMembers }
+    return { canonicalName: saveKey, packMembers: remoteMembers }
   } catch {
     return { canonicalName, packMembers: [] }
   }
 }
 
 function resolveMembersFromPackAndDb(packMembers, allRaw, { operatorScoped = false } = {}) {
-  const packNameKeys = new Set(packMembers.map((m) => memberNameKey(m.name)).filter(Boolean))
-  const all = Array.isArray(allRaw) ? allRaw : []
-  if (!packNameKeys.size) {
-    if (operatorScoped) {
-      return { members: [], memberIds: [], packNameKeys: new Set() }
-    }
+  const members = membersFromPackAndDb(packMembers, allRaw)
+  if (!members.length && operatorScoped) {
+    return { members: [], memberIds: [], packNameKeys: new Set() }
+  }
+  if (!members.length && !operatorScoped) {
+    const all = Array.isArray(allRaw) ? allRaw : []
     return {
       members: all,
       memberIds: all.map((m) => m.id).filter((id) => id != null),
       packNameKeys: new Set(all.map((m) => memberNameKey(m.name)).filter(Boolean)),
     }
   }
-  const members = all.filter((m) => packNameKeys.has(memberNameKey(m.name)))
+  const packNameKeys = new Set((packMembers || []).map((m) => memberNameKey(m.name)).filter(Boolean))
   const memberIds = members.map((m) => m.id).filter((id) => id != null)
   return { members, memberIds, packNameKeys }
 }

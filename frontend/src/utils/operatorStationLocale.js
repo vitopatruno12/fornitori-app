@@ -27,3 +27,14 @@ export function getOperatorStationStaffLocaleName(stationId, availableNames = []
 export function operatorStationLocaleKeysEqual(a, b) {
   return staffLocaleCompareKey(a) === staffLocaleCompareKey(b)
 }
+
+/** True se il nome locale appartiene alla postazione operativa (es. solo Mucche Volanti per lattea). */
+export function operatorStationLocaleNameMatches(stationId, localeName, availableNames = []) {
+  const station = String(stationId || '').trim().toLowerCase()
+  if (!station) return true
+  const linked = getOperatorStationStaffLocaleName(stationId, availableNames)
+  if (!linked) return false
+  const slug = getOperatorStationActivitySlug(stationId)
+  const canonical = matchStaffLocaleName(localeName, [linked, localeName], slug)
+  return staffLocaleCompareKey(canonical) === staffLocaleCompareKey(linked)
+}

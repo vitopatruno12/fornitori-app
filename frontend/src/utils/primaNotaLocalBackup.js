@@ -17,14 +17,22 @@ function writeList(list) {
 }
 
 /** @returns {{ savedAt: string, payload: object } | null} */
-export function getLatestPrimaNotaBackup() {
+export function getLatestPrimaNotaBackup(activityScope = '') {
   const list = readList()
-  return list[0] ?? null
+  const scope = String(activityScope || '').trim().toLowerCase()
+  if (!scope) {
+    const hit = list.find((entry) => !entry?.payload?.operatorActivityScope)
+    return hit ?? list[0] ?? null
+  }
+  return list.find((entry) => entry?.payload?.operatorActivityScope === scope) ?? null
 }
 
-export function savePrimaNotaBackup(payload) {
+export function savePrimaNotaBackup(payload, activityScope = '') {
   const list = readList()
-  const entry = { savedAt: new Date().toISOString(), payload }
+  const scope = String(activityScope || '').trim().toLowerCase()
+  const body = scope ? { ...payload, operatorActivityScope: scope } : { ...payload }
+  if (!scope && body.operatorActivityScope) delete body.operatorActivityScope
+  const entry = { savedAt: new Date().toISOString(), payload: body }
   list.unshift(entry)
   if (list.length > MAX_SNAPSHOTS) list.length = MAX_SNAPSHOTS
   writeList(list)

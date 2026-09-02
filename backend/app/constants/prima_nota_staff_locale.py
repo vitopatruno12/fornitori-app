@@ -56,4 +56,11 @@ def match_staff_locale_name(preferred: str, available_names: list, activity_slug
                 continue
             if all(token in row_key for token in tokens):
                 return str(name)
+    if slug == "via_lattea":
+        for name in available_names:
+            row_key = _locale_name_key(name)
+            if any(fragment in row_key for fragment in excluded):
+                continue
+            if "lattea" in row_key:
+                return str(name)
     return preferred.strip()

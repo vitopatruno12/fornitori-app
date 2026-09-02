@@ -45,6 +45,10 @@ import {
   savePlanningWeekBackup,
   saveStaffBackup,
   planningBackupServerKey,
+  payrollBackupServerKey,
+  operatorStaffBackupScope,
+  staffBackupKeyMatchesScope,
+  unscopedStaffBackupKey,
   pickNewestSavedAt,
 } from '../utils/staffLocalBackup.js'
 import {
@@ -71,7 +75,13 @@ import {
   verifyLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
 import { DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS } from '../utils/primaNotaStaffLocaleLink.js'
-import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug, operatorStationLocaleNameMatches } from '../utils/operatorStationLocale.js'
+import {
+  findLocalePackInStore,
+  membersFromPackAndDb,
+  writeOperatorLocalePackMembers,
+} from '../utils/operatorLocalePack.js'
+import { matchStaffLocaleName, staffLocaleCompareKey } from '../utils/primaNotaStaffLocaleLink.js'
 import {
   closeOtherOperatorStationStaffSessions,
   isOperatorStationStaffSessionOpen,
@@ -81,7 +91,6 @@ import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   fetchOperatorStationShifts,
   invalidateOperatorStationMembersCache,
-  resolveOperatorStationMembers,
 } from '../utils/operatorStaffReportData.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
@@ -1134,6 +1143,10 @@ function expandDemoRows() {
 
 export default function StaffPage({ operatorMode = false, stationId: stationIdProp = null }) {
   const operatorStationId = operatorMode ? stationIdProp || getLockedOperatorStationId() : null
+  const operatorBackupScope = useMemo(
+    () => (operatorMode && operatorStationId ? operatorStaffBackupScope(operatorStationId) : ''),
+    [operatorMode, operatorStationId],
+  )
   const [members, setMembers] = useState([])
   const [shifts, setShifts] = useState([])
   /** True dopo «Carica piano» (o demo) finché non cambi date/vista. */
@@ -1232,15 +1245,18 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }))
 
   const refreshPayrollBackupOptions = useCallback(async () => {
+    const scope = operatorBackupScope
     const options = []
     try {
       const summaries = await fetchStaffBackups('payroll')
       for (const row of summaries) {
-        const ym = String(row?.backup_key || '').trim()
+        const backupKey = String(row?.backup_key || '').trim()
+        if (!backupKey || !staffBackupKeyMatchesScope(backupKey, scope)) continue
+        const ym = unscopedStaffBackupKey(backupKey, scope)
         if (!ym) continue
         const when = formatStaffBackupLabel(row.saved_at)
         options.push({
-          value: ym,
+          value: scope ? backupKey : ym,
           label: `${formatMonthYmIt(ym)} — server${when ? ` (${when})` : ''}`,
           savedAt: row.saved_at,
           ym,
@@ -1250,11 +1266,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     } catch {
       // server assente
     }
-    const localList = listStaffBackups('payroll')
+    const localList = listStaffBackups('payroll', scope || '')
     localList.forEach((entry, index) => {
       const ym = String(entry?.payload?.payrollMonthYm || '').trim() || '—'
       const when = formatStaffBackupLabel(entry.savedAt)
-      const hasServer = options.some((o) => o.value === ym && o.source === 'server')
+      const hasServer = options.some((o) => o.ym === ym && o.source === 'server')
       const suffix = hasServer ? ' — copia browser' : ' — solo browser'
       options.push({
         value: `local:${index}`,
@@ -1271,7 +1287,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     })
     setPayrollBackupOptions(options)
     return options
-  }, [])
+  }, [operatorBackupScope])
 
   const payrollBackupSavedAt = useMemo(() => {
     const hit = payrollBackupOptions.find((o) => o.value === payrollBackupKey)
@@ -1285,7 +1301,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   useEffect(() => {
     if (!payrollBackupOptions.length) return
     if (payrollBackupOptions.some((o) => o.value === payrollBackupKey)) return
-    const serverHit = payrollBackupOptions.find((o) => o.value === payrollMonthYm)
+    const serverHit = payrollBackupOptions.find((o) => o.ym === payrollMonthYm)
     setPayrollBackupKey(serverHit?.value ?? payrollBackupOptions[0].value)
   }, [payrollBackupOptions, payrollBackupKey, payrollMonthYm])
 
@@ -1314,8 +1330,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           // server assente
         }
       }
-      const planKey = planningBackupServerKey(currentPlanningMonthYm(), planningSlot)
-      const localPlanningAt = getPlanningWeekBackupSavedAt(currentPlanningMonthYm(), planningSlot)
+      const planKey = planningBackupServerKey(currentPlanningMonthYm(), planningSlot, operatorBackupScope)
+      const localPlanningAt = getPlanningWeekBackupSavedAt(
+        currentPlanningMonthYm(),
+        planningSlot,
+        operatorBackupScope,
+      )
       let serverPlanningAt = null
       if (planKey) {
         try {
@@ -1326,16 +1346,18 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       const planningAt = pickNewestSavedAt(localPlanningAt, serverPlanningAt)
       let serverPayrollAt = null
-      if (payrollYm) {
+      const payrollServerKey = payrollYm ? payrollBackupServerKey(payrollYm, operatorBackupScope) : ''
+      if (payrollServerKey) {
         try {
-          serverPayrollAt = await fetchStaffBackupSavedAt('payroll', payrollYm)
+          serverPayrollAt = await fetchStaffBackupSavedAt('payroll', payrollServerKey)
         } catch {
           serverPayrollAt = null
         }
       }
+      const scopedPayroll = getLatestStaffBackup('payroll', operatorBackupScope || '')
       const localPayrollAt =
-        payrollYm && getLatestStaffBackup('payroll')?.payload?.payrollMonthYm === payrollYm
-          ? getLatestStaffBackup('payroll')?.savedAt ?? null
+        payrollYm && scopedPayroll?.payload?.payrollMonthYm === payrollYm
+          ? scopedPayroll?.savedAt ?? null
           : null
       const payrollAt = pickNewestSavedAt(localPayrollAt, serverPayrollAt)
       setBackupMeta({
@@ -1350,6 +1372,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       payrollMonthYm,
       localePackSavedAtByName,
       currentPlanningMonthYm,
+      operatorBackupScope,
     ],
   )
 
@@ -1366,6 +1389,22 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     [planningMonthWeeks],
   )
   const membersBackupLocaleOptions = useMemo(() => {
+    if (operatorMode && operatorStationId) {
+      const name = normalizeLocaleName(
+        getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames) || localeStaffName,
+      )
+      if (!name) {
+        return [{ value: '', label: 'Locale postazione' }]
+      }
+      const savedAt = localePackSavedAtByName[name] || getMembersLocaleBackupSavedAt(name)
+      const when = savedAt ? formatStaffBackupLabel(savedAt) : null
+      return [
+        {
+          value: name,
+          label: when ? `${name} (backup ${when})` : name,
+        },
+      ]
+    }
     const names = new Set()
     const seenKeys = new Set()
     for (const rawName of [...savedLocaleNames, ...listMembersLocaleBackupNames()]) {
@@ -1392,7 +1431,14 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         label: when ? `${name} (backup ${when})` : name,
       }
     })
-  }, [savedLocaleNames, localeStaffName, localePackSavedAtByName, backupMeta.members])
+  }, [
+    operatorMode,
+    operatorStationId,
+    savedLocaleNames,
+    localeStaffName,
+    localePackSavedAtByName,
+    backupMeta.members,
+  ])
   const weekLoadTargetAnchor = useMemo(
     () => (planView === 'week' ? weekAnchor : startOfWeekMonday(formDate ? parseYMD(formDate) : new Date())),
     [planView, weekAnchor, formDate],
@@ -1822,8 +1868,20 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   const refreshMembers = useCallback(async () => {
     if (operatorMode && operatorStationId) {
       try {
-        const { members: scoped } = await resolveOperatorStationMembers(operatorStationId)
+        const localeName = stationStaffLocaleName || localeStaffName
+        const slug = getOperatorStationActivitySlug(operatorStationId)
+        const store = await readStaffLocaleStore()
+        const hit = findLocalePackInStore(store, localeName, slug)
+        const packMembers = Array.isArray(hit?.pack?.members) ? hit.pack.members : []
+        let all = []
+        try {
+          all = await fetchStaffMembers()
+        } catch {
+          all = members
+        }
+        const scoped = membersFromPackAndDb(packMembers, all)
         setMembers(scoped)
+        invalidateOperatorStationMembersCache(operatorStationId, localeName)
       } catch (e) {
         setError(e?.message || 'Errore caricamento dipendenti')
       }
@@ -1835,7 +1893,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     } catch (e) {
       setError(e?.message || 'Errore caricamento dipendenti')
     }
-  }, [operatorMode, operatorStationId])
+  }, [operatorMode, operatorStationId, stationStaffLocaleName, localeStaffName, members])
 
   const clearStaffDataFromMemory = useCallback(() => {
     setMembers([])
@@ -2379,14 +2437,30 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       if (section) setActiveSection(section)
       if (editingMemberId) {
-        await updateStaffMember(editingMemberId, payload)
+        const updated = await updateStaffMember(editingMemberId, payload)
         setSuccess('Dipendente aggiornato')
+        if (operatorMode && operatorStationId) {
+          const nextMembers = members.map((m) =>
+            m.id === editingMemberId ? { ...m, ...payload, id: editingMemberId, ...(updated || {}) } : m,
+          )
+          setMembers(nextMembers)
+          await persistOperatorLocaleMembers(nextMembers)
+          resetMemberForm()
+          return
+        }
       } else {
-        await createStaffMember({
+        const created = await createStaffMember({
           ...payload,
           is_active: true,
         })
         setSuccess('Dipendente aggiunto')
+        if (operatorMode && operatorStationId) {
+          const nextMembers = [...members, created]
+          setMembers(nextMembers)
+          await persistOperatorLocaleMembers(nextMembers)
+          resetMemberForm()
+          return
+        }
       }
       resetMemberForm()
       await refreshMembers()
@@ -2412,6 +2486,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       await updateStaffMember(id, payload)
       setSuccess('Anagrafica aggiornata')
       setMemberInfoId(null)
+      if (operatorMode && operatorStationId) {
+        const nextMembers = members.map((m) => (m.id === id ? { ...m, ...payload, id } : m))
+        setMembers(nextMembers)
+        await persistOperatorLocaleMembers(nextMembers)
+        return
+      }
       await refreshMembers()
     } catch (err) {
       const msg = String(err?.message || '')
@@ -2539,9 +2619,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           await patchCachedListsForDelete(`/staff/members/${m.id}`)
         } else throw err
       }
-      setMembers((prev) => prev.filter((row) => !memberIdsEqual(row.id, m.id)))
+      const nextMembers = members.filter((row) => !memberIdsEqual(row.id, m.id))
+      setMembers(nextMembers)
       setShifts((prev) => prev.filter((row) => !memberIdsEqual(row.staff_member_id, m.id)))
       setPayrollShifts((prev) => prev.filter((row) => !memberIdsEqual(row.staff_member_id, m.id)))
+      if (operatorMode && operatorStationId) {
+        await persistOperatorLocaleMembers(nextMembers)
+      }
       setFormMemberIds((prev) => {
         if (!prev.has(m.id)) return prev
         const next = new Set(prev)
@@ -2555,7 +2639,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       if (!queuedOffline) {
         try {
-          await refreshMembers()
+          if (!(operatorMode && operatorStationId)) {
+            await refreshMembers()
+          }
         } catch {
           // Mantieni aggiornamento locale in memoria.
         }
@@ -2612,9 +2698,14 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setMembers([])
       setShifts([])
       setPayrollShifts([])
+      if (operatorMode && operatorStationId) {
+        await persistOperatorLocaleMembers([])
+      }
       if (!queuedOffline) {
         try {
-          await refreshMembers()
+          if (!(operatorMode && operatorStationId)) {
+            await refreshMembers()
+          }
         } catch {
           // Mantieni elenco locale vuoto se il refresh fallisce dopo bulk delete.
         }
@@ -2683,12 +2774,54 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     : isStaffLocaleSessionOpen(localeStaffName)
 
   function findLocaleStoreKey(store, localeName) {
+    const names = Object.keys(store || {})
+    const slug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
+    const matched = slug ? matchStaffLocaleName(localeName, names, slug) : ''
+    if (matched) {
+      const hit = names.find((n) => localeNameCompareKey(n) === localeNameCompareKey(matched))
+      if (hit) return hit
+    }
     const target = localeNameCompareKey(localeName)
     if (!target) return ''
-    for (const rawKey of Object.keys(store || {})) {
+    for (const rawKey of names) {
       if (localeNameCompareKey(rawKey) === target) return rawKey
     }
     return ''
+  }
+
+  async function persistOperatorLocaleMembers(memberRows) {
+    if (!operatorMode || !operatorStationId) return
+    const localeName = stationStaffLocaleName || localeStaffName
+    if (!localeName) return
+    const snapshot = (memberRows || []).map(memberSnapshotFromRow)
+    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const accessCode = isValidLocaleAccessCode(code) ? code : undefined
+    const sectionsForPack = resolveLocaleSections({
+      localeName,
+      savedSections: localeSections,
+      members: snapshot,
+    })
+    const saveKey = await writeOperatorLocalePackMembers(operatorStationId, localeName, snapshot, {
+      sections: sectionsForPack,
+      access_code: accessCode,
+      hidden_planning_sections: hiddenPlanningSections,
+    })
+    const canonicalName = saveKey || resolveCanonicalLocaleName(localeName) || localeName
+    saveMembersLocaleBackup(canonicalName, {
+      members: snapshot,
+      sections: sectionsForPack,
+      access_code: accessCode || null,
+      hidden_planning_sections: hiddenPlanningSections,
+    })
+    try {
+      await upsertStaffLocalePack(canonicalName, snapshot, accessCode, {
+        sections: sectionsForPack,
+        hidden_planning_sections: hiddenPlanningSections,
+      })
+    } catch {
+      // Il pack locale resta valido anche se il server è offline.
+    }
+    invalidateOperatorStationMembersCache(operatorStationId, canonicalName)
   }
 
   function isOfflineQueuedMessage(message) {
@@ -2818,6 +2951,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const addPack = (name, members) => {
       const n = normalizeLocaleName(name)
       if (!n || !Array.isArray(members) || members.length === 0) return
+      if (
+        operatorMode &&
+        operatorStationId &&
+        !operatorStationLocaleNameMatches(operatorStationId, n, savedLocaleNames)
+      ) {
+        return
+      }
       const key = n.toLocaleLowerCase('it')
       if (seenKeys.has(key)) return
       seenKeys.add(key)
@@ -2846,7 +2986,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     } catch {
       // server assente
     }
-    for (const backupName of listMembersLocaleBackupNames()) {
+    for (const backupName of listMembersLocaleBackupNames((name) => {
+      if (!operatorMode || !operatorStationId) return true
+      return operatorStationLocaleNameMatches(operatorStationId, name, savedLocaleNames)
+    })) {
       const backup = getMembersLocaleBackup(backupName)
       if (backup?.payload?.members?.length) addPack(backupName, backup.payload.members)
     }
@@ -2861,12 +3004,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   async function resolvePlanningBackup(slotIndex, monthYm = currentPlanningMonthYm()) {
     const ym = String(monthYm || '').trim()
     const slot = Number(slotIndex)
-    const local = ym ? getPlanningWeekBackup(ym, slot) : null
+    const local = ym ? getPlanningWeekBackup(ym, slot, operatorBackupScope) : null
     const keysToTry = []
     if (local?.payload?.monthYm) {
-      keysToTry.push(planningBackupServerKey(local.payload.monthYm, slot))
+      keysToTry.push(planningBackupServerKey(local.payload.monthYm, slot, operatorBackupScope))
     }
-    if (ym) keysToTry.push(planningBackupServerKey(ym, slot))
+    if (ym) keysToTry.push(planningBackupServerKey(ym, slot, operatorBackupScope))
     const seen = new Set()
     for (const key of keysToTry) {
       if (!key || seen.has(key)) continue
@@ -2886,7 +3029,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     try {
       const summaries = await fetchStaffBackups('planning')
       const suffix = `:${slot}`
-      const hit = summaries.find((row) => String(row?.backup_key || '').endsWith(suffix))
+      const hit = summaries.find((row) => {
+        const backupKey = String(row?.backup_key || '')
+        return staffBackupKeyMatchesScope(backupKey, operatorBackupScope) && backupKey.endsWith(suffix)
+      })
       if (hit?.backup_key) {
         const remote = await fetchStaffBackupDetail('planning', hit.backup_key)
         if (remote?.payload?.shifts?.length) {
@@ -2904,7 +3050,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (!k) return null
     if (k.startsWith('local:')) {
       const idx = Number(k.slice(6))
-      const entry = getStaffBackupEntry('payroll', idx)
+      const entry = getStaffBackupEntry('payroll', idx, operatorBackupScope || '')
       if (entry?.payload) {
         return { savedAt: entry.savedAt, payload: entry.payload }
       }
@@ -2918,7 +3064,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     } catch {
       // fallback locale
     }
-    const localHit = listStaffBackups('payroll').find((e) => e?.payload?.payrollMonthYm === k)
+    const ym = unscopedStaffBackupKey(k, operatorBackupScope)
+    const localHit = listStaffBackups('payroll', operatorBackupScope || '').find(
+      (e) => e?.payload?.payrollMonthYm === ym || e?.payload?.payrollMonthYm === k,
+    )
     if (localHit?.payload) {
       return { savedAt: localHit.savedAt, payload: localHit.payload }
     }
@@ -2926,9 +3075,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }
 
   async function resolvePayrollBackup(monthYm = payrollMonthYm) {
-    const server = await resolvePayrollBackupByKey(monthYm)
+    const scopedKey = payrollBackupServerKey(monthYm, operatorBackupScope)
+    const server = await resolvePayrollBackupByKey(operatorBackupScope ? scopedKey : monthYm)
     if (server?.payload) return server
-    return getLatestStaffBackup('payroll')
+    return getLatestStaffBackup('payroll', operatorBackupScope || '')
   }
 
   function matchServerLocaleSummary(summaries, localeName) {
@@ -3092,7 +3242,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const localCodeOk =
       !localCode || !isValidLocaleAccessCode(code) || verifyLocaleAccessCode(localCode, code)
 
-    if (local?.members?.length && localCodeOk) {
+    if (local && localCodeOk && Array.isArray(local.members) && (local.members.length > 0 || operatorMode)) {
       return {
         saved_at: local.saved_at,
         members: local.members,
@@ -3181,7 +3331,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         }
         if (!meta[n] && pack?.saved_at) meta[n] = pack.saved_at
       }
-      for (const backupName of listMembersLocaleBackupNames()) {
+      for (const backupName of listMembersLocaleBackupNames((name) => {
+        if (!operatorMode || !operatorStationId) return true
+        return operatorStationLocaleNameMatches(operatorStationId, name, [...names])
+      })) {
         const n = normalizeLocaleName(backupName)
         if (n) {
           names.add(n)
@@ -3192,7 +3345,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           }
         }
       }
-      setLocalePackSavedAtByName(meta)
       const sortIt = (a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })
       const deduped = []
       const seenLocaleKeys = new Set()
@@ -3202,12 +3354,28 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         seenLocaleKeys.add(key)
         deduped.push(name)
       }
-      setSavedLocaleNames(deduped.sort(sortIt))
-      setUserDeletableLocaleNames([...userNames].sort(sortIt))
+      let finalNames = deduped
+      let finalUserNames = [...userNames]
+      if (operatorMode && operatorStationId) {
+        const keepLocale = (n) => operatorStationLocaleNameMatches(operatorStationId, n, deduped)
+        finalNames = deduped.filter(keepLocale)
+        finalUserNames = [...userNames].filter(keepLocale)
+      }
+      setLocalePackSavedAtByName(
+        operatorMode && operatorStationId
+          ? Object.fromEntries(
+              Object.entries(meta).filter(([name]) =>
+                finalNames.some((n) => localeNameCompareKey(n) === localeNameCompareKey(name)),
+              ),
+            )
+          : meta,
+      )
+      setSavedLocaleNames(finalNames.sort(sortIt))
+      setUserDeletableLocaleNames(finalUserNames.sort(sortIt))
     } catch (err) {
       console.warn('refreshSavedLocaleNames:', err)
     }
-  }, [])
+  }, [operatorMode, operatorStationId])
 
   useEffect(() => {
     void refreshSavedLocaleNames()
@@ -3542,6 +3710,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       return []
     }
     if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
+      if (operatorMode) {
+        setMembers([])
+        return []
+      }
       clearStaffDataFromMemory()
       return []
     }
@@ -4462,11 +4634,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           notes: s.notes || null,
         })),
       }
-      const localEntry = savePlanningWeekBackup(monthYm, planningBackupSlot, payload)
+      const localEntry = savePlanningWeekBackup(monthYm, planningBackupSlot, payload, operatorBackupScope)
       if (localEntry?.savedAt) {
         setBackupMeta((prev) => ({ ...prev, planning: localEntry.savedAt }))
       }
-      const planKey = planningBackupServerKey(monthYm, planningBackupSlot)
+      const planKey = planningBackupServerKey(monthYm, planningBackupSlot, operatorBackupScope)
       try {
         await upsertStaffBackup('planning', planKey, payload)
         await refreshBackupMeta(planningBackupSlot)
@@ -4613,14 +4785,15 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         lines,
         archiveMonths: Array.isArray(archiveMonths) ? archiveMonths : [],
       }
-      const localPayrollEntry = saveStaffBackup('payroll', payload)
+      const localPayrollEntry = saveStaffBackup('payroll', payload, operatorBackupScope)
       if (localPayrollEntry?.savedAt) {
         setBackupMeta((prev) => ({ ...prev, payroll: localPayrollEntry.savedAt }))
       }
+      const payrollServerKey = payrollBackupServerKey(payrollMonthYm, operatorBackupScope)
       try {
-        await upsertStaffBackup('payroll', payrollMonthYm, payload)
+        await upsertStaffBackup('payroll', payrollServerKey, payload)
         await refreshPayrollBackupOptions()
-        setPayrollBackupKey(payrollMonthYm)
+        setPayrollBackupKey(operatorBackupScope ? payrollServerKey : payrollMonthYm)
         await refreshBackupMeta()
         setSuccess(
           `Backup ore e costi creato (mese ${payrollMonthYm}${lines.length ? `, ${lines.length} righe calcolate` : ''}, condiviso sul server).`,
@@ -4961,7 +5134,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         {(!operatorMode || activeLocaleSessionOpen) ? (
         <>
         <StaffSectionBackupBar
-          sectionTitle="dipendenti"
+          sectionTitle={
+            operatorMode
+              ? `dipendenti (${getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames) || stationStaffLocaleName || 'postazione'})`
+              : 'dipendenti'
+          }
           lastSavedAt={backupMeta.members}
           onBackup={handleBackupMembers}
           onRestore={handleRestoreMembersBackup}
@@ -4969,9 +5146,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           busy={backupBusy}
           slotLabel="Locale"
           emptySlotMessage="Nessun backup per questo locale"
-          slotOptions={membersBackupLocaleOptions}
+          slotOptions={operatorMode ? null : membersBackupLocaleOptions}
           slotValue={membersBackupLocale}
-          onSlotChange={handleMembersBackupLocaleChange}
+          onSlotChange={operatorMode ? undefined : handleMembersBackupLocaleChange}
         />
         <form onSubmit={handleAddMember} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div className="form-group" style={{ marginBottom: 0, flex: '1 1 140px' }}>

@@ -58,6 +58,13 @@ export function matchStaffLocaleName(preferredName, availableNames = [], activit
       if (tokens.every((token) => nameKey.includes(token))) return String(name)
     }
   }
+  if (slug === 'via_lattea') {
+    for (const name of availableNames) {
+      const nameKey = staffLocaleCompareKey(name)
+      if (excluded.some((fragment) => nameKey.includes(fragment))) continue
+      if (nameKey.includes('lattea')) return String(name)
+    }
+  }
   return String(preferredName || '').trim()
 }
 
