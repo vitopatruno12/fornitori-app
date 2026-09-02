@@ -121,16 +121,19 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     const to = String(dateToRef.current || '').slice(0, 10)
     if (!from || !to) {
       setError('Seleziona un intervallo date valido')
+      setLoading(false)
       return
     }
     if (to < from) {
       setError('La data «Al» deve essere uguale o successiva a «Dal»')
+      setLoading(false)
       return
     }
     if (operatorMode && daysInclusive(from, to) > MAX_OPERATOR_REPORT_DAYS) {
       setError(
         `Periodo troppo lungo (${daysInclusive(from, to)} giorni). Nella postazione operativa usa al massimo ${MAX_OPERATOR_REPORT_DAYS} giorni.`,
       )
+      setLoading(false)
       return
     }
     setLoading(true)
@@ -139,19 +142,24 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     try {
       const { members, shifts } = await loadReportData(from, to)
       startTransition(() => {
-        const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
-        setWorkbook(next)
-        setGeneratedAt(
-          new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }),
-        )
-        if (!members.length) {
-          setSuccess('Report generato: nessun dipendente registrato nel periodo.')
-        } else if (!shifts.length) {
-          setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
-        } else {
-          setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
+        try {
+          const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
+          setWorkbook(next)
+          setGeneratedAt(
+            new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }),
+          )
+          if (!members.length) {
+            setSuccess('Report generato: nessun dipendente registrato nel periodo.')
+          } else if (!shifts.length) {
+            setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
+          } else {
+            setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
+          }
+        } catch (buildErr) {
+          setError(buildErr?.message || 'Errore generazione report')
+        } finally {
+          setLoading(false)
         }
-        setLoading(false)
       })
     } catch (err) {
       setError(err?.message || 'Impossibile caricare i dati del personale')
@@ -160,7 +168,10 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   }, [loadReportData, operatorMode])
 
   useEffect(() => {
-    if (operatorMode && !operatorSessionOpen) return
+    if (operatorMode && !operatorSessionOpen) {
+      setLoading(false)
+      return
+    }
     void runRefresh()
   }, [
     operatorMode,
