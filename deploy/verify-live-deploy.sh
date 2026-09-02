@@ -38,20 +38,21 @@ echo ""
 if [[ -f "$APP_DIR/deploy/detect-served-dist.sh" ]]; then
   # shellcheck source=/dev/null
   source "$APP_DIR/deploy/detect-served-dist.sh"
-  served="$(detect_served_dist_root 2>/dev/null || true)"
-  if [[ -n "$served" ]]; then
-    echo "Cartella servita da Nginx/Caddy: $served"
-    if [[ "$served" != "$DIST_DIR" ]]; then
-      echo "ATTENZIONE: il web server NON serve $DIST_DIR"
-      if [[ -f "$served/section-versions.json" ]]; then
-        echo "Build nella cartella servita:"
-        grep -E '"build"|"generatedAt"' "$served/section-versions.json" || true
-      else
-        echo "ATTENZIONE: manca section-versions.json nella cartella servita"
+  mapfile -t served_roots < <(collect_served_dist_roots 2>/dev/null || true)
+  if ((${#served_roots[@]} > 0)); then
+    echo "Cartelle frontend/dist in Nginx/Caddy:"
+    for served in "${served_roots[@]}"; do
+      echo "  - $served"
+      if [[ "$served" != "$DIST_DIR" ]]; then
+        echo "    ATTENZIONE: diversa dal build in $DIST_DIR"
+        if [[ -f "$served/section-versions.json" ]]; then
+          echo "    Build servita:"
+          grep -E '"build"|"generatedAt"' "$served/section-versions.json" | sed 's/^/      /' || true
+        fi
+      elif [[ -f "$served/section-versions.json" ]]; then
+        echo "    OK: coincide con il build locale"
       fi
-    else
-      echo "OK: web server allineato alla cartella build"
-    fi
+    done
   else
     echo "Cartella servita: non rilevata (verifica manualmente nginx/caddy)"
   fi

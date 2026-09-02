@@ -74,25 +74,33 @@ log "Build frontend (file statici in frontend/dist)"
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/build-frontend.sh"
 
 DIST_DIR="$APP_DIR/frontend/dist"
-SERVED_DIST=""
 if [[ -f "$APP_DIR/deploy/detect-served-dist.sh" ]]; then
   # shellcheck source=/dev/null
   source "$APP_DIR/deploy/detect-served-dist.sh"
-  SERVED_DIST="$(detect_served_dist_root 2>/dev/null || true)"
-fi
-if [[ -n "$SERVED_DIST" && "$SERVED_DIST" != "$DIST_DIR" && -d "$DIST_DIR" ]]; then
-  warn "Nginx/Caddy serve $SERVED_DIST ma il build è in $DIST_DIR"
-  log "Copia frontend/dist nella cartella servita dal web server"
-  mkdir -p "$SERVED_DIST"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "$DIST_DIR/" "$SERVED_DIST/"
-  else
-    rm -rf "${SERVED_DIST:?}/"*
-    cp -a "$DIST_DIR/." "$SERVED_DIST/"
+  mapfile -t SERVED_DIST_ROOTS < <(collect_served_dist_roots 2>/dev/null || true)
+  for SERVED_DIST in "${SERVED_DIST_ROOTS[@]}"; do
+    [[ -n "$SERVED_DIST" ]] || continue
+    if [[ "$SERVED_DIST" == "$DIST_DIR" ]]; then
+      log "Web server root OK: $SERVED_DIST"
+      continue
+    fi
+    if [[ ! -d "$DIST_DIR" ]]; then
+      warn "Build assente in $DIST_DIR — salto copia verso $SERVED_DIST"
+      continue
+    fi
+    warn "Nginx/Caddy serve anche $SERVED_DIST (diversa dal build)"
+    log "Copia frontend/dist in $SERVED_DIST"
+    mkdir -p "$SERVED_DIST"
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --delete "$DIST_DIR/" "$SERVED_DIST/"
+    else
+      rm -rf "${SERVED_DIST:?}/"*
+      cp -a "$DIST_DIR/." "$SERVED_DIST/"
+    fi
+  done
+  if ((${#SERVED_DIST_ROOTS[@]} == 0)); then
+    warn "Nessuna cartella frontend/dist trovata in config Nginx/Caddy"
   fi
-  log "Dist copiata in $SERVED_DIST"
-elif [[ -n "$SERVED_DIST" ]]; then
-  log "Web server root OK: $SERVED_DIST"
 fi
 
 if [[ -f "$DIST_DIR/section-versions.json" ]]; then

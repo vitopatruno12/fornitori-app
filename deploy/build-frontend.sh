@@ -52,24 +52,46 @@ else
   echo "    Esegui: cd $APP_DIR && git fetch origin && git log -1 --oneline && git pull origin main"
 fi
 
-# Confronto con root Nginx/Caddy attivo (causa frequente: build in cartella diversa da quella servita)
+# Confronto con tutte le root Nginx/Caddy (causa frequente: build in cartella diversa da quella servita)
+warned_mismatch=0
 for cfg in /etc/nginx/sites-enabled/* /etc/caddy/Caddyfile; do
   [[ -f "$cfg" ]] || continue
   if grep -q 'frontend/dist' "$cfg" 2>/dev/null; then
-    SERVED_ROOT="$(grep -E 'root\s+' "$cfg" | grep -o '/[^;]*frontend/dist' | head -1 || true)"
-    if [[ -n "$SERVED_ROOT" && "$SERVED_ROOT" != "$DIST_DIR" ]]; then
-      echo ""
-      echo "================================================================"
-      echo "  ATTENZIONE: Nginx/Caddy serve una cartella DIVERSA dal build!"
-      echo "  Build:   $DIST_DIR"
-      echo "  Servito: $SERVED_ROOT  (in $cfg)"
-      echo "  Ricostruisci lì oppure aggiorna la config web server."
-      echo "================================================================"
-    elif [[ -n "$SERVED_ROOT" ]]; then
-      echo "==> Web server root OK: $SERVED_ROOT"
-    fi
+    while IFS= read -r served; do
+      [[ -n "$served" ]] || continue
+      if [[ "$served" != "$DIST_DIR" ]]; then
+        if [[ "$warned_mismatch" == "0" ]]; then
+          echo ""
+          echo "================================================================"
+          echo "  ATTENZIONE: Nginx/Caddy serve cartelle DIVERSE dal build!"
+          echo "  Build:   $DIST_DIR"
+          warned_mismatch=1
+        fi
+        echo "  Servito: $served  (in $cfg)"
+        echo "  Copia:   sudo rsync -a --delete \"$DIST_DIR/\" \"$served/\""
+      else
+        echo "==> Web server root OK: $served"
+      fi
+    done < <(grep -E 'root\s+' "$cfg" 2>/dev/null | grep -o '/[^;[:space:]]*frontend/dist' || true)
+    while IFS= read -r served; do
+      [[ -n "$served" ]] || continue
+      if [[ "$served" != "$DIST_DIR" ]]; then
+        if [[ "$warned_mismatch" == "0" ]]; then
+          echo ""
+          echo "================================================================"
+          echo "  ATTENZIONE: Nginx/Caddy serve cartelle DIVERSE dal build!"
+          echo "  Build:   $DIST_DIR"
+          warned_mismatch=1
+        fi
+        echo "  Servito: $served  (in $cfg)"
+        echo "  Copia:   sudo rsync -a --delete \"$DIST_DIR/\" \"$served/\""
+      fi
+    done < <(grep -E 'root \*' "$cfg" 2>/dev/null | grep -o '/[^;[:space:]]*frontend/dist' || true)
   fi
 done
+if [[ "$warned_mismatch" == "1" ]]; then
+  echo "================================================================"
+fi
 
 echo ""
 echo "    Poi: sudo systemctl reload nginx   (o reload caddy)"
