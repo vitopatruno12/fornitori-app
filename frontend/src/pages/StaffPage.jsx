@@ -78,6 +78,11 @@ import {
   setOperatorStationStaffSession,
 } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
+import {
+  fetchOperatorStationShifts,
+  invalidateOperatorStationMembersCache,
+  resolveOperatorStationMembers,
+} from '../utils/operatorStaffReportData.js'
 import { isOnline } from '../offline/offlineStatus'
 import { patchCachedListsForDelete } from '../offline/offlineCache'
 import {
@@ -1807,18 +1812,30 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
     const to = toYMD(endDate)
-    const sh = await fetchStaffShifts(from, to)
+    const sh =
+      operatorMode && operatorStationId
+        ? await fetchOperatorStationShifts(operatorStationId, from, to)
+        : await fetchStaffShifts(from, to)
     setShifts(normalizeShiftRows(sh, members))
-  }, [members])
+  }, [members, operatorMode, operatorStationId])
 
   const refreshMembers = useCallback(async () => {
+    if (operatorMode && operatorStationId) {
+      try {
+        const { members: scoped } = await resolveOperatorStationMembers(operatorStationId)
+        setMembers(scoped)
+      } catch (e) {
+        setError(e?.message || 'Errore caricamento dipendenti')
+      }
+      return
+    }
     try {
       const mem = await fetchStaffMembers()
       setMembers(mem || [])
     } catch (e) {
       setError(e?.message || 'Errore caricamento dipendenti')
     }
-  }, [])
+  }, [operatorMode, operatorStationId])
 
   const clearStaffDataFromMemory = useCallback(() => {
     setMembers([])
@@ -3440,7 +3457,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
   }
 
-  async function syncMembersFromLocalePack(packMembers, localeName, accessCode) {
+  async function syncMembersFromLocalePack(packMembers, localeName, accessCode, { operatorScoped = false } = {}) {
     let existingList = []
     try {
       const existing = await fetchStaffMembers()
@@ -3491,18 +3508,24 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
     }
 
-    for (const m of existingList) {
-      if (!keptIds.has(m.id)) {
-        await deleteStaffMember(m.id, localeName || undefined, accessCode)
+    if (!operatorScoped) {
+      for (const m of existingList) {
+        if (!keptIds.has(m.id)) {
+          await deleteStaffMember(m.id, localeName || undefined, accessCode)
+        }
       }
     }
 
     let list = []
-    try {
-      const mem = await fetchStaffMembers()
-      list = Array.isArray(mem) ? mem : []
-    } catch {
+    if (operatorScoped) {
       list = Array.from(nextMembersByKey.values())
+    } else {
+      try {
+        const mem = await fetchStaffMembers()
+        list = Array.isArray(mem) ? mem : []
+      } catch {
+        list = Array.from(nextMembersByKey.values())
+      }
     }
     setMembers(list)
     return list
@@ -3526,7 +3549,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       pack.members,
       localeName,
       isValidLocaleAccessCode(code) ? code : undefined,
+      { operatorScoped: operatorMode },
     )
+    if (operatorMode && operatorStationId) {
+      invalidateOperatorStationMembersCache(operatorStationId, localeName)
+    }
     applyLocaleSections(
       Array.isArray(pack.sections) ? pack.sections : [],
       Array.isArray(pack.sections) && pack.sections[0] ? pack.sections[0] : '',
