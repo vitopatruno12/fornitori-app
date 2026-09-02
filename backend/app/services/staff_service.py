@@ -7,6 +7,7 @@ from typing import List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..constants.prima_nota_staff_locale import DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS
 from ..models.staff_backup import StaffBackup
 from ..models.staff_locale_pack import StaffLocalePack
 from ..models.staff_member import StaffMember
@@ -555,6 +556,30 @@ def _find_locale_pack_by_key(db: Session, locale_name: str) -> Optional[StaffLoc
     for row in rows:
         if _locale_name_key(row.locale_name) == key:
             return row
+    slug_tokens = {
+        "via_zanardelli": ("zanardelli",),
+        "via_abba": ("abba",),
+        "via_lattea": ("lattea",),
+        "risacca": ("risacca", "momento"),
+    }
+    for slug, linked in DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.items():
+        linked_key = _locale_name_key(linked)
+        if linked_key and linked_key != key and linked_key not in key and key not in linked_key:
+            continue
+        tokens = slug_tokens.get(slug, ())
+        if not tokens:
+            continue
+        for row in rows:
+            row_key = _locale_name_key(row.locale_name)
+            if all(token in row_key for token in tokens):
+                return row
+    for slug, tokens in slug_tokens.items():
+        if not all(token in key for token in tokens):
+            continue
+        for row in rows:
+            row_key = _locale_name_key(row.locale_name)
+            if all(token in row_key for token in tokens):
+                return row
     return None
 
 

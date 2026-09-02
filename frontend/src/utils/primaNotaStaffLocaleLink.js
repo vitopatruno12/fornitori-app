@@ -7,6 +7,14 @@ export const DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS = {
   via_lattea: 'La Via Lattea',
 }
 
+/** Token distintivi per trovare il nome locale salvato sul server (es. *_zanardelli_19). */
+export const STAFF_LOCALE_SLUG_TOKENS = {
+  via_zanardelli: ['zanardelli'],
+  via_abba: ['abba'],
+  via_lattea: ['lattea'],
+  risacca: ['risacca', 'momento'],
+}
+
 export function staffLocaleCompareKey(value) {
   return String(value || '')
     .trim()
@@ -19,11 +27,19 @@ export function getStaffLocaleLinkForActivity(activitySlug) {
   return DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS[slug] || ''
 }
 
-export function matchStaffLocaleName(preferredName, availableNames = []) {
+export function matchStaffLocaleName(preferredName, availableNames = [], activitySlug = '') {
   const key = staffLocaleCompareKey(preferredName)
   if (!key) return ''
   for (const name of availableNames) {
     if (staffLocaleCompareKey(name) === key) return String(name)
+  }
+  const slug = String(activitySlug || '').trim().toLowerCase()
+  const tokens = STAFF_LOCALE_SLUG_TOKENS[slug] || []
+  if (tokens.length) {
+    for (const name of availableNames) {
+      const nameKey = staffLocaleCompareKey(name)
+      if (tokens.every((token) => nameKey.includes(token))) return String(name)
+    }
   }
   return String(preferredName || '').trim()
 }
@@ -33,7 +49,7 @@ export function resolveStaffLocaleName(activitySlug, staffSummaries = []) {
   const preferred = getStaffLocaleLinkForActivity(activitySlug)
   if (!preferred) return ''
   const names = (staffSummaries || []).map((row) => row?.locale_name).filter(Boolean)
-  return matchStaffLocaleName(preferred, names)
+  return matchStaffLocaleName(preferred, names, activitySlug)
 }
 
 export function findStaffLocaleSummary(activitySlug, staffSummaries = []) {

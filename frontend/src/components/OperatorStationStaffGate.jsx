@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
-import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug } from '../utils/operatorStationLocale.js'
 import {
   closeOtherOperatorStationStaffSessions,
   isOperatorStationStaffSessionOpen,
@@ -11,50 +11,55 @@ import {
   normalizeLocaleAccessCode,
   verifyLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
+import { matchStaffLocaleName, staffLocaleCompareKey } from '../utils/primaNotaStaffLocaleLink.js'
 import { readStaffLocaleStore, upsertStoredLocaleAccessCode } from '../utils/staffLocaleStore.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
 function localeNameCompareKey(value) {
-  return String(value || '')
-    .trim()
-    .toLocaleLowerCase('it')
-    .replace(/[\s_-]+/g, '')
+  return staffLocaleCompareKey(value)
 }
 
 async function readStoredLocaleAccessCode(localeName) {
   const store = await readStaffLocaleStore()
   const target = localeNameCompareKey(localeName)
   for (const [rawKey, pack] of Object.entries(store || {})) {
-    if (localeNameCompareKey(rawKey) === target) {
+    const packKey = localeNameCompareKey(rawKey)
+    if (packKey === target || packKey.includes(target) || target.includes(packKey)) {
       return normalizeLocaleAccessCode(pack?.access_code)
     }
   }
   return ''
 }
 
-async function verifyLocaleZoneAccess(localeName, code) {
+function resolveCanonicalLocaleName(localeName, summaries, activitySlug = '') {
+  const names = (summaries || []).map((row) => row?.locale_name).filter(Boolean)
+  return matchStaffLocaleName(localeName, names, activitySlug) || String(localeName || '').trim()
+}
+
+async function verifyLocaleZoneAccess(localeName, code, summaries, activitySlug = '') {
+  const canonicalName = resolveCanonicalLocaleName(localeName, summaries, activitySlug)
   try {
-    const summaries = await fetchStaffLocalePacks()
-    const hit = (summaries || []).find(
-      (row) => localeNameCompareKey(row?.locale_name) === localeNameCompareKey(localeName),
+    const rows = summaries || []
+    const hit = rows.find(
+      (row) => localeNameCompareKey(row?.locale_name) === localeNameCompareKey(canonicalName),
     )
     if (hit?.requires_access_code) {
-      await fetchStaffLocalePack(localeName, code)
-      return { ok: true }
+      await fetchStaffLocalePack(canonicalName, code)
+      return { ok: true, localeName: canonicalName }
     }
-    if (hit) return { ok: true }
+    if (hit) return { ok: true, localeName: canonicalName }
   } catch {
-    const stored = await readStoredLocaleAccessCode(localeName)
+    const stored = await readStoredLocaleAccessCode(canonicalName)
     if (stored && verifyLocaleAccessCode(stored, code)) {
-      return { ok: true }
+      return { ok: true, localeName: canonicalName }
     }
-    return { ok: false, wrongCode: true }
+    return { ok: false, wrongCode: true, localeName: canonicalName }
   }
-  const stored = await readStoredLocaleAccessCode(localeName)
+  const stored = await readStoredLocaleAccessCode(canonicalName)
   if (stored && verifyLocaleAccessCode(stored, code)) {
-    return { ok: true }
+    return { ok: true, localeName: canonicalName }
   }
-  return { ok: false, wrongCode: true }
+  return { ok: false, wrongCode: true, localeName: canonicalName }
 }
 
 export default function OperatorStationStaffGate({
@@ -76,6 +81,8 @@ export default function OperatorStationStaffGate({
     () => getOperatorStationStaffLocaleName(stationId, savedLocaleNames),
     [stationId, savedLocaleNames],
   )
+  const activitySlug = useMemo(() => getOperatorStationActivitySlug(stationId), [stationId])
+  const [localeSummaries, setLocaleSummaries] = useState([])
 
   const sessionOpen = useMemo(() => {
     void sessionTick
@@ -86,18 +93,22 @@ export default function OperatorStationStaffGate({
     try {
       const store = await readStaffLocaleStore()
       const names = new Set(Object.keys(store || {}))
+      let summaries = []
       try {
-        const summaries = await fetchStaffLocalePacks()
+        summaries = await fetchStaffLocalePacks()
+        setLocaleSummaries(Array.isArray(summaries) ? summaries : [])
         for (const row of summaries || []) {
           const n = String(row?.locale_name || '').trim()
           if (n) names.add(n)
         }
       } catch {
+        setLocaleSummaries([])
         // server assente
       }
       setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
     } catch {
       setSavedLocaleNames([])
+      setLocaleSummaries([])
     }
   }, [])
 
@@ -117,7 +128,11 @@ export default function OperatorStationStaffGate({
   }, [stationStaffLocaleName])
 
   async function handleOpen() {
-    const localeName = stationStaffLocaleName
+    const localeName = resolveCanonicalLocaleName(
+      stationStaffLocaleName,
+      localeSummaries.length ? localeSummaries : await fetchStaffLocalePacks().catch(() => []),
+      activitySlug,
+    )
     if (!localeName) {
       setError('Locale personale non configurato per questa postazione.')
       return
@@ -134,16 +149,17 @@ export default function OperatorStationStaffGate({
     setBusy(true)
     setError('')
     try {
-      const access = await verifyLocaleZoneAccess(localeName, code)
+      const summaries = localeSummaries.length ? localeSummaries : await fetchStaffLocalePacks().catch(() => [])
+      const access = await verifyLocaleZoneAccess(localeName, code, summaries, activitySlug)
       if (!access.ok) {
-        setError(`Codice errato per «${localeName}».`)
+        setError(`Codice errato per «${access.localeName || localeName}».`)
         return
       }
-      setOperatorStationStaffSession(stationId, localeName, true)
+      setOperatorStationStaffSession(stationId, access.localeName || localeName, true)
       setSessionTick((n) => n + 1)
-      await upsertStoredLocaleAccessCode(localeName, code)
+      await upsertStoredLocaleAccessCode(access.localeName || localeName, code)
       onSessionChange?.(true)
-      setSuccess(`Locale «${localeName}» aperto.`)
+      setSuccess(`Locale «${access.localeName || localeName}» aperto.`)
     } finally {
       setBusy(false)
     }

@@ -21,7 +21,7 @@ export function getOperatorStationStaffLocaleName(stationId, availableNames = []
   const slug = getOperatorStationActivitySlug(stationId)
   const preferred = DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS[slug] || ''
   if (!preferred) return ''
-  return matchStaffLocaleName(preferred, availableNames) || preferred
+  return matchStaffLocaleName(preferred, availableNames, slug) || preferred
 }
 
 export function operatorStationLocaleKeysEqual(a, b) {

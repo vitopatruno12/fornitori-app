@@ -20,11 +20,26 @@ def staff_locale_link_for_activity(activity: Optional[str]) -> str:
     return DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS.get(slug, "")
 
 
-def match_staff_locale_name(preferred: str, available_names: list) -> str:
+STAFF_LOCALE_SLUG_TOKENS = {
+    "via_zanardelli": ("zanardelli",),
+    "via_abba": ("abba",),
+    "via_lattea": ("lattea",),
+    "risacca": ("risacca", "momento"),
+}
+
+
+def match_staff_locale_name(preferred: str, available_names: list, activity_slug: Optional[str] = None) -> str:
     key = _locale_name_key(preferred)
     if not key:
         return ""
     for name in available_names:
         if _locale_name_key(name) == key:
             return str(name)
+    slug = str(activity_slug or "").strip().lower()
+    tokens = STAFF_LOCALE_SLUG_TOKENS.get(slug, ())
+    if tokens:
+        for name in available_names:
+            row_key = _locale_name_key(name)
+            if all(token in row_key for token in tokens):
+                return str(name)
     return preferred.strip()
