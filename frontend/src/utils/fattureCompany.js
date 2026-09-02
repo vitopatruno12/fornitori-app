@@ -1,4 +1,4 @@
-import { apiFetch } from './api.js'
+import { apiFetch } from '../services/api.js'
 import { getOperatorStationActivitySlug } from './operatorStationLocale.js'
 import {
   getLockedOperatorStationId,

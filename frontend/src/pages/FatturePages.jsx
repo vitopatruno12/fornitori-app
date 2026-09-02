@@ -573,7 +573,7 @@ export function FattureRicevutePage() {
         </section>
       ) : null}
         </>
-      )}
+      ) : null}
     </FatturePageShell>
   )
 }
