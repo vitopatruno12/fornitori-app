@@ -17,8 +17,8 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
   { id: 'stacker_svuotamento', label: 'Stacker', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
-  { id: 'cassa_mattina', label: 'Saldo attuale cassa', numeric: true, width: 130 },
-  { id: 'cassa_sera', label: 'Cassa finale', numeric: true, width: 110 },
+  { id: 'cassa_mattina', label: 'Cassa iniziale', numeric: true, width: 120 },
+  { id: 'cassa_sera', label: 'Saldo cassa progressivo', numeric: true, width: 150 },
   { id: 'note', label: 'Note', width: 180 },
 ]
 

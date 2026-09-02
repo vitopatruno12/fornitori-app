@@ -61,6 +61,7 @@ export default function OperatorStationStaffGate({
   stationId: stationIdProp = null,
   children,
   title = 'Accesso personale',
+  banner = null,
   onSessionChange,
 }) {
   const stationId = stationIdProp || getLockedOperatorStationId()
@@ -160,10 +161,11 @@ export default function OperatorStationStaffGate({
   }
 
   return (
-    <div>
-      <section className="card" style={{ marginBottom: '1rem' }}>
+    <div className="operator-station-staff-gate">
+      {banner}
+      <section className="card operator-station-staff-gate-card" style={{ marginBottom: '1rem' }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
-          {title}
+          {banner ? 'Accesso personale' : title}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem' }}>
           Locale: <strong>{stationStaffLocaleName || '—'}</strong>. Inserisci il codice e clicca <strong>Accedi</strong> per

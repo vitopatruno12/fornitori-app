@@ -7820,6 +7820,14 @@ select.form-control {
   max-width: 100%;
 }
 
+.operator-station-staff-gate > .staff-page-hero {
+  margin-bottom: 1rem;
+}
+
+.operator-station-staff-gate-card {
+  margin-top: 0;
+}
+
 .stipendi-toolbar-card,
 .stipendi-edit-card,
 .stipendi-excel-card {

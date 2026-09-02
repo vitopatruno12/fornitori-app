@@ -128,15 +128,19 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     window.print()
   }
 
+  const reportHero = (
+    <section className="staff-page-hero staff-report-no-print">
+      <h1 className="page-header staff-page-title">Report personale</h1>
+      <p className="staff-page-lead">
+        Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
+        Puoi stampare il report o scaricarlo in Excel.
+      </p>
+    </section>
+  )
+
   const reportBody = (
     <div className="pagamenti-page staff-report-page">
-      <section className="staff-page-hero staff-report-no-print">
-        <h1 className="page-header staff-page-title">Report personale</h1>
-        <p className="staff-page-lead">
-          Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
-          Puoi stampare il report o scaricarlo in Excel.
-        </p>
-      </section>
+      {!operatorMode ? reportHero : null}
 
       {error && <div className="alert alert-danger staff-report-no-print">{error}</div>}
       {success && <div className="alert alert-success staff-report-no-print">{success}</div>}
@@ -253,6 +257,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       <OperatorStationStaffGate
         stationId={operatorStationId}
         title="Report personale"
+        banner={reportHero}
         onSessionChange={setOperatorSessionOpen}
       >
         {reportBody}

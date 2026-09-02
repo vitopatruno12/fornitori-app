@@ -2099,7 +2099,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         {summaryScope === 'day' ? (
         <div className="form-row">
           <div className="form-group">
-            <label>Saldo attuale cassa/rimanente</label>
+            <label>Cassa iniziale giornata</label>
             <input
               type="number"
               step="0.01"
@@ -2107,6 +2107,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               value={openingCashInput}
               onChange={e => setOpeningCashInput(e.target.value)}
               placeholder="auto"
+              title="Contanti in cassa all'inizio del giorno selezionato. Lascia vuoto per calcolo automatico dal primo movimento."
               style={{ maxWidth: 180 }}
             />
           </div>
@@ -2190,7 +2191,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
         <PrimaNotaExcelSummaryTable
           title={summaryScope === 'interval' ? 'Cassa del periodo' : 'Cassa del giorno'}
-          hint={`Entrate, uscite e saldi per ${summaryPeriodLabel}.`}
+          hint={`Entrate, uscite e saldi cassa fisica per ${summaryPeriodLabel}. «Totale vendite» include anche POS, Refill e stacker (non sono contanti in cassa).`}
           rows={dailyCashRows}
         />
 
@@ -2284,7 +2285,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 <dd style={{ margin: 0 }}>{paymentLabel(drawerEntry.payment_method_id) || '–'}</dd>
                 <dt style={{ color: 'var(--text-muted)' }}>Categoria</dt>
                 <dd style={{ margin: 0 }}>{categoryLabel(drawerEntry.category_id) || '–'}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Cassa sera</dt>
+                <dt style={{ color: 'var(--text-muted)' }}>Saldo cassa progressivo</dt>
                 <dd style={{ margin: 0, fontWeight: 600 }}>€ {formatAmount(drawerEntry.cassaSera)}</dd>
               </dl>
               <div className="btn-group" style={{ marginTop: '1.25rem' }}>

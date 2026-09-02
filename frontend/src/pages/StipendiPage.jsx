@@ -434,14 +434,18 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     }
   }
 
+  const stipendiHero = (
+    <header className="staff-page-hero">
+      <div>
+        <p className="staff-kicker">Personale</p>
+        <h1>Stipendi</h1>
+      </div>
+    </header>
+  )
+
   const stipendiBody = (
     <div className="pagamenti-page staff-report-page stipendi-page">
-      <header className="staff-page-hero">
-        <div>
-          <p className="staff-kicker">Personale</p>
-          <h1>Stipendi</h1>
-        </div>
-      </header>
+      {!operatorMode ? stipendiHero : null}
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -682,6 +686,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       <OperatorStationStaffGate
         stationId={operatorStationId}
         title="Stipendi"
+        banner={stipendiHero}
         onSessionChange={setOperatorSessionOpen}
       >
         {stipendiBody}
