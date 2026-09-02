@@ -35,11 +35,11 @@ export function readOperatorStationStaffSession(stationId) {
 
 function operatorStationLocaleKeysMatch(stationId, sessionLocaleKey, localeName) {
   const target = staffLocaleCompareKey(localeName)
-  if (!target) return false
+  if (!target || !sessionLocaleKey) return false
   if (sessionLocaleKey === target) return true
-  if (target.includes(sessionLocaleKey) || sessionLocaleKey.includes(target)) return true
   const slug = getOperatorStationActivitySlug(stationId)
   const tokens = STAFF_LOCALE_SLUG_TOKENS[slug] || []
+  // Match solo se entrambi i lati contengono tutti i token della sede (niente substring generiche).
   return tokens.length > 0 && tokens.every((token) => target.includes(token) && sessionLocaleKey.includes(token))
 }
 

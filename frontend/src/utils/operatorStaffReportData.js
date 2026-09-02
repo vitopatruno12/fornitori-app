@@ -84,36 +84,40 @@ async function resolvePackMembersForLocale(stationId, localeName) {
   const availableNames = Object.keys(store || {})
   const canonicalName = matchStaffLocaleName(localeName, availableNames, slug) || localeName
   const localHit = findLocalePackInStore(store, canonicalName, slug)
-  const localMembers = Array.isArray(localHit?.pack?.members) ? localHit.pack.members : []
+  const localKey = localHit?.key || canonicalName
+  // Non usare pack locali di altre sedi (es. Mani in Pasta sulla PWA Lattea)
+  const { operatorStationLocaleNameMatches } = await import('./operatorStationLocale.js')
+  const localAllowed = operatorStationLocaleNameMatches(stationId, localKey, availableNames)
+  const localMembers =
+    localAllowed && Array.isArray(localHit?.pack?.members) ? localHit.pack.members : []
+
+  const code = await readStoredAccessCode(store, canonicalName, slug)
+  if (isValidLocaleAccessCode(code) && isOperatorStationStaffSessionOpen(stationId, canonicalName)) {
+    try {
+      const remoteHit = await fetchRemoteLocalePack(stationId, canonicalName, code)
+      if (remoteHit && Array.isArray(remoteHit.remote.members)) {
+        const remoteMembers = remoteHit.remote.members
+        const pack = {
+          saved_at: remoteHit.remote.saved_at || new Date().toISOString(),
+          members: remoteMembers,
+          sections: Array.isArray(remoteHit.remote.sections) ? remoteHit.remote.sections : [],
+          access_code: normalizeLocaleAccessCode(remoteHit.remote.access_code) || code,
+        }
+        const saveKey = localAllowed && localHit?.key ? localHit.key : remoteHit.canonicalName
+        if (localHit?.key && localHit.key !== saveKey) delete store[localHit.key]
+        store[saveKey] = pack
+        await writeStaffLocaleStore(store)
+        return { canonicalName: saveKey, packMembers: remoteMembers }
+      }
+    } catch {
+      // fallback locale sotto
+    }
+  }
+
   if (localMembers.length) {
     return { canonicalName: localHit?.canonicalName || canonicalName, packMembers: localMembers }
   }
-
-  const code = await readStoredAccessCode(store, canonicalName, slug)
-  if (!isValidLocaleAccessCode(code) || !isOperatorStationStaffSessionOpen(stationId, canonicalName)) {
-    return { canonicalName, packMembers: [] }
-  }
-
-  try {
-    const remoteHit = await fetchRemoteLocalePack(stationId, canonicalName, code)
-    if (!remoteHit) return { canonicalName, packMembers: [] }
-    const remoteMembers = remoteHit.remote.members
-    if (!remoteMembers.length) return { canonicalName: remoteHit.canonicalName, packMembers: [] }
-
-    const pack = {
-      saved_at: remoteHit.remote.saved_at || new Date().toISOString(),
-      members: remoteMembers,
-      sections: Array.isArray(remoteHit.remote.sections) ? remoteHit.remote.sections : [],
-      access_code: normalizeLocaleAccessCode(remoteHit.remote.access_code) || code,
-    }
-    const saveKey = localHit?.key || remoteHit.canonicalName
-    if (localHit?.key && localHit.key !== saveKey) delete store[localHit.key]
-    store[saveKey] = pack
-    await writeStaffLocaleStore(store)
-    return { canonicalName: saveKey, packMembers: remoteMembers }
-  } catch {
-    return { canonicalName, packMembers: [] }
-  }
+  return { canonicalName, packMembers: [] }
 }
 
 function resolveMembersFromPackAndDb(packMembers, allRaw, { operatorScoped = false } = {}) {

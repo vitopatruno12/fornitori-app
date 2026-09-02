@@ -132,9 +132,14 @@ export async function fetchSdiStatus() {
 export async function fetchSdiReceivedInvoices(params = {}) {
   const search = new URLSearchParams()
   if (params.days) search.append('days', String(params.days))
+  if (params.company) search.append('company', String(params.company))
   const query = search.toString()
   const path = query ? `/sdi/invoices/received?${query}` : '/sdi/invoices/received'
   return apiFetch(path)
+}
+
+export async function fetchSdiCompanies() {
+  return apiFetch('/sdi/companies')
 }
 
 export function getSdiInvoiceDownloadUrl(invoiceId) {

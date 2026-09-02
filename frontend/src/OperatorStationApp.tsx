@@ -199,6 +199,9 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
     markOperatorPwaLaunchPreferred(stationId)
     applyContextPwaManifest()
     setOperatorStationLock(true, stationId)
+    void import('./utils/operatorStationStaffSanitize.js').then(({ sanitizeOperatorStationStaffStore }) =>
+      sanitizeOperatorStationStaffStore(stationId),
+    )
 
     const blockFullAppNavigation = (e: Event) => {
       e.stopImmediatePropagation()

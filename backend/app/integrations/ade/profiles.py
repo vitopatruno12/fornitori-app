@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import List, Optional
 
 
-# Mappa sede Atlas → sezione inbox SDI attuale (abba / zanardelli / non_classificata)
+# Mappa sede Atlas → società inbox SDI (mediazione | via_lattea | risacca | pg)
 SEDE_TO_SDI_SECTION = {
-  "via_abba": "abba",
-  "mediazione": "abba",
-  "via_zanardelli": "zanardelli",
-  "via_lattea": "non_classificata",
-  "risacca": "non_classificata",
+  "via_abba": "mediazione",
+  "mediazione": "mediazione",
+  "via_zanardelli": "mediazione",
+  "via_lattea": "via_lattea",
+  "risacca": "risacca",
+  "pg": "pg",
 }
 
 
@@ -34,15 +35,18 @@ class AdeProfile:
   enabled: bool = True
   # Se True: non forza assign; Atlas classifica da indirizzo XML (abba/zanardelli)
   auto_section: bool = False
+  # me_stesso | incaricato | auto (auto = incaricato se c'è partita_iva)
+  utenza_mode: str = "auto"
 
   @property
   def sdi_section(self) -> Optional[str]:
     if self.auto_section:
       return None
+    pid = (self.id or "").strip().lower()
+    if pid in SEDE_TO_SDI_SECTION:
+      return SEDE_TO_SDI_SECTION[pid]
     sede = (self.sede or "").strip().lower()
-    if sede in ("auto", "mediazione"):
-      return None
-    return SEDE_TO_SDI_SECTION.get(sede, "non_classificata")
+    return SEDE_TO_SDI_SECTION.get(sede)
 
 
 def _env(name: str, default: str = "") -> str:
@@ -97,6 +101,7 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
               partita_iva=str(item.get("partita_iva") or item.get("piva") or "").strip(),
               auth_mode=str(item.get("auth_mode") or "cns").strip().lower() or "cns",
               drop_dir=str(item.get("drop_dir") or "").strip(),
+              storage_state_path=str(item.get("storage_state_path") or "").strip(),
               fisconline_password=str(
                 item.get("fisconline_password")
                 or _env(f"ADE_PROFILE_{pid.upper()}_FISCONLINE_PASSWORD")
@@ -109,10 +114,12 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
                 or _env("ADE_FISCONLINE_PIN")
                 or ""
               ).strip(),
+              enabled=bool(item.get("enabled", True)),
               auto_section=bool(
                 item.get("auto_section")
                 or str(item.get("sede") or "").strip().lower() in ("auto", "mediazione")
               ),
+              utenza_mode=str(item.get("utenza_mode") or "auto").strip().lower() or "auto",
             )
           )
     except Exception:
@@ -143,4 +150,9 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
         )
       )
 
-  return [p for p in profiles if p.enabled]
+  only = _env("ADE_ONLY_PROFILE")
+  out = [p for p in profiles if p.enabled]
+  if only:
+    ids = {x.strip().lower() for x in only.split(",") if x.strip()}
+    out = [p for p in out if p.id.lower() in ids]
+  return out

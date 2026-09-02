@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
         _ensure_carriers_tables()
         _ensure_electronic_invoices_tables()
         _ensure_sdi_electronic_invoice_link()
+        _ensure_sdi_receiver_vat()
         _ensure_bank_module_tables()
         _ensure_pos_receipts_table()
     except OperationalError as e:
@@ -428,6 +429,46 @@ def _ensure_sdi_electronic_invoice_link() -> None:
             )
     except Exception as e:
         logger.warning("Impossibile aggiungere sdi_invoices.electronic_invoice_id: %s", e)
+
+
+def _ensure_sdi_receiver_vat() -> None:
+    """P.IVA destinatario e profilo AdE su sdi_invoices (classificazione per società)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE sdi_invoices
+                      ADD COLUMN IF NOT EXISTS receiver_vat VARCHAR(32)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE sdi_invoices
+                      ADD COLUMN IF NOT EXISTS ade_profile_id VARCHAR(64)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_sdi_invoices_receiver_vat
+                      ON sdi_invoices (receiver_vat)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_sdi_invoices_ade_profile_id
+                      ON sdi_invoices (ade_profile_id)
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning("Impossibile aggiungere sdi_invoices.receiver_vat: %s", e)
 
 
 def _ensure_carriers_tables() -> None:

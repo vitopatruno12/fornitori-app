@@ -74,7 +74,7 @@ def assign_sdi_section(
   token: Optional[str] = None,
   timeout_sec: int = 60,
 ) -> Dict[str, Any]:
-  """POST /sdi/invoices/assign?invoice_id=&section= (abba|zanardelli|non_classificata)."""
+  """POST /sdi/invoices/assign?invoice_id=&section= (mediazione|via_lattea|risacca|pg|non_classificata)."""
   base = _api_base(api_base)
   tok = _token(token)
   q = urllib.parse.urlencode({"invoice_id": int(invoice_id), "section": section})

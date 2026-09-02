@@ -17,6 +17,8 @@ class SdiInvoice(Base):
   invoice_number = Column(String(128), nullable=True)
   invoice_date = Column(Date, nullable=True)
   receiver_code = Column(String(16), nullable=True)
+  receiver_vat = Column(String(32), nullable=True, index=True)
+  ade_profile_id = Column(String(64), nullable=True, index=True)
   destination = Column(Text, nullable=True)
   pipeline_status = Column(String(32), nullable=False, server_default="parsed")
   source = Column(String(16), nullable=False, server_default="push")

@@ -91,6 +91,7 @@ def ingest_fatturapa_bytes(
   sdi_message_id: Optional[str] = None,
   filename: Optional[str] = None,
   source: str = "push",
+  ade_profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
   """
   Pipeline: bytes → SdiInvoice → bridge Atlas.
@@ -100,10 +101,27 @@ def ingest_fatturapa_bytes(
   dedupe_key = hashlib.sha256(xml_bytes).hexdigest()
   xml_text = xml_bytes.decode("utf-8", errors="replace")
 
+  profile_id = (ade_profile_id or "").strip() or None
+
   existing = db.query(SdiInvoice).filter(SdiInvoice.dedupe_key == dedupe_key).first()
   if existing:
+    changed = False
     if sdi_message_id and not existing.sdi_message_id:
       existing.sdi_message_id = sdi_message_id
+      changed = True
+    if profile_id and not existing.ade_profile_id:
+      existing.ade_profile_id = profile_id
+      changed = True
+    if not existing.receiver_vat:
+      try:
+        parsed_dup = parse_fatturapa(xml_text)
+        rv = parsed_dup.get("receiver_vat") or None
+        if rv:
+          existing.receiver_vat = rv
+          changed = True
+      except ValueError:
+        pass
+    if changed:
       db.commit()
       db.refresh(existing)
     link = link_sdi_to_electronic(
@@ -136,6 +154,8 @@ def ingest_fatturapa_bytes(
     invoice_number=parsed.get("invoice_number") or None,
     invoice_date=parsed.get("invoice_date"),
     receiver_code=parsed.get("receiver_code") or None,
+    receiver_vat=parsed.get("receiver_vat") or None,
+    ade_profile_id=profile_id,
     destination=parsed.get("destination") or None,
     pipeline_status="parsed",
     source=source,
@@ -179,6 +199,8 @@ def ingest_fatturapa_bytes(
     "supplier_vat": row.supplier_vat,
     "invoice_number": row.invoice_number,
     "receiver_code": row.receiver_code,
+    "receiver_vat": row.receiver_vat,
+    "ade_profile_id": row.ade_profile_id,
     "electronic_invoice_id": row.electronic_invoice_id,
     "import": link,
     "sdi_message_id": row.sdi_message_id,

@@ -43,6 +43,19 @@ def _destination_from_root(root: ET.Element) -> str:
     return ", ".join(parts)
 
 
+def _receiver_vat_from_root(root: ET.Element) -> str:
+    codice = root.findtext(
+        ".//{*}CessionarioCommittente/{*}DatiAnagrafici/{*}IdFiscaleIVA/{*}IdCodice"
+    )
+    vat = str(codice).strip() if codice and str(codice).strip() else ""
+    if not vat:
+        cf = root.findtext(".//{*}CessionarioCommittente/{*}DatiAnagrafici/{*}CodiceFiscale")
+        vat = (cf or "").strip()
+    if vat and not vat.upper().startswith("IT") and len(vat) == 11 and vat.isdigit():
+        vat = f"IT{vat}"
+    return vat
+
+
 def _supplier_from_root(root: ET.Element) -> Tuple[str, str]:
     codice = root.findtext(".//{*}CedentePrestatore/{*}DatiAnagrafici/{*}IdFiscaleIVA/{*}IdCodice")
     vat = str(codice).strip() if codice and str(codice).strip() else ""
@@ -110,12 +123,14 @@ def parse_fatturapa(xml_text: str) -> Dict[str, Any]:
         raise ValueError("XML non parsabile") from e
 
     receiver_code = (root.findtext(".//{*}DatiTrasmissione/{*}CodiceDestinatario") or "").strip()
+    receiver_vat = _receiver_vat_from_root(root)
     vat, supplier_name = _supplier_from_root(root)
     inv_num, inv_date = _invoice_meta_from_root(root)
 
     return {
         "destination": _destination_from_root(root),
         "receiver_code": receiver_code,
+        "receiver_vat": receiver_vat,
         "supplier_vat": vat,
         "supplier_name": supplier_name,
         "invoice_number": inv_num,

@@ -3241,13 +3241,65 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const localCode = normalizeLocaleAccessCode(local?.access_code)
     const localCodeOk =
       !localCode || !isValidLocaleAccessCode(code) || verifyLocaleAccessCode(localCode, code)
+    const localBelongsToStation =
+      !operatorMode ||
+      !operatorStationId ||
+      operatorStationLocaleNameMatches(operatorStationId, matchedStoreKey || key, savedLocaleNames)
 
-    if (local && localCodeOk && Array.isArray(local.members) && (local.members.length > 0 || operatorMode)) {
+    // Postazione operativa: preferisci sempre il pack server (la PWA condivide lo store
+    // con Mani in Pasta / altre sedi e il pack locale può essere contaminato).
+    if (operatorMode && isValidLocaleAccessCode(code)) {
+      try {
+        const summaries = await listServerLocaleSummaries()
+        const fetchName =
+          matchServerLocaleSummary(summaries, key)?.locale_name ||
+          (matchServerLocaleSummary(summaries, matchedStoreKey || '')?.locale_name) ||
+          key
+        if (matchServerLocaleSummary(summaries, fetchName) || matchServerLocaleSummary(summaries, key)) {
+          const remote = await fetchStaffLocalePack(
+            fetchName,
+            isValidLocaleAccessCode(code) ? code : undefined,
+          )
+          if (remote && Array.isArray(remote.members)) {
+            const pack = {
+              saved_at: remote.saved_at || new Date().toISOString(),
+              members: remote.members,
+              sections: Array.isArray(remote.sections) ? remote.sections : [],
+              access_code: normalizeLocaleAccessCode(remote.access_code) || code || null,
+              hidden_planning_sections: Array.isArray(remote.hidden_planning_sections)
+                ? remote.hidden_planning_sections
+                : [],
+            }
+            const saveKey = matchedStoreKey && localBelongsToStation ? matchedStoreKey : fetchName
+            if (matchedStoreKey && matchedStoreKey !== saveKey) delete store[matchedStoreKey]
+            store[saveKey] = pack
+            await writeStaffLocaleStore(store)
+            return pack
+          }
+        }
+      } catch (err) {
+        const msg = String(err?.message || '')
+        if (msg.includes('403') || msg.toLowerCase().includes('codice locale')) {
+          return { denied: true }
+        }
+      }
+    }
+
+    if (
+      local &&
+      localBelongsToStation &&
+      localCodeOk &&
+      Array.isArray(local.members) &&
+      (local.members.length > 0 || operatorMode)
+    ) {
       return {
         saved_at: local.saved_at,
         members: local.members,
         sections: Array.isArray(local.sections) ? local.sections : [],
         access_code: localCode || code || null,
+        hidden_planning_sections: Array.isArray(local.hidden_planning_sections)
+          ? local.hidden_planning_sections
+          : [],
       }
     }
 
@@ -3263,6 +3315,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           members: remote.members,
           sections: Array.isArray(remote.sections) ? remote.sections : [],
           access_code: normalizeLocaleAccessCode(remote.access_code) || code || null,
+          hidden_planning_sections: Array.isArray(remote.hidden_planning_sections)
+            ? remote.hidden_planning_sections
+            : [],
         }
         const previousKey = findLocaleStoreKey(store, key)
         if (previousKey && previousKey !== key) delete store[previousKey]
@@ -3280,6 +3335,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const backup = getMembersLocaleBackup(key)
     const backupCode = normalizeLocaleAccessCode(backup?.payload?.access_code)
     if (backup?.payload?.members?.length) {
+      if (
+        operatorMode &&
+        operatorStationId &&
+        !operatorStationLocaleNameMatches(operatorStationId, key, savedLocaleNames)
+      ) {
+        return null
+      }
       if (backupCode && isValidLocaleAccessCode(code) && !verifyLocaleAccessCode(backupCode, code)) {
         return { denied: true }
       }
@@ -3396,6 +3458,15 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   useEffect(() => {
     if (!operatorMode || !operatorStationId) return
     closeOtherOperatorStationStaffSessions(operatorStationId)
+    void (async () => {
+      const { sanitizeOperatorStationStaffStore } = await import('../utils/operatorStationStaffSanitize.js')
+      await sanitizeOperatorStationStaffStore(operatorStationId)
+      await refreshSavedLocaleNames()
+    })()
+  }, [operatorMode, operatorStationId])
+
+  useEffect(() => {
+    if (!operatorMode || !operatorStationId) return
     const linked = getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames)
     if (!linked) return
     setLocaleStaffName(linked)

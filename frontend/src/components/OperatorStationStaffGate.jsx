@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
-import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug } from '../utils/operatorStationLocale.js'
+import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug, operatorStationLocaleNameMatches } from '../utils/operatorStationLocale.js'
 import {
   closeOtherOperatorStationStaffSessions,
   isOperatorStationStaffSessionOpen,
@@ -15,6 +15,7 @@ import { matchStaffLocaleName, staffLocaleCompareKey } from '../utils/primaNotaS
 import { invalidateOperatorStationMembersCache, preloadOperatorStationMembers } from '../utils/operatorStaffReportData.js'
 import { readStaffLocaleStore, upsertStoredLocaleAccessCode } from '../utils/staffLocaleStore.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
+import { sanitizeOperatorStationStaffStore } from '../utils/operatorStationStaffSanitize.js'
 
 function localeNameCompareKey(value) {
   return staffLocaleCompareKey(value)
@@ -23,9 +24,9 @@ function localeNameCompareKey(value) {
 async function readStoredLocaleAccessCode(localeName) {
   const store = await readStaffLocaleStore()
   const target = localeNameCompareKey(localeName)
+  if (!target) return ''
   for (const [rawKey, pack] of Object.entries(store || {})) {
-    const packKey = localeNameCompareKey(rawKey)
-    if (packKey === target || packKey.includes(target) || target.includes(packKey)) {
+    if (localeNameCompareKey(rawKey) === target) {
       return normalizeLocaleAccessCode(pack?.access_code)
     }
   }
@@ -93,16 +94,23 @@ export default function OperatorStationStaffGate({
   const refreshLocaleNames = useCallback(async () => {
     try {
       const store = await readStaffLocaleStore()
-      const names = new Set(Object.keys(store || {}))
+      const names = new Set()
       const slugLocale = getOperatorStationStaffLocaleName(stationId, [])
       if (slugLocale) names.add(slugLocale)
+      for (const rawKey of Object.keys(store || {})) {
+        if (operatorStationLocaleNameMatches(stationId, rawKey, [slugLocale, rawKey])) {
+          names.add(rawKey)
+        }
+      }
       setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
       try {
         const summaries = await fetchStaffLocalePacks()
         setLocaleSummaries(Array.isArray(summaries) ? summaries : [])
         for (const row of summaries || []) {
           const n = String(row?.locale_name || '').trim()
-          if (n) names.add(n)
+          if (n && operatorStationLocaleNameMatches(stationId, n, [slugLocale, n, ...names])) {
+            names.add(n)
+          }
         }
         setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
       } catch {
@@ -116,7 +124,10 @@ export default function OperatorStationStaffGate({
 
   useEffect(() => {
     closeOtherOperatorStationStaffSessions(stationId)
-    void refreshLocaleNames()
+    void (async () => {
+      await sanitizeOperatorStationStaffStore(stationId)
+      await refreshLocaleNames()
+    })()
   }, [stationId, refreshLocaleNames])
 
   useEffect(() => {

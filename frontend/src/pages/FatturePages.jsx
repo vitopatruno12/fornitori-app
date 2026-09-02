@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   FattureLink,
   FattureNavigate,
+  FattureNavBaseContext,
   FatturePageShell,
   FattureStubCard,
   PaymentBadge,
@@ -24,6 +25,9 @@ import {
   postSdiReceiveXml,
   setInvoiceIgnored,
 } from '../services/invoicesService'
+import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
+import { useFattureCompany } from '../hooks/useFattureCompany.js'
+import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 
 const SYNC_LOG_KEY = 'fattureAdeSdiSyncLog'
 
@@ -48,15 +52,31 @@ function readSyncLog() {
 }
 
 function flattenSdi(rows) {
+  if (rows?.companies && typeof rows.companies === 'object') {
+    return FATTURE_COMPANY_ORDER.flatMap((id) => rows.companies[id] || []).concat(rows.non_classificata || [])
+  }
   return [...(rows.abba || []), ...(rows.zanardelli || []), ...(rows.non_classificata || [])]
 }
 
-export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate / SDI)', showAssign = true, autoLoad = true }) {
+function sdiListForCompany(rows, companyId) {
+  if (!companyId) return []
+  if (rows?.companies?.[companyId]) return rows.companies[companyId]
+  if (companyId === 'non_classificata') return rows?.non_classificata || []
+  return []
+}
+
+export function AdeSdiInvoicesPanel({
+  title = 'Fatture ricevute (Agenzia Entrate / SDI)',
+  showAssign = true,
+  autoLoad = true,
+  companyId = '',
+  embeddedMode = false,
+}) {
   const [days, setDays] = useState('60')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [rows, setRows] = useState({ abba: [], zanardelli: [], non_classificata: [] })
+  const [rows, setRows] = useState({ companies: {}, non_classificata: [] })
 
   async function load(daysOverride) {
     setLoading(true)
@@ -64,19 +84,36 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
     setSuccess('')
     try {
       const d = Number(daysOverride || days || 60)
-      const data = await fetchSdiReceivedInvoices({ days: d })
+      const data = await fetchSdiReceivedInvoices({ days: d, company: companyId || undefined })
+      const companies = data?.companies && typeof data.companies === 'object' ? data.companies : {}
       const next = {
-        abba: Array.isArray(data?.abba) ? data.abba : [],
-        zanardelli: Array.isArray(data?.zanardelli) ? data.zanardelli : [],
+        companies: {
+          mediazione: Array.isArray(companies.mediazione) ? companies.mediazione : [],
+          via_lattea: Array.isArray(companies.via_lattea) ? companies.via_lattea : [],
+          risacca: Array.isArray(companies.risacca) ? companies.risacca : [],
+          pg: Array.isArray(companies.pg) ? companies.pg : [],
+        },
         non_classificata: Array.isArray(data?.non_classificata) ? data.non_classificata : [],
       }
       setRows(next)
-      const count = flattenSdi(next).length
-      pushSyncLog({ ok: true, days: d, count, message: `Caricate ${count} fatture SDI (ultimi ${d} gg)` })
-      setSuccess(`Inbox aggiornata: ${count} documenti.`)
+      const count = companyId ? sdiListForCompany(next, companyId).length : flattenSdi(next).length
+      pushSyncLog({
+        ok: true,
+        days: d,
+        count,
+        company: companyId || null,
+        message: companyId
+          ? `${count} fatture SDI · ${companyLabel(companyId)} (ultimi ${d} gg)`
+          : `Caricate ${count} fatture SDI (ultimi ${d} gg)`,
+      })
+      setSuccess(
+        companyId
+          ? `${companyLabel(companyId)}: ${count} documenti negli ultimi ${d} giorni.`
+          : `Inbox aggiornata: ${count} documenti.`,
+      )
     } catch (e) {
       const msg = e?.message || 'Errore caricamento inbox SDI'
-      pushSyncLog({ ok: false, days: Number(days), count: 0, message: msg })
+      pushSyncLog({ ok: false, days: Number(days), count: 0, company: companyId || null, message: msg })
       setError(msg)
     } finally {
       setLoading(false)
@@ -86,32 +123,31 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
   useEffect(() => {
     if (autoLoad) load(60)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoLoad])
+  }, [autoLoad, companyId])
 
   async function handleManualAssign(item, section) {
     try {
       await assignSdiInvoiceSection(item.id, section)
-      setSuccess(`Assegnata a ${section === 'abba' ? 'Via Abba' : 'Via Zanardelli'}`)
+      setSuccess(`Assegnata a ${companyLabel(section)}`)
       await load()
     } catch (e) {
       setError(e?.message || 'Errore assegnazione')
     }
   }
 
-  function renderTable(list, label, withAssign = false) {
+  const visibleList = companyId ? sdiListForCompany(rows, companyId) : []
+  const panelTitle = companyId ? `${title} · ${companyLabel(companyId)}` : title
+
+  function renderTable(list, withAssign = false) {
     return (
       <div className="table-wrap pn-table-wrap" style={{ marginBottom: '0.75rem' }}>
         <table className="app-table">
           <thead>
             <tr>
-              <th colSpan={withAssign ? 6 : 5}>
-                {label} ({list.length})
-              </th>
-            </tr>
-            <tr>
               <th>Numero</th>
               <th>Data</th>
               <th>Fornitore</th>
+              <th>P.IVA dest.</th>
               <th>Destinazione</th>
               <th>Azioni</th>
               {withAssign ? <th>Assegna</th> : null}
@@ -119,10 +155,11 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
           </thead>
           <tbody>
             {list.map((item) => (
-              <tr key={`${label}-${item.id}`}>
+              <tr key={`sdi-${item.id}`}>
                 <td>{item.invoice_number || '—'}</td>
                 <td>{formatDate(item.invoice_date)}</td>
                 <td>{item.supplier_name || '—'}</td>
+                <td>{item.receiver_vat || '—'}</td>
                 <td>{item.destination || '—'}</td>
                 <td>
                   <a
@@ -136,31 +173,28 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
                   </a>
                 </td>
                 {withAssign ? (
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ marginRight: '0.35rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                      onClick={() => handleManualAssign(item, 'abba')}
-                    >
-                      Via Abba
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                      onClick={() => handleManualAssign(item, 'zanardelli')}
-                    >
-                      Via Zanardelli
-                    </button>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {FATTURE_COMPANY_ORDER.map((cid) => (
+                      <button
+                        key={cid}
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ marginRight: '0.25rem', marginBottom: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
+                        onClick={() => handleManualAssign(item, cid)}
+                      >
+                        {companyLabel(cid)}
+                      </button>
+                    ))}
                   </td>
                 ) : null}
               </tr>
             ))}
             {list.length === 0 && (
               <tr>
-                <td colSpan={withAssign ? 6 : 5} className="empty-state">
-                  Nessuna fattura in questo gruppo.
+                <td colSpan={withAssign ? 7 : 6} className="empty-state">
+                  {companyId
+                    ? `Nessuna fattura per ${companyLabel(companyId)} in questo periodo.`
+                    : 'Seleziona una società dal menu in alto.'}
                 </td>
               </tr>
             )}
@@ -175,10 +209,11 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
         <div>
           <h2 className="fatture-panel-title" style={{ marginBottom: '0.25rem' }}>
-            {title}
+            {panelTitle}
           </h2>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            Inbox locale da canale SDI / Agenzia Entrate. Classificazione dalla destinazione nell&apos;XML.
+            Inbox SDI / Agenzia Entrate. Classificazione automatica dalla P.IVA destinatario nell&apos;XML
+            {companyId ? ` (${companyLabel(companyId)})` : ''}.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -190,19 +225,27 @@ export function AdeSdiInvoicesPanel({ title = 'Fatture ricevute (Agenzia Entrate
               <option value="90">90</option>
             </select>
           </label>
-          <button type="button" className="btn btn-primary" onClick={() => load()} disabled={loading}>
+          <button type="button" className="btn btn-primary" onClick={() => load()} disabled={loading || !companyId}>
             {loading ? 'Aggiornamento…' : 'Aggiorna inbox'}
           </button>
-          <FattureLink className="btn btn-secondary" to="/fatture/importa-xml">
-            Importa XML
-          </FattureLink>
+          {!embeddedMode ? (
+            <FattureLink className="btn btn-secondary" to="/fatture/importa-xml">
+              Importa XML
+            </FattureLink>
+          ) : null}
         </div>
       </div>
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      {renderTable(rows.abba, 'Via Abba')}
-      {renderTable(rows.zanardelli, 'Via Zanardelli')}
-      {renderTable(rows.non_classificata, 'Non classificate', showAssign)}
+      {!companyId ? (
+        <p className="fatture-note">
+          {embeddedMode
+            ? 'Registro locale non configurato per questa postazione.'
+            : 'Seleziona una società dal menu nel banner verde per vedere le fatture ricevute.'}
+        </p>
+      ) : (
+        renderTable(visibleList, showAssign)
+      )}
     </section>
   )
 }
@@ -304,15 +347,24 @@ export function FattureDashboardPage() {
 }
 
 export function FattureRicevutePage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(gestionaleMode)
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [showSdiInbox, setShowSdiInbox] = useState(false)
+
+  const ricevuteLead = gestionaleMode
+    ? 'Fatture dal canale SDI / Agenzia Entrate, suddivise per società (P.IVA destinatario). Scegli la società dal menu.'
+    : companyId
+      ? `Fatture ricevute del registro locale: ${companyLabel(companyId)}.`
+      : 'Fatture ricevute del registro locale di questa postazione.'
 
   async function reload() {
+    if (!gestionaleMode) return
     setLoading(true)
     setError('')
     try {
@@ -328,8 +380,10 @@ export function FattureRicevutePage() {
   }
 
   useEffect(() => {
-    reload()
-  }, [])
+    if (gestionaleMode) reload()
+    else setLoading(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gestionaleMode])
 
   useEffect(() => {
     if (!selectedId) {
@@ -363,27 +417,38 @@ export function FattureRicevutePage() {
   return (
     <FatturePageShell
       title="Fatture ricevute"
-      lead="Fatture elettroniche importate in Atlas (XML / canale SDI): fornitore, imponibile, IVA e righe."
+      lead={ricevuteLead}
       actions={
         <>
+          {gestionaleMode ? (
+            <FattureCompanySelect
+              companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+              value={companyId}
+              onChange={setCompanyId}
+              loading={loadingCompanies}
+            />
+          ) : null}
           <FattureLink className="btn btn-secondary btn-sm" to="/fatture/importa-xml">
             Importa XML
           </FattureLink>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setShowSdiInbox((v) => !v)}
-          >
-            {showSdiInbox ? 'Nascondi inbox SDI' : 'Inbox SDI'}
-          </button>
         </>
       }
     >
       {error && <div className="alert alert-danger">{error}</div>}
       {loading ? <AnalisiLoadingBar active label="Caricamento fatture ricevute" variant="subtle" /> : null}
 
+      <AdeSdiInvoicesPanel
+        title="Inbox SDI"
+        showAssign={gestionaleMode && companyId === 'non_classificata'}
+        autoLoad={Boolean(companyId)}
+        companyId={companyId}
+        embeddedMode={!gestionaleMode}
+      />
+
+      {gestionaleMode && !companyId ? (
+        <>
       <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Elenco</h2>
+        <h2 className="fatture-panel-title">Elenco importate (tutte le società)</h2>
         <div className="table-wrap">
           <table className="app-table">
             <thead>
@@ -507,10 +572,8 @@ export function FattureRicevutePage() {
           ) : null}
         </section>
       ) : null}
-
-      {showSdiInbox ? (
-        <AdeSdiInvoicesPanel title="Inbox SDI (classificazione destinazione)" showAssign autoLoad />
-      ) : null}
+        </>
+      )}
     </FatturePageShell>
   )
 }
@@ -726,6 +789,9 @@ export function FattureScadenziarioPage() {
 }
 
 export function FattureSincronizzazionePage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companyId } = useFattureCompany(gestionaleMode)
   const [log, setLog] = useState(() => readSyncLog())
   const [status, setStatus] = useState(null)
 
@@ -792,7 +858,13 @@ export function FattureSincronizzazionePage() {
           </li>
         </ul>
       </section>
-      <AdeSdiInvoicesPanel title="Inbox SDI" showAssign />
+      <AdeSdiInvoicesPanel
+        title="Inbox SDI"
+        showAssign={gestionaleMode && companyId === 'non_classificata'}
+        autoLoad={Boolean(companyId)}
+        companyId={companyId}
+        embeddedMode={!gestionaleMode}
+      />
       <section className="card fatture-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
           <h2 className="fatture-panel-title" style={{ margin: 0 }}>
