@@ -57,6 +57,8 @@ import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import {
   CORE_PLANNING_SECTIONS,
   defaultSectionsForLocale,
+  isPlanningSectionHidden,
+  mergeHiddenPlanningSections,
   memberMatchesSection,
   normalizeSectionName,
   resolveLocaleSections,
@@ -94,11 +96,6 @@ import {
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 const HIDDEN_PLANNING_SECTIONS = ['Pulizie', 'Mediazione']
-
-function isHiddenPlanningSection(section) {
-  const key = sectionCompareKey(section)
-  return HIDDEN_PLANNING_SECTIONS.some((name) => sectionCompareKey(name) === key)
-}
 const STAFF_LOCALE_SESSION_KEY = 'staffLocaleSessionOpen'
 
 function readStaffLocaleSessionOpenKeys() {
@@ -1157,6 +1154,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   const [newMemberBirthDate, setNewMemberBirthDate] = useState('')
   const [newMemberSection, setNewMemberSection] = useState('')
   const [localeSections, setLocaleSections] = useState(() => defaultSectionsForLocale(''))
+  const [hiddenPlanningSections, setHiddenPlanningSections] = useState([])
   const [activeSection, setActiveSection] = useState(() => defaultSectionsForLocale('')[0] || 'Generale')
   const [newSectionName, setNewSectionName] = useState('')
   const [editingMemberId, setEditingMemberId] = useState(null)
@@ -1769,8 +1767,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [localeSections])
 
   const planningGridSectionOptions = useMemo(
-    () => planningSectionOptions.filter((section) => !isHiddenPlanningSection(section)),
-    [planningSectionOptions],
+    () =>
+      planningSectionOptions.filter(
+        (section) => !isPlanningSectionHidden(section, hiddenPlanningSections, HIDDEN_PLANNING_SECTIONS),
+      ),
+    [planningSectionOptions, hiddenPlanningSections],
   )
 
   const visiblePlanningShifts = useMemo(() => {
@@ -1791,17 +1792,17 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [planningSection, planningGridSectionOptions, shifts, members, localeSections])
 
   useEffect(() => {
-    if (planningSection && isHiddenPlanningSection(planningSection)) {
+    if (planningSection && isPlanningSectionHidden(planningSection, hiddenPlanningSections, HIDDEN_PLANNING_SECTIONS)) {
       setPlanningSection('')
     }
-  }, [planningSection])
+  }, [planningSection, hiddenPlanningSections])
 
   useEffect(() => {
     if (editingShiftId) return
-    if (formGenere && isHiddenPlanningSection(formGenere)) {
+    if (formGenere && isPlanningSectionHidden(formGenere, hiddenPlanningSections, HIDDEN_PLANNING_SECTIONS)) {
       setFormGenere('')
     }
-  }, [formGenere, editingShiftId])
+  }, [formGenere, editingShiftId, hiddenPlanningSections])
 
   const loadForRange = useCallback(async (startDate, endDate) => {
     const from = toYMD(startDate)
@@ -1857,6 +1858,26 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }),
     )
   }, [localeStaffName, members])
+
+  useEffect(() => {
+    const name = normalizeLocaleName(localeStaffName)
+    if (!name) {
+      setHiddenPlanningSections([])
+      return
+    }
+    const backup = getMembersLocaleBackup(name)
+    const fromBackup = backup?.payload?.hidden_planning_sections
+    let cancelled = false
+    void readStaffLocaleStore().then((store) => {
+      if (cancelled) return
+      const storeKey = findLocaleStoreKey(store, name)
+      const fromStore = storeKey ? store[storeKey]?.hidden_planning_sections : []
+      applyHiddenPlanningSectionsFromSources(fromBackup, fromStore)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [localeStaffName])
 
   useEffect(() => {
     if (!localeSections.length) return
@@ -1923,6 +1944,52 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setActiveSection(next[0] || 'Generale')
     setNewMemberSection(next[0] || 'Generale')
     setSuccess(`Sezione "${name}" rimossa`)
+  }
+
+  async function persistHiddenPlanningSections(localeName, hidden) {
+    const name = normalizeLocaleName(localeName)
+    if (!name) return
+    const cleaned = mergeHiddenPlanningSections(hidden)
+    try {
+      const store = await readStaffLocaleStore()
+      const storeKey = findLocaleStoreKey(store, name)
+      if (storeKey && store[storeKey]) {
+        store[storeKey] = { ...store[storeKey], hidden_planning_sections: cleaned }
+        await writeStaffLocaleStore(store)
+      }
+    } catch {
+      // ignore
+    }
+    const backup = getMembersLocaleBackup(name)
+    const payload = backup?.payload && typeof backup.payload === 'object' ? { ...backup.payload } : {}
+    saveMembersLocaleBackup(name, { ...payload, hidden_planning_sections: cleaned })
+  }
+
+  function applyHiddenPlanningSectionsFromSources(...sources) {
+    setHiddenPlanningSections(mergeHiddenPlanningSections(...sources))
+  }
+
+  function handleHidePlanningSection(sectionName) {
+    const name = normalizeSectionName(sectionName)
+    if (!name) return
+    if (isPlanningSectionHidden(name, hiddenPlanningSections, HIDDEN_PLANNING_SECTIONS)) return
+    const next = mergeHiddenPlanningSections(hiddenPlanningSections, [name])
+    setHiddenPlanningSections(next)
+    if (sectionCompareKey(planningSection) === sectionCompareKey(name)) {
+      setPlanningSection('')
+      setFormGenere('')
+    }
+    void persistHiddenPlanningSections(localeStaffName, next)
+    setSuccess(`Settimana "${name}" rimossa dalla pianificazione`)
+  }
+
+  function handleRestorePlanningSection(sectionName) {
+    const name = normalizeSectionName(sectionName)
+    if (!name) return
+    const next = hiddenPlanningSections.filter((s) => sectionCompareKey(s) !== sectionCompareKey(name))
+    setHiddenPlanningSections(next)
+    void persistHiddenPlanningSections(localeStaffName, next)
+    setSuccess(`Settimana "${name}" ripristinata nella pianificazione`)
   }
 
   useEffect(() => {
@@ -3204,6 +3271,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         members: snapshot,
         sections: sectionsForPack,
         access_code: accessCode,
+        hidden_planning_sections: hiddenPlanningSections,
       }
       if (previousKey && previousKey !== saveName) {
         delete store[previousKey]
@@ -3212,7 +3280,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         setLocaleStaffName(saveName)
       }
       await writeStaffLocaleStore(store)
-      saveMembersLocaleBackup(saveName, { members: snapshot, sections: sectionsForPack, access_code: accessCode })
+      saveMembersLocaleBackup(saveName, {
+        members: snapshot,
+        sections: sectionsForPack,
+        access_code: accessCode,
+        hidden_planning_sections: hiddenPlanningSections,
+      })
       try {
         await upsertStaffLocalePack(saveName, snapshot, accessCode, { sections: sectionsForPack })
       } catch (err) {
@@ -3267,7 +3340,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         access_code: accessCode,
       }
       await writeStaffLocaleStore(store)
-      saveMembersLocaleBackup(localeName, { members: [], sections: sectionsForPack, access_code: accessCode })
+      saveMembersLocaleBackup(localeName, {
+        members: [],
+        sections: sectionsForPack,
+        access_code: accessCode,
+        hidden_planning_sections: hiddenPlanningSections,
+      })
       setLocaleStaffName(localeName)
       setLocaleAccessCode(accessCode)
       try {
@@ -3454,6 +3532,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       Array.isArray(pack.sections) && pack.sections[0] ? pack.sections[0] : '',
       mem,
     )
+    applyHiddenPlanningSectionsFromSources(pack.hidden_planning_sections)
     markPlanningStale()
     return mem
   }
@@ -3505,6 +3584,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         Array.isArray(pack.sections) && pack.sections[0] ? pack.sections[0] : '',
         mem,
       )
+      applyHiddenPlanningSectionsFromSources(pack.hidden_planning_sections)
       markPlanningStale()
       setMemberInfoId(null)
       setEditingShiftId(null)
@@ -4157,7 +4237,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       const saveName = check.canonicalName
       const accessCode = await resolveLocaleAccessCodeForSave(localeName)
-      saveMembersLocaleBackup(saveName, { members: snapshot, sections: sectionsForPack, access_code: accessCode })
+      saveMembersLocaleBackup(saveName, {
+        members: snapshot,
+        sections: sectionsForPack,
+        access_code: accessCode,
+        hidden_planning_sections: hiddenPlanningSections,
+      })
       const saved = await upsertStaffLocalePack(saveName, snapshot, accessCode, { sections: sectionsForPack })
       setMembersBackupLocale(saveName)
       if (saveName !== localeName) {
@@ -4255,6 +4340,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       await refreshMembers()
       applyLocaleSections(Array.isArray(pack.sections) ? pack.sections : [], '', rows)
+      applyHiddenPlanningSectionsFromSources(pack.hidden_planning_sections)
       await applyPayrollFromShifts()
       await refreshBackupMeta(planningBackupSlot, localeName)
       setSuccess(
@@ -5765,14 +5851,49 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
         {loading && <AnalisiLoadingBar active label="Caricamento personale" variant="subtle" />}
 
-        {!loading && !periodTooLong && (
+        {!loading && !periodTooLong && hiddenPlanningSections.length > 0 ? (
+          <div className="staff-hidden-planning-sections staff-report-no-print">
+            <span>Sezioni nascoste:</span>
+            {hiddenPlanningSections.map((section) => (
+              <button
+                key={section}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleRestorePlanningSection(section)}
+                title={`Ripristina Settimana ${section}`}
+              >
+                + {section}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {!loading && !periodTooLong && planningWeekBlocks.length === 0 ? (
+          <p className="text-muted" style={{ margin: '0 0 0.75rem' }}>
+            Nessuna sezione visibile nella pianificazione. Ripristina una sezione nascosta qui sopra oppure aggiungine una nuova.
+          </p>
+        ) : null}
+
+        {!loading && !periodTooLong && planningWeekBlocks.length > 0 ? (
           <div className="staff-planning-sections">
             {planningWeekBlocks.map((block) => (
               <div key={block.section} className="staff-section-week">
                 <h3 className="staff-section-week-title">
-                  Settimana {block.sectionLabel}
-                  <span>
-                    {members.filter((m) => memberMatchesSection(m, block.section, localeSections)).length} dipendenti
+                  <span className="staff-section-week-title-label">Settimana {block.sectionLabel}</span>
+                  <span className="staff-section-week-title-actions">
+                    <span className="staff-section-week-title-count">
+                      {members.filter((m) => memberMatchesSection(m, block.section, localeSections)).length} dipendenti
+                    </span>
+                    <button
+                      type="button"
+                      className="staff-section-week-remove"
+                      onClick={() => handleHidePlanningSection(block.section)}
+                      disabled={shiftBusy}
+                      title={`Rimuovi Settimana ${block.sectionLabel} dalla pianificazione`}
+                      aria-label={`Rimuovi Settimana ${block.sectionLabel}`}
+                    >
+                      ×
+                    </button>
                   </span>
                 </h3>
                 <div
@@ -5849,7 +5970,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               </div>
             ))}
           </div>
-        )}
+        ) : null}
       </section>
 
       <section id="staff-shift-form-card" className="card" style={{ order: 2 }}>

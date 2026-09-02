@@ -69,3 +69,28 @@ export function memberMatchesSection(member, sectionName, sectionsList = []) {
   const first = sectionCompareKey(canonicalSectionName(Array.isArray(sectionsList) ? sectionsList[0] : ''))
   return first ? first === target : true
 }
+
+/** Unisce elenchi di sezioni nascoste in pianificazione (senza duplicati). */
+export function mergeHiddenPlanningSections(...lists) {
+  const out = []
+  const seen = new Set()
+  for (const list of lists) {
+    for (const raw of Array.isArray(list) ? list : []) {
+      const name = normalizeSectionName(raw)
+      if (!name) continue
+      const key = sectionCompareKey(name)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+/** True se la sezione non va mostrata nella griglia pianificazione turni. */
+export function isPlanningSectionHidden(section, hiddenSections = [], staticHidden = []) {
+  const key = sectionCompareKey(section)
+  if (!key) return false
+  const hidden = mergeHiddenPlanningSections(staticHidden, hiddenSections)
+  return hidden.some((name) => sectionCompareKey(name) === key)
+}
