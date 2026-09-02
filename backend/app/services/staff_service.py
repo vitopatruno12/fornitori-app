@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..constants.prima_nota_staff_locale import DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS
+from ..constants.staff_locale_access_defaults import allowed_access_codes_for_locale
 from ..models.staff_backup import StaffBackup
 from ..models.staff_locale_pack import StaffLocalePack
 from ..models.staff_member import StaffMember
@@ -106,10 +107,11 @@ def _verify_locale_access_code(
     if not row:
         return
     stored_code = _normalize_access_code(row.access_code)
-    if not stored_code:
+    allowed = allowed_access_codes_for_locale(locale_name, stored_code)
+    if not allowed:
         return
     provided = _normalize_access_code(access_code)
-    if provided != stored_code:
+    if provided not in allowed:
         if not provided:
             raise ValueError("Codice locale richiesto.")
         raise ValueError("Codice locale non valido.")

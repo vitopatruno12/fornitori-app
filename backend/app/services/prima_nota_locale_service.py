@@ -19,6 +19,26 @@ logger = logging.getLogger(__name__)
 
 _table_ready = False
 
+DEFAULT_PRIMA_NOTA_ACTIVITY_ACCESS_CODES = {
+    "via_lattea": "050408",
+}
+
+LEGACY_PRIMA_NOTA_ACTIVITY_ACCESS_CODES = {
+    "via_lattea": frozenset({"910689"}),
+}
+
+
+def _allowed_prima_nota_codes(activity_slug: str, stored_code: str) -> set[str]:
+    slug = str(activity_slug or "").strip().lower()
+    allowed: set[str] = set()
+    if stored_code:
+        allowed.add(stored_code)
+    default = _normalize_access_code(DEFAULT_PRIMA_NOTA_ACTIVITY_ACCESS_CODES.get(slug))
+    if default:
+        allowed.add(default)
+    allowed.update(LEGACY_PRIMA_NOTA_ACTIVITY_ACCESS_CODES.get(slug, ()))
+    return allowed
+
 
 def _normalize_access_code(code: Optional[str]) -> str:
     digits = "".join(ch for ch in str(code or "") if ch.isdigit())
@@ -185,13 +205,12 @@ def verify_activity_access(db: Session, activity: Optional[str], access_code: Op
     if not slug:
         return
     row = _find_pack(db, slug)
-    if not row:
-        return
-    stored_code = _normalize_access_code(row.access_code)
-    if not stored_code:
+    stored_code = _normalize_access_code(row.access_code) if row else ""
+    allowed = _allowed_prima_nota_codes(slug, stored_code)
+    if not allowed:
         return
     provided = _normalize_access_code(access_code)
-    if provided != stored_code:
+    if provided not in allowed:
         if not provided:
             raise ValueError("Codice locale richiesto.")
         raise ValueError("Codice locale non valido.")

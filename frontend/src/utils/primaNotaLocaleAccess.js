@@ -1,5 +1,23 @@
 const STORAGE_KEY = 'primaNotaLocaleAccessCodes'
 
+/** Vecchio codice Via Lattea — sostituito da 050408. */
+const LEGACY_ACCESS_CODES = {
+  via_lattea: '910689',
+}
+const CURRENT_ACCESS_CODES = {
+  via_lattea: '050408',
+}
+
+function normalizeStoredCode(activitySlug, code) {
+  const slug = String(activitySlug || '').trim().toLowerCase()
+  const digits = String(code || '').replace(/\D/g, '')
+  if (digits.length !== 6) return ''
+  if (LEGACY_ACCESS_CODES[slug] && digits === LEGACY_ACCESS_CODES[slug]) {
+    return CURRENT_ACCESS_CODES[slug] || digits
+  }
+  return digits
+}
+
 function readStore() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -23,7 +41,7 @@ export function readStoredPrimaNotaAccessCode(activitySlug) {
   const slug = String(activitySlug || '').trim().toLowerCase()
   if (!slug) return ''
   const store = readStore()
-  const code = String(store[slug] || '').replace(/\D/g, '')
+  const code = normalizeStoredCode(slug, store[slug])
   return code.length === 6 ? code : ''
 }
 
@@ -32,7 +50,7 @@ export function saveStoredPrimaNotaAccessCode(activitySlug, accessCode) {
   const code = String(accessCode || '').replace(/\D/g, '')
   if (!slug || code.length !== 6) return
   const store = readStore()
-  store[slug] = code
+  store[slug] = normalizeStoredCode(slug, code) || code
   writeStore(store)
 }
 
