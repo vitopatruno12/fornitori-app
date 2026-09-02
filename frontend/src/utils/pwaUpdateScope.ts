@@ -135,7 +135,9 @@ export function updateAvailableForScope(
 
   if (runningBuild && runningBuild !== 'dev') {
     if (runningBuild === remoteBuild) return false
-    return scopeHashChanged(scope, scopes)
+    // Tutte le PWA ATLAS condividono lo stesso bundle/sw.js: se il build globale
+    // è cambiato, anche postazione operativa e satelliti devono poter aggiornarsi.
+    return true
   }
 
   const storedBuild = readStoredBuildId()
