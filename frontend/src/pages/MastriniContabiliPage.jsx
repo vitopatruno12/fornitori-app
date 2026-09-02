@@ -347,15 +347,6 @@ export default function MastriniContabiliPage() {
   }
 
   React.useEffect(() => {
-    if (!companyId || !accountOptions.length) return
-    const preferred = accountOptions.find((row) => row.code?.startsWith('100')) || accountOptions[0]
-    if (preferred?.code) {
-      setAccountCode(preferred.code)
-      setSelectedCode(preferred.code)
-    }
-  }, [companyId, accountOptions])
-
-  React.useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
@@ -383,6 +374,15 @@ export default function MastriniContabiliPage() {
     }
     return [...groups.entries()]
   }, [accountOptions])
+
+  React.useEffect(() => {
+    if (!companyId || !accountOptions.length) return
+    const preferred = accountOptions.find((row) => row.code?.startsWith('100')) || accountOptions[0]
+    if (preferred?.code) {
+      setAccountCode(preferred.code)
+      setSelectedCode(preferred.code)
+    }
+  }, [companyId, accountOptions])
 
   function filterMovementsBySource(rows = []) {
     return filterMovementsBySourceRows(rows, sourceFilter)
