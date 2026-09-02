@@ -173,6 +173,10 @@ def list_invoices(
     description="Filtra: overdue (scadute), due_soon (in scadenza entro 7 giorni)",
   ),
   include_ignored: bool = Query(default=False),
+  company: Optional[str] = Query(
+    default=None,
+    description="Filtra per società: mediazione|via_lattea|risacca|pg|non_classificata",
+  ),
   db: Session = Depends(get_db),
 ):
   if due_filter not in (None, "overdue", "due_soon"):
@@ -182,6 +186,7 @@ def list_invoices(
     supplier_id=supplier_id,
     due_filter=due_filter,
     include_ignored=include_ignored,
+    company=company,
   )
 
 

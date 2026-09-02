@@ -6,14 +6,28 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
+from ..constants.sdi_companies import company_from_vat, normalize_company_section, pick_company
+from ..models.cash_entry import CashEntry
+from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice
 from ..models.invoice import Invoice
 from ..models.invoice_row import InvoiceRow
+from ..models.sdi_invoice import SdiInvoice
 from ..models.supplier import Supplier
 from ..schemas.invoice import InvoiceCreate, InvoiceDetailOut, InvoiceListOut, InvoiceRead, InvoiceRowOut
 from .vat_service import calculate_vat
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "invoices"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Prima Nota activity → società fatture
+_ACTIVITY_TO_COMPANY = {
+  "via_abba": "mediazione",
+  "via_zanardelli": "mediazione",
+  "mediazione": "mediazione",
+  "via_lattea": "via_lattea",
+  "risacca": "risacca",
+  "pg": "pg",
+}
 
 
 def payment_status_label(inv: Invoice) -> Literal["paid", "unpaid", "partial"]:
@@ -30,18 +44,70 @@ def sync_invoice_paid_flag(inv: Invoice) -> None:
   inv.is_paid = payment_status_label(inv) == "paid"
 
 
+def _company_from_activity(activity: Optional[str]) -> str:
+  key = (activity or "").strip().lower()
+  return _ACTIVITY_TO_COMPANY.get(key, "non_classificata")
+
+
+def resolve_invoice_company(
+  *,
+  customer_vat: Optional[str] = None,
+  receiver_vat: Optional[str] = None,
+  ade_profile_id: Optional[str] = None,
+  cash_activity: Optional[str] = None,
+) -> str:
+  """Classifica fattura Atlas per società (P.IVA destinatario / profilo AdE / activity cassa)."""
+  by_customer = company_from_vat(customer_vat)
+  if by_customer:
+    return by_customer
+  by_sdi = pick_company(
+    receiver_vat=receiver_vat,
+    ade_profile_id=ade_profile_id,
+    legacy_destination_section=None,
+  )
+  if by_sdi != "non_classificata":
+    return by_sdi
+  return _company_from_activity(cash_activity)
+
+
 def list_invoices(
   db: Session,
   supplier_id: Optional[int] = None,
   due_filter: Optional[str] = None,
   include_ignored: bool = False,
+  company: Optional[str] = None,
 ) -> List[InvoiceListOut]:
-  q = db.query(Invoice, Supplier.name).join(Supplier, Invoice.supplier_id == Supplier.id)
+  q = (
+    db.query(
+      Invoice,
+      Supplier.name,
+      ElectronicInvoice.customer_vat,
+      SdiInvoice.receiver_vat,
+      SdiInvoice.ade_profile_id,
+      SdiInvoice.destination,
+      CashEntry.activity,
+    )
+    .join(Supplier, Invoice.supplier_id == Supplier.id)
+    .outerjoin(IncomingInvoice, IncomingInvoice.atlas_invoice_id == Invoice.id)
+    .outerjoin(ElectronicInvoice, ElectronicInvoice.id == IncomingInvoice.electronic_invoice_id)
+    .outerjoin(SdiInvoice, SdiInvoice.electronic_invoice_id == IncomingInvoice.electronic_invoice_id)
+    .outerjoin(CashEntry, CashEntry.id == Invoice.cash_entry_id)
+  )
   if supplier_id is not None:
     q = q.filter(Invoice.supplier_id == supplier_id)
   if not include_ignored:
     q = q.filter(Invoice.ignored.is_(False))
   rows = q.order_by(Invoice.invoice_date.desc()).all()
+
+  company_filter = ""
+  if company:
+    raw = str(company).strip().lower()
+    if raw in {"non_classificata", "non-classificata"}:
+      company_filter = "non_classificata"
+    else:
+      company_filter = normalize_company_section(raw)
+      if company_filter == "non_classificata":
+        company_filter = ""  # id sconosciuto → nessun filtro
 
   def _aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
@@ -55,7 +121,7 @@ def list_invoices(
   week_end = today_start + timedelta(days=7)
 
   out: List[InvoiceListOut] = []
-  for inv, supplier_name in rows:
+  for inv, supplier_name, customer_vat, receiver_vat, ade_profile_id, destination, cash_activity in rows:
     ps = payment_status_label(inv)
     dd = _aware(inv.due_date)
     if due_filter == "overdue":
@@ -65,9 +131,20 @@ def list_invoices(
       if dd is None or dd < today_start or dd > week_end or ps == "paid":
         continue
 
+    inv_company = resolve_invoice_company(
+      customer_vat=customer_vat,
+      receiver_vat=receiver_vat,
+      ade_profile_id=ade_profile_id,
+      cash_activity=cash_activity,
+    )
+    if company_filter:
+      if inv_company != company_filter:
+        continue
+
     base = InvoiceRead.model_validate(inv).model_dump()
     base["supplier_name"] = supplier_name or ""
     base["payment_status"] = ps
+    base["company"] = inv_company
     out.append(InvoiceListOut(**base))
   return out
 

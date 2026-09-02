@@ -668,17 +668,37 @@ export function FattureDaRegistrarePage() {
 }
 
 export function FattureScadenziarioPage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const [mode, setMode] = useState('overdue')
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
 
+  const scadenziarioLead = gestionaleMode
+    ? companyId
+      ? `Scadenze ${companyLabel(companyId)}: scadute o in arrivo entro 7 giorni.`
+      : 'Scegli la società dal menu per vedere le scadenze del registro corretto.'
+    : companyId
+      ? `Scadenze del registro locale ${companyLabel(companyId)}.`
+      : 'Scadenze del registro locale di questa postazione.'
+
   async function load(filter = mode) {
+    if (!companyId) {
+      setInvoices([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError('')
     try {
-      const rows = await fetchInvoices({ due_filter: filter, include_ignored: false })
+      const rows = await fetchInvoices({
+        due_filter: filter,
+        include_ignored: false,
+        company: companyId,
+      })
       setInvoices(Array.isArray(rows) ? rows : [])
     } catch (e) {
       setError(e?.message || 'Errore caricamento scadenziario')
@@ -690,7 +710,7 @@ export function FattureScadenziarioPage() {
   useEffect(() => {
     load(mode)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode])
+  }, [mode, companyId])
 
   async function toggleIgnore(inv) {
     try {
@@ -715,13 +735,22 @@ export function FattureScadenziarioPage() {
   return (
     <FatturePageShell
       title="Scadenziario fornitori"
-      lead="Fatture scadute o in scadenza entro 7 giorni."
+      lead={scadenziarioLead}
       actions={
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {gestionaleMode ? (
+            <FattureCompanySelect
+              companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+              value={companyId}
+              onChange={setCompanyId}
+              loading={loadingCompanies}
+            />
+          ) : null}
           <button
             type="button"
             className={`btn btn-sm ${mode === 'overdue' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setMode('overdue')}
+            disabled={!companyId}
           >
             Scadute
           </button>
@@ -729,6 +758,7 @@ export function FattureScadenziarioPage() {
             type="button"
             className={`btn btn-sm ${mode === 'due_soon' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setMode('due_soon')}
+            disabled={!companyId}
           >
             In arrivo
           </button>
@@ -738,6 +768,13 @@ export function FattureScadenziarioPage() {
       {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {msg && <div className="alert alert-success">{msg}</div>}
+      {!companyId ? (
+        <p className="fatture-note">
+          {gestionaleMode
+            ? 'Seleziona una società dal menu nel banner verde per vedere lo scadenziario.'
+            : 'Registro locale non configurato per questa postazione.'}
+        </p>
+      ) : (
       <section className="card fatture-panel">
         <div className="table-wrap pn-table-wrap">
           <table className="app-table">
@@ -776,7 +813,7 @@ export function FattureScadenziarioPage() {
               {!loading && invoices.length === 0 && (
                 <tr>
                   <td colSpan={7} className="empty-state">
-                    Nessuna fattura in questa vista.
+                    Nessuna fattura in questa vista per {companyLabel(companyId)}.
                   </td>
                 </tr>
               )}
@@ -784,6 +821,7 @@ export function FattureScadenziarioPage() {
           </table>
         </div>
       </section>
+      )}
     </FatturePageShell>
   )
 }
