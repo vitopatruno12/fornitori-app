@@ -1,4 +1,5 @@
-import { operatorStationLocaleKeysEqual } from './operatorStationLocale.js'
+import { getOperatorStationActivitySlug, operatorStationLocaleKeysEqual } from './operatorStationLocale.js'
+import { STAFF_LOCALE_SLUG_TOKENS, staffLocaleCompareKey } from './primaNotaStaffLocaleLink.js'
 
 const SESSION_BY_STATION_KEY = 'atlasOperatorStaffSessionByStation'
 
@@ -32,12 +33,22 @@ export function readOperatorStationStaffSession(stationId) {
   }
 }
 
-export function isOperatorStationStaffSessionOpen(stationId, localeName) {
+function operatorStationLocaleKeysMatch(stationId, sessionLocaleKey, localeName) {
+  const target = staffLocaleCompareKey(localeName)
+  if (!target) return false
+  if (sessionLocaleKey === target) return true
+  if (target.includes(sessionLocaleKey) || sessionLocaleKey.includes(target)) return true
+  const slug = getOperatorStationActivitySlug(stationId)
+  const tokens = STAFF_LOCALE_SLUG_TOKENS[slug] || []
+  return tokens.length > 0 && tokens.every((token) => target.includes(token) && sessionLocaleKey.includes(token))
+}
+
+export function isOperatorStationStaffSessionOpen(stationId, localeName = '') {
   const session = readOperatorStationStaffSession(stationId)
   if (!session.open) return false
-  const localeKey = String(localeName || '').trim().toLocaleLowerCase('it').replace(/[\s_-]+/g, '')
-  if (!localeKey) return false
-  return session.localeKey === localeKey
+  const name = String(localeName || '').trim()
+  if (!name) return true
+  return operatorStationLocaleKeysMatch(stationId, session.localeKey, name)
 }
 
 export function setOperatorStationStaffSession(stationId, localeName, open) {
@@ -45,10 +56,7 @@ export function setOperatorStationStaffSession(stationId, localeName, open) {
   if (!stationKey) return
   const all = readAll()
   if (open) {
-    const localeKey = String(localeName || '')
-      .trim()
-      .toLocaleLowerCase('it')
-      .replace(/[\s_-]+/g, '')
+    const localeKey = staffLocaleCompareKey(localeName)
     if (!localeKey) return
     all[stationKey] = { open: true, localeKey }
   } else if (all[stationKey]) {

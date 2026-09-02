@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import { fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
-import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
 import {
-  filterShiftsForOperatorLocale,
+  fetchOperatorStationShifts,
   preloadOperatorStationMembers,
   resolveOperatorStationMembers,
 } from '../utils/operatorStaffReportData.js'
@@ -72,8 +71,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
     if (!operatorMode) return true
     const sid = stationId || getLockedOperatorStationId()
-    const localeName = getOperatorStationStaffLocaleName(sid, [])
-    return isOperatorStationStaffSessionOpen(sid, localeName)
+    return isOperatorStationStaffSessionOpen(sid)
   })
   const initial = defaultPeriod(operatorMode)
   const [dateFrom, setDateFrom] = useState(initial.from)
@@ -82,7 +80,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     buildStaffReportWorkbook({ members: [], shifts: [], dateFrom: initial.from, dateTo: initial.to }),
   )
   const [activeSheet, setActiveSheet] = useState('VOCI')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    if (!operatorMode) return true
+    const sid = stationId || getLockedOperatorStationId()
+    return isOperatorStationStaffSessionOpen(sid)
+  })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [generatedAt, setGeneratedAt] = useState('')
@@ -94,9 +96,8 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const loadReportData = useCallback(
     async (from, to) => {
       if (operatorMode && operatorStationId) {
-        const { members, memberIds, packNameKeys } = await resolveOperatorStationMembers(operatorStationId)
-        const shiftsRaw = await fetchStaffShifts(from, to, memberIds.length ? { memberIds } : {})
-        const shifts = filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
+        const { members } = await resolveOperatorStationMembers(operatorStationId)
+        const shifts = await fetchOperatorStationShifts(operatorStationId, from, to)
         return { members, shifts }
       }
       const [membersRaw, shiftsRaw] = await Promise.all([
@@ -141,28 +142,23 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     setSuccess('')
     try {
       const { members, shifts } = await loadReportData(from, to)
-      startTransition(() => {
-        try {
-          const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
-          setWorkbook(next)
-          setGeneratedAt(
-            new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }),
-          )
-          if (!members.length) {
-            setSuccess('Report generato: nessun dipendente registrato nel periodo.')
-          } else if (!shifts.length) {
-            setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
-          } else {
-            setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
-          }
-        } catch (buildErr) {
-          setError(buildErr?.message || 'Errore generazione report')
-        } finally {
-          setLoading(false)
+      try {
+        const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
+        setWorkbook(next)
+        setGeneratedAt(new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }))
+        if (!members.length) {
+          setSuccess('Report generato: nessun dipendente registrato nel periodo.')
+        } else if (!shifts.length) {
+          setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
+        } else {
+          setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
         }
-      })
+      } catch (buildErr) {
+        setError(buildErr?.message || 'Errore generazione report')
+      }
     } catch (err) {
       setError(err?.message || 'Impossibile caricare i dati del personale')
+    } finally {
       setLoading(false)
     }
   }, [loadReportData, operatorMode])
