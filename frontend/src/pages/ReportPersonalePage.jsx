@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import { fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
-import { resolveOperatorStationMembers } from '../utils/operatorStaffReportData.js'
+import {
+  filterShiftsForOperatorLocale,
+  preloadOperatorStationMembers,
+  resolveOperatorStationMembers,
+} from '../utils/operatorStaffReportData.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
@@ -54,6 +58,15 @@ function defaultPeriod(operatorMode = false) {
   return { from: toYmd(startOfMonth(now)), to: toYmd(endOfMonth(now)) }
 }
 
+const MAX_OPERATOR_REPORT_DAYS = 31
+
+function daysInclusive(fromYmd, toYmdValue) {
+  const from = new Date(`${fromYmd}T12:00:00`)
+  const to = new Date(`${toYmdValue}T12:00:00`)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 0
+  return Math.max(0, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
+}
+
 export default function ReportPersonalePage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
@@ -81,13 +94,10 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const loadReportData = useCallback(
     async (from, to) => {
       if (operatorMode && operatorStationId) {
-        const { members, memberIds } = await resolveOperatorStationMembers(operatorStationId)
-        const shiftOpts = memberIds.length ? { memberIds } : {}
-        const shiftsRaw = await fetchStaffShifts(from, to, shiftOpts)
-        return {
-          members,
-          shifts: Array.isArray(shiftsRaw) ? shiftsRaw : [],
-        }
+        const { members, memberIds, packNameKeys } = await resolveOperatorStationMembers(operatorStationId)
+        const shiftsRaw = await fetchStaffShifts(from, to, memberIds.length ? { memberIds } : {})
+        const shifts = filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
+        return { members, shifts }
       }
       const [membersRaw, shiftsRaw] = await Promise.all([
         fetchStaffMembers(),
@@ -101,6 +111,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     [operatorMode, operatorStationId],
   )
 
+  useEffect(() => {
+    if (!operatorMode || !operatorSessionOpen || !operatorStationId) return
+    void preloadOperatorStationMembers(operatorStationId)
+  }, [operatorMode, operatorSessionOpen, operatorStationId])
+
   const runRefresh = useCallback(async () => {
     const from = String(dateFromRef.current || '').slice(0, 10)
     const to = String(dateToRef.current || '').slice(0, 10)
@@ -112,29 +127,37 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       setError('La data «Al» deve essere uguale o successiva a «Dal»')
       return
     }
+    if (operatorMode && daysInclusive(from, to) > MAX_OPERATOR_REPORT_DAYS) {
+      setError(
+        `Periodo troppo lungo (${daysInclusive(from, to)} giorni). Nella postazione operativa usa al massimo ${MAX_OPERATOR_REPORT_DAYS} giorni.`,
+      )
+      return
+    }
     setLoading(true)
     setError('')
     setSuccess('')
     try {
       const { members, shifts } = await loadReportData(from, to)
-      const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
-      setWorkbook(next)
-      setGeneratedAt(
-        new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }),
-      )
-      if (!members.length) {
-        setSuccess('Report generato: nessun dipendente registrato nel periodo.')
-      } else if (!shifts.length) {
-        setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
-      } else {
-        setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
-      }
+      startTransition(() => {
+        const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
+        setWorkbook(next)
+        setGeneratedAt(
+          new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }),
+        )
+        if (!members.length) {
+          setSuccess('Report generato: nessun dipendente registrato nel periodo.')
+        } else if (!shifts.length) {
+          setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
+        } else {
+          setSuccess(`Report aggiornato — ${shifts.length} voci caricate dal personale.`)
+        }
+        setLoading(false)
+      })
     } catch (err) {
       setError(err?.message || 'Impossibile caricare i dati del personale')
-    } finally {
       setLoading(false)
     }
-  }, [loadReportData])
+  }, [loadReportData, operatorMode])
 
   useEffect(() => {
     if (operatorMode && !operatorSessionOpen) return
@@ -182,6 +205,12 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       <p className="staff-page-lead">
         Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
         Puoi stampare il report o scaricarlo in Excel.
+        {operatorMode ? (
+          <>
+            {' '}
+            Periodo consigliato: <strong>settimana corrente</strong> (massimo {MAX_OPERATOR_REPORT_DAYS} giorni).
+          </>
+        ) : null}
       </p>
     </section>
   )

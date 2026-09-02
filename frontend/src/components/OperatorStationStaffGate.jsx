@@ -12,6 +12,7 @@ import {
   verifyLocaleAccessCode,
 } from '../utils/staffLocaleAccessCode.js'
 import { matchStaffLocaleName, staffLocaleCompareKey } from '../utils/primaNotaStaffLocaleLink.js'
+import { invalidateOperatorStationMembersCache, preloadOperatorStationMembers } from '../utils/operatorStaffReportData.js'
 import { readStaffLocaleStore, upsertStoredLocaleAccessCode } from '../utils/staffLocaleStore.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
@@ -93,24 +94,25 @@ export default function OperatorStationStaffGate({
     try {
       const store = await readStaffLocaleStore()
       const names = new Set(Object.keys(store || {}))
-      let summaries = []
+      const slugLocale = getOperatorStationStaffLocaleName(stationId, [])
+      if (slugLocale) names.add(slugLocale)
+      setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
       try {
-        summaries = await fetchStaffLocalePacks()
+        const summaries = await fetchStaffLocalePacks()
         setLocaleSummaries(Array.isArray(summaries) ? summaries : [])
         for (const row of summaries || []) {
           const n = String(row?.locale_name || '').trim()
           if (n) names.add(n)
         }
+        setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
       } catch {
         setLocaleSummaries([])
-        // server assente
       }
-      setSavedLocaleNames([...names].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })))
     } catch {
       setSavedLocaleNames([])
       setLocaleSummaries([])
     }
-  }, [])
+  }, [stationId])
 
   useEffect(() => {
     closeOtherOperatorStationStaffSessions(stationId)
@@ -158,6 +160,7 @@ export default function OperatorStationStaffGate({
       setOperatorStationStaffSession(stationId, access.localeName || localeName, true)
       setSessionTick((n) => n + 1)
       await upsertStoredLocaleAccessCode(access.localeName || localeName, code)
+      void preloadOperatorStationMembers(stationId)
       onSessionChange?.(true)
       setSuccess(`Locale «${access.localeName || localeName}» aperto.`)
     } finally {
@@ -169,6 +172,7 @@ export default function OperatorStationStaffGate({
     const localeName = stationStaffLocaleName
     if (!localeName) return
     setOperatorStationStaffSession(stationId, localeName, false)
+    invalidateOperatorStationMembersCache(stationId, localeName)
     setLocaleAccessCode('')
     setSessionTick((n) => n + 1)
     onSessionChange?.(false)
