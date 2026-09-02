@@ -1,13 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
-import { fetchStaffMembers, fetchStaffShifts } from '../services/staffService.js'
+import StaffGestionaleLocaleSelect from '../components/StaffGestionaleLocaleSelect.jsx'
+import { useGestionaleStaffLocale } from '../hooks/useGestionaleStaffLocale.js'
+import { fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import {
   fetchOperatorStationShifts,
+  filterShiftsForOperatorLocale,
   preloadOperatorStationMembers,
   resolveOperatorStationMembers,
 } from '../utils/operatorStaffReportData.js'
+import { resolveGestionaleLocaleMembers } from '../utils/gestionaleStaffLocale.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
@@ -68,6 +72,12 @@ function daysInclusive(fromYmd, toYmdValue) {
 
 export default function ReportPersonalePage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const {
+    localeNames: gestionaleLocaleNames,
+    localeName: gestionaleLocale,
+    setLocaleName: setGestionaleLocale,
+    loadingLocales: gestionaleLocalesLoading,
+  } = useGestionaleStaffLocale(!operatorMode)
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
     if (!operatorMode) return true
     const sid = stationId || getLockedOperatorStationId()
@@ -100,16 +110,18 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
         const shifts = await fetchOperatorStationShifts(operatorStationId, from, to)
         return { members, shifts }
       }
-      const [membersRaw, shiftsRaw] = await Promise.all([
-        fetchStaffMembers(),
-        fetchStaffShifts(from, to),
-      ])
-      return {
-        members: Array.isArray(membersRaw) ? membersRaw : [],
-        shifts: Array.isArray(shiftsRaw) ? shiftsRaw : [],
+      if (!gestionaleLocale) {
+        return { members: [], shifts: [] }
       }
+      const { members, memberIds, packNameKeys } = await resolveGestionaleLocaleMembers(gestionaleLocale)
+      let shifts = []
+      if (memberIds.length) {
+        const shiftsRaw = await fetchStaffShifts(from, to, { memberIds })
+        shifts = filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
+      }
+      return { members, shifts }
     },
-    [operatorMode, operatorStationId],
+    [operatorMode, operatorStationId, gestionaleLocale],
   )
 
   useEffect(() => {
@@ -122,6 +134,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     const to = String(dateToRef.current || '').slice(0, 10)
     if (!from || !to) {
       setError('Seleziona un intervallo date valido')
+      setLoading(false)
+      return
+    }
+    if (!operatorMode && !gestionaleLocale) {
+      setError('Seleziona il locale personale dal menu in alto.')
       setLoading(false)
       return
     }
@@ -161,7 +178,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     } finally {
       setLoading(false)
     }
-  }, [loadReportData, operatorMode])
+  }, [loadReportData, operatorMode, gestionaleLocale])
 
   useEffect(() => {
     if (operatorMode && !operatorSessionOpen) {
@@ -175,6 +192,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     runRefresh,
     operatorMode ? undefined : dateFrom,
     operatorMode ? undefined : dateTo,
+    operatorMode ? undefined : gestionaleLocale,
   ])
 
   const currentSheet = useMemo(
@@ -208,17 +226,34 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
 
   const reportHero = (
     <section className="staff-page-hero staff-report-no-print">
-      <h1 className="page-header staff-page-title">Report personale</h1>
-      <p className="staff-page-lead">
-        Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
-        Puoi stampare il report o scaricarlo in Excel.
-        {operatorMode ? (
-          <>
-            {' '}
-            Periodo consigliato: <strong>settimana corrente</strong> (massimo {MAX_OPERATOR_REPORT_DAYS} giorni).
-          </>
+      <div className="staff-page-hero-inner staff-page-hero-inner--with-locale">
+        <div>
+          <h1 className="page-header staff-page-title">Report personale</h1>
+          <p className="staff-page-lead">
+            Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
+            Puoi stampare il report o scaricarlo in Excel.
+            {operatorMode ? (
+              <>
+                {' '}
+                Periodo consigliato: <strong>settimana corrente</strong> (massimo {MAX_OPERATOR_REPORT_DAYS} giorni).
+              </>
+            ) : (
+              <>
+                {' '}
+                Scegli il <strong>locale</strong> dal menu: il report mostra solo il personale di quel negozio.
+              </>
+            )}
+          </p>
+        </div>
+        {!operatorMode ? (
+          <StaffGestionaleLocaleSelect
+            localeNames={gestionaleLocaleNames}
+            value={gestionaleLocale}
+            onChange={setGestionaleLocale}
+            loading={gestionaleLocalesLoading}
+          />
         ) : null}
-      </p>
+      </div>
     </section>
   )
 

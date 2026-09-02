@@ -10,7 +10,8 @@ class StaffStipendiMonth(Base):
     __tablename__ = "staff_stipendi_months"
 
     id = Column(Integer, primary_key=True, index=True)
-    year_month = Column(String(7), nullable=False, unique=True, index=True)
+    locale_name = Column(String(255), nullable=False, server_default="", index=True)
+    year_month = Column(String(7), nullable=False, index=True)
     period_from = Column(Date, nullable=False)
     period_to = Column(Date, nullable=False)
     lines_json = Column(Text, nullable=False, server_default="[]")

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
+import StaffGestionaleLocaleSelect from '../components/StaffGestionaleLocaleSelect.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
+import { useGestionaleStaffLocale } from '../hooks/useGestionaleStaffLocale.js'
 import {
   createStaffStipendiMonth,
   deleteStaffStipendiMonth,
@@ -11,6 +13,7 @@ import {
 } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
+import { resolveGestionaleLocaleMembers } from '../utils/gestionaleStaffLocale.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
@@ -135,6 +138,12 @@ function moneyDisplay(n) {
 
 export default function StipendiPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const {
+    localeNames: gestionaleLocaleNames,
+    localeName: gestionaleLocale,
+    setLocaleName: setGestionaleLocale,
+    loadingLocales: gestionaleLocalesLoading,
+  } = useGestionaleStaffLocale(!operatorMode)
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
     if (!operatorMode) return true
     const sid = stationId || getLockedOperatorStationId()
@@ -178,14 +187,25 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   }, [])
 
   const loadArchives = useCallback(async () => {
-    const rows = await fetchStaffStipendiMonths()
+    const locale = operatorMode ? '' : gestionaleLocale
+    if (!operatorMode && !locale) {
+      setArchives([])
+      return []
+    }
+    const rows = await fetchStaffStipendiMonths(locale)
     setArchives(Array.isArray(rows) ? rows : [])
     return Array.isArray(rows) ? rows : []
-  }, [])
+  }, [gestionaleLocale, operatorMode])
 
   const bootstrapFromMembers = useCallback(async () => {
-    const members = await fetchStaffMembers()
-    const list = Array.isArray(members) ? members : []
+    let list = []
+    if (operatorMode) {
+      const members = await fetchStaffMembers()
+      list = Array.isArray(members) ? members : []
+    } else {
+      const scoped = await resolveGestionaleLocaleMembers(gestionaleLocale)
+      list = scoped.members
+    }
     const next = list
       .filter((m) => m?.is_active !== false)
       .map((m) =>
@@ -199,7 +219,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setActiveId(null)
     setSelectedIndex(null)
     resetDraft()
-  }, [resetDraft])
+  }, [resetDraft, gestionaleLocale, operatorMode])
 
   const openArchive = useCallback(
     (row) => {
@@ -219,6 +239,13 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setLoading(false)
       return
     }
+    if (!operatorMode && !gestionaleLocale) {
+      setArchives([])
+      setLines([])
+      setActiveId(null)
+      setLoading(false)
+      return
+    }
     let cancelled = false
     ;(async () => {
       setLoading(true)
@@ -232,6 +259,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           openArchive(hit)
         } else {
           setYearMonth(ym)
+          setActiveId(null)
           await bootstrapFromMembers()
         }
       } catch (e) {
@@ -243,7 +271,14 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     return () => {
       cancelled = true
     }
-  }, [bootstrapFromMembers, loadArchives, openArchive, operatorMode, operatorSessionOpen])
+  }, [
+    bootstrapFromMembers,
+    loadArchives,
+    openArchive,
+    operatorMode,
+    operatorSessionOpen,
+    gestionaleLocale,
+  ])
 
   function updateDraft(field, value) {
     setDraft((prev) => {
@@ -319,6 +354,10 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setError('')
     setSuccess('')
     try {
+      if (!operatorMode && !gestionaleLocale) {
+        setError('Seleziona il locale personale dal menu in alto.')
+        return
+      }
       const cleaned = lines
         .map((l) => emptyLine(l))
         .filter((l) => String(l.name || '').trim())
@@ -328,6 +367,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       }
       const period = periodForYm(yearMonth)
       const payload = {
+        locale_name: operatorMode ? '' : gestionaleLocale,
         year_month: yearMonth,
         ...period,
         lines: cleaned,
@@ -436,9 +476,20 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
 
   const stipendiHero = (
     <header className="staff-page-hero">
-      <div>
-        <p className="staff-kicker">Personale</p>
-        <h1>Stipendi</h1>
+      <div className="staff-page-hero-inner staff-page-hero-inner--with-locale">
+        <div>
+          <p className="staff-kicker">Personale</p>
+          <h1>Stipendi</h1>
+          <p className="staff-page-lead" style={{ marginTop: '0.35rem' }}>
+            Archivio buste paga per locale: scegli il negozio dal menu e compila solo i dipendenti di quella sede.
+          </p>
+        </div>
+        <StaffGestionaleLocaleSelect
+          localeNames={gestionaleLocaleNames}
+          value={gestionaleLocale}
+          onChange={setGestionaleLocale}
+          loading={gestionaleLocalesLoading}
+        />
       </div>
     </header>
   )
@@ -449,6 +500,9 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+      {!operatorMode && !gestionaleLocale && !gestionaleLocalesLoading ? (
+        <div className="alert alert-warning">Seleziona il locale personale dal menu in alto per vedere e salvare gli stipendi.</div>
+      ) : null}
 
       <section className="card pagamenti-workbook-card stipendi-toolbar-card">
         <div className="stipendi-toolbar">

@@ -26,10 +26,12 @@ SAFE_MIGRATIONS = [
     "20260723_staff_member_section.sql",
     "20260723_bank_module.sql",
     "20260729_staff_stipendi_months.sql",
+    "20260902_staff_stipendi_locale.sql",
     "20260812_carriers.sql",
     "20260812_electronic_invoices.sql",
     "20260812_sdi_electronic_invoice_link.sql",
     "20260816_pos_receipts.sql",
+    "20260828_pos_receipts_payment_split.sql",
 ]
 
 

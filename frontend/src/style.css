@@ -5263,6 +5263,37 @@ select.form-control {
   color: #ecfdf5;
 }
 
+.staff-page-hero-inner--with-locale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem 1.25rem;
+}
+
+.staff-gestionale-locale-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: min(100%, 260px);
+  margin: 0;
+}
+
+.staff-gestionale-locale-select-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.staff-gestionale-locale-select-field {
+  min-width: 220px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+}
+
 .prima-nota-locale-picker {
   position: relative;
   margin-bottom: 1rem;

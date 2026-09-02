@@ -173,8 +173,11 @@ def delete_payroll_month(month_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/stipendi-months", response_model=List[staff_schema.StaffStipendiMonthRead])
-def list_stipendi_months(db: Session = Depends(get_db)):
-    return staff_service.list_stipendi_months(db)
+def list_stipendi_months(
+    locale: Optional[str] = Query(None, description="Nome locale personale"),
+    db: Session = Depends(get_db),
+):
+    return staff_service.list_stipendi_months(db, locale_name=locale)
 
 
 @router.get("/stipendi-months/{month_id}", response_model=staff_schema.StaffStipendiMonthRead)

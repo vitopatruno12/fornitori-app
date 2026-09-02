@@ -805,6 +805,27 @@ def _ensure_staff_stipendi_months_table() -> None:
             """,
             label="Index staff_stipendi_months.year_month",
         )
+        _safe_exec_sql(
+            """
+            ALTER TABLE staff_stipendi_months
+            ADD COLUMN IF NOT EXISTS locale_name VARCHAR(255) NOT NULL DEFAULT ''
+            """,
+            label="Column staff_stipendi_months.locale_name",
+        )
+        _safe_exec_sql(
+            """
+            ALTER TABLE staff_stipendi_months
+            DROP CONSTRAINT IF EXISTS uq_staff_stipendi_months_year_month
+            """,
+            label="Drop legacy staff_stipendi_months year_month unique",
+        )
+        _safe_exec_sql(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_staff_stipendi_months_locale_ym
+            ON staff_stipendi_months (locale_name, year_month)
+            """,
+            label="Unique staff_stipendi_months locale+year_month",
+        )
     except Exception as e:
         logger.warning(
             "Impossibile verificare/creare staff_stipendi_months: %s",

@@ -444,6 +444,7 @@ def stipendi_month_to_read(row: StaffStipendiMonth) -> staff_schema.StaffStipend
     totals = _stipendi_totals(lines)
     return staff_schema.StaffStipendiMonthRead(
         id=row.id,
+        locale_name=str(row.locale_name or "").strip(),
         year_month=row.year_month,
         period_from=row.period_from,
         period_to=row.period_to,
@@ -456,12 +457,13 @@ def stipendi_month_to_read(row: StaffStipendiMonth) -> staff_schema.StaffStipend
     )
 
 
-def list_stipendi_months(db: Session) -> List[staff_schema.StaffStipendiMonthRead]:
-    rows = (
-        db.query(StaffStipendiMonth)
-        .order_by(StaffStipendiMonth.year_month.desc())
-        .all()
-    )
+def list_stipendi_months(
+    db: Session, locale_name: Optional[str] = None
+) -> List[staff_schema.StaffStipendiMonthRead]:
+    q = db.query(StaffStipendiMonth)
+    if locale_name is not None:
+        q = q.filter(StaffStipendiMonth.locale_name == str(locale_name).strip())
+    rows = q.order_by(StaffStipendiMonth.year_month.desc()).all()
     return [stipendi_month_to_read(r) for r in rows]
 
 
@@ -475,15 +477,21 @@ def get_stipendi_month(db: Session, month_id: int) -> Optional[staff_schema.Staf
 def create_stipendi_month(
     db: Session, payload: staff_schema.StaffStipendiMonthCreate
 ) -> staff_schema.StaffStipendiMonthRead:
+    locale_key = str(payload.locale_name or "").strip()
     existing = (
         db.query(StaffStipendiMonth)
-        .filter(StaffStipendiMonth.year_month == payload.year_month)
+        .filter(
+            StaffStipendiMonth.year_month == payload.year_month,
+            StaffStipendiMonth.locale_name == locale_key,
+        )
         .first()
     )
     if existing:
-        raise ValueError(f"Esiste già un archivio stipendi per {payload.year_month}")
+        label = f"{payload.year_month}" + (f" ({locale_key})" if locale_key else "")
+        raise ValueError(f"Esiste già un archivio stipendi per {label}")
     totals = _stipendi_totals(payload.lines)
     row = StaffStipendiMonth(
+        locale_name=locale_key,
         year_month=payload.year_month,
         period_from=payload.period_from,
         period_to=payload.period_to,

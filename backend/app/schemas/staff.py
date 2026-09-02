@@ -207,6 +207,7 @@ class StaffStipendiMonthLine(BaseModel):
 
 
 class StaffStipendiMonthCreate(BaseModel):
+    locale_name: str = Field("", max_length=255)
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
     period_from: date
     period_to: date
@@ -229,6 +230,7 @@ class StaffStipendiMonthUpdate(BaseModel):
 
 class StaffStipendiMonthRead(BaseModel):
     id: int
+    locale_name: str = ""
     year_month: str
     period_from: date
     period_to: date

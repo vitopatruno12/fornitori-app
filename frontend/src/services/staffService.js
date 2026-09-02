@@ -113,8 +113,10 @@ export function deleteStaffPayrollMonth(id) {
   return apiFetch(`/staff/payroll-months/${id}`, { method: 'DELETE' })
 }
 
-export function fetchStaffStipendiMonths() {
-  return apiFetch('/staff/stipendi-months')
+export function fetchStaffStipendiMonths(localeName = '') {
+  const locale = String(localeName || '').trim()
+  const q = locale ? `?locale=${encodeURIComponent(locale)}` : ''
+  return apiFetch(`/staff/stipendi-months${q}`)
 }
 
 export function fetchStaffStipendiMonth(id) {
