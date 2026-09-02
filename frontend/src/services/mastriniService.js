@@ -2,63 +2,22 @@ import { fetchBancaMovimenti } from './bancaService'
 import { fetchEntries } from './cashService'
 import { fetchInvoices } from './invoicesService'
 import {
+  accountDescription,
+  buildPasscomAccountPlan,
+  causaleLabel,
+  formatRegistrationNumber,
+  GENERAL_ACCOUNTS,
+  mapPrimaNotaToPasscomAccounts,
+} from '../constants/mastriniPasscom.js'
+import {
   activitiesForCompany,
   activityLabel,
   companyFromActivity,
   companyLabel,
 } from '../utils/fattureCompany.js'
+import { readStoredPrimaNotaAccessCode } from '../utils/primaNotaLocaleAccess.js'
 
-const ACCOUNT_PLAN = [
-  {
-    code: '1000',
-    description: 'Cassa',
-    category: 'Patrimoniale',
-    type: 'attivo',
-    statementType: 'stato_patrimoniale',
-  },
-  {
-    code: '1100',
-    description: 'Banca c/c',
-    category: 'Patrimoniale',
-    type: 'attivo',
-    statementType: 'stato_patrimoniale',
-  },
-  {
-    code: '1200',
-    description: 'Crediti clienti',
-    category: 'Patrimoniale',
-    type: 'attivo',
-    statementType: 'stato_patrimoniale',
-  },
-  {
-    code: '2000',
-    description: 'Debiti fornitori',
-    category: 'Patrimoniale',
-    type: 'passivo',
-    statementType: 'stato_patrimoniale',
-  },
-  {
-    code: '4000',
-    description: 'Ricavi vendite',
-    category: 'Economico',
-    type: 'ricavo',
-    statementType: 'conto_economico',
-  },
-  {
-    code: '5000',
-    description: 'Costi acquisti/fornitori',
-    category: 'Economico',
-    type: 'costo',
-    statementType: 'conto_economico',
-  },
-  {
-    code: '6100',
-    description: 'Commissioni e oneri bancari',
-    category: 'Economico',
-    type: 'costo',
-    statementType: 'conto_economico',
-  },
-]
+const ACCOUNT_PLAN = buildPasscomAccountPlan()
 
 function isoDate(value) {
   if (!value) return ''
@@ -88,16 +47,22 @@ function resolveCompanyMeta(companyId, locale = '') {
   }
 }
 
-function pushMovement(list, accountCode, raw, amount, side) {
+function pushMovement(list, accountCode, raw, amount, side, counterAccountCode = '') {
   const val = Math.abs(toNum(amount))
   if (val <= 0) return
   const companyMeta = resolveCompanyMeta(raw.company, raw.locale || raw.center)
+  const code = String(accountCode || '')
+  const counterCode = String(counterAccountCode || raw.counterAccountCode || '')
   list.push({
-    accountCode,
+    accountCode: code,
+    accountDescription: accountDescription(code, ACCOUNT_PLAN),
+    counterAccountCode: counterCode,
+    counterAccountDescription: counterCode ? accountDescription(counterCode, ACCOUNT_PLAN) : '',
     date: raw.date || '',
     documentDate: raw.documentDate || raw.date || '',
     registrationNumber: raw.registrationNumber || '',
     causale: raw.causale || '',
+    causaleLabel: raw.causaleLabel || causaleLabel(raw.causale),
     description: raw.description || '',
     documentLabel: raw.documentLabel || '',
     documentType: raw.documentType || '',
@@ -121,6 +86,11 @@ function pushMovement(list, accountCode, raw, amount, side) {
     relatedDocumentPath: raw.relatedDocumentPath || '',
     relatedDocumentLabel: raw.relatedDocumentLabel || '',
   })
+}
+
+function pushDoubleEntry(list, dareCode, avereCode, raw, amount) {
+  pushMovement(list, dareCode, raw, amount, 'dare', avereCode)
+  pushMovement(list, avereCode, raw, amount, 'avere', dareCode)
 }
 
 function buildInvoiceIndex(invoices = []) {
@@ -153,15 +123,20 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
       (linkedInv ? invoiceCompany(linkedInv) : '') ||
       companyFromActivity(activity) ||
       'non_classificata'
+    const entryDate = isoDate(row?.entry_date)
+    const entryYear = entryDate ? Number(entryDate.slice(0, 4)) : new Date().getFullYear()
+    const mapping = mapPrimaNotaToPasscomAccounts(row, { linkedInvoice: Boolean(linkedInv) })
+    if (!mapping) continue
     const meta = {
-      date: isoDate(row?.entry_date),
-      documentDate: isoDate(row?.entry_date),
-      registrationNumber: `PN-${row?.id ?? ''}`,
-      causale: row?.type === 'entrata' ? 'INC' : 'PAG',
+      date: entryDate,
+      documentDate: entryDate,
+      registrationNumber: formatRegistrationNumber('PN/', row?.id ?? '', entryYear),
+      causale: mapping.causale,
+      causaleLabel: causaleLabel(mapping.causale),
       description: linkedInv
         ? `Prima Nota pagamento fattura ${invNum} — ${row?.description || 'Movimento'}`.trim()
-        : row?.description || 'Movimento Prima Nota',
-      documentLabel: linkedInv ? `Fattura ${invNum} · PN-${row?.id ?? ''}` : 'Prima Nota',
+        : row?.description || `Movimento Prima Nota — ${activityLabel(activity)}`,
+      documentLabel: linkedInv ? `Fattura ${invNum} · PN-${row?.id ?? ''}` : `Prima Nota PN-${row?.id ?? ''}`,
       documentType: linkedInv ? 'pagamento_fattura_prima_nota' : 'prima_nota',
       documentId: linkedInv ? String(linkedInv.id) : row?.id ? String(row.id) : '',
       documentPath: linkedInv ? '/fatture/registrate' : '/prima-nota',
@@ -180,13 +155,7 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
       customer: row?.customer_id ? `Cliente #${row.customer_id}` : '',
       source: 'prima_nota',
     }
-    if (row?.type === 'entrata') {
-      pushMovement(out, '1000', meta, amount, 'dare')
-      pushMovement(out, '4000', meta, amount, 'avere')
-    } else {
-      pushMovement(out, '5000', meta, amount, 'dare')
-      pushMovement(out, '1000', meta, amount, 'avere')
-    }
+    pushDoubleEntry(out, mapping.dare, mapping.avere, meta, amount)
   }
   return out
 }
@@ -227,8 +196,7 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
       company,
       source: 'fatture_fornitori',
     }
-    pushMovement(out, '5000', base, amount, 'dare')
-    pushMovement(out, '2000', base, amount, 'avere')
+    pushDoubleEntry(out, GENERAL_ACCOUNTS.costi.code, GENERAL_ACCOUNTS.debiti.code, base, amount)
 
     const paid = String(inv?.payment_status || '').toLowerCase() === 'paid'
     const hasBankLink = bankMatchedInvoiceIds.has(invId)
@@ -236,14 +204,14 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
     if (paid && !hasBankLink && !hasCashLink) {
       const pay = {
         ...base,
+        causale: 'BOU',
         description: `Pagamento fattura ${number} (senza movimento bancario collegato)`.trim(),
         documentLabel: `Pagamento ${number}`.trim(),
         documentType: 'pagamento_fornitore',
         documentPath: '/pagamenti',
         source: 'pagamenti',
       }
-      pushMovement(out, '2000', pay, amount, 'dare')
-      pushMovement(out, '1100', pay, amount, 'avere')
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.debiti.code, GENERAL_ACCOUNTS.banca.code, pay, amount)
     }
   }
   return out
@@ -294,14 +262,11 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
       source: matchedInv ? 'pagamento_fattura_banca' : movementType === 'entrata' ? 'incasso' : 'pagamento',
     }
     if (movementType === 'entrata') {
-      pushMovement(out, '1100', base, amount, 'dare')
-      pushMovement(out, '1200', base, amount, 'avere')
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.banca.code, GENERAL_ACCOUNTS.crediti.code, base, amount)
     } else if (isCommission) {
-      pushMovement(out, '6100', base, amount, 'dare')
-      pushMovement(out, '1100', base, amount, 'avere')
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.commissioni.code, GENERAL_ACCOUNTS.banca.code, base, amount)
     } else {
-      pushMovement(out, '2000', base, amount, 'dare')
-      pushMovement(out, '1100', base, amount, 'avere')
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.debiti.code, GENERAL_ACCOUNTS.banca.code, base, amount)
     }
   }
   return out
@@ -340,10 +305,12 @@ function buildLedger(movements) {
     })
   }
 
-  const rows = [...byAccount.values()].map((row) => ({
-    ...row,
-    status: Math.abs(row.finalBalance) < 0.005 ? 'pareggio' : row.finalBalance > 0 ? 'attivo' : 'passivo',
-  }))
+  const rows = [...byAccount.values()]
+    .filter((row) => row.movements.length > 0)
+    .map((row) => ({
+      ...row,
+      status: Math.abs(row.finalBalance) < 0.005 ? 'pareggio' : row.finalBalance > 0 ? 'attivo' : 'passivo',
+    }))
 
   const totalDare = rows.reduce((acc, r) => acc + toNum(r.totalDare), 0)
   const totalAvere = rows.reduce((acc, r) => acc + toNum(r.totalAvere), 0)
@@ -417,33 +384,42 @@ async function fetchCashEntriesForCompany({ dateFrom, dateTo, company }) {
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         })
-        return Array.isArray(rows) ? rows : []
+        return { entries: Array.isArray(rows) ? rows : [], lockedLocales: [] }
       } catch {
-        return []
+        return { entries: [], lockedLocales: [] }
       }
     }
-    return []
+    return { entries: [], lockedLocales: [] }
   }
 
+  const lockedLocales = []
   const results = await Promise.allSettled(
-    activities.map((activity) =>
-      fetchEntries({
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-        activity,
-      }),
-    ),
+    activities.map(async (activity) => {
+      const accessCode = readStoredPrimaNotaAccessCode(activity)
+      try {
+        const rows = await fetchEntries({
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          activity,
+          access_code: accessCode || undefined,
+        })
+        return { activity, rows: Array.isArray(rows) ? rows : [] }
+      } catch {
+        lockedLocales.push(activityLabel(activity))
+        return { activity, rows: [] }
+      }
+    }),
   )
 
   const byId = new Map()
   for (const res of results) {
-    if (res.status !== 'fulfilled' || !Array.isArray(res.value)) continue
-    for (const row of res.value) {
+    if (res.status !== 'fulfilled') continue
+    for (const row of res.value.rows) {
       if (row?.id != null) byId.set(Number(row.id), row)
       else byId.set(`${row?.entry_date}-${row?.amount}-${row?.description}`, row)
     }
   }
-  return [...byId.values()]
+  return { entries: [...byId.values()], lockedLocales }
 }
 
 export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
@@ -458,8 +434,14 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   ])
 
   const warnings = []
-  const cashEntries = cashRes.status === 'fulfilled' && Array.isArray(cashRes.value) ? cashRes.value : []
+  const cashPayload = cashRes.status === 'fulfilled' ? cashRes.value : { entries: [], lockedLocales: [] }
+  const cashEntries = Array.isArray(cashPayload?.entries) ? cashPayload.entries : []
   if (cashRes.status === 'rejected') warnings.push('Prima Nota non disponibile o protetta da codice.')
+  if (Array.isArray(cashPayload?.lockedLocales) && cashPayload.lockedLocales.length) {
+    warnings.push(
+      `Prima Nota non accessibile per: ${cashPayload.lockedLocales.join(', ')}. Apri il locale in Prima Nota con il codice, poi ricarica i mastrini.`,
+    )
+  }
 
   const invoices = invoiceRes.status === 'fulfilled' && Array.isArray(invoiceRes.value) ? invoiceRes.value : []
   if (invoiceRes.status === 'rejected') warnings.push('Fatture non disponibili.')

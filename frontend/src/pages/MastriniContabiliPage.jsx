@@ -5,6 +5,7 @@ import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
+import { accountCodesForCompany } from '../constants/mastriniPasscom.js'
 import { companyLabel } from '../utils/fattureCompany.js'
 
 function statusBadge(status) {
@@ -49,8 +50,10 @@ function exportMastroCsv(account, periodLabel, companyName = '') {
       'Dare',
       'Avere',
       'Saldo progressivo',
-      'Società',
-      'Locale',
+      'Codice conto',
+      'Conto controparte',
+      'Causale',
+      'Descrizione causale',
       'Centro costo',
     ],
     ...account.movements.map((m) => [
@@ -61,8 +64,10 @@ function exportMastroCsv(account, periodLabel, companyName = '') {
       m.dare || 0,
       m.avere || 0,
       m.progressiveBalance || 0,
-      m.companyLabel || '',
-      m.localeLabel || m.locale || '',
+      m.accountCode || account.code || '',
+      m.counterAccountCode || '',
+      m.causale || '',
+      m.causaleLabel || '',
       m.center || '',
     ]),
   ]
@@ -230,13 +235,12 @@ function partitarioDetailCellValue(row, col) {
 
 const MASTRO_DETAIL_COLUMNS = [
   { id: 'date', label: 'Data registrazione', width: 8, fluid: true },
-  { id: 'causale', label: 'Causale', width: 6, fluid: true, mono: true },
+  { id: 'causale', label: 'Causale', width: 7, fluid: true, mono: true },
   { id: 'registrationNumber', label: 'Numero', width: 9, fluid: true, mono: true },
-  { id: 'documentDate', label: 'Data documento', width: 8, fluid: true },
-  { id: 'description', label: 'Descrizione operazione', width: 18, fluid: true, emphasis: true },
-  { id: 'counterparty', label: 'Contropartita', width: 12, fluid: true },
-  { id: 'companyLabel', label: 'Società', width: 9, fluid: true },
-  { id: 'localeLabel', label: 'Locale', width: 9, fluid: true },
+  { id: 'counterAccountCode', label: 'Contropartita', width: 8, fluid: true, mono: true },
+  { id: 'description', label: 'Descrizione operazione', width: 16, fluid: true, emphasis: true },
+  { id: 'counterparty', label: 'Soggetto', width: 11, fluid: true },
+  { id: 'localeLabel', label: 'Locale PN', width: 9, fluid: true },
   { id: 'dare', label: 'Dare', width: 8, fluid: true, numeric: true },
   { id: 'avere', label: 'Avere', width: 8, fluid: true, numeric: true },
   { id: 'progressiveBalance', label: 'Saldo progressivo', width: 10, fluid: true, numeric: true },
@@ -246,17 +250,39 @@ function mastroDetailCellValue(row, col) {
   if (!row) return ''
   if (col.id === 'date') return formatDate(row.date)
   if (col.id === 'documentDate') return formatDate(row.documentDate || row.date)
-  if (col.id === 'causale') return row.causale || '—'
+  if (col.id === 'causale') {
+    const code = row.causale || ''
+    const label = row.causaleLabel || ''
+    return label ? `${code} — ${label}` : code || '—'
+  }
   if (col.id === 'registrationNumber') return row.registrationNumber || '—'
   if (col.id === 'description') return row.description || '—'
   if (col.id === 'counterparty') return row.counterparty || row.supplier || row.customer || '—'
   if (col.id === 'documentLabel') return row.documentLabel || '—'
+  if (col.id === 'counterAccountCode') {
+    const code = row.counterAccountCode || ''
+    const label = row.counterAccountDescription || ''
+    return code ? (label ? `${code} ${label}` : code) : '—'
+  }
   if (col.id === 'companyLabel') return row.companyLabel || companyLabel(row.company) || '—'
   if (col.id === 'localeLabel') return row.localeLabel || row.locale || row.center || '—'
   if (col.id === 'dare') return row.dare ? eur(row.dare) : '—'
   if (col.id === 'avere') return row.avere ? eur(row.avere) : '—'
   if (col.id === 'progressiveBalance') return eur(row.progressiveBalance)
   return ''
+}
+
+function filterMovementsBySourceRows(rows = [], sourceFilter = 'all') {
+  if (sourceFilter === 'all') return rows
+  return rows.filter((m) => String(m.source || '') === sourceFilter)
+}
+
+function accountTotalsFromMovements(account, movements = []) {
+  const totalDare = movements.reduce((acc, m) => acc + (Number(m.dare) || 0), 0)
+  const totalAvere = movements.reduce((acc, m) => acc + (Number(m.avere) || 0), 0)
+  const finalBalance =
+    account?.type === 'attivo' || account?.type === 'costo' ? totalDare - totalAvere : totalAvere - totalDare
+  return { totalDare, totalAvere, finalBalance }
 }
 
 function sortMovementsNewestFirst(movements = []) {
@@ -278,7 +304,8 @@ export default function MastriniContabiliPage() {
   const [statementType, setStatementType] = useState('')
   const [center, setCenter] = useState('')
   const [advancedSearch, setAdvancedSearch] = useState('')
-  const [accountCode, setAccountCode] = useState(ACCOUNT_PLAN[0]?.code || '1000')
+  const [sourceFilter, setSourceFilter] = useState('prima_nota')
+  const [accountCode, setAccountCode] = useState('1001')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState([])
@@ -320,6 +347,15 @@ export default function MastriniContabiliPage() {
   }
 
   React.useEffect(() => {
+    if (!companyId || !accountOptions.length) return
+    const preferred = accountOptions.find((row) => row.code?.startsWith('100')) || accountOptions[0]
+    if (preferred?.code) {
+      setAccountCode(preferred.code)
+      setSelectedCode(preferred.code)
+    }
+  }, [companyId, accountOptions])
+
+  React.useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
@@ -331,14 +367,38 @@ export default function MastriniContabiliPage() {
     return `${companyPart}${dateFrom || dateTo}`
   }, [dateFrom, dateTo, selectedCompanyLabel])
 
+  const companyAccountCodes = useMemo(() => accountCodesForCompany(companyId, data?.accountPlan || ACCOUNT_PLAN), [companyId, data])
+
+  const accountOptions = useMemo(() => {
+    const plan = data?.accountPlan || ACCOUNT_PLAN
+    return plan.filter((row) => companyAccountCodes.has(row.code))
+  }, [data, companyAccountCodes])
+
+  const accountOptionsByGroup = useMemo(() => {
+    const groups = new Map()
+    for (const row of accountOptions) {
+      const key = row.group || row.category || 'Altri'
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(row)
+    }
+    return [...groups.entries()]
+  }, [accountOptions])
+
+  function filterMovementsBySource(rows = []) {
+    return filterMovementsBySourceRows(rows, sourceFilter)
+  }
+
   const filteredAccounts = useMemo(() => {
     const rows = Array.isArray(data?.accounts) ? data.accounts : []
     const q = String(advancedSearch || '').trim().toLowerCase()
     return rows.filter((r) => {
+      if (!companyAccountCodes.has(r.code)) return false
+      const movements = filterMovementsBySource(r.movements || [])
+      if (sourceFilter !== 'all' && movements.length === 0) return false
       if (category && r.category !== category) return false
       if (statementType && r.statementType !== statementType) return false
       if (center) {
-        const hasCenter = r.movements.some((m) => String(m.center || '').toLowerCase().includes(center.toLowerCase()))
+        const hasCenter = movements.some((m) => String(m.center || '').toLowerCase().includes(center.toLowerCase()))
         if (!hasCenter) return false
       }
       if (!q) return true
@@ -346,7 +406,7 @@ export default function MastriniContabiliPage() {
         r.code,
         r.description,
         r.category,
-        ...r.movements.map((m) =>
+        ...movements.map((m) =>
           [
             m.description,
             m.documentLabel,
@@ -355,6 +415,8 @@ export default function MastriniContabiliPage() {
             m.customer,
             m.registrationNumber,
             m.causale,
+            m.causaleLabel,
+            m.counterAccountCode,
             m.companyLabel,
             m.localeLabel,
             m.locale,
@@ -365,8 +427,17 @@ export default function MastriniContabiliPage() {
         .join(' ')
         .toLowerCase()
       return blob.includes(q)
+    }).map((r) => {
+      const movements = filterMovementsBySourceRows(r.movements || [], sourceFilter)
+      const totals = accountTotalsFromMovements(r, movements)
+      return {
+        ...r,
+        movements,
+        ...totals,
+        status: Math.abs(totals.finalBalance) < 0.005 ? 'pareggio' : totals.finalBalance > 0 ? 'attivo' : 'passivo',
+      }
     })
-  }, [data, category, statementType, center, advancedSearch])
+  }, [data, category, statementType, center, advancedSearch, sourceFilter, companyAccountCodes])
 
   const selected = useMemo(
     () => filteredAccounts.find((r) => r.code === selectedCode) || filteredAccounts[0],
@@ -375,8 +446,17 @@ export default function MastriniContabiliPage() {
 
   const schedaAccount = useMemo(() => {
     const rows = Array.isArray(data?.accounts) ? data.accounts : []
-    return rows.find((r) => r.code === (selectedCode || accountCode)) || null
-  }, [data, selectedCode, accountCode])
+    const hit = rows.find((r) => r.code === (selectedCode || accountCode))
+    if (!hit) return null
+    const movements = filterMovementsBySourceRows(hit.movements || [], sourceFilter)
+    const totals = accountTotalsFromMovements(hit, movements)
+    return {
+      ...hit,
+      movements,
+      ...totals,
+      status: Math.abs(totals.finalBalance) < 0.005 ? 'pareggio' : totals.finalBalance > 0 ? 'attivo' : 'passivo',
+    }
+  }, [data, selectedCode, accountCode, sourceFilter])
 
   const schedaRows = useMemo(() => {
     if (!schedaAccount) return []
@@ -456,6 +536,8 @@ export default function MastriniContabiliPage() {
     [parties, selectedPartyKey],
   )
 
+  const accountOptionsForSelect = accountOptions.length ? accountOptions : ACCOUNT_PLAN
+
   async function openScheda(e) {
     e?.preventDefault?.()
     if (!companyId) {
@@ -484,14 +566,12 @@ export default function MastriniContabiliPage() {
     downloadFile('mastrini_elenco.csv', toCsv(rows), 'text/csv;charset=utf-8')
   }
 
-  const accountOptions = data?.accountPlan || ACCOUNT_PLAN
-
   return (
     <AmministrazionePageShell
       title="Schede contabili / Mastrini"
       lead={
         companyId
-          ? `Mastrini ${selectedCompanyLabel}: seleziona il conto e il periodo, poi apri la scheda Dare/Avere.`
+          ? `Mastrini ${selectedCompanyLabel}: Prima Nota collegata ai conti Passcom (cassa/ricavi/costi per locale).`
           : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
       }
       actions={
@@ -577,8 +657,24 @@ export default function MastriniContabiliPage() {
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Selezione scheda contabile</h2>
           <p className="fatture-note" style={{ marginTop: 0 }}>
-            Come in Passcom (Contabilità → Schede contabili): scegli il codice conto e l&apos;intervallo date, poi conferma.
+            Come in Passcom: ogni locale Prima Nota ha codici conto dedicati (es. 1003 Cassa Via Abba, 4103 Ricavi).
           </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${sourceFilter === 'prima_nota' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSourceFilter('prima_nota')}
+            >
+              Solo Prima Nota
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${sourceFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSourceFilter('all')}
+            >
+              Tutte le fonti
+            </button>
+          </div>
           <form
             onSubmit={openScheda}
             style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}
@@ -591,11 +687,21 @@ export default function MastriniContabiliPage() {
                 onChange={(e) => setAccountCode(e.target.value)}
                 required
               >
-                {accountOptions.map((a) => (
-                  <option key={a.code} value={a.code}>
-                    {a.code} — {a.description}
-                  </option>
-                ))}
+                {accountOptionsByGroup.length
+                  ? accountOptionsByGroup.map(([group, rows]) => (
+                      <optgroup key={group} label={group}>
+                        {rows.map((a) => (
+                          <option key={a.code} value={a.code}>
+                            {a.code} — {a.description}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : accountOptionsForSelect.map((a) => (
+                      <option key={a.code} value={a.code}>
+                        {a.code} — {a.description}
+                      </option>
+                    ))}
               </select>
             </label>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -737,8 +843,8 @@ export default function MastriniContabiliPage() {
             }
           />
           <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-            Fonti Atlas: Prima Nota (locale), fatture fornitori e banca (collegati) della società selezionata.
-            Colonne Società/Locale mostrano a quale registro appartiene ogni riga.
+            Fonti: Prima Nota con codici Passcom per locale (100x cassa, 410x ricavi, 510x costi). Fatture e banca restano disponibili con «Tutte le fonti».
+            Colonne Causale e Contropartita seguono il modello scheda contabile Passcom.
           </p>
         </section>
       ) : null}
