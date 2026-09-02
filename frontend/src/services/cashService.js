@@ -61,7 +61,7 @@ export async function fetchEntries(params = {}) {
   appendActivityAndCode(searchParams, params.activity, params.access_code)
   const query = searchParams.toString()
   const path = query ? `/cash/entries?${query}` : '/cash/entries'
-  return apiFetch(path)
+  return apiFetch(path, { cache: 'no-store' })
 }
 
 export async function createEntry(data, accessCode) {

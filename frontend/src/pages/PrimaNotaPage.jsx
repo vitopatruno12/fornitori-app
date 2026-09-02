@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
+import { invalidateCachePrefix } from '../offline/offlineCache.js'
 import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
@@ -648,6 +649,34 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setMovementPeriodTo(selectedDate)
   }
 
+  function expandMovementPeriodToInclude(ymd) {
+    const day = String(ymd || '').slice(0, 10)
+    if (!day) {
+      return { from: movementPeriodFrom, to: movementPeriodTo, changed: false }
+    }
+    let from = movementPeriodFrom || day
+    let to = movementPeriodTo || day
+    let changed = false
+    if (day < from) {
+      from = day
+      changed = true
+    }
+    if (day > to) {
+      to = day
+      changed = true
+    }
+    if (!movementPeriodFrom || !movementPeriodTo) changed = true
+    return { from, to, changed }
+  }
+
+  function applyMovementPeriodRange(from, to) {
+    const nextFrom = String(from || '').slice(0, 10)
+    const nextTo = String(to || '').slice(0, 10)
+    if (!nextFrom || !nextTo) return
+    if (nextFrom !== movementPeriodFrom) setMovementPeriodFrom(nextFrom)
+    if (nextTo !== movementPeriodTo) setMovementPeriodTo(nextTo)
+  }
+
   useEffect(() => {
     if (highlightEntryId == null) return
     const t = window.setTimeout(() => {
@@ -679,6 +708,12 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }, 200)
   }, [loading, entries, highlightEntryId, movementPeriodFrom, movementPeriodTo])
 
+
+  useEffect(() => {
+    if (!operatorMode) return
+    setMovementPeriodFrom(selectedDate)
+    setMovementPeriodTo(selectedDate)
+  }, [operatorMode, selectedDate])
 
   useEffect(() => {
     loadSummary()
@@ -747,7 +782,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
-  async function loadEntries() {
+  async function loadEntries(periodOverride = null) {
     if (!localeAccessMetaReady) {
       setLoading(true)
       return
@@ -760,8 +795,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     try {
       setLoading(true)
       setError('')
-      let from = movementPeriodFrom
-      let to = movementPeriodTo
+      let from = periodOverride?.from ?? movementPeriodFrom
+      let to = periodOverride?.to ?? movementPeriodTo
       if (from && to && from > to) {
         const swap = from
         from = to
@@ -944,7 +979,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setFormEntryDate('')
       setFormType('entrata')
       setEditingId(null)
-      await loadEntries()
+      const entryYmd = String(entryDate).slice(0, 10)
+      const period = expandMovementPeriodToInclude(entryYmd)
+      applyMovementPeriodRange(period.from, period.to)
+      await invalidateCachePrefix('/cash/entries')
+      await loadEntries({ from: period.from, to: period.to })
       await loadSummary()
     } catch (err) {
       setError(
@@ -1346,8 +1385,17 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }, [entriesForSummary, openingCashInput, summaryScope])
 
   const filteredMovementRows = useMemo(() => {
+    let from = movementPeriodFrom
+    let to = movementPeriodTo
+    if (from && to && from > to) {
+      const swap = from
+      from = to
+      to = swap
+    }
     const q = movementSearch.trim().toLowerCase()
     return rowsWithLedger.rows.filter((entry) => {
+      const d = entry.entry_date ? String(entry.entry_date).slice(0, 10) : ''
+      if (from && to && d && (d < from || d > to)) return false
       if (movementKind === 'entrata' && (isExtraCassa(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
       if (movementKind === 'fiscale' && (isNonFiscale(entry) || isExtraCassa(entry))) return false
@@ -1359,7 +1407,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       const blob = [entry.description, entry.note, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
-  }, [rowsWithLedger.rows, movementSearch, movementKind])
+  }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
 
   function sumMovementRows(rows) {
     return (rows || []).reduce(
@@ -1687,7 +1735,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           </select>
         </div>
         <div className="form-group">
-          <button type="button" className="btn btn-secondary" onClick={refreshRiepilogo} disabled={refreshingRiepilogo || loading}>
+          <button type="button" className="btn btn-primary" onClick={refreshRiepilogo} disabled={refreshingRiepilogo || loading}>
             {refreshingRiepilogo ? 'Aggiornamento...' : 'Aggiorna'}
           </button>
         </div>
