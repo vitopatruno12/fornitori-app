@@ -1865,6 +1865,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setShifts(normalizeShiftRows(sh, members))
   }, [members, operatorMode, operatorStationId])
 
+  const stationStaffLocaleName = useMemo(
+    () => (operatorStationId ? getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames) : ''),
+    [operatorStationId, savedLocaleNames],
+  )
+
   const refreshMembers = useCallback(async () => {
     if (operatorMode && operatorStationId) {
       try {
@@ -1906,11 +1911,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setPayrollShifts([])
     setPayrollImporto({})
   }, [])
-
-  const stationStaffLocaleName = useMemo(
-    () => (operatorStationId ? getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames) : ''),
-    [operatorStationId, savedLocaleNames],
-  )
 
   useEffect(() => {
     if (!operatorMode) {
