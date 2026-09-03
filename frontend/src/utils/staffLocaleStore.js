@@ -98,8 +98,10 @@ export async function upsertStoredLocaleAccessCode(localeName, accessCode) {
   const matchedKey = findStoreKeyByLocaleName(store, localeName) || String(localeName || '').trim()
   if (!matchedKey) return false
   const pack = store[matchedKey]
-  if (!pack || typeof pack !== 'object') return false
-  store[matchedKey] = { ...pack, access_code: code, saved_at: pack.saved_at || new Date().toISOString() }
+  const now = new Date().toISOString()
+  // Se il locale non ha ancora una entry (prima sessione o store svuotato), la crea.
+  const base = pack && typeof pack === 'object' ? pack : { locale_name: String(localeName || '').trim(), saved_at: now }
+  store[matchedKey] = { ...base, access_code: code, saved_at: base.saved_at || now }
   await writeStaffLocaleStore(store)
   return true
 }

@@ -130,15 +130,36 @@ export default function OperatorStationStaffGate({
     })()
   }, [stationId, refreshLocaleNames])
 
+  const [autoOpenDone, setAutoOpenDone] = useState(false)
+
   useEffect(() => {
     if (!stationStaffLocaleName) return
     void (async () => {
       const stored = await readStoredLocaleAccessCode(stationStaffLocaleName)
       if (isValidLocaleAccessCode(stored)) {
         setLocaleAccessCode(stored)
+        // Auto-apre la sessione se il codice era già salvato (evita click manuale dopo ricarica).
+        if (!sessionOpen) {
+          const summaries = await fetchStaffLocalePacks().catch(() => [])
+          setLocaleSummaries(Array.isArray(summaries) ? summaries : [])
+          const localeName = resolveCanonicalLocaleName(stationStaffLocaleName, summaries, getOperatorStationActivitySlug(stationId))
+          if (localeName) {
+            const access = await verifyLocaleZoneAccess(localeName, stored, summaries, getOperatorStationActivitySlug(stationId))
+            if (access.ok) {
+              setOperatorStationStaffSession(stationId, access.localeName || localeName, true)
+              setSessionTick((n) => n + 1)
+              void preloadOperatorStationMembers(stationId)
+              onSessionChange?.(true)
+            }
+          }
+        }
+        setAutoOpenDone(true)
+      } else {
+        setAutoOpenDone(true)
       }
     })()
-  }, [stationStaffLocaleName])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stationStaffLocaleName, stationId])
 
   async function handleOpen() {
     const localeName = resolveCanonicalLocaleName(
