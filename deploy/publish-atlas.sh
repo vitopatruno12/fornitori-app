@@ -47,6 +47,13 @@ log "Build locale: ${LOCAL_BUILD:-?}"
 publish_to() {
   local target="$1"
   [[ -n "$target" ]] || return 0
+  # Non toccare mai altri siti sullo stesso server (wemake, ecc.)
+  case "$target" in
+    */wemake/*|*/wemakee/*|*/corevian/*|/var/www/nat/*)
+      warn "Salto pubblicazione su sito non-ATLAS: $target"
+      return 0
+      ;;
+  esac
   if [[ "$target" == "$DIST_DIR" ]]; then
     log "Già servito da: $target"
     return 0

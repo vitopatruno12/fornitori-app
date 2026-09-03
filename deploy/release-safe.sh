@@ -84,6 +84,12 @@ else
       [[ -n "$SERVED_DIST" ]] || continue
       [[ "$SERVED_DIST" == "$DIST_DIR" ]] && continue
       [[ -d "$DIST_DIR" ]] || continue
+      case "$SERVED_DIST" in
+        */wemake/*|*/wemakee/*|*/corevian/*|/var/www/nat/*)
+          warn "Salto copia su sito non-ATLAS: $SERVED_DIST"
+          continue
+          ;;
+      esac
       log "Copia frontend/dist in $SERVED_DIST"
       mkdir -p "$SERVED_DIST"
       if command -v rsync >/dev/null 2>&1; then
