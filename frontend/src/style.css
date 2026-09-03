@@ -8291,6 +8291,82 @@ select.form-control {
   }
 }
 
+.mastrini-hero-tools {
+  flex: 0 0 300px;
+  width: 300px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.8rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+  box-sizing: border-box;
+}
+
+.mastrini-hero-tools .staff-gestionale-locale-select,
+.mastrini-hero-tools-company {
+  min-width: 0;
+  width: 100%;
+}
+
+.mastrini-hero-tools .staff-gestionale-locale-select-field {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.mastrini-hero-tools-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.mastrini-hero-tools-btns .btn {
+  min-width: 0;
+  width: 100%;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.mastrini-hero-tools-btns .btn-primary {
+  grid-column: 1 / -1;
+}
+
+.fatture-header.staff-page-hero:has(.mastrini-hero-tools) {
+  overflow: hidden;
+}
+
+.banca-page .fatture-header-row:has(.mastrini-hero-tools) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: 1rem 1.25rem;
+  flex-wrap: nowrap;
+}
+
+.banca-page .fatture-header-row:has(.mastrini-hero-tools) > div:first-child {
+  min-width: 0;
+}
+
+.banca-page .fatture-header-row:has(.mastrini-hero-tools) .staff-page-lead {
+  max-width: none;
+}
+
+@media (max-width: 820px) {
+  .banca-page .fatture-header-row:has(.mastrini-hero-tools) {
+    grid-template-columns: 1fr;
+  }
+
+  .mastrini-hero-tools {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
+
 .mastrini-fit-panel .workbook-grid-wrap,
 .mastrini-fit-panel .pagamenti-grid-wrap.excel-wrap,
 .banca-fit-panel .workbook-grid-wrap,

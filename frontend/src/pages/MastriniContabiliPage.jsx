@@ -575,33 +575,36 @@ export default function MastriniContabiliPage() {
           : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
       }
       actions={
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <aside className="mastrini-hero-tools" aria-label="Strumenti mastrini">
           <FattureCompanySelect
+            className="mastrini-hero-tools-company"
             companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
             value={companyId}
             onChange={setCompanyId}
             loading={loadingCompanies}
           />
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
-            {loading ? 'Aggiorno…' : 'Aggiorna'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={exportListExcel}
-            disabled={!filteredAccounts.length || !companyId}
-          >
-            Elenco Excel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => schedaAccount && printMastro(schedaAccount, periodLabel)}
-            disabled={!schedaAccount || viewMode === 'selezione' || !companyId}
-          >
-            Stampa scheda
-          </button>
-        </div>
+          <div className="mastrini-hero-tools-btns">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
+              {loading ? 'Aggiorno…' : 'Aggiorna'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={exportListExcel}
+              disabled={!filteredAccounts.length || !companyId}
+            >
+              Elenco Excel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => schedaAccount && printMastro(schedaAccount, periodLabel)}
+              disabled={!schedaAccount || viewMode === 'selezione' || !companyId}
+            >
+              Stampa scheda
+            </button>
+          </div>
+        </aside>
       }
     >
       {error && <div className="alert alert-danger">{error}</div>}
