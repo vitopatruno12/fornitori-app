@@ -7,13 +7,14 @@ import { useGestionaleStaffLocale } from '../hooks/useGestionaleStaffLocale.js'
 import {
   createStaffStipendiMonth,
   deleteStaffStipendiMonth,
-  fetchStaffMembers,
   fetchStaffStipendiMonths,
   updateStaffStipendiMonth,
 } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
 import { resolveGestionaleLocaleMembers } from '../utils/gestionaleStaffLocale.js'
+import { memberNameKey } from '../utils/operatorLocalePack.js'
+import { resolveOperatorStationMembers } from '../utils/operatorStaffReportData.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
@@ -186,46 +187,78 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setEditIndex(null)
   }, [])
 
+  const resolveOperatorLocaleName = useCallback(async () => {
+    if (!operatorMode || !operatorStationId) return ''
+    const resolved = await resolveOperatorStationMembers(operatorStationId)
+    return String(resolved?.localeName || getOperatorStationStaffLocaleName(operatorStationId, []) || '').trim()
+  }, [operatorMode, operatorStationId])
+
   const loadArchives = useCallback(async () => {
-    const locale = operatorMode ? '' : gestionaleLocale
-    if (!operatorMode && !locale) {
+    let locale = gestionaleLocale
+    if (operatorMode) {
+      locale = await resolveOperatorLocaleName()
+      if (!locale) {
+        setArchives([])
+        return []
+      }
+    } else if (!locale) {
       setArchives([])
       return []
     }
     const rows = await fetchStaffStipendiMonths(locale)
     setArchives(Array.isArray(rows) ? rows : [])
     return Array.isArray(rows) ? rows : []
-  }, [gestionaleLocale, operatorMode])
+  }, [gestionaleLocale, operatorMode, resolveOperatorLocaleName])
 
   const bootstrapFromMembers = useCallback(async () => {
     let list = []
     if (operatorMode) {
-      const members = await fetchStaffMembers()
-      list = Array.isArray(members) ? members : []
+      if (!operatorStationId) {
+        list = []
+      } else {
+        const scoped = await resolveOperatorStationMembers(operatorStationId)
+        list = Array.isArray(scoped?.members) ? scoped.members : []
+      }
     } else {
       const scoped = await resolveGestionaleLocaleMembers(gestionaleLocale)
       list = scoped.members
     }
-    const next = list
-      .filter((m) => m?.is_active !== false)
-      .map((m) =>
+    const seen = new Set()
+    const next = []
+    for (const m of list) {
+      if (m?.is_active === false) continue
+      const name = String(m.name || [m.first_name, m.last_name].filter(Boolean).join(' ') || '').trim()
+      const key = memberNameKey(name) || (m.id != null ? `id:${m.id}` : '')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      next.push(
         emptyLine({
           staff_member_id: m.id,
-          name: m.name || [m.first_name, m.last_name].filter(Boolean).join(' '),
+          name,
         }),
       )
+    }
     setLines(next)
     setNotes('')
     setActiveId(null)
     setSelectedIndex(null)
     resetDraft()
-  }, [resetDraft, gestionaleLocale, operatorMode])
+  }, [resetDraft, gestionaleLocale, operatorMode, operatorStationId])
 
   const openArchive = useCallback(
     (row) => {
       setActiveId(row.id)
       setYearMonth(row.year_month)
-      setLines((row.lines || []).map((l) => emptyLine(l)))
+      const seen = new Set()
+      const deduped = []
+      for (const l of row.lines || []) {
+        const name = String(l?.name || '').trim()
+        const key = memberNameKey(name) || (l?.staff_member_id != null ? `id:${l.staff_member_id}` : '')
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        deduped.push(emptyLine(l))
+      }
+      setLines(deduped)
       setNotes(row.notes || '')
       setSelectedIndex(null)
       resetDraft()
@@ -358,16 +391,29 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         setError('Seleziona il locale personale dal menu in alto.')
         return
       }
-      const cleaned = lines
-        .map((l) => emptyLine(l))
-        .filter((l) => String(l.name || '').trim())
+      const operatorLocale = operatorMode ? await resolveOperatorLocaleName() : ''
+      if (operatorMode && !operatorLocale) {
+        setError('Locale personale della postazione non disponibile. Apri di nuovo il locale con il codice.')
+        return
+      }
+      const seen = new Set()
+      const cleaned = []
+      for (const l of lines) {
+        const row = emptyLine(l)
+        const name = String(row.name || '').trim()
+        if (!name) continue
+        const key = memberNameKey(name) || (row.staff_member_id != null ? `id:${row.staff_member_id}` : '')
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        cleaned.push(row)
+      }
       if (!cleaned.length) {
         setError('Inserisci almeno un nominativo')
         return
       }
       const period = periodForYm(yearMonth)
       const payload = {
-        locale_name: operatorMode ? '' : gestionaleLocale,
+        locale_name: operatorMode ? operatorLocale : gestionaleLocale,
         year_month: yearMonth,
         ...period,
         lines: cleaned,
@@ -395,7 +441,18 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         }
       }
       setActiveId(saved.id)
-      setLines((saved.lines || []).map((l) => emptyLine(l)))
+      {
+        const savedSeen = new Set()
+        const savedLines = []
+        for (const l of saved.lines || []) {
+          const name = String(l?.name || '').trim()
+          const key = memberNameKey(name) || (l?.staff_member_id != null ? `id:${l.staff_member_id}` : '')
+          if (!key || savedSeen.has(key)) continue
+          savedSeen.add(key)
+          savedLines.push(emptyLine(l))
+        }
+        setLines(savedLines)
+      }
       setSelectedIndex(null)
       resetDraft()
       await loadArchives()
@@ -481,15 +538,19 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           <p className="staff-kicker">Personale</p>
           <h1>Stipendi</h1>
           <p className="staff-page-lead" style={{ marginTop: '0.35rem' }}>
-            Archivio buste paga per locale: scegli il negozio dal menu e compila solo i dipendenti di quella sede.
+            {operatorMode
+              ? 'Archivio buste paga della sede di questa postazione operativa.'
+              : 'Archivio buste paga per locale: scegli il negozio dal menu e compila solo i dipendenti di quella sede.'}
           </p>
         </div>
-        <StaffGestionaleLocaleSelect
-          localeNames={gestionaleLocaleNames}
-          value={gestionaleLocale}
-          onChange={setGestionaleLocale}
-          loading={gestionaleLocalesLoading}
-        />
+        {!operatorMode ? (
+          <StaffGestionaleLocaleSelect
+            localeNames={gestionaleLocaleNames}
+            value={gestionaleLocale}
+            onChange={setGestionaleLocale}
+            loading={gestionaleLocalesLoading}
+          />
+        ) : null}
       </div>
     </header>
   )

@@ -27,7 +27,15 @@ export function membersFromPackAndDb(packMembers, dbMembers) {
   const packNameKeys = new Set(packRows.map((m) => memberNameKey(m.name)).filter(Boolean))
   const all = Array.isArray(dbMembers) ? dbMembers : []
   if (!packNameKeys.size) return []
-  return all.filter((m) => packNameKeys.has(memberNameKey(m.name)))
+  const seen = new Set()
+  const out = []
+  for (const m of all) {
+    const key = memberNameKey(m.name)
+    if (!key || !packNameKeys.has(key) || seen.has(key)) continue
+    seen.add(key)
+    out.push(m)
+  }
+  return out
 }
 
 export function localePackFetchCandidates(localeName, activitySlug = '') {
