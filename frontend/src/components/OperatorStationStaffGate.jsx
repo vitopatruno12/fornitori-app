@@ -40,25 +40,39 @@ function resolveCanonicalLocaleName(localeName, summaries, activitySlug = '') {
 
 async function verifyLocaleZoneAccess(localeName, code, summaries, activitySlug = '') {
   const canonicalName = resolveCanonicalLocaleName(localeName, summaries, activitySlug)
-  try {
-    const rows = summaries || []
-    const hit = rows.find(
-      (row) => localeNameCompareKey(row?.locale_name) === localeNameCompareKey(canonicalName),
-    )
-    if (hit?.requires_access_code) {
+  const rows = summaries || []
+  const hit = rows.find(
+    (row) => localeNameCompareKey(row?.locale_name) === localeNameCompareKey(canonicalName),
+  )
+
+  // Locale trovato nei summaries
+  if (hit) {
+    if (!hit.requires_access_code) {
+      // Nessun codice richiesto: accesso libero
+      return { ok: true, localeName: canonicalName }
+    }
+    // Codice richiesto: verifica con il server
+    try {
       await fetchStaffLocalePack(canonicalName, code)
       return { ok: true, localeName: canonicalName }
+    } catch {
+      // Server ha rifiutato — prova con lo stored code se corrisponde
+      const stored = await readStoredLocaleAccessCode(canonicalName)
+      if (stored && verifyLocaleAccessCode(stored, code)) {
+        return { ok: true, localeName: canonicalName }
+      }
+      return { ok: false, wrongCode: true, localeName: canonicalName }
     }
-    if (hit) return { ok: true, localeName: canonicalName }
-  } catch {
-    const stored = await readStoredLocaleAccessCode(canonicalName)
-    if (stored && verifyLocaleAccessCode(stored, code)) {
-      return { ok: true, localeName: canonicalName }
-    }
-    return { ok: false, wrongCode: true, localeName: canonicalName }
   }
+
+  // Locale non trovato nei summaries: accesso libero se non c'è codice salvato,
+  // altrimenti verifica locale contro il codice salvato
   const stored = await readStoredLocaleAccessCode(canonicalName)
-  if (stored && verifyLocaleAccessCode(stored, code)) {
+  if (!stored) {
+    // Nessun codice configurato — accesso libero
+    return { ok: true, localeName: canonicalName }
+  }
+  if (verifyLocaleAccessCode(stored, code)) {
     return { ok: true, localeName: canonicalName }
   }
   return { ok: false, wrongCode: true, localeName: canonicalName }
