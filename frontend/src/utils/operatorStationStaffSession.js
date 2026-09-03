@@ -38,6 +38,11 @@ function operatorStationLocaleKeysMatch(stationId, sessionLocaleKey, localeName)
   if (!target || !sessionLocaleKey) return false
   if (sessionLocaleKey === target) return true
   const slug = getOperatorStationActivitySlug(stationId)
+  if (slug === 'via_lattea') {
+    const isViaLatteaAlias = (key) =>
+      key.includes('lattea') || (key.includes('mucche') && key.includes('volanti'))
+    if (isViaLatteaAlias(target) && isViaLatteaAlias(sessionLocaleKey)) return true
+  }
   const tokens = STAFF_LOCALE_SLUG_TOKENS[slug] || []
   // Match solo se entrambi i lati contengono tutti i token della sede (niente substring generiche).
   return tokens.length > 0 && tokens.every((token) => target.includes(token) && sessionLocaleKey.includes(token))
