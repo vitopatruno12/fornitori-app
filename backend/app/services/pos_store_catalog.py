@@ -1,6 +1,13 @@
 """Catalogo locali POS + resolve_store (senza dipendenze DB).
 
 Usato dall'agent GDB sul PC cassa e da pos_receipts_service sul server.
+
+Mapping agent EasyRetail:
+  model-1 = La Risacca
+  model-2 = Mani in Pasta Via Abba
+  model-3 = Le Mucche Volanti (Via Lattea)
+  model-4 = Mani in Pasta Via Zanardelli
+  model-5 = Gazza Ladra (POS Poste)
 """
 
 from __future__ import annotations
@@ -11,19 +18,25 @@ from typing import Optional, Tuple
 SOURCE_EASYRETAIL = "easyretail"
 SOURCE_POSTE = "poste"
 
-# Sedi Mani in Pasta senza VNE: incasso da scontrini EasyRetail (Via Abba).
+# Via Abba — EasyRetail agent (model-2)
 POS_REVENUE_STORE_KEYS = frozenset({"via_abba", "abba", "model-2"})
+POS_REVENUE_ABBA_KEYS = frozenset({"via_abba", "abba", "model-2"})
 POS_REVENUE_MODEL_ID = "model-2"
 MANI_LOC_ZANARDELLI = "via_zanardelli"
 MANI_LOC_ABBA = "via_abba"
 MANI_LOCATION_IDS = frozenset({MANI_LOC_ZANARDELLI, MANI_LOC_ABBA})
 
-# Locali analitica solo POS (niente macchina VNE). API Poste da collegare in seguito.
-GAZZA_LADRA_MODEL_ID = "model-4"
-GAZZA_LADRA_STORE_KEYS = frozenset({"gazza_ladra", "gazza", "model-4"})
-POS_ONLY_MODEL_IDS = frozenset({GAZZA_LADRA_MODEL_ID})
+# Via Zanardelli — EasyRetail agent (model-4)
+ZANARDELLI_MODEL_ID = "model-4"
+ZANARDELLI_STORE_KEYS = frozenset({"via_zanardelli", "zanardelli", "model-4"})
 
-# Allineato ai modelli VNE in routers/vne.py + locali solo-POS
+# Gazza Ladra — solo POS (API Poste in seguito)
+GAZZA_LADRA_MODEL_ID = "model-5"
+GAZZA_LADRA_STORE_KEYS = frozenset({"gazza_ladra", "gazza", "model-5"})
+
+# Locali analitica senza macchina VNE (solo scontrini / POS)
+POS_ONLY_MODEL_IDS = frozenset({ZANARDELLI_MODEL_ID, GAZZA_LADRA_MODEL_ID})
+
 POS_STORE_CATALOG = [
     {
         "model_id": "model-1",
@@ -33,39 +46,19 @@ POS_STORE_CATALOG = [
     },
     {
         "model_id": "model-2",
-        "model_label": "Mani in Pasta",
-        "store_key": "model-2",
-        "aliases": (
-            "mani",
-            "pasta",
-            "mani in pasta",
-            "lemaninpasta",
-            "le mani in pasta",
-            "model-2",
-            "model2",
-            "2",
-        ),
-    },
-    {
-        "model_id": "model-2",
         "model_label": "Mani in Pasta (Via Abba)",
         "store_key": "via_abba",
         "aliases": (
             "abba",
             "via abba",
+            "mani in pasta",
             "mani in pasta abba",
             "mani_in_pasta_abba",
-        ),
-    },
-    {
-        "model_id": "model-2",
-        "model_label": "Mani in Pasta (Via Zanardelli)",
-        "store_key": "via_zanardelli",
-        "aliases": (
-            "zanardelli",
-            "via zanardelli",
-            "mani in pasta zanardelli",
-            "mani_in_pasta_z_delli",
+            "lemaninpasta",
+            "le mani in pasta",
+            "model-2",
+            "model2",
+            "2",
         ),
     },
     {
@@ -86,6 +79,20 @@ POS_STORE_CATALOG = [
         ),
     },
     {
+        "model_id": ZANARDELLI_MODEL_ID,
+        "model_label": "Mani in Pasta (Via Zanardelli)",
+        "store_key": "via_zanardelli",
+        "aliases": (
+            "zanardelli",
+            "via zanardelli",
+            "mani in pasta zanardelli",
+            "mani_in_pasta_z_delli",
+            "model-4",
+            "model4",
+            "4",
+        ),
+    },
+    {
         "model_id": GAZZA_LADRA_MODEL_ID,
         "model_label": "Gazza Ladra",
         "store_key": "gazza_ladra",
@@ -95,9 +102,9 @@ POS_STORE_CATALOG = [
             "gazza ladra",
             "la gazza ladra",
             "gazzaladra",
-            "model-4",
-            "model4",
-            "4",
+            "model-5",
+            "model5",
+            "5",
             "poste",
         ),
     },
@@ -105,8 +112,16 @@ POS_STORE_CATALOG = [
 
 
 def analytics_pos_only_locales():
-    """Locali presenti in Dashboard Analitica senza macchina VNE."""
+    """Locali senza macchina VNE (Zanardelli + Gazza)."""
     return [
+        {
+            "model_id": ZANARDELLI_MODEL_ID,
+            "model_label": "Mani in Pasta (Via Zanardelli)",
+            "store_key": "via_zanardelli",
+            "pos_provider": "easyretail",
+            "revenue_note": "Incasso da scontrini EasyRetail (agent PC cassa)",
+            "store_keys": tuple(ZANARDELLI_STORE_KEYS),
+        },
         {
             "model_id": GAZZA_LADRA_MODEL_ID,
             "model_label": "Gazza Ladra",
@@ -114,7 +129,38 @@ def analytics_pos_only_locales():
             "pos_provider": "poste",
             "revenue_note": "Incasso da scontrini POS Poste (API da collegare)",
             "store_keys": tuple(GAZZA_LADRA_STORE_KEYS),
-        }
+        },
+    ]
+
+
+def analytics_dashboard_locales():
+    """I 5 locali della Dashboard Analitica (solo flussi agent / POS, niente VNE)."""
+    return [
+        {
+            "model_id": "model-1",
+            "model_label": "La Risacca",
+            "store_key": "model-1",
+            "pos_provider": "easyretail",
+            "revenue_note": "Incasso da scontrini EasyRetail (agent PC cassa)",
+            "store_keys": ("model-1", "risacca"),
+        },
+        {
+            "model_id": POS_REVENUE_MODEL_ID,
+            "model_label": "Mani in Pasta (Via Abba)",
+            "store_key": "via_abba",
+            "pos_provider": "easyretail",
+            "revenue_note": "Incasso da scontrini EasyRetail (agent PC cassa)",
+            "store_keys": tuple(POS_REVENUE_ABBA_KEYS),
+        },
+        {
+            "model_id": "model-3",
+            "model_label": "Le Mucche Volanti (Via Lattea)",
+            "store_key": "model-3",
+            "pos_provider": "easyretail",
+            "revenue_note": "Incasso da scontrini EasyRetail (agent PC cassa)",
+            "store_keys": ("model-3", "via_lattea", "lattea", "mucche"),
+        },
+        *analytics_pos_only_locales(),
     ]
 
 
@@ -122,20 +168,23 @@ def _catalog_by_model_id(model_id: str) -> Optional[dict]:
     mid = (model_id or "").strip()
     if not mid:
         return None
-    exact = [x for x in POS_STORE_CATALOG if x["model_id"] == mid and x.get("store_key") == mid]
-    if exact:
-        return exact[0]
-    # Prefer entry with store_key matching model for POS-only (gazza_ladra vs model-4)
     preferred = [x for x in POS_STORE_CATALOG if x["model_id"] == mid]
     if not preferred:
         return None
-    for item in preferred:
-        if item.get("store_key") and item["store_key"] not in ("model-1", "model-2", "model-3"):
-            if item["model_id"] == mid:
-                # For gazza, prefer gazza_ladra store_key entry
-                if mid == GAZZA_LADRA_MODEL_ID and item.get("store_key") == "gazza_ladra":
-                    return item
-    return preferred[0]
+    if mid == ZANARDELLI_MODEL_ID:
+        for item in preferred:
+            if item.get("store_key") == "via_zanardelli":
+                return item
+    if mid == GAZZA_LADRA_MODEL_ID:
+        for item in preferred:
+            if item.get("store_key") == "gazza_ladra":
+                return item
+    if mid == POS_REVENUE_MODEL_ID:
+        for item in preferred:
+            if item.get("store_key") == "via_abba":
+                return item
+    exact = [x for x in preferred if x.get("store_key") == mid]
+    return exact[0] if exact else preferred[0]
 
 
 def _norm_header(h: str) -> str:

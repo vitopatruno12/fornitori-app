@@ -38,6 +38,12 @@ if (-not (Test-Path $VenvPython)) {
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
 $env:ADE_HEADLESS = "0"
 $env:ADE_USE_SYSTEM_CHROME = "1"
+$env:ADE_FAST_LOGIN = "1"
+$env:ADE_DEBUG_SCREENSHOTS = "1"
+$env:ADE_STEP_DELAY_MS = "200"
+if (-not $env:ADE_ONLY_PROFILE) {
+  $env:ADE_ONLY_PROFILE = "mediazione"
+}
 
 if ($Setup) {
   Write-Host "=== Setup agent AdE ===" -ForegroundColor Cyan

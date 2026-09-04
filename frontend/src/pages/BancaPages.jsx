@@ -51,6 +51,18 @@ function resolveEnableBankingPayload(account) {
       psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal',
     }
   }
+  if (
+    bank.includes('terra')
+    || bank.includes("d'otranto")
+    || bank.includes('dotranto')
+    || (bank.includes('bcc') && (label.includes('otranto') || label.includes('carmiano')))
+  ) {
+    return {
+      aspsp_name: "BCC di Terra d'Otranto",
+      aspsp_country: 'IT',
+      psu_type: 'business',
+    }
+  }
   return { psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal' }
 }
 

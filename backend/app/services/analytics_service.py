@@ -17,6 +17,9 @@ from .pos_store_catalog import (
     MANI_LOCATION_IDS,
     POS_ONLY_MODEL_IDS,
     POS_REVENUE_MODEL_ID,
+    ZANARDELLI_MODEL_ID,
+    ZANARDELLI_STORE_KEYS,
+    analytics_dashboard_locales,
     analytics_pos_only_locales,
 )
 
@@ -40,9 +43,9 @@ MONTH_LABELS_IT = [
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 _CACHE_TTL_SEC = float(__import__("os").getenv("ANALYTICS_CACHE_TTL_SEC", "1200"))
 DATA_NOTE = (
-    "Incassi: VNE (chiusure cassa) per Risacca, Mani in Pasta Via Zanardelli e Mucche Volanti; "
-    "scontrini EasyRetail per Mani in Pasta Via Abba; Gazza Ladra da scontrini POS Poste (API in arrivo). "
-    "Traffico orario: operazioni VNE; Mani in Pasta somma VNE (Zanardelli) + scontrini (Abba) negli orari di punta."
+    "Incassi e pagamenti (contanti vs carta/POS) solo da scontrini agent sulle casse "
+    "(EasyRetail) e POS Poste — la Dashboard Analitica non legge più le VNE. "
+    "Visite = numero scontrini. Cinque locali: Risacca, Abba, Mucche, Zanardelli, Gazza Ladra."
 )
 
 
@@ -299,7 +302,7 @@ def _parse_mani_location(location: Optional[str]) -> Optional[str]:
     loc = str(location or "").strip().lower()
     if not loc or loc in ("combined", "totale", "all", "entrambe"):
         return None
-    if loc in (MANI_LOC_ZANARDELLI, "zanardelli", "model-4"):
+    if loc in (MANI_LOC_ZANARDELLI, "zanardelli"):
         return MANI_LOC_ZANARDELLI
     if loc in (MANI_LOC_ABBA, "abba", "model-2-abba"):
         return MANI_LOC_ABBA
@@ -307,37 +310,43 @@ def _parse_mani_location(location: Optional[str]) -> Optional[str]:
 
 
 def _revenue_mode_for(model_id: Optional[str], location: Optional[str] = None) -> str:
-    """vne | pos | combined — Mani in Pasta usa pos/combined; Gazza Ladra solo pos."""
+    """vne | pos | combined — locali EasyRetail usano solo agent cassa (pos)."""
     mid = _parse_model_id(model_id)
     if mid in POS_ONLY_MODEL_IDS:
         return "pos"
-    if mid != POS_REVENUE_MODEL_ID:
-        return "vne"
-    loc = _parse_mani_location(location)
-    if loc == MANI_LOC_ABBA:
+    # Risacca / Mucche / Abba: agent EasyRetail sul PC cassa
+    if mid in ("model-1", "model-2", "model-3"):
         return "pos"
-    if loc == MANI_LOC_ZANARDELLI:
-        return "vne"
-    return "combined"
+    return "vne"
 
 
 def _should_load_pos(model_id: Optional[str], revenue_mode: str) -> bool:
     mid = _parse_model_id(model_id)
     if mid in POS_ONLY_MODEL_IDS:
         return True
+    if mid in ("model-1", "model-2", "model-3"):
+        return revenue_mode in ("combined", "pos")
     if mid not in (None, POS_REVENUE_MODEL_ID):
         return False
     return revenue_mode in ("combined", "pos")
 
 
-def _pos_store_keys_for(model_id: Optional[str]) -> Optional[tuple]:
+def _pos_store_keys_for(model_id: Optional[str], location: Optional[str] = None) -> Optional[tuple]:
     mid = _parse_model_id(model_id)
     if mid == GAZZA_LADRA_MODEL_ID:
         return tuple(GAZZA_LADRA_STORE_KEYS)
+    if mid == ZANARDELLI_MODEL_ID:
+        return tuple(ZANARDELLI_STORE_KEYS)
     if mid == POS_REVENUE_MODEL_ID:
-        from .pos_store_catalog import POS_REVENUE_STORE_KEYS
+        from .pos_store_catalog import POS_REVENUE_ABBA_KEYS
 
-        return tuple(POS_REVENUE_STORE_KEYS)
+        # Solo Via Abba: Zanardelli è scheda dedicata model-4
+        loc = _parse_mani_location(location)
+        if loc == MANI_LOC_ZANARDELLI:
+            return tuple(ZANARDELLI_STORE_KEYS)
+        return tuple(POS_REVENUE_ABBA_KEYS)
+    if mid in ("model-1", "model-3"):
+        return (mid,)
     return None
 
 
@@ -421,8 +430,9 @@ def _load_pos_daily_totals(
     *,
     revenue_mode: str = "combined",
     store_keys: Optional[tuple] = None,
+    location: Optional[str] = None,
 ) -> Dict[date, Dict[str, Any]]:
-    """Incasso giornaliero da scontrini (Via Abba / Gazza Ladra / …)."""
+    """Incasso giornaliero da scontrini EasyRetail (agent PC cassa)."""
     if not _should_load_pos(model_id, revenue_mode):
         return {}
     try:
@@ -432,8 +442,40 @@ def _load_pos_daily_totals(
         return {}
 
     mid = _parse_model_id(model_id)
-    target_mid = mid if mid in POS_ONLY_MODEL_IDS else POS_REVENUE_MODEL_ID
-    keys = store_keys or _pos_store_keys_for(target_mid)
+    loc = _parse_mani_location(location)
+    if mid == POS_REVENUE_MODEL_ID and loc == MANI_LOC_ZANARDELLI:
+        target_mid = ZANARDELLI_MODEL_ID
+    elif mid in POS_ONLY_MODEL_IDS or mid in ("model-1", "model-2", "model-3"):
+        target_mid = mid
+    else:
+        target_mid = POS_REVENUE_MODEL_ID
+    keys = store_keys or _pos_store_keys_for(target_mid if target_mid != POS_REVENUE_MODEL_ID or loc else mid, location)
+
+    # Totale Mani (Abba + Zanardelli): unisce model-2 e model-4
+    if mid == POS_REVENUE_MODEL_ID and loc is None and revenue_mode == "combined":
+        abba = _load_pos_daily_totals(
+            date_from, date_to, POS_REVENUE_MODEL_ID, revenue_mode="pos", location=MANI_LOC_ABBA
+        )
+        zan = _load_pos_daily_totals(
+            date_from, date_to, ZANARDELLI_MODEL_ID, revenue_mode="pos"
+        )
+        merged: Dict[date, Dict[str, Any]] = {}
+        for src in (abba, zan):
+            for day, hit in (src or {}).items():
+                slot = merged.setdefault(
+                    day,
+                    {
+                        "incasso": Decimal("0.00"),
+                        "movimenti": 0,
+                        "cash_eur": Decimal("0.00"),
+                        "card_eur": Decimal("0.00"),
+                    },
+                )
+                slot["incasso"] = _dec(slot["incasso"] + _dec(hit.get("incasso", 0)))
+                slot["movimenti"] += int(hit.get("movimenti") or 0)
+                slot["cash_eur"] = _dec(slot["cash_eur"] + _dec(hit.get("cash_eur", 0)))
+                slot["card_eur"] = _dec(slot["card_eur"] + _dec(hit.get("card_eur", 0)))
+        return merged
 
     db = SessionLocal()
     try:
@@ -448,6 +490,16 @@ def _load_pos_daily_totals(
         return {}
     finally:
         db.close()
+
+
+def _pos_day_cash(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
+    hit = (pos_daily or {}).get(day) or {}
+    return _dec(hit.get("cash_eur", 0))
+
+
+def _pos_day_card(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
+    hit = (pos_daily or {}).get(day) or {}
+    return _dec(hit.get("card_eur", 0))
 
 
 def _payment_split_from_pos_daily(pos_daily: Dict[date, Dict[str, Any]]) -> dict:
@@ -682,6 +734,8 @@ def _weekly_from_events(
         end = min(sunday, today)
         incasso = Decimal("0.00")
         movimenti = 0
+        cash = Decimal("0.00")
+        card = Decimal("0.00")
         d = monday
         while d <= end:
             if revenue_mode == "pos":
@@ -693,6 +747,8 @@ def _weekly_from_events(
             else:
                 incasso += _combined_day_incasso(scoped, d, pos_daily)
                 movimenti += _combined_day_movimenti(scoped, d, pos_daily)
+            cash += _pos_day_cash(pos_daily, d)
+            card += _pos_day_card(pos_daily, d)
             d += timedelta(days=1)
         rows.append(
             {
@@ -701,6 +757,8 @@ def _weekly_from_events(
                 "label": f"{monday.strftime('%d/%m')}–{end.strftime('%d/%m')}",
                 "incasso": _dec(incasso),
                 "movimenti": movimenti,
+                "cash_eur": _dec(cash),
+                "card_eur": _dec(card),
             }
         )
     return {
@@ -708,6 +766,7 @@ def _weekly_from_events(
         "source": _revenue_source(model_id, pos_daily or {}, revenue_mode),
         "weeks": weeks,
         "total_incasso": _dec(sum((r["incasso"] for r in rows), Decimal("0.00"))),
+        "payment_split": _payment_split_from_pos_daily(pos_daily or {}),
         "rows": rows,
         "warnings": list(warnings or []),
         "data_note": DATA_NOTE,
@@ -1012,18 +1071,20 @@ def _build_pos_only_machine_entry(
     lookback_months: int,
     date_from: date,
     date_to: date,
+    pos_daily: Optional[Dict[date, Dict[str, Any]]] = None,
 ) -> dict:
-    """Scheda analitica per locale senza VNE (es. Gazza Ladra / POS Poste)."""
+    """Scheda analitica per locale (solo scontrini agent/POS, niente VNE)."""
     model_id = locale["model_id"]
     label = locale["model_label"]
     store_keys = tuple(locale.get("store_keys") or ())
-    pos_daily = _load_pos_daily_totals(
-        date_from,
-        date_to,
-        model_id,
-        revenue_mode="pos",
-        store_keys=store_keys,
-    )
+    if pos_daily is None:
+        pos_daily = _load_pos_daily_totals(
+            date_from,
+            date_to,
+            model_id,
+            revenue_mode="pos",
+            store_keys=store_keys,
+        )
     m_snap = _snapshot_from_events(
         [],
         model_id=model_id,
@@ -1054,8 +1115,8 @@ def _build_pos_only_machine_entry(
         "model_id": model_id,
         "model_label": label,
         "revenue_source": "pos",
-        "pos_provider": locale.get("pos_provider") or "poste",
-        "revenue_note": locale.get("revenue_note") or "Incasso da scontrini POS",
+        "pos_provider": locale.get("pos_provider") or "easyretail",
+        "revenue_note": locale.get("revenue_note") or "Incasso da scontrini agent cassa",
         "snapshot": m_snap,
         "weekly": m_weekly,
         "top_slots": m_heat["suggestions"][:5],
@@ -1079,7 +1140,9 @@ def get_snapshot(*, model_id: Optional[str] = None, months: int = 3, location: O
         events, warnings = [], []
     else:
         events, warnings = _load_events(date_from=date_from, date_to=today, model_id=model_id)
-    pos_daily = _load_pos_daily_totals(date_from, today, model_id, revenue_mode=revenue_mode)
+    pos_daily = _load_pos_daily_totals(
+        date_from, today, model_id, revenue_mode=revenue_mode, location=location
+    )
     return _snapshot_from_events(
         events,
         model_id=model_id,
@@ -1096,12 +1159,14 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
     start_d = today - timedelta(days=days - 1)
     mid = _parse_model_id(model_id)
     revenue_mode = _revenue_mode_for(model_id, location)
-    if mid in POS_ONLY_MODEL_IDS:
+    if mid in POS_ONLY_MODEL_IDS or revenue_mode == "pos":
         events, warnings = [], []
     else:
         events, warnings = _load_events(date_from=start_d, date_to=today, model_id=model_id)
     scoped = _filter_events_for_model(events, model_id)
-    pos_daily = _load_pos_daily_totals(start_d, today, model_id, revenue_mode=revenue_mode)
+    pos_daily = _load_pos_daily_totals(
+        start_d, today, model_id, revenue_mode=revenue_mode, location=location
+    )
 
     rows = []
     for i in range(days):
@@ -1115,6 +1180,8 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
         else:
             incasso = _combined_day_incasso(scoped, d, pos_daily)
             movimenti = _combined_day_movimenti(scoped, d, pos_daily)
+        cash = _pos_day_cash(pos_daily, d)
+        card = _pos_day_card(pos_daily, d)
         rows.append(
             {
                 "date": d.isoformat(),
@@ -1122,6 +1189,8 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
                 "weekday_label": WEEKDAY_LABELS_IT[d.weekday()],
                 "incasso": incasso,
                 "movimenti": movimenti,
+                "cash_eur": cash,
+                "card_eur": card,
             }
         )
     total = sum((r["incasso"] for r in rows), Decimal("0.00"))
@@ -1131,6 +1200,7 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
         "date_from": start_d.isoformat(),
         "date_to": today.isoformat(),
         "total_incasso": _dec(total),
+        "payment_split": _payment_split_from_pos_daily(pos_daily),
         "rows": rows,
         "warnings": warnings,
         "data_note": DATA_NOTE,
@@ -1143,11 +1213,13 @@ def get_weekly_series(*, weeks: int = 12, model_id: Optional[str] = None, locati
     start_monday = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)
     mid = _parse_model_id(model_id)
     revenue_mode = _revenue_mode_for(model_id, location)
-    if mid in POS_ONLY_MODEL_IDS:
+    if mid in POS_ONLY_MODEL_IDS or revenue_mode == "pos":
         events, warnings = [], []
     else:
         events, warnings = _load_events(date_from=start_monday, date_to=today, model_id=model_id)
-    pos_daily = _load_pos_daily_totals(start_monday, today, model_id, revenue_mode=revenue_mode)
+    pos_daily = _load_pos_daily_totals(
+        start_monday, today, model_id, revenue_mode=revenue_mode, location=location
+    )
     return _weekly_from_events(
         events,
         weeks=weeks,
@@ -1169,7 +1241,7 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
     start_d = date(y, m, 1)
     mid = _parse_model_id(model_id)
     revenue_mode = _revenue_mode_for(model_id, location)
-    if mid in POS_ONLY_MODEL_IDS:
+    if mid in POS_ONLY_MODEL_IDS or revenue_mode == "pos":
         events, warnings = [], []
     else:
         events, warnings = _load_events(
@@ -1189,15 +1261,19 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
             "month_label": f"{MONTH_LABELS_IT[cm - 1]} {cy}",
             "incasso": Decimal("0.00"),
             "movimenti": 0,
+            "cash_eur": Decimal("0.00"),
+            "card_eur": Decimal("0.00"),
         }
         cm += 1
         if cm > 12:
             cm = 1
             cy += 1
 
-    # Incasso mensile da chiusure VNE + scontrini (Abba / Gazza)
+    # Incasso mensile da scontrini EasyRetail (agent cassa)
     scoped = _filter_events_for_model(events, model_id)
-    pos_daily = _load_pos_daily_totals(start_d, today, model_id, revenue_mode=revenue_mode)
+    pos_daily = _load_pos_daily_totals(
+        start_d, today, model_id, revenue_mode=revenue_mode, location=location
+    )
     d = start_d
     while d <= today:
         key = d.strftime("%Y-%m")
@@ -1213,6 +1289,8 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
                 mov = _combined_day_movimenti(scoped, d, pos_daily)
             buckets[key]["incasso"] = _dec(buckets[key]["incasso"] + inc)
             buckets[key]["movimenti"] += mov
+            buckets[key]["cash_eur"] = _dec(buckets[key]["cash_eur"] + _pos_day_cash(pos_daily, d))
+            buckets[key]["card_eur"] = _dec(buckets[key]["card_eur"] + _pos_day_card(pos_daily, d))
         d += timedelta(days=1)
 
     rows = list(buckets.values())
@@ -1221,6 +1299,7 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
         "source": _revenue_source(model_id, pos_daily, revenue_mode),
         "months": months,
         "total_incasso": _dec(sum((r["incasso"] for r in rows), Decimal("0.00"))),
+        "payment_split": _payment_split_from_pos_daily(pos_daily),
         "rows": rows,
         "warnings": warnings,
         "data_note": DATA_NOTE,
@@ -1332,13 +1411,37 @@ def get_staffing_plan(*, months: int = 3, model_id: Optional[str] = None) -> dic
     }
 
 
-def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
-    """Overview totale + una scheda per macchina VNE (Risacca / Mani / Mucche)."""
-    from ..routers.vne import _models
+def _merge_pos_daily(
+    target: Dict[date, Dict[str, Any]],
+    source: Dict[date, Dict[str, Any]],
+) -> Dict[date, Dict[str, Any]]:
+    for day, hit in (source or {}).items():
+        if day not in target:
+            target[day] = {
+                "incasso": Decimal("0.00"),
+                "movimenti": 0,
+                "cash_eur": Decimal("0.00"),
+                "card_eur": Decimal("0.00"),
+            }
+        target[day]["incasso"] = _dec(
+            Decimal(str(target[day].get("incasso") or 0)) + Decimal(str(hit.get("incasso") or 0))
+        )
+        target[day]["movimenti"] = int(target[day].get("movimenti") or 0) + int(
+            hit.get("movimenti") or 0
+        )
+        target[day]["cash_eur"] = _dec(
+            Decimal(str(target[day].get("cash_eur") or 0)) + Decimal(str(hit.get("cash_eur") or 0))
+        )
+        target[day]["card_eur"] = _dec(
+            Decimal(str(target[day].get("card_eur") or 0)) + Decimal(str(hit.get("card_eur") or 0))
+        )
+    return target
 
+
+def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
+    """Overview analitica: solo scontrini agent/POS (nessuna lettura VNE)."""
     lookback_months = max(1, min(6, int(months or 3)))
     today = date.today()
-    # Range unico: copre snapshot (90g) + weekly (8 sett) + monthly (fino a 6 mesi)
     month_span = max(3, min(6, lookback_months))
     y, m = today.year, today.month
     m -= month_span - 1
@@ -1347,64 +1450,93 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
         y -= 1
     date_from = date(y, m, 1)
 
-    # Se chiede una sola macchina, resta filtrata; altrimenti carica tutte una volta.
     mid = _parse_model_id(model_id)
-    if mid in POS_ONLY_MODEL_IDS:
-        events, warnings = [], []
-        revenue_mode = "pos"
-        abba_pos = {}
-        gazza_daily = _load_pos_daily_totals(date_from, today, mid, revenue_mode="pos")
-        pos_daily = dict(gazza_daily)
-    else:
-        events, warnings = _load_events(
+    locales = analytics_dashboard_locales()
+    if mid:
+        locales = [loc for loc in locales if loc["model_id"] == mid]
+
+    by_machine = []
+    pos_daily: Dict[date, Dict[str, Any]] = {}
+    locales_today = []
+
+    for locale in locales:
+        store_keys = tuple(locale.get("store_keys") or ())
+        m_pos = _load_pos_daily_totals(
+            date_from,
+            today,
+            locale["model_id"],
+            revenue_mode="pos",
+            store_keys=store_keys,
+        )
+        _merge_pos_daily(pos_daily, m_pos)
+        entry = _build_pos_only_machine_entry(
+            locale=locale,
+            lookback_months=lookback_months,
             date_from=date_from,
             date_to=today,
-            model_id=mid,
-            max_op_pages=4,
-            max_closing_pages=10,
+            pos_daily=m_pos,
         )
-        revenue_mode = "combined" if mid in (None, POS_REVENUE_MODEL_ID) else "vne"
-        abba_pos = _load_pos_daily_totals(date_from, today, mid, revenue_mode=revenue_mode)
-        gazza_daily = (
-            _load_pos_daily_totals(date_from, today, GAZZA_LADRA_MODEL_ID, revenue_mode="pos")
-            if mid is None
-            else {}
+        by_machine.append(entry)
+        snap_m = entry.get("snapshot") or {}
+        locales_today.append(
+            {
+                "model_id": locale["model_id"],
+                "label": locale["model_label"],
+                "incasso_oggi": snap_m.get("incasso_oggi") or 0,
+                "movimenti_oggi": snap_m.get("movimenti_oggi") or 0,
+                "cash_eur": (snap_m.get("payment_split") or {}).get("cash_eur") or 0,
+                "card_eur": (snap_m.get("payment_split") or {}).get("card_eur") or 0,
+            }
         )
-        pos_daily = dict(abba_pos)
-        for day, hit in gazza_daily.items():
-            if day not in pos_daily:
-                pos_daily[day] = {
-                    "incasso": Decimal("0.00"),
-                    "movimenti": 0,
-                    "cash_eur": Decimal("0.00"),
-                    "card_eur": Decimal("0.00"),
-                }
-            pos_daily[day]["incasso"] = _dec(
-                Decimal(str(pos_daily[day].get("incasso") or 0)) + Decimal(str(hit.get("incasso") or 0))
-            )
-            pos_daily[day]["movimenti"] = int(pos_daily[day].get("movimenti") or 0) + int(
-                hit.get("movimenti") or 0
-            )
 
     snap = _snapshot_from_events(
-        events,
+        [],
         model_id=mid,
         lookback_months=lookback_months,
-        warnings=warnings,
+        warnings=[],
         pos_daily=pos_daily,
-        revenue_mode=revenue_mode,
+        revenue_mode="pos",
     )
+    snap["machines"] = [loc["model_label"] for loc in locales]
+    snap["locales_today"] = locales_today
+
     weekly = _weekly_from_events(
-        events,
+        [],
         weeks=8,
         model_id=mid,
-        warnings=warnings,
+        warnings=[],
         pos_daily=pos_daily,
-        revenue_mode=revenue_mode,
+        revenue_mode="pos",
     )
-    heat = _heatmap_from_events(events, months=lookback_months, model_id=mid, warnings=warnings)
 
-    # Mensile dal medesimo dataset
+    # Heatmap / top slot: solo POS (niente VNE). In totale uniamo i top delle schede.
+    heat = {
+        "suggestions": [],
+        "hours": BUSINESS_HOURS,
+        "weekdays": WEEKDAY_LABELS_IT,
+        "cells": [],
+    }
+    if mid and locales:
+        heat = _heatmap_from_pos_receipts(
+            date_from=date_from,
+            date_to=today,
+            store_keys=tuple(locales[0].get("store_keys") or ()),
+            months=lookback_months,
+            warnings=[],
+            model_id=locales[0]["model_id"],
+            model_label=locales[0]["model_label"],
+        )
+    elif by_machine:
+        merged_slots = []
+        for entry in by_machine:
+            for slot in entry.get("top_slots") or []:
+                merged_slots.append(slot)
+        merged_slots.sort(
+            key=lambda s: float(s.get("avg_visits") or s.get("score") or 0),
+            reverse=True,
+        )
+        heat["suggestions"] = merged_slots[:5]
+
     buckets: Dict[str, Dict[str, Any]] = {}
     cy, cm = date_from.year, date_from.month
     for _ in range(month_span):
@@ -1419,130 +1551,34 @@ def get_overview(*, months: int = 3, model_id: Optional[str] = None) -> dict:
         if cm > 12:
             cm = 1
             cy += 1
-    scoped_all = _filter_events_for_model(events, mid)
     d = date_from
     while d <= today:
         key = d.strftime("%Y-%m")
         if key in buckets:
             buckets[key]["incasso"] = _dec(
-                buckets[key]["incasso"] + _combined_day_incasso(scoped_all, d, pos_daily)
+                buckets[key]["incasso"] + _pos_day_incasso(pos_daily, d)
             )
-            buckets[key]["movimenti"] += _combined_day_movimenti(scoped_all, d, pos_daily)
+            buckets[key]["movimenti"] += int((pos_daily.get(d) or {}).get("movimenti") or 0)
         d += timedelta(days=1)
     monthly_rows = list(buckets.values())
     monthly = {
         "activity": mid or "all",
-        "source": _revenue_source(mid, pos_daily, "combined"),
+        "source": "pos",
         "months": month_span,
         "total_incasso": _dec(sum((r["incasso"] for r in monthly_rows), Decimal("0.00"))),
         "rows": monthly_rows,
-        "warnings": warnings,
+        "warnings": [],
         "data_note": DATA_NOTE,
     }
-
-    machine_models = _models()
-    if mid in POS_ONLY_MODEL_IDS:
-        machine_models = []
-    elif mid:
-        machine_models = [m for m in machine_models if m.id == mid]
-
-    by_machine = []
-    for model in machine_models:
-        m_events = [e for e in events if e.model_id == model.id]
-        m_warn = [w for w in warnings if model.label in w]
-        m_pos = abba_pos if model.id == POS_REVENUE_MODEL_ID else {}
-        m_snap = _snapshot_from_events(
-            m_events,
-            model_id=model.id,
-            lookback_months=lookback_months,
-            warnings=m_warn,
-            pos_daily=m_pos,
-            revenue_mode="combined" if model.id == POS_REVENUE_MODEL_ID else "vne",
-        )
-        m_snap["machines"] = [model.label]
-        m_weekly = _weekly_from_events(
-            m_events,
-            weeks=8,
-            model_id=model.id,
-            warnings=m_warn,
-            pos_daily=m_pos,
-            revenue_mode="combined" if model.id == POS_REVENUE_MODEL_ID else "vne",
-        )
-        m_heat = _heatmap_from_events(
-            m_events,
-            months=lookback_months,
-            model_id=model.id,
-            warnings=m_warn,
-        )
-        m_heat = _apply_pos_visits(
-            m_heat,
-            date_from=date_from,
-            date_to=today,
-            model_id=model.id,
-            merge=(model.id == POS_REVENUE_MODEL_ID),
-        )
-        entry = {
-            "model_id": model.id,
-            "model_label": model.label,
-            "revenue_source": m_snap.get("revenue_source") or "vne",
-            "snapshot": m_snap,
-            "weekly": m_weekly,
-            "top_slots": m_heat["suggestions"][:5],
-            "hours": m_heat["hours"],
-            "weekdays": m_heat["weekdays"],
-            "cells": m_heat["cells"],
-            "visits_source": m_heat.get("visits_source") or "vne",
-        }
-        if model.id == POS_REVENUE_MODEL_ID:
-            entry["locations"] = [
-                _build_mani_location_view(
-                    events,
-                    m_pos,
-                    location_id=MANI_LOC_ZANARDELLI,
-                    location_label="Via Zanardelli",
-                    revenue_mode="vne",
-                    revenue_note="Incasso da chiusure cassa VNE",
-                    lookback_months=lookback_months,
-                    date_from=date_from,
-                    date_to=today,
-                    warnings=m_warn,
-                ),
-                _build_mani_location_view(
-                    events,
-                    m_pos,
-                    location_id=MANI_LOC_ABBA,
-                    location_label="Via Abba",
-                    revenue_mode="pos",
-                    revenue_note="Incasso da scontrini EasyRetail (senza VNE)",
-                    lookback_months=lookback_months,
-                    date_from=date_from,
-                    date_to=today,
-                    warnings=m_warn,
-                ),
-            ]
-        by_machine.append(entry)
-
-    # Locali senza VNE (Gazza Ladra / POS Poste): struttura pronta, dati da scontrini.
-    if mid is None or mid in POS_ONLY_MODEL_IDS:
-        for locale in analytics_pos_only_locales():
-            if mid and locale["model_id"] != mid:
-                continue
-            by_machine.append(
-                _build_pos_only_machine_entry(
-                    locale=locale,
-                    lookback_months=lookback_months,
-                    date_from=date_from,
-                    date_to=today,
-                )
-            )
 
     return {
         "snapshot": snap,
         "weekly": weekly,
         "monthly": monthly,
-        "top_slots": heat["suggestions"][:5],
+        "top_slots": heat.get("suggestions") or [],
         "by_machine": by_machine,
-        "source": _revenue_source(mid, pos_daily, "combined"),
+        "locales_today": locales_today,
+        "source": "pos",
         "data_note": DATA_NOTE,
-        "warnings": list(dict.fromkeys(warnings)),
+        "warnings": [],
     }

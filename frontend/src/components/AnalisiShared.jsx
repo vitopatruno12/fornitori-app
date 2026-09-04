@@ -307,27 +307,75 @@ export function VneStatusSemaphore({ light = 'green', show = true }) {
   )
 }
 
-export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label' }) {
+export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', splitPayments = false }) {
   if (!rows?.length) return <p className="empty-state">Nessun dato disponibile nel periodo.</p>
-  const max = Math.max(1, ...rows.map((r) => Number(r[valueKey] || 0)))
+  const useSplit =
+    splitPayments &&
+    rows.some((r) => Number(r.cash_eur || 0) > 0 || Number(r.card_eur || 0) > 0)
+  const max = Math.max(
+    1,
+    ...rows.map((r) =>
+      useSplit
+        ? Number(r.cash_eur || 0) + Number(r.card_eur || 0) || Number(r[valueKey] || 0)
+        : Number(r[valueKey] || 0),
+    ),
+  )
   return (
     <div className="analisi-bars">
+      {useSplit ? (
+        <div className="analisi-payment-legend" role="note">
+          <span className="analisi-payment-legend-item">
+            <span className="analisi-payment-swatch analisi-payment-swatch--cash" /> Contanti
+          </span>
+          <span className="analisi-payment-legend-item">
+            <span className="analisi-payment-swatch analisi-payment-swatch--card" /> Carta/POS
+          </span>
+        </div>
+      ) : null}
       {rows.map((r, idx) => {
-        const v = Number(r[valueKey] || 0)
+        const cash = Number(r.cash_eur || 0)
+        const card = Number(r.card_eur || 0)
+        const v = useSplit ? cash + card || Number(r[valueKey] || 0) : Number(r[valueKey] || 0)
         const label = r[labelKey] || r.month_label || r.date || r.week_start || `#${idx + 1}`
+        const cashPct = useSplit && v > 0 ? (cash / max) * 100 : 0
+        const cardPct = useSplit && v > 0 ? (card / max) * 100 : 0
         return (
           <div key={label + idx} className="analisi-bar-row">
             <div className="analisi-bar-label" title={label}>
               {label}
             </div>
             <div className="analisi-bar-track">
-              <div className="analisi-bar-fill" style={{ width: `${(v / max) * 100}%` }} />
+              {useSplit ? (
+                <div className="analisi-bar-stack">
+                  <div className="analisi-bar-fill analisi-bar-fill--cash" style={{ width: `${cashPct}%` }} />
+                  <div className="analisi-bar-fill analisi-bar-fill--card" style={{ width: `${cardPct}%` }} />
+                </div>
+              ) : (
+                <div className="analisi-bar-fill" style={{ width: `${(v / max) * 100}%` }} />
+              )}
             </div>
-            <div className="analisi-bar-value">{eur(v)}</div>
+            <div className="analisi-bar-value" title={useSplit ? `Contanti ${eur(cash)} · Carta ${eur(card)}` : undefined}>
+              {eur(v)}
+            </div>
           </div>
         )
       })}
     </div>
+  )
+}
+
+export function PaymentSplitSummary({ split }) {
+  if (!split) return null
+  const cash = Number(split.cash_eur || 0)
+  const card = Number(split.card_eur || 0)
+  if (cash <= 0 && card <= 0) return null
+  return (
+    <p className="analisi-machine-scope" role="status">
+      Contanti <strong>{eur(cash)}</strong>
+      {' · '}
+      Carta/POS <strong>{eur(card)}</strong>
+      {Number(split.receipts || 0) > 0 ? ` · ${split.receipts} scontrini` : ''}
+    </p>
   )
 }
 
@@ -502,7 +550,7 @@ export function MachineCompareCharts({ machines = [] }) {
     <section className="card analisi-panel analisi-compare-panel">
       <h2 className="analisi-panel-title">Confronto macchine — oggi</h2>
       <p className="analisi-machine-scope">
-        Torta = quota incasso da chiusure. Barre = operazioni e picco operatori consigliati.
+        Torta = quota incasso da scontrini agent. Barre = operazioni (scontrini) e picco operatori.
       </p>
       <div className="analisi-compare-grid">
         <div className="analisi-compare-card">
@@ -647,11 +695,9 @@ export function PopularTimesChart({
         </label>
       </div>
       <p className="analisi-machine-scope" style={{ marginBottom: '0.45rem' }}>
-        {cells.some((c) => c?.visit_source === 'vne+pos')
-          ? 'Visite stimate da operazioni VNE + scontrini EasyRetail'
-          : cells.some((c) => c?.visit_source === 'pos')
-            ? 'Visite da scontrini EasyRetail (registratore)'
-            : 'Visite stimate dalle operazioni VNE'}
+        {cells.some((c) => c?.visit_source === 'pos' || c?.visit_source === 'vne+pos')
+          ? 'Visite da scontrini agent cassa (EasyRetail / POS)'
+          : 'Visite da scontrini agent cassa'}
         {peakHour.hour != null && peakHour.v > 0
           ? ` · picco alle ${String(peakHour.hour).padStart(2, '0')}:00`
           : ''}

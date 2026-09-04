@@ -7,9 +7,6 @@ import {
 } from '../constants/vneMachines.js'
 import {
   isManiPastaModel,
-  MANI_PASTA_VIEW_OPTIONS,
-  maniPastaLocationParam,
-  maniPastaViewLabel,
   readStoredManiPastaView,
   writeStoredManiPastaView,
 } from '../constants/maniPastaLocations.js'
@@ -28,10 +25,9 @@ export function useAnalisiMachineFilter() {
     writeStoredManiPastaView(next)
   }, [])
 
-  const location = isManiPastaModel(modelId) ? maniPastaLocationParam(maniViewId) : undefined
-  const machineLabel = isManiPastaModel(modelId)
-    ? maniPastaViewLabel(maniViewId).replace('Totale (entrambe le sedi)', 'Mani in Pasta')
-    : vneMachineLabel(modelId)
+  // Zanardelli non è più sottofilter: Mani = sempre Via Abba
+  const location = isManiPastaModel(modelId) ? 'via_abba' : undefined
+  const machineLabel = vneMachineLabel(modelId)
 
   return {
     modelId,
@@ -64,37 +60,13 @@ export function AnalisiMachineSelect({ value, onChange, disabled = false, id = '
   )
 }
 
-export function ManiPastaViewSelect({ value, onChange, disabled = false, id = 'analisi-mani-view-select' }) {
-  return (
-    <div className="analisi-machine-filter analisi-mani-location-filter">
-      <label htmlFor={id}>Mostra sede</label>
-      <select
-        id={id}
-        className="form-control analisi-machine-filter-select"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {MANI_PASTA_VIEW_OPTIONS.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
 export function AnalisiTrendToolbar({
   modelId,
   onModelChange,
-  maniViewId,
-  onManiViewChange,
   onRefresh,
   refreshing = false,
   loading = false,
   selectId,
-  maniSelectId,
 }) {
   return (
     <div className="analisi-trend-toolbar">
@@ -104,14 +76,6 @@ export function AnalisiTrendToolbar({
         onChange={onModelChange}
         disabled={refreshing || loading}
       />
-      {isManiPastaModel(modelId) ? (
-        <ManiPastaViewSelect
-          id={maniSelectId}
-          value={maniViewId || 'combined'}
-          onChange={onManiViewChange}
-          disabled={refreshing || loading}
-        />
-      ) : null}
       <button
         type="button"
         className="btn btn-secondary btn-sm"

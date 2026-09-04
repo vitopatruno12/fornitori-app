@@ -13,7 +13,8 @@ const MODEL_OPTIONS = [
   { id: 'model-1', label: 'La Risacca' },
   { id: 'model-2', label: 'Mani in Pasta (Via Abba)' },
   { id: 'model-3', label: 'Le Mucche Volanti (Via Lattea)' },
-  { id: 'model-4', label: 'Gazza Ladra (POS Poste)' },
+  { id: 'model-4', label: 'Mani in Pasta (Via Zanardelli)' },
+  { id: 'model-5', label: 'Gazza Ladra (POS Poste)' },
 ]
 
 /** Import / sync scontrini EasyRetail → visite per Orari di punta. */

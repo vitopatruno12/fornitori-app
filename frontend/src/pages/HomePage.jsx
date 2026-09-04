@@ -458,7 +458,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
             <section className="card analisi-home-card" aria-label="Analisi vendite oggi">
               <div className="analisi-home-card-grid">
                 <div>
-                  <p className="analisi-kicker">Analisi · VNE</p>
+                  <p className="analisi-kicker">Analisi · agent casse</p>
                   <h2 className="analisi-home-title">Vendite di oggi</h2>
                   <p className="analisi-home-peak">{analisiSnap.picco_previsto?.message || 'Picco previsto in elaborazione.'}</p>
                 </div>

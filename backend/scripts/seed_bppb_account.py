@@ -52,6 +52,20 @@ try:
         iban="IT48Q0200816005000105294153",
         notes="UniCredit LECCE FOSCARINI · BIC UNCRITM1L32 · testabile in sandbox Enable Banking",
     )
+    ensure(
+        db,
+        bank_name="Intesa Sanpaolo",
+        account_name="RISACCA S.R.L. · Business Insieme",
+        iban="IT88N0306979822100000008926",
+        notes="RISACCA S.R.L. · Filiale Nardò · BIC BCITITMM · Conto Business Insieme · CC 66494/1000/00008926",
+    )
+    ensure(
+        db,
+        bank_name="BCC Terra d'Otranto",
+        account_name="Conto corrente Carmiano",
+        iban="IT06B0844516000000000972450",
+        notes="BCC Terra d'Otranto · Via C. Battisti 27 Carmiano · BIC ICRAITRRCD0 · ABI 08445",
+    )
     print("accounts:")
     for a in banca_service.list_accounts(db):
         print("-", a["id"], a["bank_name"], a.get("iban"))

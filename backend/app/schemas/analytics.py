@@ -46,6 +46,7 @@ class AnalyticsSeriesResponse(BaseModel):
     activity: str = "all"
     source: str = "vne"
     total_incasso: Decimal = Decimal("0")
+    payment_split: Dict[str, Any] = Field(default_factory=dict)
     rows: List[Dict[str, Any]] = Field(default_factory=list)
     date_from: Optional[str] = None
     date_to: Optional[str] = None

@@ -404,8 +404,8 @@ def purge_receipts_by_model(
 ) -> Dict[str, Any]:
     """Elimina scontrini per model_id (es. cleanup import errato)."""
     mid = (model_id or "").strip()
-    if mid not in ("model-1", "model-2", "model-3", "model-4"):
-        raise ValueError("model_id deve essere model-1|model-2|model-3|model-4")
+    if mid not in ("model-1", "model-2", "model-3", "model-4", "model-5"):
+        raise ValueError("model_id deve essere model-1|model-2|model-3|model-4|model-5")
     q = db.query(PosReceipt).filter(PosReceipt.source == source, PosReceipt.model_id == mid)
     deleted = q.delete(synchronize_session=False)
     db.commit()
@@ -492,12 +492,14 @@ def load_pos_daily_incasso(
         POS_ONLY_MODEL_IDS,
         POS_REVENUE_MODEL_ID,
         POS_REVENUE_STORE_KEYS,
+        ZANARDELLI_MODEL_ID,
+        ZANARDELLI_STORE_KEYS,
     )
 
     mid = (model_id or "").strip() or POS_REVENUE_MODEL_ID
     if mid in ("all", "*"):
         mid = POS_REVENUE_MODEL_ID
-    allowed_models = {POS_REVENUE_MODEL_ID} | set(POS_ONLY_MODEL_IDS)
+    allowed_models = {POS_REVENUE_MODEL_ID, "model-1", "model-3"} | set(POS_ONLY_MODEL_IDS)
     if mid not in allowed_models:
         return {}
 
@@ -505,6 +507,12 @@ def load_pos_daily_incasso(
         allowed_store_keys = frozenset(store_keys)
     elif mid == GAZZA_LADRA_MODEL_ID:
         allowed_store_keys = GAZZA_LADRA_STORE_KEYS
+    elif mid == ZANARDELLI_MODEL_ID:
+        allowed_store_keys = ZANARDELLI_STORE_KEYS
+    elif mid == "model-1":
+        allowed_store_keys = frozenset({"model-1", "risacca"})
+    elif mid == "model-3":
+        allowed_store_keys = frozenset({"model-3", "via_lattea", "lattea", "mucche"})
     else:
         allowed_store_keys = POS_REVENUE_STORE_KEYS
 
@@ -530,13 +538,15 @@ def load_pos_daily_incasso(
         if not r.receipt_at:
             continue
         sk = (r.store_key or "").strip()
-        if sk and sk not in allowed_store_keys:
+        if allowed_store_keys and sk and sk not in allowed_store_keys:
             continue
         if not sk and mid == GAZZA_LADRA_MODEL_ID:
-            # Accetta anche scontrini senza store_key se model_id è Gazza
             pass
-        elif not sk and allowed_store_keys not in (POS_REVENUE_STORE_KEYS, GAZZA_LADRA_STORE_KEYS):
-            continue
+        elif not sk and mid in ("model-1", "model-3"):
+            pass
+        elif not sk and allowed_store_keys and mid == POS_REVENUE_MODEL_ID:
+            # Accetta scontrini Mani senza store_key se filtrati solo per model_id
+            pass
         day = r.receipt_at.date()
         by_day[day]["movimenti"] += 1
         amount = Decimal(str(r.amount_eur or 0)).quantize(Decimal("0.01"))
@@ -688,6 +698,9 @@ def payment_summary(
     by_day: Dict[str, Dict[str, float]] = defaultdict(
         lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0}
     )
+    by_hour: Dict[int, Dict[str, float]] = defaultdict(
+        lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0, "movimenti": 0.0}
+    )
 
     for r in q.all():
         totals["receipts"] += 1
@@ -722,10 +735,33 @@ def payment_summary(
             bucket["amount_eur"] += amount
             bucket["cash_eur"] += cash
             bucket["card_eur"] += card
+        if r.receipt_at:
+            hr = int(r.receipt_at.hour)
+            hb = by_hour[hr]
+            hb["receipts"] += 1
+            hb["movimenti"] += 1
+            hb["amount_eur"] += amount
+            hb["cash_eur"] += cash
+            hb["card_eur"] += card
 
     for key in totals:
         if isinstance(totals[key], float):
             totals[key] = round(totals[key], 2)
+
+    by_hour_rows = []
+    for hr in range(8, 23):
+        hit = by_hour.get(hr) or {}
+        by_hour_rows.append(
+            {
+                "hour": hr,
+                "slot_label": f"{hr:02d}:00–{(hr + 1) % 24:02d}:00",
+                "receipts": int(hit.get("receipts") or 0),
+                "movimenti": int(hit.get("movimenti") or 0),
+                "amount_eur": round(float(hit.get("amount_eur") or 0), 2),
+                "cash_eur": round(float(hit.get("cash_eur") or 0), 2),
+                "card_eur": round(float(hit.get("card_eur") or 0), 2),
+            }
+        )
 
     return {
         "ok": True,
@@ -736,6 +772,7 @@ def payment_summary(
         "by_payment_type": dict(by_type),
         "by_store": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in by_store.items()},
         "by_day": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in sorted(by_day.items())},
+        "by_hour": by_hour_rows,
     }
 
 
