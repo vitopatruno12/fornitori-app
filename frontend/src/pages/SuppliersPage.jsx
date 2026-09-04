@@ -108,13 +108,32 @@ export default function SuppliersPage() {
   const [invoiceUploadBusy, setInvoiceUploadBusy] = useState(false)
   const invoiceUploadRef = useRef(null)
   const [quickEditSupplierId, setQuickEditSupplierId] = useState('')
+  const [filterLocale, setFilterLocale] = useState('')
   const localeOptions = useMemo(() => loadPrimaNotaLocales(), [])
+
+  const localeFilterOptions = useMemo(() => {
+    const labels = {
+      risacca: 'Risacca / Bar-momento',
+      via_lattea: 'Via Lattea',
+      via_abba: 'Mediazione Via Abba',
+      via_zanardelli: 'Mediazione Via Zanardelli',
+    }
+    return (localeOptions || []).map((loc) => ({
+      id: loc.id,
+      label: labels[loc.id] || loc.label || localeLabel(loc.id, localeOptions),
+    }))
+  }, [localeOptions])
 
   const filteredSuppliers = useMemo(() => {
     const list = Array.isArray(suppliers) ? suppliers : []
     const q = search.trim().toLowerCase()
-    if (!q) return list
+    const localeId = String(filterLocale || '').trim()
     return list.filter((s) => {
+      if (localeId) {
+        const linked = parseSupplierLocales(s.locales)
+        if (!linked.includes(localeId)) return false
+      }
+      if (!q) return true
       const blob = [
         s.name,
         s.vat_number,
@@ -138,7 +157,7 @@ export default function SuppliersPage() {
       ].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
-  }, [suppliers, search, localeOptions])
+  }, [suppliers, search, filterLocale, localeOptions])
 
   const workbookTotals = useMemo(
     () => supplierWorkbookTotals(filteredSuppliers),
@@ -712,7 +731,11 @@ export default function SuppliersPage() {
           <div className="pagamenti-workbook-toolbar-left">
             <span className="pagamenti-workbook-title">{SUPPLIER_WORKBOOK_TITLE}</span>
             <span className="pagamenti-workbook-sheet-label">
-              {filteredSuppliers.length} fornitori{search.trim() ? ' (filtrati)' : ''}
+              {filteredSuppliers.length} fornitori
+              {filterLocale || search.trim() ? ' (filtrati)' : ''}
+              {filterLocale
+                ? ` · ${localeFilterOptions.find((l) => l.id === filterLocale)?.label || filterLocale}`
+                : ''}
             </span>
           </div>
           <div className="pagamenti-workbook-actions suppliers-workbook-actions">
@@ -755,6 +778,38 @@ export default function SuppliersPage() {
             >
               Modifica fornitore
             </button>
+            <select
+              id="sup-filter-locale"
+              className="form-control"
+              value={filterLocale}
+              onChange={(e) => {
+                setFilterLocale(e.target.value)
+                setQuickEditSupplierId('')
+              }}
+              style={{ minWidth: 220, maxWidth: 'min(340px, 55vw)' }}
+              aria-label="Mostra fornitori per locale"
+              title="Mostra solo i fornitori legati al locale selezionato"
+            >
+              <option value="">Mostra fornitori x locali…</option>
+              {localeFilterOptions.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.label}
+                </option>
+              ))}
+            </select>
+            {filterLocale ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setFilterLocale('')
+                  setQuickEditSupplierId('')
+                }}
+                title="Mostra di nuovo tutti i fornitori"
+              >
+                Tutti i locali
+              </button>
+            ) : null}
             <input
               type="search"
               className="sup-search"
