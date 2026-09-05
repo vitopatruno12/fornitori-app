@@ -78,12 +78,19 @@ _STORE_COL_CANDIDATES = (
     "CODICEPOSTAZIONE",
     "POSTAZIONE",
     "CASSA",
+    "NUMEROCASSA",
+    "CODICECASSA",
+    "NUMEROPOS",
+    "IDPOS",
     "NEGOZIO",
     "SEDE",
     "CODICENEGOZIO",
+    "PUNTOVENDITA",
+    "NUMEROPUNTOVENDITA",
+    "CODICEPDV",
     "MAGAZZINO",
+    # spesso presente ma NULL → ultimo candidato
     "NUMEROMAGAZZINODA",
-    "IDPOS",
 )
 _VOID_COL_CANDIDATES = (
     "ANNULLATO",
@@ -211,6 +218,23 @@ def _env(name: str, default: str = "") -> str:
     return str(os.getenv(name, default) or "").strip()
 
 
+def _parse_store_filter(raw: Optional[str] = None) -> Tuple[str, ...]:
+    """Allow-list postazione/cassa: EASYRETAIL_STORE_FILTER=abba,1,pos1 (match case-insensitive)."""
+    text = (raw if raw is not None else _env("EASYRETAIL_STORE_FILTER")).strip()
+    if not text:
+        return ()
+    return tuple(p.strip().lower() for p in text.split(",") if p.strip())
+
+
+def _store_raw_allowed(store_raw: Any, allow: Sequence[str]) -> bool:
+    if not allow:
+        return True
+    text = str(store_raw if store_raw is not None else "").strip().lower()
+    if not text:
+        return False
+    return any(token == text or token in text for token in allow)
+
+
 def gdb_config_from_env() -> Dict[str, Any]:
     """Config sync GDB da variabili ambiente."""
     dsn = _env("EASYRETAIL_GDB_DSN") or _env("EASYRETAIL_GDB_PATH")
@@ -224,6 +248,7 @@ def gdb_config_from_env() -> Dict[str, Any]:
         "lookback_hours": max(1, int(_env("EASYRETAIL_GDB_LOOKBACK_HOURS", "48") or "48")),
         "interval_sec": max(60, int(_env("EASYRETAIL_GDB_SYNC_INTERVAL_SEC", "180") or "180")),
         "charset": _env("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
+        "store_filter": _parse_store_filter(),
     }
 
 
@@ -399,6 +424,30 @@ def _pick_col(cols: Sequence[str], candidates: Sequence[str], *, exact_only: boo
     return None
 
 
+def _pick_store_col(cur, table: str, cols: Sequence[str]) -> Optional[str]:
+    """Preferisci una colonna cassa/negozio con almeno un valore non NULL."""
+    upper = {c.upper(): c for c in cols}
+    ordered: List[str] = []
+    for name in _STORE_COL_CANDIDATES:
+        col = upper.get(name.upper())
+        if col and col not in ordered:
+            ordered.append(col)
+    # altri candidati per nome
+    for c in cols:
+        u = c.upper()
+        if any(k in u for k in ("POS", "CASSA", "NEGOZ", "SEDE", "PDV", "POSTAZ", "MAGAZZ")):
+            if c not in ordered:
+                ordered.append(c)
+    for col in ordered:
+        try:
+            cur.execute(f"SELECT FIRST 1 {col} FROM {table} WHERE {col} IS NOT NULL")
+            if cur.fetchone() is not None:
+                return col
+        except Exception:
+            continue
+    return ordered[0] if ordered else None
+
+
 def discover_receipt_mapping(cur) -> Dict[str, Any]:
     tables = _list_user_tables(cur)
     table = None
@@ -429,7 +478,7 @@ def discover_receipt_mapping(cur) -> Dict[str, Any]:
         "date": _pick_col(cols, _DATE_COL_CANDIDATES),
         "time": _pick_col(cols, _TIME_COL_CANDIDATES),
         "amount": _pick_col(cols, _AMOUNT_COL_CANDIDATES),
-        "store": _pick_col(cols, _STORE_COL_CANDIDATES),
+        "store": _pick_store_col(cur, table, cols),
         "void": _pick_col(cols, _VOID_COL_CANDIDATES),
         "cash_amount": _pick_col(cols, _RECEIPT_CASH_AMOUNT_COLS),
         "card_amount": _pick_col(cols, _RECEIPT_CARD_AMOUNT_COLS),
@@ -972,10 +1021,17 @@ def fetch_receipts_from_gdb(
     lookback_hours: int = 48,
     since: Optional[datetime] = None,
     default_model_id: Optional[str] = None,
+    store_filter: Optional[Sequence[str]] = None,
     limit: int = 20000,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Legge scontrini recenti dal GDB. Ritorna (rows, meta)."""
     from .pos_store_catalog import SOURCE_EASYRETAIL, resolve_store
+
+    allow_stores = tuple(
+        str(x).strip().lower() for x in (store_filter or ()) if str(x).strip()
+    )
+    if not allow_stores:
+        allow_stores = _parse_store_filter()
 
     con = connect_gdb(dsn, user=user, password=password, fbclient=fbclient, charset=charset)
     try:
@@ -1046,6 +1102,8 @@ def fetch_receipts_from_gdb(
             return row[col_index[col.upper()]]
 
         raw_rows: List[Tuple[Any, Dict[str, Any]]] = []
+        skipped_store = 0
+        store_counts: Dict[str, int] = {}
         for row in cur.fetchall():
             when = _as_datetime(get(row, "ts"))
             if when is None:
@@ -1062,6 +1120,11 @@ def fetch_receipts_from_gdb(
                 continue
 
             store_raw = get(row, "store")
+            store_label = "(vuoto)" if store_raw is None or str(store_raw).strip() == "" else str(store_raw).strip()
+            store_counts[store_label] = store_counts.get(store_label, 0) + 1
+            if allow_stores and not _store_raw_allowed(store_raw, allow_stores):
+                skipped_store += 1
+                continue
             store_key, model_id, model_label = resolve_store(
                 "" if store_raw is None else str(store_raw),
                 default_model_id,
@@ -1158,6 +1221,10 @@ def fetch_receipts_from_gdb(
             },
             "fetched": len(rows),
             "with_payment_type": sum(1 for r in rows if r.get("payment_type") and r["payment_type"] != "unknown"),
+            "store_column": mapping.get("store"),
+            "store_filter": list(allow_stores),
+            "skipped_store": skipped_store,
+            "store_counts": dict(sorted(store_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
             "dsn": dsn,
             "fbclient": resolve_fbclient(fbclient),
         }

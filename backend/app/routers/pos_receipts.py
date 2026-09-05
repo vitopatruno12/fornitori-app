@@ -212,3 +212,22 @@ def purge_pos_receipts_model(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Purge fallita: {e}") from e
+
+
+class PurgeOverlapBody(BaseModel):
+    confirm: str = Field(..., description='Deve essere esattamente "DELETE"')
+
+
+@router.post("/purge-abba-zanardelli-overlap")
+def purge_abba_zanardelli_overlap(
+    body: PurgeOverlapBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_sync_token),
+):
+    """Elimina da model-2 gli scontrini già presenti su model-4 (GDB Abba condiviso)."""
+    if (body.confirm or "").strip() != "DELETE":
+        raise HTTPException(status_code=400, detail='confirm deve essere "DELETE"')
+    try:
+        return pos_receipts_service.purge_model2_overlap_with_model4(db)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Purge overlap fallita: {e}") from e

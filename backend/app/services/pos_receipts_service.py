@@ -290,11 +290,13 @@ def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, in
     Prima la chiave era (source, store_key, external_id): se lo store_key cambiava
     (es. model-2 → via_abba) lo stesso scontrino veniva inserito due volte.
     """
-    from .pos_store_catalog import _catalog_by_model_id
+    from .pos_store_catalog import POS_REVENUE_MODEL_ID, ZANARDELLI_MODEL_ID, _catalog_by_model_id
 
     inserted = 0
     updated = 0
     skipped_void = 0
+    skipped_overlap = 0
+    zan_external_ids: Optional[set] = None
     for row in rows:
         mid = (row.get("model_id") or "").strip() or None
         # Normalizza store_key canonico del locale (evita duplicati su alias)
@@ -302,6 +304,15 @@ def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, in
             hit = _catalog_by_model_id(mid)
             if hit and hit.get("store_key"):
                 row = {**row, "store_key": hit["store_key"], "model_label": hit.get("model_label") or row.get("model_label")}
+
+        # Abba (model-2) non deve re-importare scontrini già syncati come Zanardelli
+        if mid == POS_REVENUE_MODEL_ID:
+            if zan_external_ids is None:
+                zan_external_ids = _external_ids_for_model(db, model_id=ZANARDELLI_MODEL_ID, source=row.get("source") or SOURCE_EASYRETAIL)
+            ext = str(row.get("external_id") or "").strip()
+            if ext and ext in zan_external_ids:
+                skipped_overlap += 1
+                continue
 
         if int(row.get("is_void") or 0) == 1:
             skipped_void += 1
@@ -382,7 +393,12 @@ def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, in
             db.add(PosReceipt(**merged))
             inserted += 1
     db.commit()
-    return {"inserted": inserted, "updated": updated, "skipped_void": skipped_void}
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "skipped_void": skipped_void,
+        "skipped_overlap": skipped_overlap,
+    }
 
 
 def import_csv_bytes(
@@ -463,6 +479,83 @@ def purge_receipts_by_model(
     deleted = q.delete(synchronize_session=False)
     db.commit()
     return {"ok": True, "deleted": int(deleted), "model_id": mid, "source": source}
+
+
+def purge_model2_overlap_with_model4(
+    db: Session,
+    *,
+    source: str = SOURCE_EASYRETAIL,
+) -> Dict[str, Any]:
+    """Rimuove da model-2 (Abba) gli scontrini già presenti su model-4 (Zanardelli).
+
+    Il GDB Abba a volte è un DB condiviso/replica e contiene anche i VEN di Zanardelli
+    con lo stesso NUMEROMOVIMENTO → senza questo step Abba somma entrambe le casse.
+    """
+    from .pos_store_catalog import POS_REVENUE_MODEL_ID, ZANARDELLI_MODEL_ID
+
+    zan_ids = {
+        str(x[0]).strip()
+        for x in db.query(PosReceipt.external_id)
+        .filter(
+            PosReceipt.source == source,
+            PosReceipt.model_id == ZANARDELLI_MODEL_ID,
+            PosReceipt.external_id.isnot(None),
+        )
+        .all()
+        if x[0] is not None and str(x[0]).strip()
+    }
+    if not zan_ids:
+        return {
+            "ok": True,
+            "deleted": 0,
+            "zanardelli_ids": 0,
+            "note": "nessun scontrino model-4 da confrontare",
+        }
+
+    deleted = 0
+    q = (
+        db.query(PosReceipt)
+        .filter(PosReceipt.source == source, PosReceipt.model_id == POS_REVENUE_MODEL_ID)
+        .all()
+    )
+    for r in q:
+        ext = (r.external_id or "").strip()
+        if ext and ext in zan_ids:
+            db.delete(r)
+            deleted += 1
+    db.commit()
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "zanardelli_ids": len(zan_ids),
+        "model_id": POS_REVENUE_MODEL_ID,
+        "overlap_with": ZANARDELLI_MODEL_ID,
+    }
+
+
+def _external_ids_for_model(
+    db: Session,
+    *,
+    model_id: str,
+    source: str = SOURCE_EASYRETAIL,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> set:
+    q = db.query(PosReceipt.external_id).filter(
+        PosReceipt.source == source,
+        PosReceipt.model_id == model_id,
+        PosReceipt.is_void == 0,
+        PosReceipt.external_id.isnot(None),
+    )
+    if date_from is not None:
+        q = q.filter(
+            PosReceipt.receipt_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        q = q.filter(
+            PosReceipt.receipt_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+        )
+    return {str(x[0]).strip() for x in q.all() if x[0] is not None and str(x[0]).strip()}
 
 
 def load_pos_visit_buckets(
@@ -586,6 +679,16 @@ def load_pos_daily_incasso(
         .filter(PosReceipt.receipt_at <= end)
     )
 
+    # Abba: escludi scontrini già contati su Zanardelli (stesso external_id, GDB condiviso)
+    exclude_ext: set = set()
+    if mid == POS_REVENUE_MODEL_ID:
+        exclude_ext = _external_ids_for_model(
+            db,
+            model_id=ZANARDELLI_MODEL_ID,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
     by_day: Dict[date, Dict[str, Any]] = defaultdict(
         lambda: {
             "incasso": Decimal("0.00"),
@@ -600,6 +703,8 @@ def load_pos_daily_incasso(
             continue
         # Evita doppi conteggi se lo stesso scontrino esiste con store_key diversi
         ext = (r.external_id or "").strip()
+        if ext and ext in exclude_ext:
+            continue
         dedupe_key = (mid, ext) if ext else (mid, r.id)
         if dedupe_key in seen_external:
             continue

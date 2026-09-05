@@ -16,6 +16,7 @@ Variabili (o file .env accanto allo script):
   EASYRETAIL_GDB_PATH=C:\\EasyRetail\\DBase\\DBRETAIL.GDB
   EASYRETAIL_FBCLIENT=C:\\EasyRetail\\DBase\\fbclient.dll
   EASYRETAIL_MODEL_ID=model-2        # opzionale: Mani in Pasta
+  EASYRETAIL_STORE_FILTER=...        # opzionale: solo certe casse/POS (es. codice Abba)
   EASYRETAIL_GDB_LOOKBACK_HOURS=48
   EASYRETAIL_GDB_USER=SYSDBA
   EASYRETAIL_GDB_PASSWORD=masterkey
@@ -243,9 +244,15 @@ def main() -> int:
 
     lookback = int(os.getenv("EASYRETAIL_GDB_LOOKBACK_HOURS", "48") or "48")
     model_id = (os.getenv("EASYRETAIL_MODEL_ID") or "").strip() or None
+    store_filter = tuple(
+        p.strip()
+        for p in (os.getenv("EASYRETAIL_STORE_FILTER") or "").split(",")
+        if p.strip()
+    )
     # nginx default ~1MB: batch piccoli evitano 413
     batch_size = max(50, int(os.getenv("EASYRETAIL_INGEST_BATCH_SIZE", "200") or "200"))
-    print(f"SYNC: lettura GDB lookback={lookback}h model={model_id} …", flush=True)
+    filt = f" store_filter={list(store_filter)}" if store_filter else ""
+    print(f"SYNC: lettura GDB lookback={lookback}h model={model_id}{filt} …", flush=True)
     rows, meta = fetch_receipts_from_gdb(
         dsn=dsn,
         user=os.getenv("EASYRETAIL_GDB_USER", "SYSDBA") or "SYSDBA",
@@ -254,7 +261,13 @@ def main() -> int:
         charset=os.getenv("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
         lookback_hours=lookback,
         default_model_id=model_id,
+        store_filter=store_filter,
     )
+
+    if meta.get("store_counts"):
+        print(f"store_col={meta.get('store_column')} counts={meta.get('store_counts')}", flush=True)
+        if meta.get("skipped_store"):
+            print(f"skipped_store={meta.get('skipped_store')} (filtro attivo)", flush=True)
 
     serialized = [_serialize_receipt(r) for r in rows]
     if not serialized:
