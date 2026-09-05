@@ -11,6 +11,7 @@ export const PN_CONTO = {
   POS: 'POS',
   REFILL: 'REFILL',
   STACKER: 'SVUOTAMENTO_STACKER',
+  VERSAMENTO_BANCA: 'VERSAMENTO_BANCA',
 }
 
 /** Causali registrazione (Passcom). */
@@ -20,6 +21,7 @@ export const MASTRINI_CAUSALI = {
   INF: 'Incasso non fiscale',
   IRF: 'Refill distributori',
   STK: 'Svuotamento stacker',
+  VRB: 'Versamento banca',
   PAG: 'Pagamento cassa',
   PFF: 'Pagamento fattura fornitore (Prima Nota)',
   FE: 'Registrazione fattura elettronica',
@@ -234,6 +236,9 @@ export function mapPrimaNotaToPasscomAccounts(row, { linkedInvoice = false } = {
   }
   if (conto === PN_CONTO.STACKER) {
     return { dare: accounts.cassa, avere: AUXILIARY_ACCOUNTS.stacker.code, causale: 'STK' }
+  }
+  if (conto === PN_CONTO.VERSAMENTO_BANCA) {
+    return { dare: GENERAL_ACCOUNTS.banca.code, avere: accounts.cassa, causale: 'VRB' }
   }
 
   if (linkedInvoice && !isEntrata) {

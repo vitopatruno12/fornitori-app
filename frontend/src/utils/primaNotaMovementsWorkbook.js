@@ -2,6 +2,7 @@ const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
+const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
 
 export const PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE = 'Movimenti cassa'
 
@@ -19,7 +20,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
   { id: 'cassa_mattina', label: 'Cassa iniziale', numeric: true, width: 120 },
   { id: 'cassa_sera', label: 'Saldo cassa progressivo', numeric: true, width: 150 },
-  { id: 'note', label: 'Note', width: 180 },
+  { id: 'versamento_banca', label: 'Versamento banca', numeric: true, width: 130 },
 ]
 
 function formatDate(value) {
@@ -65,6 +66,10 @@ function isStackerSvuotamentoEntry(entry) {
   return entry?.conto === CONTO_STACKER_SVUOTAMENTO
 }
 
+function isVersamentoBancaEntry(entry) {
+  return entry?.conto === CONTO_VERSAMENTO_BANCA
+}
+
 export function isExtraCassaMovement(entry) {
   return isPosEntry(entry) || isRefillEntry(entry) || isStackerSvuotamentoEntry(entry)
 }
@@ -78,11 +83,13 @@ function movementDescription(entry) {
   else if (isPosEntry(entry)) text = text ? `${text} [POS]` : '[POS]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
+  else if (isVersamentoBancaEntry(entry)) text = text ? `${text} [Banca]` : '[Banca]'
   return text
 }
 
 export function movementIncassoTone(entry) {
   if (isExtraCassaMovement(entry)) return 'workbook-cell-muted'
+  if (isVersamentoBancaEntry(entry)) return 'workbook-cell-alert'
   if (entry?.type === 'entrata') return 'workbook-cell-yes'
   if (entry?.type === 'uscita') return 'workbook-cell-alert'
   return ''
@@ -125,8 +132,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatAmount(entry.cassaMattina)
     case 'cassa_sera':
       return formatAmount(entry.cassaSera)
-    case 'note':
-      return String(entry.note || '')
+    case 'versamento_banca':
+      return formatAmountClean(entry.versamentoBanca)
     default:
       return ''
   }
@@ -141,6 +148,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'pos') return formatAmount(totals.pos)
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
+  if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)
   if (columnId === 'incasso') return formatAmount(totals.incasso)
   return ''
 }

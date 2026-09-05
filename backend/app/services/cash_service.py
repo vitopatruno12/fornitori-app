@@ -20,6 +20,7 @@ NON_FISCALE_CONTO = "NON_FISCALE"
 POS_CONTO = "POS"
 REFILL_CONTO = "REFILL"
 STACKER_SVUOTAMENTO_CONTO = "SVUOTAMENTO_STACKER"
+VERSAMENTO_BANCA_CONTO = "VERSAMENTO_BANCA"
 EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO, STACKER_SVUOTAMENTO_CONTO)
 
 
@@ -54,7 +55,15 @@ def _activity_filter(activity: Optional[str]):
 def _is_fiscale_filter():
     return or_(
         CashEntry.conto.is_(None),
-        CashEntry.conto.notin_([NON_FISCALE_CONTO, POS_CONTO, REFILL_CONTO, STACKER_SVUOTAMENTO_CONTO]),
+        CashEntry.conto.notin_(
+            [
+                NON_FISCALE_CONTO,
+                POS_CONTO,
+                REFILL_CONTO,
+                STACKER_SVUOTAMENTO_CONTO,
+                VERSAMENTO_BANCA_CONTO,
+            ]
+        ),
     )
 
 

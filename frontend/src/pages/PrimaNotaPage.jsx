@@ -57,9 +57,22 @@ const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
+const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
 
 const REGISTRO_CHIUSO_SAVE_MSG =
   'Registro chiuso: non puoi salvare. Apri con Accedi per salvare i movimenti.'
+
+const MOVEMENT_KIND_OPTIONS = [
+  'all',
+  'entrata',
+  'uscita',
+  'fiscale',
+  'nf',
+  'pos',
+  'refill',
+  'stacker_svuotamento',
+  'versamento_banca',
+]
 
 function isExtraCassaConto(conto) {
   return conto === CONTO_POS || conto === CONTO_REFILL || conto === CONTO_STACKER_SVUOTAMENTO
@@ -70,6 +83,7 @@ function flowTagFromConto(conto) {
   if (conto === CONTO_POS) return 'pos'
   if (conto === CONTO_REFILL) return 'refill'
   if (conto === CONTO_STACKER_SVUOTAMENTO) return 'stacker_svuotamento'
+  if (conto === CONTO_VERSAMENTO_BANCA) return 'versamento_banca'
   return 'fiscale'
 }
 
@@ -145,8 +159,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [formDescription, setFormDescription] = useState('')
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
-  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | refill | stacker_svuotamento
+  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | refill | stacker_svuotamento | versamento_banca
   const extraCassaEntrataOnly = formFlowTag === 'pos' || formFlowTag === 'stacker_svuotamento'
+  const versamentoUscitaOnly = formFlowTag === 'versamento_banca'
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
   const [formInvoiceId, setFormInvoiceId] = useState('')
@@ -503,7 +518,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   useEffect(() => {
     const onAiFilter = (ev) => {
       const d = ev?.detail || {}
-      if (d?.movementKind && ['all', 'entrata', 'uscita', 'fiscale', 'nf', 'pos', 'refill', 'stacker_svuotamento'].includes(String(d.movementKind))) {
+      if (d?.movementKind && MOVEMENT_KIND_OPTIONS.includes(String(d.movementKind))) {
         setMovementKind(String(d.movementKind))
         setSuccess('Filtro AI applicato')
       }
@@ -598,7 +613,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         setMovementPeriodTo(lastDay)
         applied = true
       }
-      if (data?.movementKind && ['all', 'entrata', 'uscita', 'fiscale', 'nf', 'pos', 'refill', 'stacker_svuotamento'].includes(String(data.movementKind))) {
+      if (data?.movementKind && MOVEMENT_KIND_OPTIONS.includes(String(data.movementKind))) {
         setMovementKind(String(data.movementKind))
         applied = true
       }
@@ -933,10 +948,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       const entryDate = formEntryDate || selectedDate
       const payload = {
         entry_date: entryDate.includes('T') ? entryDate : `${entryDate}T12:00:00`,
-        type: extraCassaEntrataOnly ? 'entrata' : formType,
+        type: extraCassaEntrataOnly ? 'entrata' : versamentoUscitaOnly ? 'uscita' : formType,
         amount: Number(formAmount),
         description: descTrimmed,
-        note: formNote.trim() || null,
+        note: null,
         conto:
           formFlowTag === 'non_fiscale'
             ? CONTO_NON_FISCALE
@@ -946,7 +961,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 ? CONTO_REFILL
                 : formFlowTag === 'stacker_svuotamento'
                   ? CONTO_STACKER_SVUOTAMENTO
-                  : (formConto.trim() || null),
+                  : formFlowTag === 'versamento_banca'
+                    ? CONTO_VERSAMENTO_BANCA
+                    : (formConto.trim() || null),
         riferimento_documento: formRifDocumento.trim() || null,
         supplier_id: formSupplierId ? Number(formSupplierId) : null,
         invoice_id: formInvoiceId ? Number(formInvoiceId) : null,
@@ -1010,6 +1027,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setFormConto(entry.conto || '')
     setFormFlowTag(flowTagFromConto(entry.conto))
     if (entry.conto === CONTO_POS || entry.conto === CONTO_STACKER_SVUOTAMENTO) setFormType('entrata')
+    if (entry.conto === CONTO_VERSAMENTO_BANCA) setFormType('uscita')
     setFormRifDocumento(entry.riferimento_documento || '')
     setFormSupplierId(entry.supplier_id ? String(entry.supplier_id) : '')
     setFormInvoiceId(entry.invoice_id ? String(entry.invoice_id) : '')
@@ -1302,6 +1320,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     return entry?.conto === CONTO_STACKER_SVUOTAMENTO
   }
 
+  function isVersamentoBanca(entry) {
+    return entry?.conto === CONTO_VERSAMENTO_BANCA
+  }
+
   function isExtraCassa(entry) {
     return isExtraCassaConto(entry?.conto)
   }
@@ -1312,6 +1334,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const posTag = entry.conto === CONTO_POS
     const refillTag = entry.conto === CONTO_REFILL
     const stackerTag = entry.conto === CONTO_STACKER_SVUOTAMENTO
+    const versamentoTag = entry.conto === CONTO_VERSAMENTO_BANCA
     const extraCassaTag = posTag || refillTag || stackerTag
     const isEntrata = entry.type === 'entrata'
     const entrata = !extraCassaTag && isEntrata ? amount : 0
@@ -1320,7 +1343,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const pos = posTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const stackerSvuotamento = stackerTag ? -Math.abs(amount) : 0
-    const totaleMovimento = !nonFiscaleTag && !extraCassaTag ? entrata - uscita : 0
+    const versamentoBanca = versamentoTag ? Math.abs(amount) : 0
+    const totaleMovimento = !nonFiscaleTag && !extraCassaTag && !versamentoTag ? entrata - uscita : 0
     const affectsSaldo = !extraCassaTag
     const cashDelta = affectsSaldo ? entrata - uscita : 0
     const incasso = totaleMovimento + nonFiscale + pos + refill + stackerSvuotamento
@@ -1331,6 +1355,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       pos,
       refill,
       stackerSvuotamento,
+      versamentoBanca,
       totaleMovimento,
       affectsSaldo,
       cashDelta,
@@ -1409,8 +1434,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'pos' && (!isPos(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
+      if (movementKind === 'versamento_banca' && !isVersamentoBanca(entry)) return false
       if (!q) return true
-      const blob = [entry.description, entry.note, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
+      const blob = [entry.description, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
       return blob.includes(q)
     })
   }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
@@ -1425,10 +1451,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         pos: acc.pos + Number(entry.pos || 0),
         refill: acc.refill + Number(entry.refill || 0),
         stackerSvuotamento: acc.stackerSvuotamento + Number(entry.stackerSvuotamento || 0),
+        versamentoBanca: acc.versamentoBanca + Number(entry.versamentoBanca || 0),
         incasso: acc.incasso + Number(entry.incasso || 0),
         count: acc.count + 1,
       }),
-      { entrata: 0, uscita: 0, fiscale: 0, nonFiscale: 0, pos: 0, refill: 0, stackerSvuotamento: 0, incasso: 0, count: 0 },
+      { entrata: 0, uscita: 0, fiscale: 0, nonFiscale: 0, pos: 0, refill: 0, stackerSvuotamento: 0, versamentoBanca: 0, incasso: 0, count: 0 },
     )
   }
 
@@ -1723,7 +1750,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             className="form-control"
             value={movementSearch}
             onChange={e => setMovementSearch(e.target.value)}
-            placeholder="Descrizione, note, riferimento (nell’elenco del periodo)"
+            placeholder="Descrizione, riferimento (nell’elenco del periodo)"
             aria-label="Filtra movimenti"
           />
         </div>
@@ -1738,6 +1765,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <option value="pos">POS</option>
             <option value="refill">Refill</option>
             <option value="stacker_svuotamento">Svuotamento stacker</option>
+            <option value="versamento_banca">Versamento banca</option>
           </select>
         </div>
         <div className="form-group">
@@ -1774,12 +1802,14 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   type="button"
                   className={formType === 'entrata' || extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('entrata')}
+                  disabled={versamentoUscitaOnly}
+                  title={versamentoUscitaOnly ? 'Il versamento banca è un’uscita di cassa verso il conto corrente.' : undefined}
                 >
                   Cassa entrata
                 </button>
                 <button
                   type="button"
-                  className={formType === 'uscita' && !extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
+                  className={(formType === 'uscita' || versamentoUscitaOnly) && !extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('uscita')}
                   disabled={extraCassaEntrataOnly}
                   title={extraCassaEntrataOnly ? 'POS registra solo entrate; lo svuotamento stacker è un prelievo VNE (segno negativo nelle vendite).' : undefined}
@@ -1792,6 +1822,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   {formFlowTag === 'pos'
                     ? 'POS: solo pagamenti ricevuti (cassa entrata).'
                     : 'Svuotamento stacker: prelievo banconote dallo stacker VNE (es. 1000 € → -1000 nelle vendite, escluso dalla cassa fisica).'}
+                </p>
+              ) : versamentoUscitaOnly ? (
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Versamento banca: contanti prelevati dalla cassa e versati in banca (uscita cassa).
                 </p>
               ) : null}
             </div>
@@ -1843,6 +1877,18 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   title="Svuotamento stacker VNE: prelievo banconote dallo stacker, registrato in negativo nelle vendite ed escluso dalla cassa fisica."
                 >
                   Svuotamento stacker
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'versamento_banca' ? 'btn btn-vino' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('versamento_banca')
+                    setFormType('uscita')
+                    setFormDescription((prev) => (String(prev || '').trim() ? prev : 'Versamento banca'))
+                  }}
+                  title="Versamento banca: contanti prelevati dalla cassa e versati sul conto corrente (uscita cassa)."
+                >
+                  Versamento banca
                 </button>
               </div>
             </div>
@@ -1976,10 +2022,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </div>
           </details>
 
-          <div className="form-group">
-            <label>Note (per commercialista)</label>
-            <textarea className="form-control" value={formNote} onChange={e => setFormNote(e.target.value)} rows={2} placeholder="Note da allegare al report per il commercialista" />
-          </div>
           <div className="btn-group">
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Salvataggio...' : editingId ? 'Salva modifiche' : 'Registra movimento'}
@@ -2047,6 +2089,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </span>
             <span className="pn-movement-totals-item">
               Stacker: <strong>€ {formatAmount(movementPeriodTotals.stackerSvuotamento)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
             </span>
             <span className="pn-movement-totals-item">
               Incasso: <strong>€ {formatAmount(movementPeriodTotals.incasso)}</strong>
@@ -2303,6 +2348,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   <span className="badge-pn badge-pn--nf">Refill</span>
                 ) : isStackerSvuotamento(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">Svuotamento stacker</span>
+                ) : isVersamentoBanca(drawerEntry) ? (
+                  <span className="badge-pn badge-pn--out">Versamento banca</span>
                 ) : drawerEntry.type === 'entrata' ? (
                   <span className="badge-pn badge-pn--in">Entrata</span>
                 ) : (
@@ -2319,8 +2366,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 0.75rem', fontSize: '0.9rem' }}>
                 <dt style={{ color: 'var(--text-muted)' }}>Descrizione</dt>
                 <dd style={{ margin: 0 }}>{drawerEntry.description || '–'}</dd>
-                <dt style={{ color: 'var(--text-muted)' }}>Note</dt>
-                <dd style={{ margin: 0 }}>{drawerEntry.note || '–'}</dd>
+                <dt style={{ color: 'var(--text-muted)' }}>Versamento banca</dt>
+                <dd style={{ margin: 0 }}>
+                  {isVersamentoBanca(drawerEntry) ? `€ ${formatAmount(drawerEntry.amount)}` : '–'}
+                </dd>
                 <dt style={{ color: 'var(--text-muted)' }}>Rif. documento</dt>
                 <dd style={{ margin: 0 }}>{drawerEntry.riferimento_documento || '–'}</dd>
                 <dt style={{ color: 'var(--text-muted)' }}>Conto testuale</dt>
