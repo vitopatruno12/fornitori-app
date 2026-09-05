@@ -285,13 +285,64 @@ def _apply_payment_fields(existing: PosReceipt, row: Dict[str, Any]) -> None:
 
 
 def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    """Upsert per (source, model_id, external_id).
+
+    Prima la chiave era (source, store_key, external_id): se lo store_key cambiava
+    (es. model-2 → via_abba) lo stesso scontrino veniva inserito due volte.
+    """
+    from .pos_store_catalog import _catalog_by_model_id
+
     inserted = 0
     updated = 0
     skipped_void = 0
     for row in rows:
+        mid = (row.get("model_id") or "").strip() or None
+        # Normalizza store_key canonico del locale (evita duplicati su alias)
+        if mid:
+            hit = _catalog_by_model_id(mid)
+            if hit and hit.get("store_key"):
+                row = {**row, "store_key": hit["store_key"], "model_label": hit.get("model_label") or row.get("model_label")}
+
         if int(row.get("is_void") or 0) == 1:
             skipped_void += 1
-            # marca void se già presente
+            existing = (
+                db.query(PosReceipt)
+                .filter(
+                    PosReceipt.source == row["source"],
+                    PosReceipt.model_id == mid,
+                    PosReceipt.external_id == row["external_id"],
+                )
+                .order_by(PosReceipt.id.asc())
+                .first()
+            )
+            if existing is None:
+                existing = (
+                    db.query(PosReceipt)
+                    .filter(
+                        PosReceipt.source == row["source"],
+                        PosReceipt.store_key == row["store_key"],
+                        PosReceipt.external_id == row["external_id"],
+                    )
+                    .one_or_none()
+                )
+            if existing:
+                existing.is_void = 1
+                existing.store_key = row["store_key"]
+                existing.model_id = mid
+                updated += 1
+            continue
+
+        existing = (
+            db.query(PosReceipt)
+            .filter(
+                PosReceipt.source == row["source"],
+                PosReceipt.model_id == mid,
+                PosReceipt.external_id == row["external_id"],
+            )
+            .order_by(PosReceipt.id.asc())
+            .first()
+        )
+        if existing is None:
             existing = (
                 db.query(PosReceipt)
                 .filter(
@@ -301,29 +352,31 @@ def upsert_receipts(db: Session, rows: Iterable[Dict[str, Any]]) -> Dict[str, in
                 )
                 .one_or_none()
             )
-            if existing:
-                existing.is_void = 1
-                updated += 1
-            continue
-
-        existing = (
-            db.query(PosReceipt)
-            .filter(
-                PosReceipt.source == row["source"],
-                PosReceipt.store_key == row["store_key"],
-                PosReceipt.external_id == row["external_id"],
-            )
-            .one_or_none()
-        )
         if existing:
             existing.receipt_at = row["receipt_at"]
             existing.amount_eur = row.get("amount_eur")
-            existing.model_id = row.get("model_id")
+            existing.model_id = mid
             existing.model_label = row.get("model_label")
+            existing.store_key = row["store_key"]
             existing.raw_store = row.get("raw_store")
             existing.is_void = 0
             _apply_payment_fields(existing, row)
             updated += 1
+            # Elimina cloni dello stesso scontrino (stesso external_id / model)
+            clones = (
+                db.query(PosReceipt)
+                .filter(
+                    PosReceipt.source == row["source"],
+                    PosReceipt.external_id == row["external_id"],
+                    PosReceipt.id != existing.id,
+                )
+                .filter(
+                    (PosReceipt.model_id == mid) | (PosReceipt.store_key == row["store_key"])
+                )
+                .all()
+            )
+            for clone in clones:
+                db.delete(clone)
         else:
             merged = merge_payment_fields(row)
             db.add(PosReceipt(**merged))
@@ -438,9 +491,16 @@ def load_pos_visit_buckets(
     buckets: Dict[Tuple[str, int, int], Dict[str, float]] = defaultdict(
         lambda: {"visits": 0.0, "amount": 0.0, "days": set()}  # type: ignore
     )
+    seen_external: set = set()
     for r in q.all():
         if not r.receipt_at:
             continue
+        ext = (r.external_id or "").strip()
+        mid_r = r.model_id or "unknown"
+        dedupe_key = (mid_r, ext) if ext else (mid_r, r.id)
+        if dedupe_key in seen_external:
+            continue
+        seen_external.add(dedupe_key)
         sk = (r.store_key or "").strip()
         if allowed_store_keys is not None:
             if sk not in allowed_store_keys:
@@ -534,9 +594,16 @@ def load_pos_daily_incasso(
             "card_eur": Decimal("0.00"),
         }
     )
+    seen_external: set = set()
     for r in q.all():
         if not r.receipt_at:
             continue
+        # Evita doppi conteggi se lo stesso scontrino esiste con store_key diversi
+        ext = (r.external_id or "").strip()
+        dedupe_key = (mid, ext) if ext else (mid, r.id)
+        if dedupe_key in seen_external:
+            continue
+        seen_external.add(dedupe_key)
         sk = (r.store_key or "").strip()
         if allowed_store_keys and sk and sk not in allowed_store_keys:
             continue

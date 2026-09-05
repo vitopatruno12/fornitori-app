@@ -1024,9 +1024,9 @@ def fetch_receipts_from_gdb(
             where.append(f"{mapping['date']} >= ?")
             params.append(cutoff.date())
 
-        # Solo documenti vendita / scontrino (esclude CHF cassetto ecc.)
+        # Solo vendita fiscale (VEN). BIL = gestionale stesso scontrino → doppio conteggio vs chiusura cassa.
         if mapping.get("doc_type"):
-            where.append(f"{mapping['doc_type']} IN ('VEN', 'BIL')")
+            where.append(f"{mapping['doc_type']} = 'VEN'")
 
         if where:
             sql += " WHERE " + " AND ".join(where)
