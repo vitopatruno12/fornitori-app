@@ -679,16 +679,6 @@ def load_pos_daily_incasso(
         .filter(PosReceipt.receipt_at <= end)
     )
 
-    # Abba: escludi scontrini già contati su Zanardelli (stesso external_id, GDB condiviso)
-    exclude_ext: set = set()
-    if mid == POS_REVENUE_MODEL_ID:
-        exclude_ext = _external_ids_for_model(
-            db,
-            model_id=ZANARDELLI_MODEL_ID,
-            date_from=date_from,
-            date_to=date_to,
-        )
-
     by_day: Dict[date, Dict[str, Any]] = defaultdict(
         lambda: {
             "incasso": Decimal("0.00"),
@@ -703,8 +693,6 @@ def load_pos_daily_incasso(
             continue
         # Evita doppi conteggi se lo stesso scontrino esiste con store_key diversi
         ext = (r.external_id or "").strip()
-        if ext and ext in exclude_ext:
-            continue
         dedupe_key = (mid, ext) if ext else (mid, r.id)
         if dedupe_key in seen_external:
             continue
@@ -733,6 +721,30 @@ def load_pos_daily_incasso(
             card = amount
         by_day[day]["cash_eur"] = (by_day[day]["cash_eur"] + cash).quantize(Decimal("0.01"))
         by_day[day]["card_eur"] = (by_day[day]["card_eur"] + card).quantize(Decimal("0.01"))
+
+    # Il GDB Abba spesso include anche Zanardelli, ma con NUMEROMOVIMENTO diversi:
+    # l'overlap per external_id non funziona → sottrai i totali giornalieri model-4.
+    if mid == POS_REVENUE_MODEL_ID:
+        zan_days = load_pos_daily_incasso(
+            db,
+            date_from=date_from,
+            date_to=date_to,
+            model_id=ZANARDELLI_MODEL_ID,
+            store_keys=tuple(ZANARDELLI_STORE_KEYS),
+        )
+        zero = Decimal("0.00")
+
+        def _d(v):
+            return Decimal(str(v or 0)).quantize(Decimal("0.01"))
+
+        for day, zhit in (zan_days or {}).items():
+            slot = by_day.get(day)
+            if not slot:
+                continue
+            slot["incasso"] = max(zero, _d(slot["incasso"]) - _d(zhit.get("incasso", 0)))
+            slot["cash_eur"] = max(zero, _d(slot["cash_eur"]) - _d(zhit.get("cash_eur", 0)))
+            slot["card_eur"] = max(zero, _d(slot["card_eur"]) - _d(zhit.get("card_eur", 0)))
+            slot["movimenti"] = max(0, int(slot["movimenti"] or 0) - int(zhit.get("movimenti") or 0))
 
     return dict(by_day)
 
