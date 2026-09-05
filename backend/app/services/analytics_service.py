@@ -879,12 +879,12 @@ def _heatmap_from_pos_receipts(
     model_id: Optional[str] = None,
     model_label: str = "Mani in Pasta (Via Abba)",
 ) -> dict:
-    """Heatmap traffico/incasso da scontrini POS (Abba / Gazza Ladra)."""
+    """Heatmap traffico/incasso da scontrini POS (medie storiche weekday+ora)."""
     months = max(1, min(6, int(months or 3)))
     target_mid = _parse_model_id(model_id) or POS_REVENUE_MODEL_ID
     amount: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
-    count: Dict[Tuple[int, int], int] = defaultdict(int)
-    day_seen: Dict[Tuple[int, int], set] = defaultdict(set)
+    count: Dict[Tuple[int, int], float] = defaultdict(float)
+    sample_days: Dict[Tuple[int, int], int] = defaultdict(int)
 
     try:
         from ..database import SessionLocal
@@ -906,12 +906,14 @@ def _heatmap_from_pos_receipts(
                 continue
             if hr not in BUSINESS_HOURS:
                 continue
-            visits = int(hit.get("visits") or 0)
-            amt = Decimal(str(hit.get("amount") or 0))
             days_n = max(1, int(hit.get("sample_days") or 1))
-            amount[(wd, hr)] += _dec(amt)
-            count[(wd, hr)] += visits
-            day_seen[(wd, hr)].add(f"d{days_n}")
+            avg_visits = float(hit.get("avg_visits") or 0)
+            if avg_visits <= 0:
+                avg_visits = float(hit.get("visits") or 0) / days_n
+            avg_amt = float(hit.get("amount") or 0) / days_n
+            amount[(wd, hr)] = _dec(avg_amt)
+            count[(wd, hr)] = avg_visits
+            sample_days[(wd, hr)] = days_n
     except Exception:
         buckets = {}
 
@@ -920,10 +922,9 @@ def _heatmap_from_pos_receipts(
     max_avg_visits = 0.0
     for wd in range(7):
         for hr in BUSINESS_HOURS:
-            days_n = max(1, len(day_seen[(wd, hr)]))
-            tot = float(amount[(wd, hr)])
-            avg = tot / days_n
-            avg_visits = count[(wd, hr)] / days_n
+            days_n = max(1, sample_days[(wd, hr)])
+            avg = float(amount[(wd, hr)])
+            avg_visits = float(count[(wd, hr)])
             max_avg = max(max_avg, avg)
             max_avg_visits = max(max_avg_visits, avg_visits)
             cells.append(
@@ -932,11 +933,12 @@ def _heatmap_from_pos_receipts(
                     "weekday_label": WEEKDAY_LABELS_IT[wd],
                     "hour": hr,
                     "slot_label": _slot_label(hr),
-                    "total_amount": _dec(tot),
+                    "total_amount": _dec(avg * days_n),
                     "avg_amount": _dec(avg),
-                    "movimenti": count[(wd, hr)],
+                    "movimenti": int(round(avg_visits * days_n)),
                     "avg_visits": round(avg_visits, 2),
-                    "sample_days": len(day_seen[(wd, hr)]),
+                    "sample_days": days_n,
+                    "visit_source": "pos",
                 }
             )
 
@@ -956,14 +958,15 @@ def _heatmap_from_pos_receipts(
         else:
             cell["level"] = "nullo"
 
-    ranked = sorted(cells, key=lambda c: float(c["avg_amount"]), reverse=True)
-    top = [c for c in ranked if float(c["avg_amount"]) > 0][:12]
+    ranked = sorted(cells, key=lambda c: float(c["avg_visits"]), reverse=True)
+    top = [c for c in ranked if float(c["avg_visits"]) > 0][:12]
     suggestions = [
         {
             "weekday_label": c["weekday_label"],
             "slot_label": c["slot_label"],
             "operatori_consigliati": c["operatori_consigliati"],
             "avg_amount": c["avg_amount"],
+            "avg_visits": c["avg_visits"],
             "message": (
                 f"Consigliati {c['operatori_consigliati']} operator"
                 f"{'i' if c['operatori_consigliati'] != 1 else 'e'} "
@@ -988,6 +991,48 @@ def _heatmap_from_pos_receipts(
         "data_note": DATA_NOTE,
         "visits_source": "pos",
     }
+
+
+def _today_hourly_from_pos(
+    *,
+    model_id: str,
+    store_keys: tuple,
+    day: Optional[date] = None,
+) -> List[dict]:
+    """Visite/scontrini di oggi ora per ora (flusso agent in tempo reale)."""
+    day = day or date.today()
+    try:
+        from ..database import SessionLocal
+        from .pos_receipts_service import load_pos_visit_buckets
+    except Exception:
+        return []
+    db = SessionLocal()
+    try:
+        buckets = load_pos_visit_buckets(
+            db,
+            date_from=day,
+            date_to=day,
+            model_id=model_id,
+            store_keys=store_keys or None,
+        )
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+    rows = []
+    for hr in BUSINESS_HOURS:
+        hit = buckets.get((model_id, day.weekday(), hr)) or {}
+        visits = int(round(float(hit.get("visits") or 0)))
+        rows.append(
+            {
+                "hour": hr,
+                "slot_label": _slot_label(hr),
+                "visits": visits,
+                "amount": _dec(hit.get("amount") or 0),
+            }
+        )
+    return rows
 
 
 def _build_mani_location_view(
@@ -1111,6 +1156,11 @@ def _build_pos_only_machine_entry(
         model_id=model_id,
         model_label=label,
     )
+    today_hourly = _today_hourly_from_pos(
+        model_id=model_id,
+        store_keys=store_keys or tuple(GAZZA_LADRA_STORE_KEYS),
+        day=date_to,
+    )
     return {
         "model_id": model_id,
         "model_label": label,
@@ -1123,6 +1173,7 @@ def _build_pos_only_machine_entry(
         "hours": m_heat["hours"],
         "weekdays": m_heat["weekdays"],
         "cells": m_heat["cells"],
+        "today_hourly": today_hourly,
         "visits_source": "pos",
         "payment_split": m_snap.get("payment_split") or {},
         "locations": [],

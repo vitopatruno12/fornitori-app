@@ -624,14 +624,16 @@ export function MachineCompareCharts({ machines = [] }) {
 const WEEKDAY_SHORT = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom']
 
 /**
- * Grafico stile Google "Orari di punta": visite medie per ora, selezionabili per giorno.
- * Fonte: operazioni VNE (proxy visite).
+ * Grafico stile Google "Orari di punta".
+ * - Giorno = oggi: visite reali ora per ora dagli scontrini agent (tempo reale)
+ * - Altri giorni: media storica per quel weekday (~3 mesi)
  */
 export function PopularTimesChart({
   cells = [],
   hours = [],
   weekdays = [],
   title = 'Orari di punta',
+  todayHourly = null,
 }) {
   const todayWd = new Date().getDay()
   // JS: 0=Dom … converti a Lun=0
@@ -650,9 +652,23 @@ export function PopularTimesChart({
     return map
   }, [cells])
 
+  const todayByHour = React.useMemo(() => {
+    const map = new Map()
+    for (const row of Array.isArray(todayHourly) ? todayHourly : []) {
+      map.set(Number(row.hour), Number(row.visits || 0) || 0)
+    }
+    return map
+  }, [todayHourly])
+
+  const isTodayView = weekday === todayIdx
+  const useLiveToday = isTodayView && todayByHour.size > 0
+
   const dayCells = hourList.map((h) => byKey.get(`${weekday}-${h}`) || null)
 
-  function visitValue(c) {
+  function visitValue(c, h) {
+    if (useLiveToday) {
+      return todayByHour.get(h) || 0
+    }
     if (!c) return 0
     const avg = Number(c.avg_visits)
     if (Number.isFinite(avg) && avg > 0) return avg
@@ -661,13 +677,13 @@ export function PopularTimesChart({
     return mov / days
   }
 
-  const maxVisits = Math.max(1, ...dayCells.map((c) => visitValue(c)))
-  const hasData = dayCells.some((c) => visitValue(c) > 0)
+  const maxVisits = Math.max(1, ...hourList.map((h, idx) => visitValue(dayCells[idx], h)))
+  const hasData = hourList.some((h, idx) => visitValue(dayCells[idx], h) > 0)
 
-  const peakHour = dayCells.reduce(
-    (best, c, idx) => {
-      const v = visitValue(c)
-      if (v > best.v) return { v, hour: hourList[idx], cell: c }
+  const peakHour = hourList.reduce(
+    (best, h, idx) => {
+      const v = visitValue(dayCells[idx], h)
+      if (v > best.v) return { v, hour: h, cell: dayCells[idx] }
       return best
     },
     { v: 0, hour: null, cell: null },
@@ -695,31 +711,34 @@ export function PopularTimesChart({
         </label>
       </div>
       <p className="analisi-machine-scope" style={{ marginBottom: '0.45rem' }}>
-        {cells.some((c) => c?.visit_source === 'pos' || c?.visit_source === 'vne+pos')
-          ? 'Visite da scontrini agent cassa (EasyRetail / POS)'
-          : 'Visite da scontrini agent cassa'}
+        {useLiveToday
+          ? 'Visite di oggi · scontrini agent in tempo reale (ora per ora)'
+          : 'Media storica per questo giorno della settimana (~3 mesi)'}
         {peakHour.hour != null && peakHour.v > 0
           ? ` · picco alle ${String(peakHour.hour).padStart(2, '0')}:00`
           : ''}
       </p>
       {!hasData ? (
-        <p className="empty-state">Pochi dati visite per questo giorno.</p>
+        <p className="empty-state">
+          {useLiveToday ? 'Ancora nessun scontrino oggi in queste fasce.' : 'Pochi dati visite per questo giorno.'}
+        </p>
       ) : (
         <div className="analisi-popular-chart" role="img" aria-label={`Orari di punta ${dayLabels[weekday]}`}>
           {hourList.map((h, idx) => {
             const c = dayCells[idx]
-            const v = visitValue(c)
+            const v = visitValue(c, h)
             const heightPct = Math.max(v > 0 ? 6 : 0, Math.round((v / maxVisits) * 100))
             const isLive = weekday === todayIdx && h === nowHour
             const isPeak = peakHour.hour === h && peakHour.v > 0
             const showTick = h % 3 === 0 || h === hourList[0] || h === hourList[hourList.length - 1]
+            const tipUnit = useLiveToday ? 'visite oggi' : 'visite medie/ora'
             return (
               <div
                 key={h}
                 className={`analisi-popular-col${isLive ? ' is-live' : ''}${isPeak ? ' is-peak' : ''}`}
                 title={
-                  c
-                    ? `${dayLabels[weekday]} ${String(h).padStart(2, '0')}:00 · ~${v.toFixed(1)} visite/ora`
+                  c || useLiveToday
+                    ? `${dayLabels[weekday]} ${String(h).padStart(2, '0')}:00 · ${useLiveToday ? v : `~${v.toFixed(1)}`} ${tipUnit}`
                     : `${String(h).padStart(2, '0')}:00`
                 }
               >
@@ -741,7 +760,7 @@ export function PopularTimesChart({
       )}
       <div className="analisi-popular-legend" aria-hidden>
         <span>
-          <i className="analisi-popular-swatch" /> Affluenza tipica
+          <i className="analisi-popular-swatch" /> {useLiveToday ? 'Visite oggi' : 'Affluenza tipica'}
         </span>
         <span>
           <i className="analisi-popular-swatch is-live" /> Ora attuale

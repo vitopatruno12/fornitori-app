@@ -88,7 +88,7 @@ export function PosOnlyMachineCard({ machine }) {
           </div>
         </div>
         <div>
-          <div className="dashboard-kpi-label">Visite / scontrini</div>
+          <div className="dashboard-kpi-label">Scontrini oggi</div>
           <div className="dashboard-kpi-value" style={{ fontSize: '1.25rem' }}>
             {s.movimenti_oggi ?? 0}
           </div>
@@ -111,10 +111,12 @@ export function PosOnlyMachineCard({ machine }) {
         cells={machine.cells}
         hours={machine.hours}
         weekdays={machine.weekdays}
+        todayHourly={machine.today_hourly}
         title={`Orari di punta · ${machine.model_label}`}
       />
       <p className="analisi-machine-scope">
         Fonte visite: <strong>scontrini {providerLabel}</strong>
+        {' · oggi in tempo reale; altri giorni = media storica'}
       </p>
       <h3 className="analisi-machine-subtitle">Fasce consigliate</h3>
       <TopSlotsColumnChart
