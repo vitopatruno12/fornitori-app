@@ -153,10 +153,13 @@ def ingest_pos_receipts(
     from ..services import agent_cassa_status as agent_status
 
     items = list(body.receipts or [])
+    # L'agent sul PC cassa conosce il locale: forza sempre model_id del payload
+    # (evita che NUMEROPOS=4 finisca su model-4 Zanardelli).
     if body.model_id:
+        mid = str(body.model_id).strip()
         for it in items:
-            if isinstance(it, dict) and not it.get("model_id"):
-                it["model_id"] = body.model_id
+            if isinstance(it, dict):
+                it["model_id"] = mid
     try:
         result = pos_receipts_service.ingest_receipt_dicts(db, items)
         agent_status.touch_agent_heartbeat(

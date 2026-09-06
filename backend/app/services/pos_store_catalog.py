@@ -42,7 +42,7 @@ POS_STORE_CATALOG = [
         "model_id": "model-1",
         "model_label": "La Risacca",
         "store_key": "model-1",
-        "aliases": ("risacca", "la risacca", "model-1", "model1", "1"),
+        "aliases": ("risacca", "la risacca", "model-1", "model1"),
     },
     {
         "model_id": "model-2",
@@ -58,7 +58,6 @@ POS_STORE_CATALOG = [
             "le mani in pasta",
             "model-2",
             "model2",
-            "2",
         ),
     },
     {
@@ -74,7 +73,6 @@ POS_STORE_CATALOG = [
             "lattea",
             "model-3",
             "model3",
-            "3",
             "momento",
         ),
     },
@@ -89,7 +87,6 @@ POS_STORE_CATALOG = [
             "mani_in_pasta_z_delli",
             "model-4",
             "model4",
-            "4",
         ),
     },
     {
@@ -104,7 +101,6 @@ POS_STORE_CATALOG = [
             "gazzaladra",
             "model-5",
             "model5",
-            "5",
             "poste",
         ),
     },
@@ -195,10 +191,19 @@ def _norm_header(h: str) -> str:
 
 
 def resolve_store(raw: str, fallback_model_id: Optional[str] = None) -> Tuple[str, Optional[str], str]:
-    """Ritorna (store_key, model_id, model_label)."""
+    """Ritorna (store_key, model_id, model_label).
+
+    NUMEROPOS / codici cassa numerici (es. "4") NON sono model_id: se c'è
+    fallback_model_id dell'agent, usa quello e non gli alias "1"/"2"/…
+    """
     text = str(raw or "").strip()
     key = _norm_header(text)
     if not key and fallback_model_id:
+        hit = _catalog_by_model_id(fallback_model_id)
+        if hit:
+            return hit["store_key"], hit["model_id"], hit["model_label"]
+    # Codice postazione EasyRetail (solo cifre): non confondere con model-1..5
+    if fallback_model_id and key.isdigit():
         hit = _catalog_by_model_id(fallback_model_id)
         if hit:
             return hit["store_key"], hit["model_id"], hit["model_label"]
