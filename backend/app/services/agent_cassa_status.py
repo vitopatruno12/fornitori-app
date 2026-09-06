@@ -44,7 +44,11 @@ def _parse_iso(value: Any) -> Optional[datetime]:
 
 
 def touch_agent_heartbeat(*, source: str = "ingest", meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Registra contatto riuscito dell'agent (o sync GDB server)."""
+    """Registra contatto riuscito dell'agent (o sync GDB server).
+
+    Non deve mai far fallire l'ingest: se la directory data non è scrivibile,
+    loggiamo e restituiamo comunque il payload in memoria.
+    """
     now = datetime.now(timezone.utc)
     payload: Dict[str, Any] = {
         "last_agent_at": now.isoformat(),
@@ -52,10 +56,14 @@ def touch_agent_heartbeat(*, source: str = "ingest", meta: Optional[Dict[str, An
         "meta": meta or {},
     }
     path = _heartbeat_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        # Permission denied / read-only FS: ingest deve comunque riuscire
+        payload["write_error"] = str(exc)[:200]
     return payload
 
 

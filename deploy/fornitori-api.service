@@ -34,7 +34,7 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-ReadWritePaths=/opt/fornitori-app/backend/app/uploads /opt/fornitori-app/backups
+ReadWritePaths=/opt/fornitori-app/backend/app/uploads /opt/fornitori-app/backend/data /opt/fornitori-app/backups
 
 [Install]
 WantedBy=multi-user.target
