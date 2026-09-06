@@ -150,15 +150,33 @@ def ingest_pos_receipts(
     _: None = Depends(_require_sync_token),
 ):
     """Riceve scontrini dall'agent GDB sul PC cassa (JSON)."""
+    from ..services import agent_cassa_status as agent_status
+
     items = list(body.receipts or [])
     if body.model_id:
         for it in items:
             if isinstance(it, dict) and not it.get("model_id"):
                 it["model_id"] = body.model_id
     try:
-        return pos_receipts_service.ingest_receipt_dicts(db, items)
+        result = pos_receipts_service.ingest_receipt_dicts(db, items)
+        agent_status.touch_agent_heartbeat(
+            source="ingest",
+            meta={"parsed": result.get("parsed"), "model_id": body.model_id},
+        )
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ingest fallito: {e}") from e
+
+
+@router.post("/agent-ping")
+def pos_receipts_agent_ping(
+    _: None = Depends(_require_sync_token),
+):
+    """Heartbeat agent PC cassa (anche senza scontrini nuovi)."""
+    from ..services import agent_cassa_status as agent_status
+
+    payload = agent_status.touch_agent_heartbeat(source="agent-ping")
+    return {"ok": True, **payload}
 
 
 @router.post("/sync-gdb")
@@ -168,23 +186,32 @@ def sync_pos_receipts_from_gdb(
     _: None = Depends(_require_sync_token_or_server_gdb),
 ):
     """Sync diretta GDB→ATLAS (solo se il server vede il file Firebird)."""
+    from ..services import agent_cassa_status as agent_status
+
     try:
-        return pos_receipts_service.sync_from_easyretail_gdb(
+        result = pos_receipts_service.sync_from_easyretail_gdb(
             db,
             dsn=(body.dsn or None),
             model_id=(body.model_id or None),
             lookback_hours=body.lookback_hours,
         )
+        agent_status.touch_agent_heartbeat(
+            source="server-gdb",
+            meta={"parsed": result.get("parsed"), "model_id": body.model_id},
+        )
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Sync GDB fallita: {e}") from e
 
 
 @router.get("/sync-status")
-def pos_receipts_sync_status():
+def pos_receipts_sync_status(db: Session = Depends(get_db)):
+    from ..services import agent_cassa_status as agent_status
     from ..services import easyretail_gdb_service as gdb
 
     cfg = gdb.gdb_config_from_env()
     token_set = bool((os.getenv("EASYRETAIL_SYNC_TOKEN") or os.getenv("POS_RECEIPTS_SYNC_TOKEN") or "").strip())
+    agent = agent_status.agent_cassa_status(db)
     return {
         "gdb_sync_enabled": cfg["enabled"],
         "gdb_dsn_configured": bool(cfg["dsn"]),
@@ -194,6 +221,7 @@ def pos_receipts_sync_status():
         "fbclient_resolved": gdb.resolve_fbclient(cfg.get("fbclient")),
         "sync_token_configured": token_set,
         "mode": "server-gdb" if cfg["enabled"] and cfg["dsn"] else "agent-push",
+        **agent,
     }
 
 

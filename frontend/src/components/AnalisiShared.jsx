@@ -116,7 +116,7 @@ export function AnalisiSyncStatus({ loading, refreshing, lastSyncAt }) {
       <AnalisiLoadingBar
         active
         variant={loading ? 'primary' : 'subtle'}
-        label={loading ? 'Caricamento dati VNE' : 'Aggiornamento dati'}
+        label={loading ? 'Caricamento dati agent cassa' : 'Aggiornamento dati'}
       />
     )
   }
@@ -265,13 +265,27 @@ export function resolveAnalisiVneSemaphoreLight({
   return 'green'
 }
 
-/** Semaforo stato VNE: verde ok, giallo ritardo, rosso offline/errore. */
+/** Semaforo agent PC cassa: verde operativo, giallo comunicazione, rosso fermo. */
+export function resolveAgentCassaSemaphoreLight({
+  syncStatus = null,
+  loading = false,
+  error = '',
+} = {}) {
+  if (loading && !syncStatus) return 'yellow'
+  if (error && !syncStatus) return 'yellow'
+  const light = String(syncStatus?.agent_light || '').toLowerCase()
+  if (light === 'green' || light === 'yellow' || light === 'red') return light
+  // Senza stato agent: in attesa di comunicazione
+  return 'yellow'
+}
+
+/** Semaforo stato agent cassa (non più collegamento VNE). */
 export function VneStatusSemaphore({ light = 'green', show = true }) {
   if (!show) return null
   const labels = {
-    green: 'Operativo',
-    yellow: 'Rallentamento o in ritardo',
-    red: 'Offline o errore',
+    green: 'Operativo — agent cassa attivo',
+    yellow: 'In attesa / problemi di comunicazione cassa ↔ ATLAS',
+    red: 'Fermo — agent non contatta ATLAS',
   }
   const active = light === 'yellow' || light === 'red' ? light : 'green'
 
@@ -279,7 +293,7 @@ export function VneStatusSemaphore({ light = 'green', show = true }) {
     <div
       className={`analisi-vne-semaphore analisi-vne-semaphore--${active}`}
       role="status"
-      aria-label={`Stato VNE: ${labels[active]}`}
+      aria-label={`Stato agent cassa: ${labels[active]}`}
     >
       <div className="analisi-vne-semaphore-housing" aria-hidden>
         <span className={`analisi-vne-light analisi-vne-light--red${active === 'red' ? ' is-on' : ''}`} />
@@ -287,19 +301,19 @@ export function VneStatusSemaphore({ light = 'green', show = true }) {
         <span className={`analisi-vne-light analisi-vne-light--green${active === 'green' ? ' is-on' : ''}`} />
       </div>
       <div className="analisi-vne-semaphore-copy">
-        <strong className="analisi-vne-semaphore-title">Stato collegamento VNE</strong>
+        <strong className="analisi-vne-semaphore-title">Stato agent cassa</strong>
         <ul className="analisi-vne-semaphore-legend">
           <li className={active === 'green' ? 'is-active' : ''}>
             <span className="analisi-vne-legend-dot analisi-vne-legend-dot--green" />
-            Verde — operativo (almeno una macchina)
+            Verde — operativo (agent al lavoro)
           </li>
           <li className={active === 'yellow' ? 'is-active' : ''}>
             <span className="analisi-vne-legend-dot analisi-vne-legend-dot--yellow" />
-            Giallo — caricamento o rallentamento
+            Giallo — in attesa / problemi comunicazione cassa ↔ ATLAS
           </li>
           <li className={active === 'red' ? 'is-active' : ''}>
             <span className="analisi-vne-legend-dot analisi-vne-legend-dot--red" />
-            Rosso — tutte le macchine irraggiungibili
+            Rosso — fermo (PC cassa spento o agent fermo)
           </li>
         </ul>
       </div>

@@ -213,10 +213,25 @@ def _post_ingest(api: str, token: str, model_id: str | None, receipts: list[dict
         headers={
             "Content-Type": "application/json",
             "X-Atlas-Sync-Token": token,
-            "User-Agent": "atlas-easyretail-gdb-agent/1.2",
+            "User-Agent": "atlas-easyretail-gdb-agent/1.3",
         },
     )
     with urllib.request.urlopen(req, timeout=180) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _post_agent_ping(api: str, token: str) -> str:
+    req = urllib.request.Request(
+        f"{api}/pos-receipts/agent-ping",
+        data=b"{}",
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Atlas-Sync-Token": token,
+            "User-Agent": "atlas-easyretail-gdb-agent/1.3",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
@@ -271,13 +286,22 @@ def main() -> int:
 
     serialized = [_serialize_receipt(r) for r in rows]
     if not serialized:
-        print(
-            f"OK fetched=0 with_payment=0 "
-            f"mode={(meta.get('payment_schema') or {}).get('mode')} "
-            f"table={meta.get('table')} (nessuno scontrino)",
-            flush=True,
-        )
-        return 0
+        try:
+            ping_body = _post_agent_ping(api, token)
+            print(
+                f"OK fetched=0 with_payment=0 "
+                f"mode={(meta.get('payment_schema') or {}).get('mode')} "
+                f"table={meta.get('table')} (nessuno scontrino) ping={ping_body}",
+                flush=True,
+            )
+            return 0
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            print(f"HTTP {e.code} (agent-ping): {err}", file=sys.stderr, flush=True)
+            return 1
+        except Exception as e:
+            print(f"ERRORE agent-ping: {e}", file=sys.stderr, flush=True)
+            return 1
 
     total_batches = (len(serialized) + batch_size - 1) // batch_size
     try:

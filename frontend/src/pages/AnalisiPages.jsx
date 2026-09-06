@@ -10,7 +10,7 @@ import {
   SeriesBars,
   TopSlotsColumnChart,
   VneStatusSemaphore,
-  resolveAnalisiVneSemaphoreLight,
+  resolveAgentCassaSemaphoreLight,
   eur,
 } from '../components/AnalisiShared.jsx'
 import { AnalisiTrendToolbar, useAnalisiMachineFilter } from '../components/AnalisiMachineFilter.jsx'
@@ -22,6 +22,7 @@ import {
   fetchAnalyticsStaffing,
   fetchAnalyticsWeekly,
   fetchPosPaymentSummary,
+  fetchPosReceiptSyncStatus,
 } from '../services/analyticsService'
 import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
 import { AnalisiMachineCard } from '../components/AnalisiMachineCard.jsx'
@@ -181,14 +182,35 @@ function DataNote({ text }) {
   return <p className="analisi-note">{cleaned}</p>
 }
 
-function AnalisiVneSemaphore({ data, loading = false, refreshing = false, error = '' }) {
-  const light = resolveAnalisiVneSemaphoreLight({
-    data,
-    loading,
-    refreshing,
-    error,
-    expectedMachines: 3,
-  })
+function AnalisiAgentCassaSemaphore() {
+  const [syncStatus, setSyncStatus] = React.useState(null)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState('')
+
+  React.useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const st = await fetchPosReceiptSyncStatus()
+        if (cancelled) return
+        setSyncStatus(st)
+        setError('')
+      } catch (err) {
+        if (cancelled) return
+        setError(err?.message || 'Stato agent non disponibile')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    const id = window.setInterval(load, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
+
+  const light = resolveAgentCassaSemaphoreLight({ syncStatus, loading, error })
   return <VneStatusSemaphore light={light} show />
 }
 
@@ -343,7 +365,7 @@ export function AnalisiGiornalieroPage() {
     <AnalisiPageShell
       title={`Andamento giornaliero — ${machineLabel}`}
       lead={`Incassi e pagamenti (contanti vs carta/POS) da scontrini EasyRetail della cassa ${machineLabel} — non dalle VNE.`}
-      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-daily-machine"
@@ -389,7 +411,7 @@ export function AnalisiSettimanalePage() {
     <AnalisiPageShell
       title={`Andamento settimanale — ${machineLabel}`}
       lead={`Confronto settimane per ${machineLabel}: contanti vs carta/POS da scontrini EasyRetail (agent cassa).`}
-      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-weekly-machine"
@@ -429,7 +451,7 @@ export function AnalisiMensilePage() {
     <AnalisiPageShell
       title={`Andamento mensile — ${machineLabel}`}
       lead={`Incassi mensili per ${machineLabel}: ripartizione contanti / carta da EasyRetail (agent PC cassa).`}
-      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-monthly-machine"
@@ -481,7 +503,7 @@ export function AnalisiOrariaPage() {
     <AnalisiPageShell
       title={`Analisi oraria — ${machineLabel}`}
       lead="Visite e pagamenti (contanti vs carta) da scontrini EasyRetail; heatmap traffico per fascia oraria."
-      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
           selectId="analisi-hourly-machine"
@@ -574,7 +596,7 @@ export function AnalisiPianificazionePage() {
     <AnalisiPageShell
       title="Pianificazione personale"
       lead="Copertura consigliata per fascia, calcolata sul traffico delle operazioni VNE."
-      vneStatus={<AnalisiVneSemaphore data={data} loading={loading} refreshing={refreshing} error={error} />}
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
           {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import VneWorkbookGrid from './VneWorkbookGrid.jsx'
 import VneFilterWorkbook from './VneFilterWorkbook.jsx'
-import { AnalisiLoadingBar, VneStatusSemaphore, resolveVneSemaphoreLight } from './AnalisiShared.jsx'
+import { AnalisiLoadingBar, VneStatusSemaphore, resolveAgentCassaSemaphoreLight } from './AnalisiShared.jsx'
+import { fetchPosReceiptSyncStatus } from '../services/analyticsService'
 import {
   VNE_CLOSINGS_COLUMNS,
   VNE_CLOSINGS_WORKBOOK_TITLE,
@@ -98,6 +99,8 @@ export default function VneSection({ embedded = false }) {
   const [machineRows, setMachineRows] = useState([])
   const [loadingMachines, setLoadingMachines] = useState(false)
   const [machinesUpdatedAt, setMachinesUpdatedAt] = useState('')
+  const [agentSyncStatus, setAgentSyncStatus] = useState(null)
+  const [agentSyncLoading, setAgentSyncLoading] = useState(true)
 
   const selected = useMemo(() => models.find((m) => m.id === selectedId) || null, [models, selectedId])
   const selectedDisplayName = useMemo(
@@ -117,19 +120,32 @@ export default function VneSection({ embedded = false }) {
       ),
     [],
   )
-  const semaphoreLight = useMemo(() => {
-    // Solo il modello selezionato: unknown/pending → giallo; offline → rosso; online → verde.
-    const selectedState = selectedId ? modelConnectivity?.[selectedId] : undefined
-    const isOffline =
-      selectedState === 'offline' ||
-      (!selectedId && Object.values(modelConnectivity || {}).some((v) => v === 'offline'))
-    const isPending =
-      selectedState === 'unknown' || (Boolean(selectedId) && selectedState == null)
-    return resolveVneSemaphoreLight([error, healthWarning], {
-      hasOffline: isOffline,
-      pending: isPending,
-    })
-  }, [error, healthWarning, modelConnectivity, selectedId])
+  const semaphoreLight = useMemo(
+    () => resolveAgentCassaSemaphoreLight({ syncStatus: agentSyncStatus, loading: agentSyncLoading }),
+    [agentSyncStatus, agentSyncLoading],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadAgentStatus() {
+      try {
+        const st = await fetchPosReceiptSyncStatus()
+        if (cancelled) return
+        setAgentSyncStatus(st)
+      } catch {
+        if (cancelled) return
+        setAgentSyncStatus(null)
+      } finally {
+        if (!cancelled) setAgentSyncLoading(false)
+      }
+    }
+    void loadAgentStatus()
+    const id = window.setInterval(loadAgentStatus, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -401,7 +417,7 @@ export default function VneSection({ embedded = false }) {
             : 'Sezione modelli VNE (3 slot). Il primo modello è collegato all’endpoint stato remoto.'}
         </p>
         <div className="analisi-hero-vne-status" aria-live="polite">
-          <VneStatusSemaphore light={loadingModels ? 'yellow' : semaphoreLight} show />
+          <VneStatusSemaphore light={agentSyncLoading ? 'yellow' : semaphoreLight} show />
         </div>
       </section>
 
