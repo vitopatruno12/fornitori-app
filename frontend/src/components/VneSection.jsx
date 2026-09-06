@@ -410,14 +410,18 @@ export default function VneSection({ embedded = false }) {
   return (
     <div className="vne-legacy-skin">
       <section className="staff-page-hero vne-page-hero">
-        <h1 className="page-header staff-page-title">VNE Cassa Automatica</h1>
-        <p className="staff-page-lead">
-          {embedded
-            ? 'Monitoraggio stato, operazioni, contabilita e chiusure dei modelli VNE.'
-            : 'Sezione modelli VNE (3 slot). Il primo modello è collegato all’endpoint stato remoto.'}
-        </p>
-        <div className="analisi-hero-vne-status" aria-live="polite">
-          <VneStatusSemaphore light={agentSyncLoading ? 'yellow' : semaphoreLight} show />
+        <div className="analisi-header-main">
+          <div>
+            <h1 className="page-header staff-page-title">VNE Cassa Automatica</h1>
+            <p className="staff-page-lead">
+              {embedded
+                ? 'Monitoraggio stato, operazioni, contabilita e chiusure dei modelli VNE.'
+                : 'Sezione modelli VNE (3 slot). Il primo modello è collegato all’endpoint stato remoto.'}
+            </p>
+          </div>
+          <div className="analisi-hero-vne-status" aria-live="polite">
+            <VneStatusSemaphore light={agentSyncLoading ? 'yellow' : semaphoreLight} show />
+          </div>
         </div>
       </section>
 

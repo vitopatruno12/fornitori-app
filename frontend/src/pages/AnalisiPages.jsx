@@ -311,11 +311,18 @@ export function AnalisiDashboardPage() {
   return (
     <AnalisiPageShell
       title="Dashboard Analitica"
-      lead="Incassi e traffico solo da agent sulle casse (EasyRetail) e POS Poste — nessuna lettura VNE."
+      vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing || loading}>
-          {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
-        </button>
+        <aside className="analisi-hero-tools" aria-label="Aggiorna analisi">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={refreshNow}
+            disabled={refreshing || loading}
+          >
+            {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
+          </button>
+        </aside>
       }
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
@@ -364,7 +371,6 @@ export function AnalisiGiornalieroPage() {
   return (
     <AnalisiPageShell
       title={`Andamento giornaliero — ${machineLabel}`}
-      lead={`Incassi e pagamenti (contanti vs carta/POS) da scontrini EasyRetail della cassa ${machineLabel} — non dalle VNE.`}
       vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
@@ -410,7 +416,6 @@ export function AnalisiSettimanalePage() {
   return (
     <AnalisiPageShell
       title={`Andamento settimanale — ${machineLabel}`}
-      lead={`Confronto settimane per ${machineLabel}: contanti vs carta/POS da scontrini EasyRetail (agent cassa).`}
       vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
@@ -450,7 +455,6 @@ export function AnalisiMensilePage() {
   return (
     <AnalisiPageShell
       title={`Andamento mensile — ${machineLabel}`}
-      lead={`Incassi mensili per ${machineLabel}: ripartizione contanti / carta da EasyRetail (agent PC cassa).`}
       vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
@@ -502,7 +506,6 @@ export function AnalisiOrariaPage() {
   return (
     <AnalisiPageShell
       title={`Analisi oraria — ${machineLabel}`}
-      lead="Visite e pagamenti (contanti vs carta) da scontrini EasyRetail; heatmap traffico per fascia oraria."
       vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
         <AnalisiTrendToolbar
@@ -595,12 +598,18 @@ export function AnalisiPianificazionePage() {
   return (
     <AnalisiPageShell
       title="Pianificazione personale"
-      lead="Copertura consigliata per fascia, calcolata sul traffico delle operazioni VNE."
       vneStatus={<AnalisiAgentCassaSemaphore />}
       actions={
-        <button type="button" className="btn btn-secondary btn-sm" onClick={refreshNow} disabled={refreshing}>
-          {refreshing ? 'Aggiorno…' : 'Aggiorna ora'}
-        </button>
+        <aside className="analisi-hero-tools" aria-label="Aggiorna analisi">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={refreshNow}
+            disabled={refreshing || loading}
+          >
+            {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
+          </button>
+        </aside>
       }
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />

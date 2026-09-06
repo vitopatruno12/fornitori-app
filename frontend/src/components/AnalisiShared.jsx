@@ -37,12 +37,14 @@ export function AnalisiPageShell({ title, lead, children, actions = null, vneSta
     <div className="analisi-page">
       <header className="analisi-header staff-page-hero">
         <div className="analisi-header-row">
-          <div>
-            <p className="analisi-kicker">Analisi</p>
-            <h1 className="page-header staff-page-title" style={{ marginBottom: '0.25rem' }}>
-              {title}
-            </h1>
-            {lead ? <p className="dashboard-subtitle staff-page-lead">{lead}</p> : null}
+          <div className="analisi-header-main">
+            <div>
+              <p className="analisi-kicker">Analisi</p>
+              <h1 className="page-header staff-page-title" style={{ marginBottom: '0.25rem' }}>
+                {title}
+              </h1>
+              {lead ? <p className="dashboard-subtitle staff-page-lead">{lead}</p> : null}
+            </div>
             {vneStatus ? <div className="analisi-hero-vne-status">{vneStatus}</div> : null}
           </div>
           {actions}

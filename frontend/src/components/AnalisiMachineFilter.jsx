@@ -68,23 +68,19 @@ export function AnalisiTrendToolbar({
   loading = false,
   selectId,
 }) {
+  const busy = refreshing || loading
   return (
-    <div className="analisi-trend-toolbar">
+    <aside className="analisi-hero-tools" aria-label="Filtri analisi">
       <AnalisiMachineSelect
         id={selectId}
         value={modelId}
         onChange={onModelChange}
-        disabled={refreshing || loading}
+        disabled={busy}
       />
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={onRefresh}
-        disabled={refreshing || loading}
-      >
-        {refreshing || loading ? 'Aggiorno…' : 'Aggiorna ora'}
+      <button type="button" className="btn btn-primary btn-sm" onClick={onRefresh} disabled={busy}>
+        {busy ? 'Aggiorno…' : 'Aggiorna ora'}
       </button>
-    </div>
+    </aside>
   )
 }
 
