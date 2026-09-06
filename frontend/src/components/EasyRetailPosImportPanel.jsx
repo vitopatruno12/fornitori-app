@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { eur } from './AnalisiShared'
 import {
   fetchPosPaymentSummary,
   fetchPosReceiptStats,
@@ -16,6 +17,160 @@ const MODEL_OPTIONS = [
   { id: 'model-4', label: 'Mani in Pasta (Via Zanardelli)' },
   { id: 'model-5', label: 'Gazza Ladra (POS Poste)' },
 ]
+
+const PAY_COLORS = {
+  cash: '#059669',
+  card: '#2563eb',
+  unknown: '#94a3b8',
+}
+
+const PAY_LABELS = {
+  cash: 'Contanti',
+  card: 'Carta/POS',
+  unknown: 'Non classificati',
+}
+
+const STORE_COLORS = ['#2563eb', '#0891b2', '#d97706', '#7c3aed', '#059669', '#db2777']
+
+function _polar(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)]
+}
+
+function _donutPath(cx, cy, rOuter, rInner, startDeg, sweepDeg) {
+  if (sweepDeg <= 0) return ''
+  const sweep = Math.min(359.999, sweepDeg)
+  const large = sweep > 180 ? 1 : 0
+  const [x1, y1] = _polar(cx, cy, rOuter, startDeg)
+  const [x2, y2] = _polar(cx, cy, rOuter, startDeg + sweep)
+  const [x3, y3] = _polar(cx, cy, rInner, startDeg + sweep)
+  const [x4, y4] = _polar(cx, cy, rInner, startDeg)
+  return [
+    `M ${x1} ${y1}`,
+    `A ${rOuter} ${rOuter} 0 ${large} 1 ${x2} ${y2}`,
+    `L ${x3} ${y3}`,
+    `A ${rInner} ${rInner} 0 ${large} 0 ${x4} ${y4}`,
+    'Z',
+  ].join(' ')
+}
+
+function PaymentIncassiDonut({ payTotals }) {
+  const rows = [
+    { id: 'cash', label: PAY_LABELS.cash, value: Number(payTotals?.cash_eur || 0), color: PAY_COLORS.cash },
+    { id: 'card', label: PAY_LABELS.card, value: Number(payTotals?.card_eur || 0), color: PAY_COLORS.card },
+    { id: 'unknown', label: PAY_LABELS.unknown, value: Number(payTotals?.unknown_eur || 0), color: PAY_COLORS.unknown },
+  ].filter((r) => r.value > 0)
+
+  const total = rows.reduce((acc, r) => acc + r.value, 0)
+  if (total <= 0) return null
+
+  let angle = -90
+  const slices = rows.map((r) => {
+    const sweep = (r.value / total) * 360
+    const start = angle
+    angle += sweep
+    return { ...r, pct: (r.value / total) * 100, start, sweep }
+  })
+
+  return (
+    <div className="analisi-compare-card">
+      <h3 className="analisi-machine-subtitle" style={{ marginTop: 0 }}>
+        Incassi classificati
+      </h3>
+      <div className="analisi-donut-wrap">
+        <svg className="analisi-donut" viewBox="0 0 120 120" role="img" aria-label="Incassi contanti, carta e non classificati">
+          {slices.map((s) => (
+            <path key={s.id} d={_donutPath(60, 60, 52, 30, s.start, s.sweep)} fill={s.color} />
+          ))}
+          <text x="60" y="56" textAnchor="middle" className="analisi-donut-total-label">
+            Totale
+          </text>
+          <text x="60" y="72" textAnchor="middle" className="analisi-donut-total-value">
+            {eur(total)}
+          </text>
+        </svg>
+        <ul className="analisi-donut-legend">
+          {slices.map((s) => (
+            <li key={s.id}>
+              <span className="analisi-donut-swatch" style={{ background: s.color }} />
+              <span>
+                {s.label} · {eur(s.value)} ({Math.round(s.pct)}%)
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+function CountBars({ title, entries, colorFor, labelFor }) {
+  const rows = entries
+    .map(([key, n]) => ({
+      key: String(key),
+      label: labelFor ? labelFor(key) : String(key),
+      value: Number(n) || 0,
+    }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .map((r, idx) => ({
+      ...r,
+      color: colorFor ? colorFor(r.key, idx) : '#2563eb',
+    }))
+
+  if (!rows.length) return null
+  const max = Math.max(1, ...rows.map((r) => r.value))
+
+  return (
+    <div className="analisi-compare-card">
+      <h3 className="analisi-machine-subtitle" style={{ marginTop: 0 }}>
+        {title}
+      </h3>
+      <div className="analisi-bars" role="img" aria-label={title}>
+        {rows.map((r) => (
+          <div key={r.key} className="analisi-bar-row" title={`${r.label}: ${r.value}`}>
+            <div className="analisi-bar-label" title={r.label}>
+              {r.label}
+            </div>
+            <div className="analisi-bar-track">
+              <div
+                className="analisi-bar-fill"
+                style={{ width: `${Math.max(4, (r.value / max) * 100)}%`, background: r.color }}
+              />
+            </div>
+            <div className="analisi-bar-value">{r.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PosReceiptCharts({ payTotals, byPayment, byStore }) {
+  const paymentEntries = Object.entries(byPayment || {})
+  const storeEntries = Object.entries(byStore || {})
+  const hasPay = payTotals && (Number(payTotals.cash_eur) || Number(payTotals.card_eur) || Number(payTotals.unknown_eur))
+  const hasCharts = hasPay || paymentEntries.length > 0 || storeEntries.length > 0
+  if (!hasCharts) return null
+
+  return (
+    <div className="analisi-compare-grid" style={{ marginTop: '0.75rem' }}>
+      {hasPay ? <PaymentIncassiDonut payTotals={payTotals} /> : null}
+      <CountBars
+        title="Scontrini per pagamento"
+        entries={paymentEntries}
+        labelFor={(k) => PAY_LABELS[k] || String(k)}
+        colorFor={(k) => PAY_COLORS[k] || '#64748b'}
+      />
+      <CountBars
+        title="Scontrini per locale"
+        entries={storeEntries}
+        labelFor={(k) => (k === '0' || k === '' ? 'Non assegnato' : String(k))}
+        colorFor={(_, idx) => STORE_COLORS[idx % STORE_COLORS.length]}
+      />
+    </div>
+  )
+}
 
 /** Import / sync scontrini EasyRetail → visite per Orari di punta. */
 export function EasyRetailPosImportPanel({ onImported } = {}) {
@@ -148,58 +303,7 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
           ? ` · ${stats.with_payment_type} con tipo pagamento`
           : ''}
       </p>
-      {payTotals ? (
-        <p className="analisi-machine-scope" role="status">
-          Incassi classificati: contanti <strong>{Number(payTotals.cash_eur || 0).toFixed(2)} €</strong>
-          {' · '}
-          carta/POS <strong>{Number(payTotals.card_eur || 0).toFixed(2)} €</strong>
-          {Number(payTotals.unknown_eur || 0) > 0
-            ? ` · non classificati ${Number(payTotals.unknown_eur).toFixed(2)} €`
-            : ''}
-        </p>
-      ) : null}
-      {Object.keys(byPayment).length > 0 ? (
-        <ul className="analisi-suggestions">
-          {Object.entries(byPayment).map(([ptype, n]) => (
-            <li key={ptype}>
-              {ptype}: {n} scontrini
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {Object.keys(byStore).length > 0 ? (
-        <ul className="analisi-suggestions">
-          {Object.entries(byStore).map(([label, n]) => (
-            <li key={label}>
-              {label}: {n}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <details style={{ marginTop: '0.75rem' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Come attivare la sync automatica (PC cassa)</summary>
-        <ol style={{ margin: '0.5rem 0 0', paddingLeft: '1.2rem', fontSize: '0.9rem' }}>
-          <li>
-            Sul server ATLAS imposta <code>EASYRETAIL_SYNC_TOKEN</code> (token segreto) e fai restart API.
-          </li>
-          <li>
-            Sul PC EasyRetail installa Python + <code>pip install fdb</code>, copia{' '}
-            <code>backend/scripts/easyretail_gdb_sync_agent.py</code> e la cartella <code>backend/app</code> (o tutto il
-            repo).
-          </li>
-          <li>
-            Crea un <code>.env</code> accanto all’agent con percorso GDB, <code>fbclient.dll</code>, token e{' '}
-            <code>ATLAS_API_BASE=https://www.atlass.it/api</code>.
-          </li>
-          <li>
-            Pianifica l’esecuzione ogni 2–5 minuti con Utilità di pianificazione Windows.
-          </li>
-          <li>
-            Per verificare come il GDB espone contanti/carta sul PC cassa:{' '}
-            <code>python easyretail_gdb_sync_agent.py --probe</code>
-          </li>
-        </ol>
-      </details>
+      <PosReceiptCharts payTotals={payTotals} byPayment={byPayment} byStore={byStore} />
     </section>
   )
 }
