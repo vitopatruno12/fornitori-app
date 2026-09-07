@@ -722,29 +722,8 @@ def load_pos_daily_incasso(
         by_day[day]["cash_eur"] = (by_day[day]["cash_eur"] + cash).quantize(Decimal("0.01"))
         by_day[day]["card_eur"] = (by_day[day]["card_eur"] + card).quantize(Decimal("0.01"))
 
-    # Il GDB Abba spesso include anche Zanardelli, ma con NUMEROMOVIMENTO diversi:
-    # l'overlap per external_id non funziona → sottrai i totali giornalieri model-4.
-    if mid == POS_REVENUE_MODEL_ID:
-        zan_days = load_pos_daily_incasso(
-            db,
-            date_from=date_from,
-            date_to=date_to,
-            model_id=ZANARDELLI_MODEL_ID,
-            store_keys=tuple(ZANARDELLI_STORE_KEYS),
-        )
-        zero = Decimal("0.00")
-
-        def _d(v):
-            return Decimal(str(v or 0)).quantize(Decimal("0.01"))
-
-        for day, zhit in (zan_days or {}).items():
-            slot = by_day.get(day)
-            if not slot:
-                continue
-            slot["incasso"] = max(zero, _d(slot["incasso"]) - _d(zhit.get("incasso", 0)))
-            slot["cash_eur"] = max(zero, _d(slot["cash_eur"]) - _d(zhit.get("cash_eur", 0)))
-            slot["card_eur"] = max(zero, _d(slot["card_eur"]) - _d(zhit.get("card_eur", 0)))
-            slot["movimenti"] = max(0, int(slot["movimenti"] or 0) - int(zhit.get("movimenti") or 0))
+    # Abba: niente sottrazione Zanardelli qui.
+    # Separazione corretta = EASYRETAIL_STORE_FILTER su NUMEROPOS (es. 1=Abba, 2=Zanardelli).
 
     return dict(by_day)
 
