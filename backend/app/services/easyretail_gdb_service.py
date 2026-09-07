@@ -74,6 +74,8 @@ _AMOUNT_COL_CANDIDATES = (
     "VALORE",
 )
 _STORE_COL_CANDIDATES = (
+    # Giornata POS: distingue casse nello stesso GDB (es. Abba 6694 vs Zanardelli 6692)
+    "NUMEROGIORNOPOS",
     "CODICEPOS",
     "CODICEPOSTAZIONE",
     "POSTAZIONE",
@@ -425,27 +427,35 @@ def _pick_col(cols: Sequence[str], candidates: Sequence[str], *, exact_only: boo
 
 
 def _pick_store_col(cur, table: str, cols: Sequence[str]) -> Optional[str]:
-    """Preferisci una colonna cassa/negozio con almeno un valore non NULL."""
+    """Preferisci una colonna che distingue le casse (più valori distinti non NULL)."""
     upper = {c.upper(): c for c in cols}
     ordered: List[str] = []
     for name in _STORE_COL_CANDIDATES:
         col = upper.get(name.upper())
         if col and col not in ordered:
             ordered.append(col)
-    # altri candidati per nome
     for c in cols:
         u = c.upper()
-        if any(k in u for k in ("POS", "CASSA", "NEGOZ", "SEDE", "PDV", "POSTAZ", "MAGAZZ")):
+        if any(k in u for k in ("POS", "CASSA", "NEGOZ", "SEDE", "PDV", "POSTAZ", "MAGAZZ", "GIORNO")):
             if c not in ordered:
                 ordered.append(c)
+
+    best_col: Optional[str] = None
+    best_score = -1
     for col in ordered:
         try:
-            cur.execute(f"SELECT FIRST 1 {col} FROM {table} WHERE {col} IS NOT NULL")
-            if cur.fetchone() is not None:
-                return col
+            cur.execute(f"SELECT FIRST 800 {col} FROM {table} WHERE {col} IS NOT NULL")
+            vals = {str(r[0]).strip() for r in cur.fetchall() if r and r[0] is not None and str(r[0]).strip()}
+            if not vals:
+                continue
+            # Più valori distinti = meglio (es. NUMEROGIORNOPOS Abba/Zan); un solo valore = debole
+            score = len(vals) * 10 + (5 if "GIORNOPOS" in col.upper() else 0)
+            if score > best_score:
+                best_score = score
+                best_col = col
         except Exception:
             continue
-    return ordered[0] if ordered else None
+    return best_col or (ordered[0] if ordered else None)
 
 
 def discover_receipt_mapping(cur) -> Dict[str, Any]:
