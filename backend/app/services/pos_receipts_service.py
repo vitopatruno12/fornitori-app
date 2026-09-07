@@ -630,6 +630,39 @@ def load_pos_visit_buckets(
     return out
 
 
+def _zanardelli_near_keys(
+    db: Session,
+    *,
+    date_from: date,
+    date_to: date,
+    window_sec: int = 3,
+) -> set:
+    """Chiavi (giorno, importo, slot_tempo) degli scontrini Zanardelli per escludere
+    copie replicate nel GDB Abba quando NUMEROPOS non le distingue (sab/dom)."""
+    from .pos_store_catalog import SOURCE_EASYRETAIL, ZANARDELLI_MODEL_ID
+
+    start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+    rows = (
+        db.query(PosReceipt.receipt_at, PosReceipt.amount_eur)
+        .filter(PosReceipt.source == SOURCE_EASYRETAIL)
+        .filter(PosReceipt.model_id == ZANARDELLI_MODEL_ID)
+        .filter(PosReceipt.is_void == 0)
+        .filter(PosReceipt.receipt_at >= start)
+        .filter(PosReceipt.receipt_at <= end)
+        .all()
+    )
+    keys: set = set()
+    for when, amount in rows:
+        if when is None or amount is None:
+            continue
+        amt = Decimal(str(amount)).quantize(Decimal("0.01"))
+        # slot di 3s per tollerare piccoli scarti di timestamp tra GDB
+        slot = int(when.timestamp()) // max(1, window_sec)
+        keys.add((when.date().isoformat(), str(amt), slot))
+    return keys
+
+
 def load_pos_daily_incasso(
     db: Session,
     *,
@@ -679,6 +712,11 @@ def load_pos_daily_incasso(
         .filter(PosReceipt.receipt_at <= end)
     )
 
+    # Abba: escludi copie Zanardelli (stesso importo/orario) ancora presenti sotto NUMEROPOS=1
+    zan_near: set = set()
+    if mid == POS_REVENUE_MODEL_ID:
+        zan_near = _zanardelli_near_keys(db, date_from=date_from, date_to=date_to)
+
     by_day: Dict[date, Dict[str, Any]] = defaultdict(
         lambda: {
             "incasso": Decimal("0.00"),
@@ -707,6 +745,11 @@ def load_pos_daily_incasso(
         elif not sk and allowed_store_keys and mid == POS_REVENUE_MODEL_ID:
             # Accetta scontrini Mani senza store_key se filtrati solo per model_id
             pass
+        if zan_near and r.amount_eur is not None:
+            amt = Decimal(str(r.amount_eur)).quantize(Decimal("0.01"))
+            slot = int(r.receipt_at.timestamp()) // 3
+            if (r.receipt_at.date().isoformat(), str(amt), slot) in zan_near:
+                continue
         day = r.receipt_at.date()
         by_day[day]["movimenti"] += 1
         amount = Decimal(str(r.amount_eur or 0)).quantize(Decimal("0.01"))
@@ -721,9 +764,6 @@ def load_pos_daily_incasso(
             card = amount
         by_day[day]["cash_eur"] = (by_day[day]["cash_eur"] + cash).quantize(Decimal("0.01"))
         by_day[day]["card_eur"] = (by_day[day]["card_eur"] + card).quantize(Decimal("0.01"))
-
-    # Abba: niente sottrazione Zanardelli qui.
-    # Separazione corretta = EASYRETAIL_STORE_FILTER su NUMEROPOS (es. 1=Abba, 2=Zanardelli).
 
     return dict(by_day)
 
