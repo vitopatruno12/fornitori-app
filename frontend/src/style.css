@@ -7952,6 +7952,68 @@ select.form-control {
   }
 }
 
+/* Elenco fatture registrate: niente scroll orizzontale */
+.fatture-page:has(.invoices-elenco-wrap) {
+  max-width: none;
+  width: 100%;
+}
+
+.invoices-elenco-wrap {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.invoices-elenco-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.invoices-elenco-table th,
+.invoices-elenco-table td {
+  padding: 0.4rem 0.35rem;
+  font-size: 0.78rem;
+  vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.invoices-elenco-table th {
+  line-height: 1.15;
+  font-size: 0.68rem;
+}
+
+.invoices-elenco-table col.col-doc { width: 7%; }
+.invoices-elenco-table col.col-date { width: 7%; }
+.invoices-elenco-table col.col-supplier { width: 14%; }
+.invoices-elenco-table col.col-money { width: 7%; }
+.invoices-elenco-table col.col-status { width: 8%; }
+.invoices-elenco-table col.col-file { width: 6%; }
+.invoices-elenco-table col.col-cassa { width: 8%; }
+.invoices-elenco-table col.col-actions { width: 15%; }
+
+.invoices-elenco-table .btn {
+  padding: 0.22rem 0.4rem;
+  font-size: 0.72rem;
+  white-space: normal;
+  line-height: 1.15;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.invoices-elenco-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+}
+
+.invoices-elenco-actions .btn {
+  margin: 0;
+  width: 100%;
+}
+
 .fatture-page {
   max-width: 1100px;
 }

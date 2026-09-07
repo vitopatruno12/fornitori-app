@@ -580,21 +580,35 @@ export default function InvoicesPage() {
         {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
 
         {!loading && !error && (
-          <div className="table-wrap pn-table-wrap" style={{ fontSize: '0.88rem' }}>
-            <table className="app-table">
+          <div className="table-wrap invoices-elenco-wrap" style={{ fontSize: '0.88rem' }}>
+            <table className="app-table invoices-elenco-table">
+              <colgroup>
+                <col className="col-doc" />
+                <col className="col-date" />
+                <col className="col-date" />
+                <col className="col-supplier" />
+                <col className="col-money" />
+                <col className="col-money" />
+                <col className="col-money" />
+                <col className="col-status" />
+                <col className="col-money" />
+                <col className="col-file" />
+                <col className="col-cassa" />
+                <col className="col-actions" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th>N. documento</th>
-                  <th>Data documento</th>
-                  <th>Data scadenza</th>
+                  <th>N. doc.</th>
+                  <th>Data doc.</th>
+                  <th>Scadenza</th>
                   <th>Fornitore</th>
                   <th className="text-end">Imponibile</th>
                   <th className="text-end">IVA</th>
                   <th className="text-end">Totale</th>
                   <th>Stato</th>
-                  <th className="text-end">Già pagato</th>
+                  <th className="text-end">Pagato</th>
                   <th>File</th>
-                  <th>Prima nota</th>
+                  <th>Cassa</th>
                   <th>Azioni</th>
                 </tr>
               </thead>
@@ -624,9 +638,9 @@ export default function InvoicesPage() {
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-primary"
-                          style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }}
+                          style={{ textDecoration: 'none' }}
                         >
-                          PDF / file
+                          PDF
                         </a>
                       ) : (
                         <span style={{ color: 'var(--text-muted)' }}>–</span>
@@ -636,36 +650,35 @@ export default function InvoicesPage() {
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', marginBottom: '0.25rem', display: 'block' }}
                         onClick={() => openPrimaNota(inv)}
                         title="Apre Prima Nota con data documento e fornitore"
                       >
-                        Apri cassa
+                        Cassa
                       </button>
                       {inv.cash_entry_id ? (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Mov. #{inv.cash_entry_id}</span>
+                        <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>#{inv.cash_entry_id}</span>
                       ) : null}
                     </td>
                     <td onClick={e => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={() => handleMarkPaid(inv)}
-                        disabled={inv.payment_status === 'paid'}
-                      >
-                        Segna pagata
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                        onClick={() => handleToggleIgnore(inv)}
-                      >
-                        {inv.ignored ? 'Ripristina' : 'Ignora'}
-                      </button>
-                      <button type="button" className="btn btn-secondary" style={{ marginRight: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }} onClick={() => handleEdit(inv)}>Modifica</button>
-                      <button type="button" className="btn btn-outline-danger" style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }} onClick={() => handleDelete(inv)}>Elimina</button>
+                      <div className="invoices-elenco-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => handleMarkPaid(inv)}
+                          disabled={inv.payment_status === 'paid'}
+                        >
+                          Pagata
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => handleToggleIgnore(inv)}
+                        >
+                          {inv.ignored ? 'Ripristina' : 'Ignora'}
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => handleEdit(inv)}>Modifica</button>
+                        <button type="button" className="btn btn-outline-danger" onClick={() => handleDelete(inv)}>Elimina</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
