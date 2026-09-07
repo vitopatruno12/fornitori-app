@@ -427,8 +427,14 @@ def _pick_col(cols: Sequence[str], candidates: Sequence[str], *, exact_only: boo
 
 
 def _pick_store_col(cur, table: str, cols: Sequence[str]) -> Optional[str]:
-    """Preferisci una colonna che distingue le casse (più valori distinti non NULL)."""
+    """Preferisci una colonna che distingue le casse in modo stabile (NUMEROPOS)."""
+    forced = _env("EASYRETAIL_STORE_COLUMN")
     upper = {c.upper(): c for c in cols}
+    if forced:
+        hit = upper.get(forced.upper())
+        if hit:
+            return hit
+
     ordered: List[str] = []
     for name in _STORE_COL_CANDIDATES:
         col = upper.get(name.upper())
@@ -448,8 +454,14 @@ def _pick_store_col(cur, table: str, cols: Sequence[str]) -> Optional[str]:
             vals = {str(r[0]).strip() for r in cur.fetchall() if r and r[0] is not None and str(r[0]).strip()}
             if not vals:
                 continue
-            # Più valori distinti = meglio (es. NUMEROGIORNOPOS Abba/Zan); un solo valore = debole
-            score = len(vals) * 10 + (5 if "GIORNOPOS" in col.upper() else 0)
+            u = col.upper()
+            # NUMEROPOS stabile (1/2) batte NUMEROGIORNOPOS (cambia ogni giorno)
+            if u == "NUMEROPOS" and len(vals) >= 2:
+                score = 1000 + len(vals)
+            elif "GIORNOPOS" in u:
+                score = 10 + len(vals)  # debole: id giornata
+            else:
+                score = len(vals) * 10
             if score > best_score:
                 best_score = score
                 best_col = col
