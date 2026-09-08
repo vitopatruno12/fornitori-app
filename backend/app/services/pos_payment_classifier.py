@@ -42,6 +42,19 @@ OTHER_KEYWORDS = (
     "finanzi",
     "nota credito",
 )
+QUOTE_KEYWORDS = (
+    "quote",
+    "preventiv",
+    "non fiscal",
+    "non_fiscal",
+    "vea",
+    "proforma",
+    "preconto",
+)
+
+# Tipi già risolti che non vanno riclassificati su unknown.
+PRESERVE_PAYMENT_TYPES = frozenset({"cash", "card", "mixed", "other", "quote", "non_fiscal", "vea", "preventivo"})
+
 
 
 def _norm_text(value: Any) -> str:
@@ -61,6 +74,11 @@ def label_suggests_card(label: str) -> bool:
 def label_suggests_other(label: str) -> bool:
     low = _norm_text(label)
     return any(k in low for k in OTHER_KEYWORDS)
+
+
+def label_suggests_quote(label: str) -> bool:
+    low = _norm_text(label)
+    return any(k in low for k in QUOTE_KEYWORDS)
 
 
 def classify_payment(
@@ -90,6 +108,8 @@ def classify_payment(
     hint = " ".join(x for x in (label_text, code_text) if x).strip()
 
     if hint:
+        if label_suggests_quote(hint):
+            return "quote", None, None
         if label_suggests_cash(hint) and not label_suggests_card(hint):
             amt = total if total and total > 0 else None
             return "cash", amt, None
@@ -106,6 +126,19 @@ def classify_payment(
 
 def merge_payment_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     """Normalizza campi pagamento su un dict scontrino."""
+    existing_type = str(row.get("payment_type") or "").strip().lower()
+    # VEA / preventivo: non riclassificare in unknown
+    if existing_type in ("quote", "non_fiscal", "vea", "preventivo"):
+        out = dict(row)
+        out["payment_type"] = "quote"
+        out["cash_amount_eur"] = None
+        out["card_amount_eur"] = None
+        if not out.get("payment_label"):
+            out["payment_label"] = "Non fiscale (VEA)"
+        if not out.get("payment_raw"):
+            out["payment_raw"] = "VEA"
+        return out
+
     cash_raw = row.get("cash_amount_eur")
     card_raw = row.get("card_amount_eur")
     amount = row.get("amount_eur")
@@ -116,6 +149,9 @@ def merge_payment_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         label=row.get("payment_label"),
         type_code=row.get("payment_raw"),
     )
+    # Se il chiamante ha già un tipo valido e classify torna unknown, preserva
+    if ptype == "unknown" and existing_type in PRESERVE_PAYMENT_TYPES:
+        ptype = existing_type
     out = dict(row)
     out["payment_type"] = ptype
     if cash is not None:
