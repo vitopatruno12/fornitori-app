@@ -486,22 +486,40 @@ export function AnalisiMensilePage() {
 
 export function AnalisiOrariaPage() {
   const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
+  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `hourly:months=3:${modelId}`,
     () => fetchAnalyticsHourly({ months: 3, modelId }),
     [modelId],
   )
-  const { data: payData } = useAnalisiFetch(
-    `pay-hourly:${modelId}`,
-    () => fetchPosPaymentSummary({ modelId: modelId || undefined }),
-    [modelId],
+  const { data: payToday } = useAnalisiFetch(
+    `pay-today:${modelId}:${todayIso}`,
+    () =>
+      fetchPosPaymentSummary({
+        modelId: modelId || undefined,
+        dateFrom: todayIso,
+        dateTo: todayIso,
+      }),
+    [modelId, todayIso],
   )
   const machines = Array.isArray(data?.by_machine) ? data.by_machine : []
-  const machineLabels =
-    (Array.isArray(data?.machines) && data.machines.length
-      ? data.machines
-      : machines.map((m) => m.model_label).filter(Boolean)) || []
-  const hourRows = Array.isArray(payData?.by_hour) ? payData.by_hour : []
+  const totals = payToday?.totals && typeof payToday.totals === 'object' ? payToday.totals : null
+  const hourRows = Array.isArray(payToday?.by_hour) ? payToday.by_hour : []
+  const totalDay = Number(totals?.amount_eur || 0)
+  const cashDay = Number(totals?.cash_eur || 0)
+  const cardDay = Number(totals?.card_eur || 0)
+  const receiptsDay = Number(totals?.receipts || 0)
+  const peakHour = hourRows.reduce(
+    (best, row) => {
+      const v = Number(row?.amount_eur || 0)
+      if (v <= Number(best?.amount_eur || 0)) return best
+      return row
+    },
+    null,
+  )
+  const peakLabel = peakHour
+    ? peakHour.slot_label || `${String(peakHour.hour).padStart(2, '0')}:00`
+    : '—'
 
   return (
     <AnalisiPageShell
@@ -520,11 +538,42 @@ export function AnalisiOrariaPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <DataNote text={data?.data_note} />
-      {hourRows.length > 0 ? (
-        <section className="card analisi-panel" style={{ marginBottom: '1rem' }}>
-          <h2 className="analisi-panel-title">Pagamenti per fascia oraria · EasyRetail</h2>
-          <PaymentSplitSummary split={payData?.totals} />
+
+      <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
+        <p className="analisi-attr-tag">Attributo · Incasso giornata</p>
+        <h2 className="analisi-panel-title">Saldo intera giornata · {machineLabel}</h2>
+        <p className="analisi-machine-scope">
+          Totale € di oggi da scontrini EasyRetail (agent cassa). Non è il flusso visite e non è la media storica.
+        </p>
+        <div className="dashboard-kpi-grid analisi-kpi-grid">
+          <div className="dashboard-kpi dashboard-kpi--primary">
+            <div className="dashboard-kpi-label">Incasso giornata</div>
+            <div className="dashboard-kpi-value">{eur(totalDay)}</div>
+          </div>
+          <div className="dashboard-kpi dashboard-kpi--secondary">
+            <div className="dashboard-kpi-label">Pagamenti contanti</div>
+            <div className="dashboard-kpi-value">{eur(cashDay)}</div>
+          </div>
+          <div className="dashboard-kpi dashboard-kpi--secondary">
+            <div className="dashboard-kpi-label">Pagamenti carta/POS</div>
+            <div className="dashboard-kpi-value">{eur(cardDay)}</div>
+          </div>
+          <div className="dashboard-kpi">
+            <div className="dashboard-kpi-label">Scontrini oggi</div>
+            <div className="dashboard-kpi-value">{receiptsDay}</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
+        <p className="analisi-attr-tag">Attributo · € per fascia oraria</p>
+        <h2 className="analisi-panel-title">Incasso per ora (oggi)</h2>
+        <p className="analisi-machine-scope">
+          Quanto hai incassato in ogni ora di oggi · contanti (verde) e carta/POS (blu). Picco €:{' '}
+          <strong>{peakLabel}</strong>
+          {peakHour ? ` · ${eur(peakHour.amount_eur)}` : ''}.
+        </p>
+        {hourRows.some((r) => Number(r.amount_eur || 0) > 0) ? (
           <SeriesBars
             splitPayments
             rows={hourRows.map((r) => ({
@@ -533,36 +582,38 @@ export function AnalisiOrariaPage() {
               incasso: Number(r.amount_eur || 0),
             }))}
           />
-        </section>
-      ) : null}
-      {data && (
-        <>
-          <section className="card analisi-panel">
-            <h2 className="analisi-panel-title">Heatmap e flusso — {machineLabel || 'tutte'}</h2>
-            <p className="analisi-machine-scope" role="status">
-              {machineLabels.length
-                ? `Locali nel flusso: ${machineLabels.join(' · ')}`
-                : 'Flusso da scontrini / VNE aggregato'}
-            </p>
-            <HeatmapGrid hours={data.hours} weekdays={data.weekdays} cells={data.cells} />
-            <PopularTimesChart
-              cells={data.cells}
-              hours={data.hours}
-              weekdays={data.weekdays}
-              title="Orari di punta"
-            />
-            <h3 className="analisi-machine-subtitle">Top fasce</h3>
-            <TopSlotsColumnChart suggestions={data.suggestions} />
-          </section>
+        ) : (
+          <p className="empty-state">Nessun incasso orario per oggi su questo locale.</p>
+        )}
+      </section>
 
-          {machines.length > 0 ? (
+      {data ? (
+        <section className="card analisi-panel analisi-attr-panel">
+          <p className="analisi-attr-tag">Attributo · Fasce con maggior flusso</p>
+          <h2 className="analisi-panel-title">Orari di punta (visite / traffico)</h2>
+          <p className="analisi-machine-scope">
+            Qui si guarda il <strong>flusso clienti</strong> (quando passa più gente), non il saldo € della
+            giornata. Periodo storico ~3 mesi · {machineLabel}.
+          </p>
+          <HeatmapGrid hours={data.hours} weekdays={data.weekdays} cells={data.cells} />
+          <PopularTimesChart
+            cells={data.cells}
+            hours={data.hours}
+            weekdays={data.weekdays}
+            title="Fasce con maggior flusso"
+          />
+          <h3 className="analisi-machine-subtitle">Top fasce · traffico</h3>
+          <TopSlotsColumnChart
+            suggestions={data.suggestions}
+            emptyText="Pochi dati di traffico nel periodo."
+          />
+
+          {machines.length > 1 ? (
             <div className="analisi-machine-grid" style={{ marginTop: '1rem' }}>
               {machines.map((m) => (
                 <section key={m.model_id} className="card analisi-panel analisi-machine-card">
-                  <h2 className="analisi-panel-title">Heatmap e flusso — {m.model_label}</h2>
-                  <p className="analisi-machine-scope" role="status">
-                    Locale: <strong>{m.model_label}</strong>
-                  </p>
+                  <p className="analisi-attr-tag">Flusso · {m.model_label}</p>
+                  <h2 className="analisi-panel-title">{m.model_label}</h2>
                   <HeatmapGrid
                     hours={m.hours || data.hours}
                     weekdays={m.weekdays || data.weekdays}
@@ -572,9 +623,8 @@ export function AnalisiOrariaPage() {
                     cells={m.cells}
                     hours={m.hours || data.hours}
                     weekdays={m.weekdays || data.weekdays}
-                    title={`Orari di punta · ${m.model_label}`}
+                    title={`Maggior flusso · ${m.model_label}`}
                   />
-                  <h3 className="analisi-machine-subtitle">Top fasce · {m.model_label}</h3>
                   <TopSlotsColumnChart
                     suggestions={m.suggestions}
                     emptyText="Pochi scontrini per questa sede."
@@ -583,8 +633,8 @@ export function AnalisiOrariaPage() {
               ))}
             </div>
           ) : null}
-        </>
-      )}
+        </section>
+      ) : null}
     </AnalisiPageShell>
   )
 }

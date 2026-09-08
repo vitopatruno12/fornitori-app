@@ -6832,9 +6832,21 @@ select.form-control {
   color: rgba(255, 255, 255, 0.72);
 }
 
-.analisi-hero-vne-status {
-  margin-top: 0;
-  flex: 0 0 auto;
+.analisi-attr-panel {
+  border-left: 4px solid #0d9488;
+}
+
+.analisi-attr-tag {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+.analisi-machine-card .analisi-attr-tag {
+  color: #64748b;
 }
 
 .analisi-header-main {
