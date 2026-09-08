@@ -4,6 +4,10 @@
 Legge scontrini dal database Firebird EasyRetail e invia ad ATLAS anche
 la ripartizione contanti vs carta/POS quando disponibile nel GDB.
 
+Sincronizza:
+  - VEN = scontrini fiscali (incasso / chiusura)
+  - VEA = vendite non fiscali salvate (preventivo operativo; fuori chiusura)
+
 Esempio (Task Scheduler ogni 3 minuti):
   python easyretail_gdb_sync_agent.py
 
