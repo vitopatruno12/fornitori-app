@@ -275,6 +275,7 @@ function App() {
     fatture: 'fatture dashboard',
     'fatture-passive': 'fatture ricevute',
     'fatture-ricevute': 'fatture ricevute',
+    'fatture-emesse': 'fatture emesse',
     'fatture-da-registrare': 'fatture da registrare',
     'fatture-registrate': 'fatture registrate',
     'fatture-scadenziario': 'scadenziario fatture',
@@ -492,6 +493,10 @@ function App() {
       'fatture-ricevute': [
         'Come aggiorno l’inbox fatture SDI?',
         'Come assegno una fattura a Via Abba?',
+      ],
+      'fatture-emesse': [
+        'Come carico una fattura emessa XML?',
+        'Quali fatture emesse ho per questa società?',
       ],
       'fatture-da-registrare': [
         'Come collego una fattura alla Prima Nota?',
