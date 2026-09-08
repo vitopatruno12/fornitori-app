@@ -29,6 +29,7 @@ import {
   updateAdeFisconlineCredentials,
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
+import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 
@@ -643,22 +644,198 @@ export function FattureRicevutePage() {
   )
 }
 
+export function FattureEmessePage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const [error, setError] = useState('')
+  const importInputRef = React.useRef(null)
+
+  async function handleBannerImport(ev) {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
+    if (!file) return
+    setImportBusy(true)
+    setImportMsg('')
+    setError('')
+    try {
+      const res = await importInvoiceXml(file)
+      if (res?.duplicated) {
+        setImportMsg('XML già presente in Atlas.')
+      } else {
+        const inv = res?.incoming_invoice
+        setImportMsg(
+          `Caricata n. ${inv?.invoice_number || '—'} · ${inv?.supplier_name || inv?.customer_name || 'documento'} · ${eur(inv?.total_amount)}`,
+        )
+      }
+    } catch (e) {
+      setError(e?.message || 'Caricamento XML fallito')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  return (
+    <FatturePageShell
+      title="Fatture emesse"
+      lead={
+        gestionaleMode
+          ? 'Fatture attive / emesse per società. Società e caricamento XML manuale nel banner verde.'
+          : companyId
+            ? `Fatture emesse del registro ${companyLabel(companyId)}.`
+            : 'Fatture emesse del registro locale.'
+      }
+      actions={
+        <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e caricamento XML">
+          {gestionaleMode ? (
+            <FattureCompanySelect
+              className="mastrini-hero-tools-company"
+              companies={companies}
+              value={companyId}
+              onChange={setCompanyId}
+              loading={loadingCompanies}
+            />
+          ) : (
+            <div className="fatture-hero-tools-locale">
+              <span className="staff-gestionale-locale-select-label">Registro</span>
+              <strong>{companyId ? companyLabel(companyId) : 'Locale'}</strong>
+            </div>
+          )}
+          <div className="mastrini-hero-tools-btns">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xml,.p7m,application/xml,text/xml"
+              style={{ display: 'none' }}
+              onChange={(ev) => void handleBannerImport(ev)}
+            />
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={importBusy}
+              onClick={() => importInputRef.current?.click()}
+              title="Carica una FatturaPA XML emessa in Atlas"
+            >
+              {importBusy ? 'Caricamento…' : 'Carica XML'}
+            </button>
+          </div>
+          {importMsg ? <p className="fatture-hero-tools-msg">{importMsg}</p> : null}
+        </aside>
+      }
+    >
+      {error && <div className="alert alert-danger">{error}</div>}
+      {!companyId ? (
+        <div className="alert alert-info">
+          Scegli la società nel banner verde, oppure usa <strong>Carica XML</strong> per inserire una fattura
+          emessa manualmente.
+        </div>
+      ) : (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
+          <p className="fatture-note">
+            Puoi caricare una FatturaPA XML dal banner verde. L’elenco da canale AdE / SDI attive sarà collegato
+            qui.
+          </p>
+          <div className="table-wrap pn-table-wrap">
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Numero</th>
+                  <th>Cliente</th>
+                  <th>Imponibile</th>
+                  <th>IVA</th>
+                  <th>Totale</th>
+                  <th>Stato</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    Nessuna fattura emessa in archivio per {companyLabel(companyId)}. Usa «Carica XML» nel banner.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </FatturePageShell>
+  )
+}
+
 /** @deprecated usa FattureRicevutePage — redirect da /fatture/passive */
 export function FatturePassivePage() {
   return <FattureNavigate to="/fatture/ricevute" replace />
 }
 
 export function FattureDaRegistrarePage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [scopeMode, setScopeMode] = useState(() => {
+    try {
+      return sessionStorage.getItem('atlasFattureScopeMode:v1') || 'company'
+    } catch {
+      return 'company'
+    }
+  })
+  const [localeId, setLocaleId] = useState(() => {
+    try {
+      return sessionStorage.getItem('atlasFattureLocale:v1') || ''
+    } catch {
+      return ''
+    }
+  })
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  function changeScopeMode(next) {
+    setScopeMode(next)
+    try {
+      sessionStorage.setItem('atlasFattureScopeMode:v1', next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function changeLocaleId(next) {
+    setLocaleId(next)
+    try {
+      sessionStorage.setItem('atlasFattureLocale:v1', next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const scopeReady = gestionaleMode
+    ? scopeMode === 'company'
+      ? Boolean(companyId)
+      : Boolean(localeId)
+    : Boolean(companyId)
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      if (gestionaleMode && !scopeReady) {
+        setInvoices([])
+        setLoading(false)
+        return
+      }
       setLoading(true)
+      setError('')
       try {
-        const rows = await fetchInvoices({ include_ignored: false })
+        const params = { include_ignored: false }
+        if (gestionaleMode) {
+          if (scopeMode === 'company' && companyId) params.company = companyId
+          if (scopeMode === 'locale' && localeId) params.activity = localeId
+        } else if (companyId) {
+          params.company = companyId
+        }
+        const rows = await fetchInvoices(params)
         const list = Array.isArray(rows) ? rows : []
         if (!cancelled) {
           setInvoices(list.filter((inv) => !inv.cash_entry_id && inv.payment_status !== 'paid'))
@@ -672,13 +849,33 @@ export function FattureDaRegistrarePage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [gestionaleMode, scopeMode, companyId, localeId, scopeReady])
 
   return (
     <FatturePageShell
       title="Da registrare"
-      lead="Fatture in elenco senza movimento di Prima Nota collegato — da portare in contabilità."
+      lead="Fatture senza movimento di Prima Nota — filtra per società o locale dal banner."
+      actions={
+        gestionaleMode ? (
+          <FattureScopeTools
+            mode={scopeMode}
+            onModeChange={changeScopeMode}
+            companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+            companyId={companyId}
+            onCompanyChange={setCompanyId}
+            localeId={localeId}
+            onLocaleChange={changeLocaleId}
+            loading={loadingCompanies}
+          />
+        ) : null
+      }
     >
+      {gestionaleMode && !scopeReady ? (
+        <div className="alert alert-info">
+          Scegli <strong>Società</strong> o <strong>Locale</strong> nel banner verde per vedere le fatture da
+          registrare.
+        </div>
+      ) : null}
       {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       <section className="card fatture-panel">
@@ -717,7 +914,7 @@ export function FattureDaRegistrarePage() {
                   </td>
                 </tr>
               ))}
-              {!loading && invoices.length === 0 && (
+              {!loading && scopeReady && invoices.length === 0 && (
                 <tr>
                   <td colSpan={9} className="empty-state">
                     Nessuna fattura da registrare.

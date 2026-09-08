@@ -76,6 +76,7 @@ def list_invoices(
   due_filter: Optional[str] = None,
   include_ignored: bool = False,
   company: Optional[str] = None,
+  activity: Optional[str] = None,
 ) -> List[InvoiceListOut]:
   q = (
     db.query(
@@ -109,6 +110,8 @@ def list_invoices(
       if company_filter == "non_classificata":
         company_filter = ""  # id sconosciuto → nessun filtro
 
+  activity_filter = (activity or "").strip().lower()
+
   def _aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
       return None
@@ -137,14 +140,25 @@ def list_invoices(
       ade_profile_id=ade_profile_id,
       cash_activity=cash_activity,
     )
+    inv_activity = (cash_activity or "").strip().lower() or None
     if company_filter:
       if inv_company != company_filter:
         continue
+    if activity_filter:
+      # Match diretto su activity cassa; se assente, usa la società collegata al locale.
+      if inv_activity:
+        if inv_activity != activity_filter:
+          continue
+      else:
+        linked = _company_from_activity(activity_filter)
+        if not linked or inv_company != linked:
+          continue
 
     base = InvoiceRead.model_validate(inv).model_dump()
     base["supplier_name"] = supplier_name or ""
     base["payment_status"] = ps
     base["company"] = inv_company
+    base["activity"] = inv_activity
     out.append(InvoiceListOut(**base))
   return out
 

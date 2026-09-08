@@ -21,6 +21,7 @@ export const APP_PATHS = {
   fatture: '/fatture',
   'fatture-passive': '/fatture/ricevute',
   'fatture-ricevute': '/fatture/ricevute',
+  'fatture-emesse': '/fatture/emesse',
   'fatture-da-registrare': '/fatture/da-registrare',
   'fatture-registrate': '/fatture/registrate',
   'fatture-scadenziario': '/fatture/scadenziario',

@@ -3,8 +3,11 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
+import { useFattureCompany } from '../hooks/useFattureCompany.js'
+import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
@@ -12,6 +15,23 @@ function formatAmount(value) {
 }
 
 export default function InvoicesPage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [scopeMode, setScopeMode] = useState(() => {
+    try {
+      return sessionStorage.getItem('atlasFattureScopeMode:v1') || 'company'
+    } catch {
+      return 'company'
+    }
+  })
+  const [localeId, setLocaleId] = useState(() => {
+    try {
+      return sessionStorage.getItem('atlasFattureLocale:v1') || ''
+    } catch {
+      return ''
+    }
+  })
   const [suppliers, setSuppliers] = useState([])
   const [invoices, setInvoices] = useState([])
   const [supplierId, setSupplierId] = useState('')
@@ -19,6 +39,30 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  function changeScopeMode(next) {
+    setScopeMode(next)
+    try {
+      sessionStorage.setItem('atlasFattureScopeMode:v1', next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function changeLocaleId(next) {
+    setLocaleId(next)
+    try {
+      sessionStorage.setItem('atlasFattureLocale:v1', next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const scopeReady = gestionaleMode
+    ? scopeMode === 'company'
+      ? Boolean(companyId)
+      : Boolean(localeId)
+    : true
 
   const [formSupplierId, setFormSupplierId] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
@@ -145,7 +189,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadInvoices()
-  }, [supplierId, dueFilter, showIgnored])
+  }, [supplierId, dueFilter, showIgnored, gestionaleMode, scopeMode, companyId, localeId, scopeReady])
 
   useEffect(() => {
     if (!pendingSupplierLabel || suppliers.length === 0 || supplierId) return
@@ -189,13 +233,23 @@ export default function InvoicesPage() {
 
   async function loadInvoices() {
     try {
+      if (gestionaleMode && !scopeReady) {
+        setInvoices([])
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setError('')
-      const data = await fetchInvoices({
+      const params = {
         supplier_id: supplierId || undefined,
         due_filter: dueFilter || undefined,
         include_ignored: showIgnored || undefined,
-      })
+      }
+      if (gestionaleMode) {
+        if (scopeMode === 'company' && companyId) params.company = companyId
+        if (scopeMode === 'locale' && localeId) params.activity = localeId
+      }
+      const data = await fetchInvoices(params)
       setInvoices(data)
     } catch (e) {
       setError('Errore nel caricamento delle fatture')
@@ -414,8 +468,28 @@ export default function InvoicesPage() {
   return (
     <FatturePageShell
       title="Registrate"
-      lead="Elenco fatture in archivio Atlas: filtri per scadenza e stato, collegamento Prima Nota, modifica e dettaglio."
+      lead="Elenco fatture in archivio Atlas: filtra per società o locale dal banner, poi scadenza e stato."
+      actions={
+        gestionaleMode ? (
+          <FattureScopeTools
+            mode={scopeMode}
+            onModeChange={changeScopeMode}
+            companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+            companyId={companyId}
+            onCompanyChange={setCompanyId}
+            localeId={localeId}
+            onLocaleChange={changeLocaleId}
+            loading={loadingCompanies}
+          />
+        ) : null
+      }
     >
+      {gestionaleMode && !scopeReady ? (
+        <div className="alert alert-info">
+          Scegli <strong>Società</strong> o <strong>Locale</strong> nel banner verde per vedere le fatture
+          registrate.
+        </div>
+      ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 

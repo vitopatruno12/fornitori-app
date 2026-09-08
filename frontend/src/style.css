@@ -8667,6 +8667,10 @@ select.form-control {
   grid-column: 1 / -1;
 }
 
+.fatture-scope-mode-btns .btn-primary {
+  grid-column: auto;
+}
+
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {
   overflow: hidden;
 }

@@ -4,6 +4,7 @@ import { Link, Navigate, NavLink } from 'react-router-dom'
 export const FATTURE_NAV_ITEMS = [
   { to: '/fatture', label: 'Dashboard', end: true },
   { to: '/fatture/ricevute', label: 'Fatture ricevute' },
+  { to: '/fatture/emesse', label: 'Fatture emesse' },
   { to: '/fatture/da-registrare', label: 'Da registrare' },
   { to: '/fatture/registrate', label: 'Registrate' },
   { to: '/fatture/scadenziario', label: 'Scadenziario' },

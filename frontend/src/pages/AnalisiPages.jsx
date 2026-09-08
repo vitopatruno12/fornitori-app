@@ -453,7 +453,6 @@ export function AnalisiGiornalieroPage() {
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
         title={`Incasso di oggi · ${machineLabel}`}
-        hint={`Solo la giornata ${focus.dateTo} (non gli ultimi 30 giorni). Contanti/POS fiscali vs preventivi non contabilizzati.`}
         amountLabel="Incasso oggi"
         {...kpis}
       />
@@ -517,7 +516,6 @@ export function AnalisiSettimanalePage() {
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
         title={`Incasso settimana corrente · ${machineLabel}`}
-        hint={`Da lunedì ${focus.dateFrom} a oggi ${focus.dateTo}. Diverso dall’incasso giornaliero e dal mese.`}
         amountLabel="Incasso settimana"
         {...kpis}
       />
@@ -574,7 +572,6 @@ export function AnalisiMensilePage() {
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
         title={`Incasso mese corrente · ${machineLabel}`}
-        hint={`Dal ${focus.dateFrom} a oggi ${focus.dateTo}. Non è il totale di oggi né della sola settimana.`}
         amountLabel="Incasso mese"
         {...kpis}
       />
@@ -645,7 +642,6 @@ export function AnalisiOrariaPage() {
 
       <AnalisiIncassoAttrPanel
         title={`Saldo intera giornata · ${machineLabel}`}
-        hint="Totale € di oggi da scontrini EasyRetail (agent cassa). Non è il flusso visite e non è la media storica."
         amountLabel="Incasso giornata"
         {...kpis}
       />

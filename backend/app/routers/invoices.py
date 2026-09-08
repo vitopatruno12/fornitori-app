@@ -177,6 +177,10 @@ def list_invoices(
     default=None,
     description="Filtra per società: mediazione|via_lattea|risacca|pg|non_classificata",
   ),
+  activity: Optional[str] = Query(
+    default=None,
+    description="Filtra per locale/attività Prima Nota: via_abba|via_zanardelli|…",
+  ),
   db: Session = Depends(get_db),
 ):
   if due_filter not in (None, "overdue", "due_soon"):
@@ -187,6 +191,7 @@ def list_invoices(
     due_filter=due_filter,
     include_ignored=include_ignored,
     company=company,
+    activity=activity,
   )
 
 

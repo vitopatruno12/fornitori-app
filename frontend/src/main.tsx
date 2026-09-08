@@ -49,6 +49,7 @@ import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
   FattureDashboardPage,
+  FattureEmessePage,
   FattureImportXmlPage,
   FatturePassivePage,
   FattureImpostazioniPage,
@@ -956,6 +957,7 @@ function App() {
           <Route path="/fatture" element={<FattureDashboardPage />} />
           <Route path="/fatture/passive" element={<FatturePassivePage />} />
           <Route path="/fatture/ricevute" element={<FattureRicevutePage />} />
+          <Route path="/fatture/emesse" element={<FattureEmessePage />} />
           <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
           <Route path="/fatture/registrate" element={<InvoicesPage />} />
           <Route path="/fatture/scadenziario" element={<FattureScadenziarioPage />} />

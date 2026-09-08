@@ -19,6 +19,7 @@ import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
   FattureDashboardPage,
+  FattureEmessePage,
   FattureImpostazioniPage,
   FattureImportXmlPage,
   FattureLogPage,
@@ -117,6 +118,7 @@ function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
       <Routes>
         <Route index element={<FattureDashboardPage />} />
         <Route path="ricevute" element={<FattureRicevutePage />} />
+        <Route path="emesse" element={<FattureEmessePage />} />
         <Route path="passive" element={<FatturePassivePage />} />
         <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
         <Route path="registrate" element={<InvoicesPage />} />
