@@ -66,6 +66,11 @@ function resolveEnableBankingPayload(account) {
   return { psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal' }
 }
 
+function isBppbAccount(account) {
+  const bank = String(account?.bank_name || '').toLowerCase()
+  return bank.includes('bppb') || bank.includes('puglia') || bank.includes('basilicata')
+}
+
 const BANK_LAST_MOVEMENTS_COLUMNS = [
   { id: 'date', label: 'Data', width: 14, fluid: true },
   { id: 'description', label: 'Descrizione', width: 42, fluid: true, emphasis: true },
@@ -492,6 +497,59 @@ export function BancaContiPage() {
     }
   }
 
+  async function syncBankAccount(accountId) {
+    setBusyId(accountId)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await syncEnableBankingAccount(accountId)
+      const imported = Number(res?.imported || 0)
+      const saldo = res?.account?.saldo_disponibile
+      const bits = []
+      if (Number.isFinite(saldo)) bits.push(`saldo ${eur(saldo)}`)
+      bits.push(`${imported} nuovi movimenti`)
+      setSuccess(res?.message || `Conti sincronizzati: ${bits.join(' · ')}. Vedi Movimenti banca.`)
+      await reload()
+    } catch (err) {
+      setError(err?.message || 'Sincronizzazione fallita')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function syncAllBppbAccounts() {
+    const bppb = items.filter(isBppbAccount)
+    if (!bppb.length) {
+      setError('Nessun conto BPPB in elenco. Crea prima il conto BPPB.')
+      return
+    }
+    const connected = bppb.filter((a) => a.enable_banking_connected)
+    if (!connected.length) {
+      await startEnableBanking(bppb[0].id)
+      return
+    }
+    setError('')
+    setSuccess('')
+    let totalImported = 0
+    for (const acc of connected) {
+      setBusyId(acc.id)
+      try {
+        const res = await syncEnableBankingAccount(acc.id)
+        totalImported += Number(res?.imported || 0)
+      } catch (err) {
+        setError(err?.message || `Sync fallito per ${acc.bank_name}`)
+        setBusyId(null)
+        await reload()
+        return
+      }
+    }
+    setBusyId(null)
+    setSuccess(
+      `BPPB sincronizzato: ${connected.length} conti, ${totalImported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+    )
+    await reload()
+  }
+
   async function startConnect(accountId) {
     setBusyId(accountId)
     setError('')
@@ -615,6 +673,39 @@ export function BancaContiPage() {
         </section>
       )}
 
+      {items.some(isBppbAccount) ? (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
+          <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+            Scarica saldi e movimenti da Banca Popolare di Puglia e Basilicata e li mostra in Atlas
+            (Conti + Movimenti banca).
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+              onClick={syncAllBppbAccounts}
+              title="Collega o sincronizza i conti BPPB via Enable Banking"
+            >
+              {busyId != null && items.some((a) => a.id === busyId && isBppbAccount(a))
+                ? 'Sincronizzo…'
+                : items.some((a) => isBppbAccount(a) && a.enable_banking_connected)
+                  ? 'Sincronizza conti BPPB'
+                  : 'Collega e sincronizza BPPB'}
+            </button>
+            <Link className="btn btn-secondary" to="/banca/movimenti">
+              Vedi movimenti
+            </Link>
+          </div>
+          {!connectProfile?.enable_banking?.configured ? (
+            <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+              Enable Banking non configurato sul server.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Collega conto</h2>
         <form onSubmit={onCreate} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -717,10 +808,14 @@ export function BancaContiPage() {
                     type="button"
                     className="btn btn-primary btn-sm"
                     disabled={busyId === a.id}
-                    title="Scarica saldi e movimenti da Enable Banking"
-                    onClick={() => run(a.id, syncEnableBankingAccount, 'Sync Enable Banking completato')}
+                    title="Scarica saldi e movimenti e aggiorna Atlas"
+                    onClick={() => syncBankAccount(a.id)}
                   >
-                    {busyId === a.id ? '…' : 'Sync EB'}
+                    {busyId === a.id
+                      ? '…'
+                      : isBppbAccount(a)
+                        ? 'Sincronizza conti'
+                        : 'Sincronizza'}
                   </button>
                 ) : (
                   <button
@@ -730,7 +825,7 @@ export function BancaContiPage() {
                     onClick={() => startEnableBanking(a.id)}
                     title="Collega via Enable Banking (SCA + consenso API)"
                   >
-                    Enable Banking
+                    {isBppbAccount(a) ? 'Collega BPPB' : 'Enable Banking'}
                   </button>
                 )}
                 {!a.enable_banking_connected && a.connection_status !== 'connected' ? (
