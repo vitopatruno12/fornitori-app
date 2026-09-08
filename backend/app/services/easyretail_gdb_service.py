@@ -1102,9 +1102,10 @@ def fetch_receipts_from_gdb(
             where.append(f"{mapping['date']} >= ?")
             params.append(cutoff.date())
 
-        # Solo vendita fiscale (VEN). BIL = gestionale stesso scontrino → doppio conteggio vs chiusura cassa.
+        # VEN = fiscale (chiusura). VEA = vendita/stampa non fiscale salvata (preventivo operativo).
+        # BIL = gemello gestionale → escluso (doppio conteggio).
         if mapping.get("doc_type"):
-            where.append(f"{mapping['doc_type']} = 'VEN'")
+            where.append(f"{mapping['doc_type']} IN ('VEN', 'VEA')")
 
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -1158,6 +1159,15 @@ def fetch_receipts_from_gdb(
             else:
                 external_key = _norm_id_key(external)
             is_void = _as_void(get(row, "void"))
+            doc_raw = get(row, "doc_type")
+            doc_type = (
+                str(doc_raw).strip().upper()
+                if doc_raw is not None and str(doc_raw).strip()
+                else "VEN"
+            )
+            # Evita collisione id se in futuro VEN/VEA condividessero la stessa chiave
+            if doc_type == "VEA":
+                external_key = f"VEA:{external_key}"
             row_vals = {
                 "amount": amount,
                 "cash_amount": get(row, "cash_amount"),
@@ -1177,6 +1187,7 @@ def fetch_receipts_from_gdb(
                         "amount_eur": amount,
                         "is_void": 1 if is_void else 0,
                         "raw_store": None if store_raw is None else str(store_raw)[:120],
+                        "_doc_type": doc_type,
                         "_row_vals": row_vals,
                     },
                 )
@@ -1184,7 +1195,15 @@ def fetch_receipts_from_gdb(
 
         payment_breakdown: Dict[str, Dict[str, Any]] = {}
         if payment_lines_map:
-            receipt_ids = [r[0] for r in raw_rows if r[0] is not None]
+            # Id numerici GDB (senza prefisso VEA:) per join PAGAMENTI
+            receipt_ids = []
+            for ext, _base in raw_rows:
+                if ext is None:
+                    continue
+                s = str(ext).strip()
+                if s.upper().startswith("VEA:"):
+                    s = s[4:]
+                receipt_ids.append(s)
             payment_breakdown = _fetch_payment_lines_breakdown(
                 cur,
                 payment_mapping=payment_lines_map,
@@ -1201,20 +1220,34 @@ def fetch_receipts_from_gdb(
         )
         rows: List[Dict[str, Any]] = []
         matched_lines = 0
+        vea_count = 0
         for external, base in raw_rows:
             pay: Dict[str, Any] = {}
             ext_key = str(external).strip()
             row_vals = base.pop("_row_vals", {})
+            doc_type = str(base.pop("_doc_type", "") or "VEN").upper()
+            pay_lookup_key = _norm_id_key(
+                ext_key[4:] if ext_key.upper().startswith("VEA:") else ext_key
+            )
             # Prima prova dalla testata (NUMEROFORMAPAGAMENTO), poi overlay righe se migliori
             if has_receipt_payment_cols:
                 pay = _payment_fields_from_receipt_row(row_vals, mapping, lookup)
-            if ext_key in payment_breakdown:
-                line_pay = payment_breakdown[ext_key]
+            if pay_lookup_key in payment_breakdown:
+                line_pay = payment_breakdown[pay_lookup_key]
                 matched_lines += 1
                 if (line_pay.get("payment_type") or "unknown") != "unknown":
                     pay = line_pay
                 elif (pay.get("payment_type") or "unknown") == "unknown":
                     pay = line_pay
+            if doc_type == "VEA":
+                vea_count += 1
+                pay = {
+                    "payment_type": "quote",
+                    "cash_amount_eur": None,
+                    "card_amount_eur": None,
+                    "payment_label": "Non fiscale (VEA)",
+                    "payment_raw": "VEA",
+                }
             rows.append({**base, **pay})
         meta = {
             "table": table,
@@ -1231,6 +1264,7 @@ def fetch_receipts_from_gdb(
                     "cash_amount",
                     "card_amount",
                     "payment_type",
+                    "doc_type",
                 )
             },
             "payment_schema": {
@@ -1242,6 +1276,7 @@ def fetch_receipts_from_gdb(
                 "payment_lines_keys": len(payment_breakdown),
             },
             "fetched": len(rows),
+            "vea_non_fiscal": vea_count,
             "with_payment_type": sum(1 for r in rows if r.get("payment_type") and r["payment_type"] != "unknown"),
             "store_column": mapping.get("store"),
             "store_filter": list(allow_stores),

@@ -190,6 +190,24 @@ def list_invoices(
   )
 
 
+@router.get("/{invoice_id}/pdf")
+def download_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
+  """Anteprima PDF: file caricato, allegato FatturaPA, oppure PDF generato dall'XML."""
+  from fastapi.responses import Response
+
+  from ..services.invoice_pdf_service import pdf_bytes_for_atlas_invoice
+
+  pdf, _source, err = pdf_bytes_for_atlas_invoice(db, invoice_id)
+  if err or not pdf:
+    raise HTTPException(status_code=404 if err == "Fattura non trovata" else 400, detail=err or "PDF non disponibile")
+  filename = f"fattura-{invoice_id}.pdf"
+  return Response(
+    content=pdf,
+    media_type="application/pdf",
+    headers={"Content-Disposition": f'inline; filename="{filename}"'},
+  )
+
+
 @router.get("/{invoice_id}", response_model=InvoiceDetailOut)
 def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
   inv = invoice_service.get_invoice_detail(db, invoice_id)

@@ -13,6 +13,7 @@ import {
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   assignSdiInvoiceSection,
+  fetchAdeProfiles,
   fetchIncomingInvoice,
   fetchIncomingInvoices,
   fetchInvoices,
@@ -20,10 +21,12 @@ import {
   fetchSdiReceivedInvoices,
   fetchSdiStatus,
   getSdiInvoiceDownloadUrl,
+  getSdiInvoicePdfUrl,
   importInvoiceXml,
   markInvoicePaid,
   postSdiReceiveXml,
   setInvoiceIgnored,
+  updateAdeFisconlineCredentials,
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
@@ -71,6 +74,7 @@ export function AdeSdiInvoicesPanel({
   autoLoad = true,
   companyId = '',
   embeddedMode = false,
+  hideImportLink = false,
 }) {
   const [days, setDays] = useState('60')
   const [loading, setLoading] = useState(false)
@@ -161,7 +165,17 @@ export function AdeSdiInvoicesPanel({
                 <td>{item.supplier_name || '—'}</td>
                 <td>{item.receiver_vat || '—'}</td>
                 <td>{item.destination || '—'}</td>
-                <td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <a
+                    className="btn btn-primary"
+                    style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none', marginRight: '0.35rem' }}
+                    href={getSdiInvoicePdfUrl(item.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Apri PDF (allegato FatturaPA o anteprima generata dall'XML)"
+                  >
+                    PDF
+                  </a>
                   <a
                     className="btn btn-secondary"
                     style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }}
@@ -169,7 +183,7 @@ export function AdeSdiInvoicesPanel({
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Scarica XML
+                    XML
                   </a>
                 </td>
                 {withAssign ? (
@@ -228,7 +242,7 @@ export function AdeSdiInvoicesPanel({
           <button type="button" className="btn btn-primary" onClick={() => load()} disabled={loading || !companyId}>
             {loading ? 'Aggiornamento…' : 'Aggiorna inbox'}
           </button>
-          {!embeddedMode ? (
+          {!embeddedMode && !hideImportLink ? (
             <FattureLink className="btn btn-secondary" to="/fatture/importa-xml">
               Importa XML
             </FattureLink>
@@ -356,9 +370,12 @@ export function FattureRicevutePage() {
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const importInputRef = React.useRef(null)
 
   const ricevuteLead = gestionaleMode
-    ? 'Fatture dal canale SDI / Agenzia Entrate, suddivise per società (P.IVA destinatario). Scegli la società dal menu.'
+    ? 'Fatture dal canale SDI / Agenzia Entrate, suddivise per società (P.IVA destinatario). Società e import XML nel banner.'
     : companyId
       ? `Fatture ricevute del registro locale: ${companyLabel(companyId)}.`
       : 'Fatture ricevute del registro locale di questa postazione.'
@@ -376,6 +393,31 @@ export function FattureRicevutePage() {
       setError(e?.message || 'Errore caricamento fatture ricevute')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleBannerImport(ev) {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
+    if (!file) return
+    setImportBusy(true)
+    setImportMsg('')
+    setError('')
+    try {
+      const res = await importInvoiceXml(file)
+      if (res?.duplicated) {
+        setImportMsg('XML già presente in Atlas.')
+      } else {
+        const inv = res?.incoming_invoice
+        setImportMsg(
+          `Importata n. ${inv?.invoice_number || '—'} · ${inv?.supplier_name || 'fornitore'} · ${eur(inv?.total_amount)}`,
+        )
+      }
+      await reload()
+    } catch (e) {
+      setError(e?.message || 'Import XML fallito')
+    } finally {
+      setImportBusy(false)
     }
   }
 
@@ -419,19 +461,41 @@ export function FattureRicevutePage() {
       title="Fatture ricevute"
       lead={ricevuteLead}
       actions={
-        <>
+        <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e import XML">
           {gestionaleMode ? (
             <FattureCompanySelect
+              className="mastrini-hero-tools-company"
               companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
               value={companyId}
               onChange={setCompanyId}
               loading={loadingCompanies}
             />
-          ) : null}
-          <FattureLink className="btn btn-secondary btn-sm" to="/fatture/importa-xml">
-            Importa XML
-          </FattureLink>
-        </>
+          ) : (
+            <div className="fatture-hero-tools-locale">
+              <span className="staff-gestionale-locale-select-label">Registro</span>
+              <strong>{companyId ? companyLabel(companyId) : 'Locale'}</strong>
+            </div>
+          )}
+          <div className="mastrini-hero-tools-btns">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xml,.p7m,application/xml,text/xml"
+              style={{ display: 'none' }}
+              onChange={(ev) => void handleBannerImport(ev)}
+            />
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={importBusy}
+              onClick={() => importInputRef.current?.click()}
+              title="Carica una FatturaPA XML in Atlas"
+            >
+              {importBusy ? 'Import…' : 'Importa XML'}
+            </button>
+          </div>
+          {importMsg ? <p className="fatture-hero-tools-msg">{importMsg}</p> : null}
+        </aside>
       }
     >
       {error && <div className="alert alert-danger">{error}</div>}
@@ -443,6 +507,7 @@ export function FattureRicevutePage() {
         autoLoad={Boolean(companyId)}
         companyId={companyId}
         embeddedMode={!gestionaleMode}
+        hideImportLink
       />
 
       {gestionaleMode && !companyId ? (
@@ -1028,29 +1093,160 @@ export function FattureLogPage() {
 }
 
 export function FattureImpostazioniPage() {
+  const [profiles, setProfiles] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [drafts, setDrafts] = useState({})
+  const [savingId, setSavingId] = useState('')
+
+  async function loadProfiles() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetchAdeProfiles()
+      const items = Array.isArray(res?.items) ? res.items : []
+      setProfiles(items)
+      setDrafts((prev) => {
+        const next = { ...prev }
+        for (const p of items) {
+          if (!next[p.id]) next[p.id] = { password: '', pin: '' }
+        }
+        return next
+      })
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento profili AdE')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadProfiles()
+  }, [])
+
+  function setDraft(profileId, field, value) {
+    setDrafts((prev) => ({
+      ...prev,
+      [profileId]: { ...(prev[profileId] || { password: '', pin: '' }), [field]: value },
+    }))
+  }
+
+  async function saveCredentials(profileId) {
+    const draft = drafts[profileId] || {}
+    const password = String(draft.password || '').trim()
+    const pin = String(draft.pin || '').trim()
+    if (!password && !pin) {
+      setError('Inserisci almeno la nuova password o il PIN')
+      return
+    }
+    setSavingId(profileId)
+    setError('')
+    setSuccess('')
+    try {
+      await updateAdeFisconlineCredentials(profileId, {
+        password: password || undefined,
+        pin: pin || undefined,
+      })
+      setSuccess(`Credenziali Fisconline aggiornate per ${profileId}.`)
+      setDrafts((prev) => ({ ...prev, [profileId]: { password: '', pin: '' } }))
+      await loadProfiles()
+    } catch (e) {
+      setError(e?.message || 'Salvataggio credenziali fallito')
+    } finally {
+      setSavingId('')
+    }
+  }
+
   return (
-    <FatturePageShell title="Impostazioni" lead="Configurazione attuale via variabili ambiente backend (sola lettura).">
+    <FatturePageShell
+      title="Impostazioni"
+      lead="Aggiorna password e PIN Fisconline per le società: l’agent AdE userà queste credenziali al prossimo sync."
+    >
+      {loading && <AnalisiLoadingBar active label="Caricamento impostazioni" variant="subtle" />}
+      {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
+
       <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Variabili usate</h2>
+        <h2 className="fatture-panel-title">Credenziali Fisconline (Agenzia Entrate)</h2>
+        <p className="fatture-note" style={{ marginTop: 0 }}>
+          Quando la password scade, aggiornala qui. Non viene mostrata in chiaro: vedi solo se è già configurata.
+        </p>
+        <div className="fatture-creds-grid">
+          {profiles.map((p) => {
+            const draft = drafts[p.id] || { password: '', pin: '' }
+            const busy = savingId === p.id
+            return (
+              <article key={p.id} className="fatture-creds-card">
+                <header className="fatture-creds-card-head">
+                  <div>
+                    <h3 className="fatture-creds-card-title">{p.label || p.id}</h3>
+                    <p className="fatture-creds-card-meta">
+                      {p.partita_iva ? `P.IVA ${p.partita_iva}` : 'P.IVA —'}
+                      {p.codice_fiscale ? ` · CF ${p.codice_fiscale}` : ''}
+                      {p.enabled ? '' : ' · disabilitato'}
+                    </p>
+                  </div>
+                  <div className="fatture-creds-badges">
+                    <span className={`fatture-creds-badge${p.password_set ? ' is-ok' : ''}`}>
+                      {p.password_set ? 'Password ok' : 'Password mancante'}
+                    </span>
+                    <span className={`fatture-creds-badge${p.pin_set ? ' is-ok' : ''}`}>
+                      {p.pin_set ? 'PIN ok' : 'PIN mancante'}
+                    </span>
+                  </div>
+                </header>
+                <div className="fatture-creds-fields">
+                  <label className="form-group">
+                    <span>Nuova password Fisconline</span>
+                    <input
+                      type="password"
+                      className="form-control"
+                      autoComplete="new-password"
+                      placeholder={p.password_set ? '•••••••• (lascia vuoto per non cambiare)' : 'Inserisci password'}
+                      value={draft.password}
+                      onChange={(e) => setDraft(p.id, 'password', e.target.value)}
+                    />
+                  </label>
+                  <label className="form-group">
+                    <span>Nuovo PIN</span>
+                    <input
+                      type="password"
+                      className="form-control"
+                      autoComplete="new-password"
+                      placeholder={p.pin_set ? '•••• (lascia vuoto per non cambiare)' : 'Inserisci PIN'}
+                      value={draft.pin}
+                      onChange={(e) => setDraft(p.id, 'pin', e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="fatture-creds-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => void saveCredentials(p.id)}
+                  >
+                    {busy ? 'Salvataggio…' : 'Aggiorna credenziali'}
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+          {!loading && profiles.length === 0 ? (
+            <p className="empty-state">Nessun profilo AdE trovato (controlla ADE_PROFILES_PATH / profiles.json).</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">Canale tecnico</h2>
         <ul className="fatture-suggestions">
           <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
-          <li>SDI_DEST_ABBA_KEYWORDS / SDI_DEST_ZANARDELLI_KEYWORDS</li>
-          <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received</li>
-          <li>AdE agent: backend/scripts/ade_sync_agent.py (chiavetta CNS → /sdi/receive)</li>
-          <li>Script ufficio: backend/scripts/run_ade_sync_ufficio.ps1</li>
+          <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received · PUT /ade/profiles/…/credentials</li>
+          <li>Agent: backend/scripts/ade_sync_agent.py</li>
         </ul>
-        <p className="fatture-note">La modifica da UI arriverà in una fase successiva; ora si configura nel .env del server.</p>
       </section>
-      <FattureStubCard
-        title="Evoluzione futura"
-        points={[
-          'Suggerimento centro di costo',
-          'Fatture ricorrenti e anomalie',
-          'Notifiche scadenze',
-          'Confronto con ordini e DDT',
-          'Classificazione spese con AI',
-        ]}
-      />
     </FatturePageShell>
   )
 }

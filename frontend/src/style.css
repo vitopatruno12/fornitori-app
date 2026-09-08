@@ -489,7 +489,7 @@ a:hover {
   right: -7px;
   min-width: 18px;
   height: 18px;
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 999px;
   background: #dc2626;
   color: #fff;
@@ -502,6 +502,7 @@ a:hover {
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(220, 38, 38, 0.45);
   animation: atlas-update-pulse 1.6s ease-in-out infinite;
+  font-variant-numeric: tabular-nums;
 }
 
 .atlas-update-btn--nav .atlas-update-badge {
@@ -8033,6 +8034,121 @@ select.form-control {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.fatture-header-row:has(.mastrini-hero-tools),
+.fatture-header-row:has(.fatture-hero-tools) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  align-items: start;
+  gap: 1rem 1.25rem;
+  flex-wrap: nowrap;
+}
+
+.fatture-header-row:has(.mastrini-hero-tools) > div:first-child,
+.fatture-header-row:has(.fatture-hero-tools) > div:first-child {
+  min-width: 0;
+}
+
+.fatture-hero-tools-locale {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: #fff;
+}
+
+.fatture-hero-tools-locale strong {
+  font-size: 0.95rem;
+}
+
+.fatture-hero-tools-msg {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.fatture-creds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+
+.fatture-creds-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  background: var(--bg-card);
+}
+
+.fatture-creds-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.fatture-creds-card-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.fatture-creds-card-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.fatture-creds-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+
+.fatture-creds-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.fatture-creds-badge.is-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.fatture-creds-fields {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.fatture-creds-fields .form-group {
+  margin: 0;
+}
+
+.fatture-creds-fields .form-group > span {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.fatture-creds-actions {
+  margin-top: 0.85rem;
+}
+
+@media (max-width: 820px) {
+  .fatture-header-row:has(.mastrini-hero-tools),
+  .fatture-header-row:has(.fatture-hero-tools) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fatture-subnav {

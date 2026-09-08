@@ -154,5 +154,100 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
   out = [p for p in profiles if p.enabled]
   if only:
     ids = {x.strip().lower() for x in only.split(",") if x.strip()}
-    out = [p for p in out if p.id.lower() in ids]
+    # ADE_ONLY_PROFILE include anche profili disabled (es. prova via_lattea)
+    out = [p for p in profiles if p.id.lower() in ids]
   return out
+
+
+def load_profiles_raw(path: Optional[Path] = None) -> List[dict]:
+  """Lista dict grezzi dal JSON profili (tutti, anche disabled)."""
+  p = path or default_profiles_path()
+  if not p.is_file():
+    return []
+  try:
+    raw = json.loads(p.read_text(encoding="utf-8"))
+  except Exception:
+    return []
+  if not isinstance(raw, list):
+    return []
+  return [item for item in raw if isinstance(item, dict) and str(item.get("id") or "").strip()]
+
+
+def profiles_public_list(path: Optional[Path] = None) -> List[dict]:
+  """Profili per UI: mai password/PIN in chiaro."""
+  out: List[dict] = []
+  for item in load_profiles_raw(path):
+    pid = str(item.get("id") or "").strip()
+    pwd = str(item.get("fisconline_password") or "").strip()
+    pin = str(item.get("fisconline_pin") or "").strip()
+    out.append(
+      {
+        "id": pid,
+        "label": str(item.get("label") or pid).strip(),
+        "sede": str(item.get("sede") or pid).strip(),
+        "codice_fiscale": str(item.get("codice_fiscale") or "").strip(),
+        "partita_iva": str(item.get("partita_iva") or item.get("piva") or "").strip(),
+        "auth_mode": str(item.get("auth_mode") or "cns").strip().lower() or "cns",
+        "utenza_mode": str(item.get("utenza_mode") or "auto").strip().lower() or "auto",
+        "enabled": bool(item.get("enabled", True)),
+        "password_set": bool(pwd),
+        "pin_set": bool(pin),
+      }
+    )
+  return out
+
+
+def update_fisconline_credentials(
+  profile_id: str,
+  *,
+  password: Optional[str] = None,
+  pin: Optional[str] = None,
+  path: Optional[Path] = None,
+) -> dict:
+  """
+  Aggiorna password/PIN Fisconline nel JSON profili.
+  Campi None = non modificare; stringa (anche vuota) = sovrascrivere.
+  """
+  p = path or default_profiles_path()
+  if not p.is_file():
+    raise FileNotFoundError(f"File profili AdE non trovato: {p}")
+
+  raw = json.loads(p.read_text(encoding="utf-8"))
+  if not isinstance(raw, list):
+    raise ValueError("profiles.json non è una lista")
+
+  pid = (profile_id or "").strip().lower()
+  found = None
+  for item in raw:
+    if not isinstance(item, dict):
+      continue
+    if str(item.get("id") or "").strip().lower() == pid:
+      found = item
+      break
+  if found is None:
+    raise KeyError(f"Profilo AdE non trovato: {profile_id}")
+
+  if password is not None:
+    found["fisconline_password"] = str(password)
+  if pin is not None:
+    found["fisconline_pin"] = str(pin)
+  # Preferisci Fisconline se stiamo salvando credenziali
+  if password is not None or pin is not None:
+    mode = str(found.get("auth_mode") or "").strip().lower()
+    if mode in ("", "cns"):
+      found["auth_mode"] = "fisconline"
+
+  tmp = p.with_suffix(p.suffix + ".tmp")
+  tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+  tmp.replace(p)
+
+  pwd = str(found.get("fisconline_password") or "").strip()
+  pin_v = str(found.get("fisconline_pin") or "").strip()
+  return {
+    "id": str(found.get("id") or "").strip(),
+    "label": str(found.get("label") or "").strip(),
+    "auth_mode": str(found.get("auth_mode") or "").strip(),
+    "password_set": bool(pwd),
+    "pin_set": bool(pin_v),
+    "updated": True,
+  }

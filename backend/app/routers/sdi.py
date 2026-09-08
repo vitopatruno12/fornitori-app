@@ -8,6 +8,7 @@ Canale SDI / Agenzia delle Entrate (senza intermediario Aruba).
 - GET  /sdi/invoices/received — elenco inbox per società
 - POST /sdi/invoices/assign — assegnazione società
 - GET  /sdi/invoices/{id}/download — scarica XML
+- GET  /sdi/invoices/{id}/pdf — anteprima PDF (allegato o generato)
 - GET  /sdi/status — stato canale
 """
 from __future__ import annotations
@@ -336,4 +337,20 @@ def download_sdi_invoice(invoice_id: int, db: Session = Depends(get_db)) -> Resp
     content=content,
     media_type="application/xml",
     headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+  )
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+def download_sdi_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)) -> Response:
+  """PDF inline: allegato embedded nell'XML oppure anteprima generata."""
+  from ..services.invoice_pdf_service import pdf_bytes_for_sdi_invoice
+
+  pdf, _source, err = pdf_bytes_for_sdi_invoice(db, invoice_id)
+  if err or not pdf:
+    raise HTTPException(status_code=404 if err == "Fattura SDI non trovata" else 400, detail=err or "PDF non disponibile")
+  filename = f"sdi-fattura-{invoice_id}.pdf"
+  return Response(
+    content=pdf,
+    media_type="application/pdf",
+    headers={"Content-Disposition": f'inline; filename="{filename}"'},
   )

@@ -2,10 +2,11 @@ import React from 'react'
 import { usePwaUpdate } from '../pwa/PwaUpdateContext.jsx'
 
 /**
- * Controlla e installa aggiornamenti PWA. Badge rosso quando una nuova versione è pronta.
+ * Controlla e installa aggiornamenti PWA.
+ * Badge rosso con contatore (1, 2, 3…) per i deploy non ancora installati.
  */
 export default function AtlasUpdateButton({ className = '', navStyle = false, iconOnly = false, onDone }) {
-  const { updateReady, checking, applying, checkForUpdate, applyUpdate } = usePwaUpdate()
+  const { updateReady, updateCount, checking, applying, checkForUpdate, applyUpdate } = usePwaUpdate()
 
   async function handleClick() {
     if (applying || checking) return
@@ -20,15 +21,24 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     }
   }
 
+  const pendingCount = updateReady ? Math.max(1, Number(updateCount) || 1) : 0
   const label = applying ? 'Aggiornamento…' : checking ? 'Controllo…' : 'Aggiornamento'
+  const showUpdateBadge = pendingCount > 0 && !applying && !checking
 
-  const showUpdateBadge = updateReady && !applying && !checking
-
-  const title = updateReady
-    ? 'Nuova versione pronta: clicca per installare l’aggiornamento'
+  const title = showUpdateBadge
+    ? pendingCount === 1
+      ? 'Nuova versione pronta: clicca per installare l’aggiornamento'
+      : `${pendingCount} aggiornamenti pronti: clicca per installarli`
     : 'Controlla se è disponibile un aggiornamento dell’app'
 
-  const ariaLabel = updateReady && !applying && !checking ? 'Installa aggiornamento' : label
+  const ariaLabel = showUpdateBadge
+    ? pendingCount === 1
+      ? 'Installa aggiornamento'
+      : `Installa ${pendingCount} aggiornamenti`
+    : label
+
+  const badgeAria =
+    pendingCount === 1 ? '1 aggiornamento disponibile' : `${pendingCount} aggiornamenti disponibili`
 
   if (iconOnly) {
     return (
@@ -38,15 +48,15 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
         onClick={() => void handleClick()}
         disabled={applying || checking}
         title={title}
-        aria-label={label}
+        aria-label={ariaLabel}
         aria-live="polite"
       >
         <span className="atlas-update-btn-icon" aria-hidden>
           ↻
         </span>
         {showUpdateBadge ? (
-          <span className="atlas-update-badge" aria-label="Aggiornamento disponibile">
-            1
+          <span className="atlas-update-badge" aria-label={badgeAria}>
+            {pendingCount}
           </span>
         ) : null}
       </button>
@@ -65,8 +75,8 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     >
       <span className="atlas-update-btn-label">{label}</span>
       {showUpdateBadge ? (
-        <span className="atlas-update-badge" aria-label="Aggiornamento disponibile">
-          1
+        <span className="atlas-update-badge" aria-label={badgeAria}>
+          {pendingCount}
         </span>
       ) : null}
     </button>

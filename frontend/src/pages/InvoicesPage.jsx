@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
+import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { apiUrl } from '../services/api'
 import { FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 
@@ -634,11 +633,12 @@ export default function InvoicesPage() {
                     <td onClick={e => e.stopPropagation()}>
                       {inv.file_path ? (
                         <a
-                          href={apiUrl(`/${inv.file_path}`)}
+                          href={getInvoicePdfUrl(inv.id)}
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-primary"
                           style={{ textDecoration: 'none' }}
+                          title="Apri PDF (allegato FatturaPA o anteprima generata)"
                         >
                           PDF
                         </a>

@@ -21,7 +21,7 @@ class InvoiceParser:
   def parse(self, xml_content: str) -> dict:
     if not xml_content or not str(xml_content).strip():
       raise ValueError("XML vuoto")
-    if "<FatturaElettronica" not in xml_content:
+    if "FatturaElettronica" not in xml_content:
       raise ValueError("XML non valido o non FatturaPA")
 
     try:

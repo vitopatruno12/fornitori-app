@@ -78,6 +78,11 @@ export function getInvoicesExportUrl(supplierId) {
   return `${API_BASE_URL}/invoices/export/csv${q ? '?' + q : ''}`
 }
 
+/** Anteprima PDF fattura registrata (allegato FatturaPA o PDF generato dall'XML). */
+export function getInvoicePdfUrl(invoiceId) {
+  return apiUrl(`/invoices/${invoiceId}/pdf`)
+}
+
 /** Import XML FatturaPA → fatture passive Atlas (senza SdI). */
 export async function importInvoiceXml(file) {
   const formData = new FormData()
@@ -147,11 +152,38 @@ export function getSdiInvoiceDownloadUrl(invoiceId) {
   return apiUrl(`/sdi/invoices/${invoiceId}/download`)
 }
 
+/** Anteprima PDF fattura SDI (allegato embedded o generato dall'XML). */
+export function getSdiInvoicePdfUrl(invoiceId) {
+  return apiUrl(`/sdi/invoices/${invoiceId}/pdf`)
+}
+
 export async function assignSdiInvoiceSection(invoiceId, section) {
   const search = new URLSearchParams({
     invoice_id: String(invoiceId),
     section: String(section),
   })
   return apiFetch(`/sdi/invoices/assign?${search.toString()}`, { method: 'POST' })
+}
+
+/** Profili AdE (password/PIN mascherati). */
+export async function fetchAdeProfiles() {
+  return apiFetch('/ade/profiles')
+}
+
+/**
+ * Aggiorna password e/o PIN Fisconline per un profilo.
+ * Campi undefined/null non vengono inviati (nessuna modifica).
+ */
+export async function updateAdeFisconlineCredentials(profileId, { password, pin } = {}) {
+  const body = {}
+  if (password != null && String(password).length > 0) body.fisconline_password = String(password)
+  if (pin != null && String(pin).length > 0) body.fisconline_pin = String(pin)
+  if (!Object.keys(body).length) {
+    throw new Error('Inserisci almeno password o PIN')
+  }
+  return apiFetch(`/ade/profiles/${encodeURIComponent(profileId)}/credentials`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
 }
 

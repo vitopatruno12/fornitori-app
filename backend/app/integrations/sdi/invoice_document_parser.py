@@ -43,7 +43,7 @@ def parse_fatturapa_document(xml_text: str) -> Dict[str, Any]:
   Estrae fornitore, cliente, documento, righe e riepilogo IVA.
   Solleva ValueError se l'XML non è FatturaPA.
   """
-  if not xml_text or "<FatturaElettronica" not in xml_text:
+  if not xml_text or "FatturaElettronica" not in xml_text:
     raise ValueError("XML non valido o non FatturaPA")
   try:
     root = ET.fromstring(xml_text)

@@ -115,7 +115,7 @@ def parse_fatturapa(xml_text: str) -> Dict[str, Any]:
     Restituisce campi normalizzati per DB/classificazione.
     Solleva ValueError se l'XML non è una FatturaPA riconoscibile.
     """
-    if not xml_text or "<FatturaElettronica" not in xml_text:
+    if not xml_text or "FatturaElettronica" not in xml_text:
         raise ValueError("XML non valido o non FatturaPA")
     try:
         root = ET.fromstring(xml_text)

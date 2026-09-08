@@ -21,6 +21,18 @@ from .pos_store_catalog import (  # noqa: F401 — re-export
     resolve_store,
 )
 
+# Vendita/stampa non fiscale EasyRetail (TIPODOCUMENTO=VEA) — fuori chiusura.
+NON_FISCAL_PAYMENT_TYPES = frozenset({"quote", "non_fiscal", "vea", "preventivo"})
+
+
+def _is_non_fiscal_receipt(payment_type: Optional[str], *, payment_raw: Optional[str] = None) -> bool:
+    pt = (payment_type or "").strip().lower()
+    if pt in NON_FISCAL_PAYMENT_TYPES:
+        return True
+    raw = (payment_raw or "").strip().upper()
+    return raw == "VEA" or raw.startswith("VEA:")
+
+
 _DATE_HEADERS = (
     "dataora",
     "data_ora",
@@ -588,6 +600,8 @@ def load_pos_visit_buckets(
     for r in q.all():
         if not r.receipt_at:
             continue
+        if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
+            continue
         ext = (r.external_id or "").strip()
         mid_r = r.model_id or "unknown"
         dedupe_key = (mid_r, ext) if ext else (mid_r, r.id)
@@ -728,6 +742,8 @@ def load_pos_daily_incasso(
     seen_external: set = set()
     for r in q.all():
         if not r.receipt_at:
+            continue
+        if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
             continue
         # Evita doppi conteggi se lo stesso scontrino esiste con store_key diversi
         ext = (r.external_id or "").strip()
@@ -893,6 +909,8 @@ def payment_summary(
         "mixed_eur": 0.0,
         "unknown_eur": 0.0,
         "other_eur": 0.0,
+        "quote_receipts": 0,
+        "quote_eur": 0.0,
     }
     by_type: Dict[str, int] = defaultdict(int)
     by_store: Dict[str, Dict[str, float]] = defaultdict(
@@ -906,11 +924,16 @@ def payment_summary(
     )
 
     for r in q.all():
-        totals["receipts"] += 1
         amount = float(r.amount_eur or 0)
-        totals["amount_eur"] += amount
         ptype = (r.payment_type or "unknown").strip() or "unknown"
         by_type[ptype] += 1
+        if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
+            totals["quote_receipts"] += 1
+            totals["quote_eur"] += amount
+            continue
+
+        totals["receipts"] += 1
+        totals["amount_eur"] += amount
 
         cash = float(r.cash_amount_eur) if r.cash_amount_eur is not None else 0.0
         card = float(r.card_amount_eur) if r.card_amount_eur is not None else 0.0
