@@ -737,13 +737,13 @@ def load_pos_daily_incasso(
             "movimenti": 0,
             "cash_eur": Decimal("0.00"),
             "card_eur": Decimal("0.00"),
+            "quote_eur": Decimal("0.00"),
+            "quote_receipts": 0,
         }
     )
     seen_external: set = set()
     for r in q.all():
         if not r.receipt_at:
-            continue
-        if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
             continue
         # Evita doppi conteggi se lo stesso scontrino esiste con store_key diversi
         ext = (r.external_id or "").strip()
@@ -767,8 +767,13 @@ def load_pos_daily_incasso(
             if (r.receipt_at.date().isoformat(), str(amt), slot) in zan_near:
                 continue
         day = r.receipt_at.date()
-        by_day[day]["movimenti"] += 1
         amount = Decimal(str(r.amount_eur or 0)).quantize(Decimal("0.01"))
+        if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
+            by_day[day]["quote_receipts"] += 1
+            if r.amount_eur is not None:
+                by_day[day]["quote_eur"] = (by_day[day]["quote_eur"] + amount).quantize(Decimal("0.01"))
+            continue
+        by_day[day]["movimenti"] += 1
         if r.amount_eur is not None:
             by_day[day]["incasso"] = (by_day[day]["incasso"] + amount).quantize(Decimal("0.01"))
         ptype = (r.payment_type or "unknown").strip() or "unknown"

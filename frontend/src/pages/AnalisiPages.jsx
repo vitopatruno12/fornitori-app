@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   AnalisiPageShell,
   AnalisiSyncStatus,
+  AnalisiIncassoAttrPanel,
+  AnalisiAttrTag,
   HeatmapGrid,
   MachineCompareCharts,
-  PaymentSplitSummary,
   PopularTimesChart,
   SeriesBars,
   TopSlotsColumnChart,
@@ -32,6 +33,42 @@ const LOCALE_KPI_ALL = 'all'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
 const ANALISI_MORNING_HOUR = 7
 const ANALISI_BACKGROUND_CHECK_MS = 60 * 1000 // 1 min: controlla se serve refresh
+
+function isoDate(d) {
+  return d.toISOString().slice(0, 10)
+}
+
+function todayIsoLocal() {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  return isoDate(d)
+}
+
+/** Range date allineato alle pagine giornaliero / settimanale / mensile. */
+function analisiPeriodRange({ days, weeks, months } = {}) {
+  const to = new Date()
+  to.setHours(12, 0, 0, 0)
+  const from = new Date(to)
+  if (days) from.setDate(from.getDate() - (Number(days) - 1))
+  else if (weeks) from.setDate(from.getDate() - Number(weeks) * 7 + 1)
+  else if (months) from.setMonth(from.getMonth() - (Number(months) - 1))
+  return { dateFrom: isoDate(from), dateTo: isoDate(to) }
+}
+
+function splitFromPayOrAnalytics(payData, analyticsData) {
+  const totals = payData?.totals && typeof payData.totals === 'object' ? payData.totals : null
+  const split = analyticsData?.payment_split && typeof analyticsData.payment_split === 'object'
+    ? analyticsData.payment_split
+    : null
+  return {
+    amountEur: Number(totals?.amount_eur ?? split?.amount_eur ?? analyticsData?.total_incasso ?? 0),
+    cashEur: Number(totals?.cash_eur ?? split?.cash_eur ?? 0),
+    cardEur: Number(totals?.card_eur ?? split?.card_eur ?? 0),
+    receipts: Number(totals?.receipts ?? split?.receipts ?? 0),
+    quoteEur: Number(totals?.quote_eur ?? split?.quote_eur ?? 0),
+    quoteReceipts: Number(totals?.quote_receipts ?? split?.quote_receipts ?? 0),
+  }
+}
 
 function readAnalisiCache(cacheKey) {
   try {
@@ -363,11 +400,24 @@ export function AnalisiDashboardPage() {
 
 export function AnalisiGiornalieroPage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
+  const range = React.useMemo(() => analisiPeriodRange({ days: 30 }), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `daily:days=30:${modelId}`,
     () => fetchAnalyticsDaily({ days: 30, modelId, location }),
     [modelId, location],
   )
+  const { data: payData } = useAnalisiFetch(
+    `pay-daily:30:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    () =>
+      fetchPosPaymentSummary({
+        modelId: modelId || undefined,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+      }),
+    [modelId, range.dateFrom, range.dateTo],
+  )
+  const kpis = splitFromPayOrAnalytics(payData, data)
+
   return (
     <AnalisiPageShell
       title={`Andamento giornaliero — ${machineLabel}`}
@@ -385,14 +435,20 @@ export function AnalisiGiornalieroPage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <DataNote text={data?.data_note} />
-      {data && (
-        <section className="card analisi-panel">
-          <h2 className="analisi-panel-title">Flusso giornaliero · {machineLabel}</h2>
-          <p className="analisi-total">
-            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
+      <AnalisiIncassoAttrPanel
+        title={`Incasso periodo · ${machineLabel}`}
+        hint={`Ultimi 30 giorni (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
+        amountLabel="Incasso 30 giorni"
+        {...kpis}
+      />
+      {data ? (
+        <section className="card analisi-panel analisi-attr-panel">
+          <AnalisiAttrTag>Attributo · € per giorno</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Incasso giorno per giorno · {machineLabel}</h2>
+          <p className="analisi-machine-scope">
+            Barre = € contabilizzati per giornata · contanti (verde) e carta/POS (blu). I preventivi non
+            sono in queste barre.
           </p>
-          <PaymentSplitSummary split={data.payment_split} />
           <SeriesBars
             splitPayments
             rows={(data.rows || []).map((r) => ({
@@ -401,18 +457,31 @@ export function AnalisiGiornalieroPage() {
             }))}
           />
         </section>
-      )}
+      ) : null}
     </AnalisiPageShell>
   )
 }
 
 export function AnalisiSettimanalePage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
+  const range = React.useMemo(() => analisiPeriodRange({ weeks: 12 }), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `weekly:weeks=12:${modelId}`,
     () => fetchAnalyticsWeekly({ weeks: 12, modelId, location }),
     [modelId, location],
   )
+  const { data: payData } = useAnalisiFetch(
+    `pay-weekly:12:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    () =>
+      fetchPosPaymentSummary({
+        modelId: modelId || undefined,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+      }),
+    [modelId, range.dateFrom, range.dateTo],
+  )
+  const kpis = splitFromPayOrAnalytics(payData, data)
+
   return (
     <AnalisiPageShell
       title={`Andamento settimanale — ${machineLabel}`}
@@ -430,28 +499,47 @@ export function AnalisiSettimanalePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <DataNote text={data?.data_note} />
-      {data && (
-        <section className="card analisi-panel">
-          <h2 className="analisi-panel-title">Flusso settimanale · {machineLabel}</h2>
-          <p className="analisi-total">
-            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
+      <AnalisiIncassoAttrPanel
+        title={`Incasso periodo · ${machineLabel}`}
+        hint={`Ultime 12 settimane (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
+        amountLabel="Incasso 12 settimane"
+        {...kpis}
+      />
+      {data ? (
+        <section className="card analisi-panel analisi-attr-panel">
+          <AnalisiAttrTag>Attributo · € per settimana</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Incasso settimana per settimana · {machineLabel}</h2>
+          <p className="analisi-machine-scope">
+            Barre = € contabilizzati per settimana · contanti / carta-POS. Preventivi in attributo dedicato
+            sopra.
           </p>
-          <PaymentSplitSummary split={data.payment_split} />
           <SeriesBars splitPayments rows={data.rows || []} labelKey="label" />
         </section>
-      )}
+      ) : null}
     </AnalisiPageShell>
   )
 }
 
 export function AnalisiMensilePage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
+  const range = React.useMemo(() => analisiPeriodRange({ months: 6 }), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `monthly:months=6:${modelId}`,
     () => fetchAnalyticsMonthly({ months: 6, modelId, location }),
     [modelId, location],
   )
+  const { data: payData } = useAnalisiFetch(
+    `pay-monthly:6:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    () =>
+      fetchPosPaymentSummary({
+        modelId: modelId || undefined,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+      }),
+    [modelId, range.dateFrom, range.dateTo],
+  )
+  const kpis = splitFromPayOrAnalytics(payData, data)
+
   return (
     <AnalisiPageShell
       title={`Andamento mensile — ${machineLabel}`}
@@ -469,24 +557,29 @@ export function AnalisiMensilePage() {
     >
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
-      <DataNote text={data?.data_note} />
-      {data && (
-        <section className="card analisi-panel">
-          <h2 className="analisi-panel-title">Flusso mensile · {machineLabel}</h2>
-          <p className="analisi-total">
-            Totale periodo ({machineLabel}): <strong>{eur(data.total_incasso)}</strong>
+      <AnalisiIncassoAttrPanel
+        title={`Incasso periodo · ${machineLabel}`}
+        hint={`Ultimi 6 mesi (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
+        amountLabel="Incasso 6 mesi"
+        {...kpis}
+      />
+      {data ? (
+        <section className="card analisi-panel analisi-attr-panel">
+          <AnalisiAttrTag>Attributo · € per mese</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Incasso mese per mese · {machineLabel}</h2>
+          <p className="analisi-machine-scope">
+            Barre = € contabilizzati per mese · contanti / carta-POS. Preventivi non fiscali separati sopra.
           </p>
-          <PaymentSplitSummary split={data.payment_split} />
           <SeriesBars splitPayments rows={data.rows || []} labelKey="month_label" />
         </section>
-      )}
+      ) : null}
     </AnalisiPageShell>
   )
 }
 
 export function AnalisiOrariaPage() {
   const { modelId, setModelId, machineLabel } = useAnalisiMachineFilter()
-  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const todayIso = React.useMemo(() => todayIsoLocal(), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `hourly:months=3:${modelId}`,
     () => fetchAnalyticsHourly({ months: 3, modelId }),
@@ -503,12 +596,8 @@ export function AnalisiOrariaPage() {
     [modelId, todayIso],
   )
   const machines = Array.isArray(data?.by_machine) ? data.by_machine : []
-  const totals = payToday?.totals && typeof payToday.totals === 'object' ? payToday.totals : null
+  const kpis = splitFromPayOrAnalytics(payToday, null)
   const hourRows = Array.isArray(payToday?.by_hour) ? payToday.by_hour : []
-  const totalDay = Number(totals?.amount_eur || 0)
-  const cashDay = Number(totals?.cash_eur || 0)
-  const cardDay = Number(totals?.card_eur || 0)
-  const receiptsDay = Number(totals?.receipts || 0)
   const peakHour = hourRows.reduce(
     (best, row) => {
       const v = Number(row?.amount_eur || 0)
@@ -539,34 +628,15 @@ export function AnalisiOrariaPage() {
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
 
-      <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
-        <p className="analisi-attr-tag">Attributo · Incasso giornata</p>
-        <h2 className="analisi-panel-title">Saldo intera giornata · {machineLabel}</h2>
-        <p className="analisi-machine-scope">
-          Totale € di oggi da scontrini EasyRetail (agent cassa). Non è il flusso visite e non è la media storica.
-        </p>
-        <div className="dashboard-kpi-grid analisi-kpi-grid">
-          <div className="dashboard-kpi dashboard-kpi--primary">
-            <div className="dashboard-kpi-label">Incasso giornata</div>
-            <div className="dashboard-kpi-value">{eur(totalDay)}</div>
-          </div>
-          <div className="dashboard-kpi dashboard-kpi--secondary">
-            <div className="dashboard-kpi-label">Pagamenti contanti</div>
-            <div className="dashboard-kpi-value">{eur(cashDay)}</div>
-          </div>
-          <div className="dashboard-kpi dashboard-kpi--secondary">
-            <div className="dashboard-kpi-label">Pagamenti carta/POS</div>
-            <div className="dashboard-kpi-value">{eur(cardDay)}</div>
-          </div>
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi-label">Scontrini oggi</div>
-            <div className="dashboard-kpi-value">{receiptsDay}</div>
-          </div>
-        </div>
-      </section>
+      <AnalisiIncassoAttrPanel
+        title={`Saldo intera giornata · ${machineLabel}`}
+        hint="Totale € di oggi da scontrini EasyRetail (agent cassa). Non è il flusso visite e non è la media storica."
+        amountLabel="Incasso giornata"
+        {...kpis}
+      />
 
       <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
-        <p className="analisi-attr-tag">Attributo · € per fascia oraria</p>
+        <AnalisiAttrTag>Attributo · € per fascia oraria</AnalisiAttrTag>
         <h2 className="analisi-panel-title">Incasso per ora (oggi)</h2>
         <p className="analisi-machine-scope">
           Quanto hai incassato in ogni ora di oggi · contanti (verde) e carta/POS (blu). Picco €:{' '}
@@ -589,7 +659,7 @@ export function AnalisiOrariaPage() {
 
       {data ? (
         <section className="card analisi-panel analisi-attr-panel">
-          <p className="analisi-attr-tag">Attributo · Fasce con maggior flusso</p>
+          <AnalisiAttrTag>Attributo · Fasce con maggior flusso</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Orari di punta (visite / traffico)</h2>
           <p className="analisi-machine-scope">
             Qui si guarda il <strong>flusso clienti</strong> (quando passa più gente), non il saldo € della
@@ -612,7 +682,7 @@ export function AnalisiOrariaPage() {
             <div className="analisi-machine-grid" style={{ marginTop: '1rem' }}>
               {machines.map((m) => (
                 <section key={m.model_id} className="card analisi-panel analisi-machine-card">
-                  <p className="analisi-attr-tag">Flusso · {m.model_label}</p>
+                  <AnalisiAttrTag>Flusso · {m.model_label}</AnalisiAttrTag>
                   <h2 className="analisi-panel-title">{m.model_label}</h2>
                   <HeatmapGrid
                     hours={m.hours || data.hours}

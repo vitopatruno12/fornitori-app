@@ -384,14 +384,82 @@ export function PaymentSplitSummary({ split }) {
   if (!split) return null
   const cash = Number(split.cash_eur || 0)
   const card = Number(split.card_eur || 0)
-  if (cash <= 0 && card <= 0) return null
+  const quote = Number(split.quote_eur || 0)
+  if (cash <= 0 && card <= 0 && quote <= 0) return null
   return (
     <p className="analisi-machine-scope" role="status">
       Contanti <strong>{eur(cash)}</strong>
       {' · '}
       Carta/POS <strong>{eur(card)}</strong>
+      {quote > 0 ? (
+        <>
+          {' · '}
+          Preventivi/non contabilizzati <strong>{eur(quote)}</strong>
+        </>
+      ) : null}
       {Number(split.receipts || 0) > 0 ? ` · ${split.receipts} scontrini` : ''}
     </p>
+  )
+}
+
+/** Etichetta attributo sopra i pannelli Analisi. */
+export function AnalisiAttrTag({ children }) {
+  return <p className="analisi-attr-tag">{children}</p>
+}
+
+/** KPI incasso periodo: totale, contanti, carta/POS, scontrini (+ preventivi opzionale). */
+export function AnalisiIncassoAttrPanel({
+  title,
+  hint,
+  amountEur = 0,
+  cashEur = 0,
+  cardEur = 0,
+  receipts = 0,
+  quoteEur = 0,
+  quoteReceipts = 0,
+  amountLabel = 'Incasso periodo',
+}) {
+  return (
+    <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
+      <AnalisiAttrTag>Attributo · Incasso contabilizzato</AnalisiAttrTag>
+      <h2 className="analisi-panel-title">{title}</h2>
+      {hint ? <p className="analisi-machine-scope">{hint}</p> : null}
+      <div className="dashboard-kpi-grid analisi-kpi-grid">
+        <div className="dashboard-kpi dashboard-kpi--primary">
+          <div className="dashboard-kpi-label">{amountLabel}</div>
+          <div className="dashboard-kpi-value">{eur(amountEur)}</div>
+        </div>
+        <div className="dashboard-kpi dashboard-kpi--secondary">
+          <div className="dashboard-kpi-label">Pagamenti contanti</div>
+          <div className="dashboard-kpi-value">{eur(cashEur)}</div>
+        </div>
+        <div className="dashboard-kpi dashboard-kpi--secondary">
+          <div className="dashboard-kpi-label">Pagamenti carta/POS</div>
+          <div className="dashboard-kpi-value">{eur(cardEur)}</div>
+        </div>
+        <div className="dashboard-kpi">
+          <div className="dashboard-kpi-label">Scontrini fiscali</div>
+          <div className="dashboard-kpi-value">{Number(receipts) || 0}</div>
+        </div>
+      </div>
+      <section className="analisi-quote-attr" style={{ marginTop: '0.85rem' }}>
+        <AnalisiAttrTag>Attributo · Non contabilizzati / preventivi</AnalisiAttrTag>
+        <p className="analisi-machine-scope" style={{ marginBottom: '0.45rem' }}>
+          Documenti VEA / preventivo EasyRetail: fuori chiusura fiscale, non entrano nell’incasso
+          contabilizzato sopra.
+        </p>
+        <div className="dashboard-kpi-grid analisi-kpi-grid">
+          <div className="dashboard-kpi dashboard-kpi--warn">
+            <div className="dashboard-kpi-label">Preventivi / non fiscali</div>
+            <div className="dashboard-kpi-value">{eur(quoteEur)}</div>
+          </div>
+          <div className="dashboard-kpi">
+            <div className="dashboard-kpi-label">N. preventivi</div>
+            <div className="dashboard-kpi-value">{Number(quoteReceipts) || 0}</div>
+          </div>
+        </div>
+      </section>
+    </section>
   )
 }
 

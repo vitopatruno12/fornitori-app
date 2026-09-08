@@ -3162,7 +3162,8 @@ select.form-control {
 }
 
 .dashboard-kpi--warn {
-  border-left: 3px solid var(--warning);
+  border-color: #fdba74;
+  background: linear-gradient(145deg, #fff7ed 0%, #fff 100%);
 }
 
 .dashboard-kpi--danger {

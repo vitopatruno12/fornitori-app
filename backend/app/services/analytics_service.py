@@ -505,16 +505,22 @@ def _pos_day_card(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
 def _payment_split_from_pos_daily(pos_daily: Dict[date, Dict[str, Any]]) -> dict:
     cash = Decimal("0.00")
     card = Decimal("0.00")
+    quote = Decimal("0.00")
     receipts = 0
+    quote_receipts = 0
     for hit in (pos_daily or {}).values():
         cash += _dec(hit.get("cash_eur", 0))
         card += _dec(hit.get("card_eur", 0))
+        quote += _dec(hit.get("quote_eur", 0))
         receipts += int(hit.get("movimenti") or 0)
+        quote_receipts += int(hit.get("quote_receipts") or 0)
     return {
         "receipts": receipts,
         "cash_eur": cash,
         "card_eur": card,
         "amount_eur": _dec(cash + card),
+        "quote_eur": quote,
+        "quote_receipts": quote_receipts,
     }
 
 
@@ -669,6 +675,8 @@ def _snapshot_from_events(
         "cash_eur": Decimal("0.00"),
         "card_eur": Decimal("0.00"),
         "amount_eur": Decimal("0.00"),
+        "quote_eur": Decimal("0.00"),
+        "quote_receipts": 0,
     }
     peak_message = (
         f"Picco previsto {label_prefix}: {WEEKDAY_LABELS_IT[today_wd].lower()} "
