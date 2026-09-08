@@ -34,39 +34,55 @@ const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
 const ANALISI_MORNING_HOUR = 7
 const ANALISI_BACKGROUND_CHECK_MS = 60 * 1000 // 1 min: controlla se serve refresh
 
-function isoDate(d) {
-  return d.toISOString().slice(0, 10)
+function isoDateLocal(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function todayIsoLocal() {
   const d = new Date()
   d.setHours(12, 0, 0, 0)
-  return isoDate(d)
+  return isoDateLocal(d)
 }
 
-/** Range date allineato alle pagine giornaliero / settimanale / mensile. */
-function analisiPeriodRange({ days, weeks, months } = {}) {
+function startOfWeekMonday(d = new Date()) {
+  const x = new Date(d)
+  x.setHours(12, 0, 0, 0)
+  const offset = (x.getDay() + 6) % 7 // lunedì = 0
+  x.setDate(x.getDate() - offset)
+  return x
+}
+
+function startOfMonth(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0, 0)
+}
+
+/**
+ * Range KPI dell'attributo in cima (diverso per pagina):
+ * - day: solo oggi
+ * - week: settimana corrente (lun → oggi)
+ * - month: mese corrente (1 → oggi)
+ */
+function analisiFocusRange(kind) {
   const to = new Date()
   to.setHours(12, 0, 0, 0)
-  const from = new Date(to)
-  if (days) from.setDate(from.getDate() - (Number(days) - 1))
-  else if (weeks) from.setDate(from.getDate() - Number(weeks) * 7 + 1)
-  else if (months) from.setMonth(from.getMonth() - (Number(months) - 1))
-  return { dateFrom: isoDate(from), dateTo: isoDate(to) }
+  let from = new Date(to)
+  if (kind === 'week') from = startOfWeekMonday(to)
+  else if (kind === 'month') from = startOfMonth(to)
+  return { dateFrom: isoDateLocal(from), dateTo: isoDateLocal(to), kind }
 }
 
-function splitFromPayOrAnalytics(payData, analyticsData) {
+function kpisFromPaySummary(payData) {
   const totals = payData?.totals && typeof payData.totals === 'object' ? payData.totals : null
-  const split = analyticsData?.payment_split && typeof analyticsData.payment_split === 'object'
-    ? analyticsData.payment_split
-    : null
   return {
-    amountEur: Number(totals?.amount_eur ?? split?.amount_eur ?? analyticsData?.total_incasso ?? 0),
-    cashEur: Number(totals?.cash_eur ?? split?.cash_eur ?? 0),
-    cardEur: Number(totals?.card_eur ?? split?.card_eur ?? 0),
-    receipts: Number(totals?.receipts ?? split?.receipts ?? 0),
-    quoteEur: Number(totals?.quote_eur ?? split?.quote_eur ?? 0),
-    quoteReceipts: Number(totals?.quote_receipts ?? split?.quote_receipts ?? 0),
+    amountEur: Number(totals?.amount_eur || 0),
+    cashEur: Number(totals?.cash_eur || 0),
+    cardEur: Number(totals?.card_eur || 0),
+    receipts: Number(totals?.receipts || 0),
+    quoteEur: Number(totals?.quote_eur || 0),
+    quoteReceipts: Number(totals?.quote_receipts || 0),
   }
 }
 
@@ -400,23 +416,23 @@ export function AnalisiDashboardPage() {
 
 export function AnalisiGiornalieroPage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
-  const range = React.useMemo(() => analisiPeriodRange({ days: 30 }), [])
+  const focus = React.useMemo(() => analisiFocusRange('day'), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `daily:days=30:${modelId}`,
     () => fetchAnalyticsDaily({ days: 30, modelId, location }),
     [modelId, location],
   )
   const { data: payData } = useAnalisiFetch(
-    `pay-daily:30:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    `pay-focus:day:${modelId}:${focus.dateFrom}:${focus.dateTo}`,
     () =>
       fetchPosPaymentSummary({
         modelId: modelId || undefined,
-        dateFrom: range.dateFrom,
-        dateTo: range.dateTo,
+        dateFrom: focus.dateFrom,
+        dateTo: focus.dateTo,
       }),
-    [modelId, range.dateFrom, range.dateTo],
+    [modelId, focus.dateFrom, focus.dateTo],
   )
-  const kpis = splitFromPayOrAnalytics(payData, data)
+  const kpis = kpisFromPaySummary(payData)
 
   return (
     <AnalisiPageShell
@@ -436,18 +452,18 @@ export function AnalisiGiornalieroPage() {
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
-        title={`Incasso periodo · ${machineLabel}`}
-        hint={`Ultimi 30 giorni (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
-        amountLabel="Incasso 30 giorni"
+        title={`Incasso di oggi · ${machineLabel}`}
+        hint={`Solo la giornata ${focus.dateTo} (non gli ultimi 30 giorni). Contanti/POS fiscali vs preventivi non contabilizzati.`}
+        amountLabel="Incasso oggi"
         {...kpis}
       />
       {data ? (
         <section className="card analisi-panel analisi-attr-panel">
-          <AnalisiAttrTag>Attributo · € per giorno</AnalisiAttrTag>
-          <h2 className="analisi-panel-title">Incasso giorno per giorno · {machineLabel}</h2>
+          <AnalisiAttrTag>Attributo · Storico € per giorno</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Ultimi 30 giorni · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre = € contabilizzati per giornata · contanti (verde) e carta/POS (blu). I preventivi non
-            sono in queste barre.
+            Barre sotto = storico giorno per giorno (non il totale di oggi sopra). Contanti / carta-POS;
+            i preventivi restano nell’attributo dedicato.
           </p>
           <SeriesBars
             splitPayments
@@ -464,23 +480,23 @@ export function AnalisiGiornalieroPage() {
 
 export function AnalisiSettimanalePage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
-  const range = React.useMemo(() => analisiPeriodRange({ weeks: 12 }), [])
+  const focus = React.useMemo(() => analisiFocusRange('week'), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `weekly:weeks=12:${modelId}`,
     () => fetchAnalyticsWeekly({ weeks: 12, modelId, location }),
     [modelId, location],
   )
   const { data: payData } = useAnalisiFetch(
-    `pay-weekly:12:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    `pay-focus:week:${modelId}:${focus.dateFrom}:${focus.dateTo}`,
     () =>
       fetchPosPaymentSummary({
         modelId: modelId || undefined,
-        dateFrom: range.dateFrom,
-        dateTo: range.dateTo,
+        dateFrom: focus.dateFrom,
+        dateTo: focus.dateTo,
       }),
-    [modelId, range.dateFrom, range.dateTo],
+    [modelId, focus.dateFrom, focus.dateTo],
   )
-  const kpis = splitFromPayOrAnalytics(payData, data)
+  const kpis = kpisFromPaySummary(payData)
 
   return (
     <AnalisiPageShell
@@ -500,18 +516,17 @@ export function AnalisiSettimanalePage() {
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
-        title={`Incasso periodo · ${machineLabel}`}
-        hint={`Ultime 12 settimane (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
-        amountLabel="Incasso 12 settimane"
+        title={`Incasso settimana corrente · ${machineLabel}`}
+        hint={`Da lunedì ${focus.dateFrom} a oggi ${focus.dateTo}. Diverso dall’incasso giornaliero e dal mese.`}
+        amountLabel="Incasso settimana"
         {...kpis}
       />
       {data ? (
         <section className="card analisi-panel analisi-attr-panel">
-          <AnalisiAttrTag>Attributo · € per settimana</AnalisiAttrTag>
-          <h2 className="analisi-panel-title">Incasso settimana per settimana · {machineLabel}</h2>
+          <AnalisiAttrTag>Attributo · Storico € per settimana</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Ultime 12 settimane · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre = € contabilizzati per settimana · contanti / carta-POS. Preventivi in attributo dedicato
-            sopra.
+            Barre = confronto settimane (non il totale della settimana corrente sopra).
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="label" />
         </section>
@@ -522,23 +537,23 @@ export function AnalisiSettimanalePage() {
 
 export function AnalisiMensilePage() {
   const { modelId, setModelId, location, machineLabel } = useAnalisiMachineFilter()
-  const range = React.useMemo(() => analisiPeriodRange({ months: 6 }), [])
+  const focus = React.useMemo(() => analisiFocusRange('month'), [])
   const { data, loading, refreshing, error, lastSyncAt, refreshNow } = useAnalisiFetch(
     `monthly:months=6:${modelId}`,
     () => fetchAnalyticsMonthly({ months: 6, modelId, location }),
     [modelId, location],
   )
   const { data: payData } = useAnalisiFetch(
-    `pay-monthly:6:${modelId}:${range.dateFrom}:${range.dateTo}`,
+    `pay-focus:month:${modelId}:${focus.dateFrom}:${focus.dateTo}`,
     () =>
       fetchPosPaymentSummary({
         modelId: modelId || undefined,
-        dateFrom: range.dateFrom,
-        dateTo: range.dateTo,
+        dateFrom: focus.dateFrom,
+        dateTo: focus.dateTo,
       }),
-    [modelId, range.dateFrom, range.dateTo],
+    [modelId, focus.dateFrom, focus.dateTo],
   )
-  const kpis = splitFromPayOrAnalytics(payData, data)
+  const kpis = kpisFromPaySummary(payData)
 
   return (
     <AnalisiPageShell
@@ -558,17 +573,17 @@ export function AnalisiMensilePage() {
       <AnalisiSyncStatus loading={loading} refreshing={refreshing} lastSyncAt={lastSyncAt} />
       {error && <div className="alert alert-danger">{error}</div>}
       <AnalisiIncassoAttrPanel
-        title={`Incasso periodo · ${machineLabel}`}
-        hint={`Ultimi 6 mesi (${range.dateFrom} → ${range.dateTo}) · solo scontrini fiscali EasyRetail.`}
-        amountLabel="Incasso 6 mesi"
+        title={`Incasso mese corrente · ${machineLabel}`}
+        hint={`Dal ${focus.dateFrom} a oggi ${focus.dateTo}. Non è il totale di oggi né della sola settimana.`}
+        amountLabel="Incasso mese"
         {...kpis}
       />
       {data ? (
         <section className="card analisi-panel analisi-attr-panel">
-          <AnalisiAttrTag>Attributo · € per mese</AnalisiAttrTag>
-          <h2 className="analisi-panel-title">Incasso mese per mese · {machineLabel}</h2>
+          <AnalisiAttrTag>Attributo · Storico € per mese</AnalisiAttrTag>
+          <h2 className="analisi-panel-title">Ultimi 6 mesi · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre = € contabilizzati per mese · contanti / carta-POS. Preventivi non fiscali separati sopra.
+            Barre = confronto mesi (non il totale del mese corrente sopra).
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="month_label" />
         </section>
@@ -596,7 +611,7 @@ export function AnalisiOrariaPage() {
     [modelId, todayIso],
   )
   const machines = Array.isArray(data?.by_machine) ? data.by_machine : []
-  const kpis = splitFromPayOrAnalytics(payToday, null)
+  const kpis = kpisFromPaySummary(payToday)
   const hourRows = Array.isArray(payToday?.by_hour) ? payToday.by_hour : []
   const peakHour = hourRows.reduce(
     (best, row) => {

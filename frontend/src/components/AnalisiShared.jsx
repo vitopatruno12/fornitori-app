@@ -407,7 +407,7 @@ export function AnalisiAttrTag({ children }) {
   return <p className="analisi-attr-tag">{children}</p>
 }
 
-/** KPI incasso periodo: totale, contanti, carta/POS, scontrini (+ preventivi opzionale). */
+/** KPI incasso: totale, contanti, carta/POS, scontrini, preventivi (stessa griglia). */
 export function AnalisiIncassoAttrPanel({
   title,
   hint,
@@ -421,7 +421,6 @@ export function AnalisiIncassoAttrPanel({
 }) {
   return (
     <section className="card analisi-panel analisi-attr-panel" style={{ marginBottom: '1rem' }}>
-      <AnalisiAttrTag>Attributo · Incasso contabilizzato</AnalisiAttrTag>
       <h2 className="analisi-panel-title">{title}</h2>
       {hint ? <p className="analisi-machine-scope">{hint}</p> : null}
       <div className="dashboard-kpi-grid analisi-kpi-grid">
@@ -441,24 +440,15 @@ export function AnalisiIncassoAttrPanel({
           <div className="dashboard-kpi-label">Scontrini fiscali</div>
           <div className="dashboard-kpi-value">{Number(receipts) || 0}</div>
         </div>
-      </div>
-      <section className="analisi-quote-attr" style={{ marginTop: '0.85rem' }}>
-        <AnalisiAttrTag>Attributo · Non contabilizzati / preventivi</AnalisiAttrTag>
-        <p className="analisi-machine-scope" style={{ marginBottom: '0.45rem' }}>
-          Documenti VEA / preventivo EasyRetail: fuori chiusura fiscale, non entrano nell’incasso
-          contabilizzato sopra.
-        </p>
-        <div className="dashboard-kpi-grid analisi-kpi-grid">
-          <div className="dashboard-kpi dashboard-kpi--warn">
-            <div className="dashboard-kpi-label">Preventivi / non fiscali</div>
-            <div className="dashboard-kpi-value">{eur(quoteEur)}</div>
-          </div>
-          <div className="dashboard-kpi">
-            <div className="dashboard-kpi-label">N. preventivi</div>
-            <div className="dashboard-kpi-value">{Number(quoteReceipts) || 0}</div>
-          </div>
+        <div className="dashboard-kpi dashboard-kpi--warn">
+          <div className="dashboard-kpi-label">Preventivi / non fiscali</div>
+          <div className="dashboard-kpi-value">{eur(quoteEur)}</div>
         </div>
-      </section>
+        <div className="dashboard-kpi">
+          <div className="dashboard-kpi-label">N. preventivi</div>
+          <div className="dashboard-kpi-value">{Number(quoteReceipts) || 0}</div>
+        </div>
+      </div>
     </section>
   )
 }
