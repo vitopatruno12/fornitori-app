@@ -6,6 +6,7 @@ import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
@@ -16,15 +17,15 @@ function formatAmount(value) {
 }
 
 const REGISTRATE_COLUMNS = [
-  { id: 'invoice_number', label: 'N. doc.', width: 110, sticky: 'left' },
-  { id: 'invoice_date', label: 'Data doc.', width: 100 },
-  { id: 'due_date', label: 'Scadenza', width: 100 },
-  { id: 'supplier_name', label: 'Fornitore', width: 200 },
-  { id: 'imponibile', label: 'Imponibile', width: 110, numeric: true },
-  { id: 'vat_amount', label: 'IVA', width: 90, numeric: true },
-  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
-  { id: 'payment_status', label: 'Stato', width: 100 },
-  { id: 'amount_paid', label: 'Pagato', width: 100, numeric: true },
+  { id: 'invoice_number', label: 'N. doc.', width: 9, fluid: true },
+  { id: 'invoice_date', label: 'Data doc.', width: 9, fluid: true },
+  { id: 'due_date', label: 'Scadenza', width: 9, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 20, fluid: true },
+  { id: 'imponibile', label: 'Imponibile', width: 10, fluid: true, numeric: true },
+  { id: 'vat_amount', label: 'IVA', width: 8, fluid: true, numeric: true },
+  { id: 'total', label: 'Totale', width: 10, fluid: true, numeric: true, emphasis: true },
+  { id: 'payment_status', label: 'Stato', width: 9, fluid: true },
+  { id: 'amount_paid', label: 'Pagato', width: 8, fluid: true, numeric: true },
 ]
 
 function paymentStatusText(status, ignored) {
@@ -715,40 +716,55 @@ export default function InvoicesPage() {
             }
             onRowClick={(inv) => openInvoiceDetail(inv)}
             actionsHeader="Azioni"
+            actionsColWidth="8.75rem"
             renderActions={(inv) => (
-              <div className="fatture-excel-actions" onClick={(e) => e.stopPropagation()}>
-                {inv.file_path ? (
-                  <a
-                    href={getInvoicePdfUrl(inv.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-primary btn-sm"
-                    title="Apri PDF"
-                  >
-                    PDF
-                  </a>
-                ) : null}
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPrimaNota(inv)}>
-                  Cassa
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => handleMarkPaid(inv)}
-                  disabled={inv.payment_status === 'paid'}
-                >
-                  Pagata
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleIgnore(inv)}>
-                  {inv.ignored ? 'Ripristina' : 'Ignora'}
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(inv)}>
-                  Modifica
-                </button>
-                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(inv)}>
-                  Elimina
-                </button>
-              </div>
+              <FattureActionsMenu
+                primary={
+                  inv.file_path ? (
+                    <a
+                      href={getInvoicePdfUrl(inv.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-primary btn-sm"
+                      title="Apri PDF"
+                    >
+                      PDF
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleMarkPaid(inv)}
+                      disabled={inv.payment_status === 'paid'}
+                    >
+                      Pagata
+                    </button>
+                  )
+                }
+                items={[
+                  inv.file_path
+                    ? {
+                        key: 'pagata',
+                        label: 'Segna pagata',
+                        disabled: inv.payment_status === 'paid',
+                        onClick: () => handleMarkPaid(inv),
+                      }
+                    : null,
+                  { key: 'cassa', label: 'Cassa', onClick: () => openPrimaNota(inv) },
+                  {
+                    key: 'ignore',
+                    label: inv.ignored ? 'Ripristina' : 'Ignora',
+                    onClick: () => handleToggleIgnore(inv),
+                  },
+                  { key: 'edit', label: 'Modifica', onClick: () => handleEdit(inv) },
+                  {
+                    key: 'delete',
+                    label: 'Elimina',
+                    danger: true,
+                    onClick: () => handleDelete(inv),
+                  },
+                ]}
+              />
             )}
           />
         )}

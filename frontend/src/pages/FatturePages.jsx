@@ -33,6 +33,7 @@ import {
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
+import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
@@ -40,40 +41,40 @@ import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from 
 const SYNC_LOG_KEY = 'fattureAdeSdiSyncLog'
 
 const SDI_INVOICE_COLUMNS = [
-  { id: 'invoice_number', label: 'Numero', width: 110 },
-  { id: 'invoice_date', label: 'Data', width: 100 },
-  { id: 'supplier_name', label: 'Fornitore', width: 200 },
-  { id: 'receiver_vat', label: 'P.IVA dest.', width: 120 },
-  { id: 'destination', label: 'Destinazione', width: 220 },
+  { id: 'invoice_number', label: 'Numero', width: 12, fluid: true },
+  { id: 'invoice_date', label: 'Data', width: 12, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 28, fluid: true },
+  { id: 'receiver_vat', label: 'P.IVA dest.', width: 16, fluid: true },
+  { id: 'destination', label: 'Destinazione', width: 32, fluid: true },
 ]
 
 const EMESSE_COLUMNS = [
-  { id: 'created_at', label: 'Data carico', width: 110 },
-  { id: 'file_kind', label: 'Tipo', width: 90 },
-  { id: 'original_filename', label: 'File', width: 220 },
-  { id: 'invoice_number', label: 'Numero', width: 110 },
-  { id: 'total_amount', label: 'Importo', width: 110, numeric: true },
-  { id: 'status', label: 'Stato', width: 100 },
+  { id: 'created_at', label: 'Data carico', width: 14, fluid: true },
+  { id: 'file_kind', label: 'Tipo', width: 10, fluid: true },
+  { id: 'original_filename', label: 'File', width: 30, fluid: true },
+  { id: 'invoice_number', label: 'Numero', width: 14, fluid: true },
+  { id: 'total_amount', label: 'Importo', width: 14, fluid: true, numeric: true },
+  { id: 'status', label: 'Stato', width: 12, fluid: true },
 ]
 
 const DA_REGISTRARE_COLUMNS = [
-  { id: 'invoice_date', label: 'Data', width: 100 },
-  { id: 'invoice_number', label: 'Numero', width: 110 },
-  { id: 'supplier_name', label: 'Fornitore', width: 200 },
-  { id: 'imponibile', label: 'Imponibile', width: 110, numeric: true },
-  { id: 'vat_amount', label: 'IVA', width: 90, numeric: true },
-  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
-  { id: 'due_date', label: 'Scadenza', width: 100 },
-  { id: 'payment_status', label: 'Stato', width: 100 },
+  { id: 'invoice_date', label: 'Data', width: 11, fluid: true },
+  { id: 'invoice_number', label: 'Numero', width: 12, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 22, fluid: true },
+  { id: 'imponibile', label: 'Imponibile', width: 12, fluid: true, numeric: true },
+  { id: 'vat_amount', label: 'IVA', width: 10, fluid: true, numeric: true },
+  { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true, emphasis: true },
+  { id: 'due_date', label: 'Scadenza', width: 11, fluid: true },
+  { id: 'payment_status', label: 'Stato', width: 10, fluid: true },
 ]
 
 const SCADENZIARIO_COLUMNS = [
-  { id: 'due_date', label: 'Scadenza', width: 100 },
-  { id: 'invoice_date', label: 'Data doc.', width: 100 },
-  { id: 'invoice_number', label: 'Numero', width: 110 },
-  { id: 'supplier_name', label: 'Fornitore', width: 200 },
-  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
-  { id: 'payment_status', label: 'Stato', width: 100 },
+  { id: 'due_date', label: 'Scadenza', width: 12, fluid: true },
+  { id: 'invoice_date', label: 'Data doc.', width: 12, fluid: true },
+  { id: 'invoice_number', label: 'Numero', width: 14, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 28, fluid: true },
+  { id: 'total', label: 'Totale', width: 14, fluid: true, numeric: true, emphasis: true },
+  { id: 'payment_status', label: 'Stato', width: 12, fluid: true },
 ]
 
 function paymentStatusText(status, ignored) {
@@ -230,38 +231,35 @@ export function AdeSdiInvoicesPanel({
             : 'Seleziona una società dal menu in alto.'
         }
         actionsHeader={withAssign ? 'Azioni / Assegna' : 'Azioni'}
+        actionsColWidth={withAssign ? '9.5rem' : '8.75rem'}
         renderActions={(item) => (
-          <div className="fatture-excel-actions">
-            <a
-              className="btn btn-primary btn-sm"
-              href={getSdiInvoicePdfUrl(item.id)}
-              target="_blank"
-              rel="noreferrer"
-              title="Apri PDF"
-            >
-              PDF
-            </a>
-            <a
-              className="btn btn-secondary btn-sm"
-              href={getSdiInvoiceDownloadUrl(item.id)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              XML
-            </a>
-            {withAssign
-              ? FATTURE_COMPANY_ORDER.map((cid) => (
-                  <button
-                    key={cid}
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => handleManualAssign(item, cid)}
-                  >
-                    {companyLabel(cid)}
-                  </button>
-                ))
-              : null}
-          </div>
+          <FattureActionsMenu
+            primary={
+              <a
+                className="btn btn-primary btn-sm"
+                href={getSdiInvoicePdfUrl(item.id)}
+                target="_blank"
+                rel="noreferrer"
+                title="Apri PDF"
+              >
+                PDF
+              </a>
+            }
+            items={[
+              {
+                key: 'xml',
+                label: 'Scarica XML',
+                href: getSdiInvoiceDownloadUrl(item.id),
+              },
+              ...(withAssign
+                ? FATTURE_COMPANY_ORDER.map((cid) => ({
+                    key: `assign-${cid}`,
+                    label: `Assegna: ${companyLabel(cid)}`,
+                    onClick: () => handleManualAssign(item, cid),
+                  }))
+                : []),
+            ]}
+          />
         )}
       />
     )
@@ -569,10 +567,10 @@ export function FattureRicevutePage() {
           hideToolbar
           gridClassName="fatture-excel-grid"
           columns={[
-            { id: 'invoice_number', label: 'N.', width: 100 },
-            { id: 'supplier_name', label: 'Fornitore', width: 220 },
-            { id: 'invoice_date', label: 'Data', width: 100 },
-            { id: 'total_amount', label: 'Totale', width: 110, numeric: true, emphasis: true },
+            { id: 'invoice_number', label: 'N.', width: 18, fluid: true },
+            { id: 'supplier_name', label: 'Fornitore', width: 42, fluid: true },
+            { id: 'invoice_date', label: 'Data', width: 18, fluid: true },
+            { id: 'total_amount', label: 'Totale', width: 22, fluid: true, numeric: true, emphasis: true },
           ]}
           rows={items}
           rowKey={(row) => row.id}
@@ -874,20 +872,28 @@ export function FattureEmessePage() {
             totalsLabel={moneyTotalsLabel}
             emptyMessage={`Nessuna fattura emessa per ${companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal banner.`}
             actionsHeader="Azioni"
+            actionsColWidth="8.75rem"
             renderActions={(row) => (
-              <div className="fatture-excel-actions">
-                <a
-                  className="btn btn-secondary btn-sm"
-                  href={getIssuedInvoiceFileUrl(row.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Apri
-                </a>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleDelete(row.id)}>
-                  Elimina
-                </button>
-              </div>
+              <FattureActionsMenu
+                primary={
+                  <a
+                    className="btn btn-primary btn-sm"
+                    href={getIssuedInvoiceFileUrl(row.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Apri
+                  </a>
+                }
+                items={[
+                  {
+                    key: 'delete',
+                    label: 'Elimina',
+                    danger: true,
+                    onClick: () => void handleDelete(row.id),
+                  },
+                ]}
+              />
             )}
           />
         </section>
@@ -1180,20 +1186,27 @@ export function FattureScadenziarioPage() {
           totalsLabel={moneyTotalsLabel}
           emptyMessage={`Nessuna fattura in questa vista per ${companyLabel(companyId)}.`}
           actionsHeader="Azioni"
+          actionsColWidth="8.75rem"
           renderActions={(inv) => (
-            <div className="fatture-excel-actions">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => markPaid(inv)}
-                disabled={inv.payment_status === 'paid'}
-              >
-                Segna pagata
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => toggleIgnore(inv)}>
-                {inv.ignored ? 'Ripristina' : 'Ignora'}
-              </button>
-            </div>
+            <FattureActionsMenu
+              primary={
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => markPaid(inv)}
+                  disabled={inv.payment_status === 'paid'}
+                >
+                  Pagata
+                </button>
+              }
+              items={[
+                {
+                  key: 'ignore',
+                  label: inv.ignored ? 'Ripristina' : 'Ignora',
+                  onClick: () => toggleIgnore(inv),
+                },
+              ]}
+            />
           )}
         />
       </section>

@@ -27,6 +27,7 @@ export default function WorkbookGrid({
   rowClickTitle = 'Apri dettaglio',
   getRowId,
   getTotalsCellClassName,
+  actionsColWidth = '9.5rem',
 }) {
   const showTotals = totals != null && typeof totalsLabel === 'function' && rows.length > 0
   const hasActions = Boolean(actionsHeader && typeof renderActions === 'function')
@@ -61,12 +62,15 @@ export default function WorkbookGrid({
                     col.fluid
                       ? { width: `${col.width || 0}%` }
                       : col.width
-                        ? { minWidth: col.width }
-                        : undefined
+                        ? {
+                            width: typeof col.width === 'number' ? `${col.width}px` : col.width,
+                            minWidth: 0,
+                          }
+                        : { minWidth: 0 }
                   }
                 />
               ))}
-              {hasActions ? <col style={{ minWidth: 168 }} /> : null}
+              {hasActions ? <col style={{ width: actionsColWidth, minWidth: 0 }} /> : null}
             </colgroup>
             <thead>
               <tr>

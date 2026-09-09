@@ -8877,26 +8877,133 @@ select.form-control {
   grid-column: auto;
 }
 
-/* Fatture fornitori — griglia Excel come Banca (header verde, totali giallo) */
+/* Fatture fornitori — griglia Excel fit senza scroll orizzontale */
 .fatture-page .workbook-card-nested {
   margin-top: 0.35rem;
 }
 
+.fatture-page .workbook-card-nested:has(.fatture-excel-grid) .workbook-grid-wrap,
+.fatture-page .workbook-card-nested:has(.fatture-excel-grid) .pagamenti-grid-wrap.excel-wrap {
+  overflow-x: hidden !important;
+  max-width: 100%;
+}
+
 .fatture-page .workbook-grid.fatture-excel-grid {
-  min-width: 980px;
+  min-width: 0 !important;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.fatture-page .workbook-grid.fatture-excel-grid th,
+.fatture-page .workbook-grid.fatture-excel-grid td {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .fatture-page .workbook-grid.fatture-excel-grid th {
   background: #e2efda;
   color: #1f2937;
+  font-size: 0.74rem;
+  padding: 0.4rem 0.35rem;
+}
+
+.fatture-page .workbook-grid.fatture-excel-grid .excel-cell {
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.4rem;
+}
+
+.fatture-page .workbook-grid.fatture-excel-grid .sup-actions-col {
+  width: 9.5rem;
+  min-width: 0;
+  vertical-align: middle;
 }
 
 .fatture-excel-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3rem;
   align-items: center;
-  padding: 0.25rem 0.35rem;
+  padding: 0.2rem 0.3rem;
+}
+
+.fatture-actions-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.25rem;
+  max-width: 100%;
+}
+
+.fatture-actions-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.fatture-actions-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.fatture-actions-menu-caret {
+  font-size: 0.7rem;
+  opacity: 0.75;
+  line-height: 1;
+}
+
+.fatture-actions-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 40;
+  min-width: 10.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+}
+
+.fatture-actions-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.fatture-actions-menu-item:hover:not(:disabled) {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.fatture-actions-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fatture-actions-menu-item.is-danger {
+  color: var(--danger);
+}
+
+.fatture-actions-menu-item.is-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .fatture-page .workbook-row-selected .excel-cell {
