@@ -602,19 +602,48 @@ export default function SuppliersPage() {
             {aiSupplierAnomalies.length > 0 && <div><strong>Anomalie:</strong> {aiSupplierAnomalies.join(' · ')}</div>}
           </div>
         )}
-        <form onSubmit={handleSubmit}>
-          <div className="form-row">
-            <div className="form-group" style={{ flex: '1 1 240px' }}>
-              <label>Ragione sociale</label>
-              <input className="form-control" value={name} onChange={e => setName(e.target.value)} placeholder="Ragione sociale" required />
+        <form onSubmit={handleSubmit} className="supplier-anagrafica-form">
+          <div className="supplier-form-panel supplier-identity-panel">
+            <div className="supplier-form-panel-head">
+              <h3 className="supplier-form-panel-title">Identità</h3>
+              <p className="supplier-form-panel-lead">Ragione sociale e dati fiscali del fornitore.</p>
             </div>
-            <div className="form-group" style={{ flex: '0 1 160px' }}>
-              <label>P. IVA</label>
-              <input className="form-control" value={vatNumber} onChange={e => setVatNumber(e.target.value)} placeholder="IT12345678901" />
-            </div>
-            <div className="form-group" style={{ flex: '0 1 160px' }}>
-              <label>Codice fiscale</label>
-              <input className="form-control" value={fiscalCode} onChange={e => setFiscalCode(e.target.value)} placeholder="CF" />
+            <div className="form-row supplier-identity-row">
+              <div className="form-group supplier-identity-name">
+                <label htmlFor="sup-ragione-sociale">Ragione sociale</label>
+                <input
+                  id="sup-ragione-sociale"
+                  className="form-control supplier-identity-name-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Es. Bar Roma Srl"
+                  required
+                  autoComplete="organization"
+                />
+              </div>
+              <div className="form-group supplier-identity-vat">
+                <label htmlFor="sup-piva">P. IVA</label>
+                <input
+                  id="sup-piva"
+                  className="form-control"
+                  value={vatNumber}
+                  onChange={(e) => setVatNumber(e.target.value)}
+                  placeholder="IT12345678901"
+                  inputMode="text"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="form-group supplier-identity-cf">
+                <label htmlFor="sup-cf">Codice fiscale</label>
+                <input
+                  id="sup-cf"
+                  className="form-control"
+                  value={fiscalCode}
+                  onChange={(e) => setFiscalCode(e.target.value)}
+                  placeholder="CF o P.IVA"
+                  autoComplete="off"
+                />
+              </div>
             </div>
           </div>
           <SupplierMultiContactEditor

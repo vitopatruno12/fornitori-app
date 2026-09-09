@@ -5,7 +5,6 @@ import {
   FattureNavBaseContext,
   FatturePageShell,
   FattureStubCard,
-  PaymentBadge,
   SeriesBars,
   eur,
   formatDate,
@@ -34,10 +33,70 @@ import {
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 
 const SYNC_LOG_KEY = 'fattureAdeSdiSyncLog'
+
+const SDI_INVOICE_COLUMNS = [
+  { id: 'invoice_number', label: 'Numero', width: 110 },
+  { id: 'invoice_date', label: 'Data', width: 100 },
+  { id: 'supplier_name', label: 'Fornitore', width: 200 },
+  { id: 'receiver_vat', label: 'P.IVA dest.', width: 120 },
+  { id: 'destination', label: 'Destinazione', width: 220 },
+]
+
+const EMESSE_COLUMNS = [
+  { id: 'created_at', label: 'Data carico', width: 110 },
+  { id: 'file_kind', label: 'Tipo', width: 90 },
+  { id: 'original_filename', label: 'File', width: 220 },
+  { id: 'invoice_number', label: 'Numero', width: 110 },
+  { id: 'total_amount', label: 'Importo', width: 110, numeric: true },
+  { id: 'status', label: 'Stato', width: 100 },
+]
+
+const DA_REGISTRARE_COLUMNS = [
+  { id: 'invoice_date', label: 'Data', width: 100 },
+  { id: 'invoice_number', label: 'Numero', width: 110 },
+  { id: 'supplier_name', label: 'Fornitore', width: 200 },
+  { id: 'imponibile', label: 'Imponibile', width: 110, numeric: true },
+  { id: 'vat_amount', label: 'IVA', width: 90, numeric: true },
+  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
+  { id: 'due_date', label: 'Scadenza', width: 100 },
+  { id: 'payment_status', label: 'Stato', width: 100 },
+]
+
+const SCADENZIARIO_COLUMNS = [
+  { id: 'due_date', label: 'Scadenza', width: 100 },
+  { id: 'invoice_date', label: 'Data doc.', width: 100 },
+  { id: 'invoice_number', label: 'Numero', width: 110 },
+  { id: 'supplier_name', label: 'Fornitore', width: 200 },
+  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
+  { id: 'payment_status', label: 'Stato', width: 100 },
+]
+
+function paymentStatusText(status, ignored) {
+  if (ignored) return 'Ignorata'
+  if (status === 'paid') return 'Pagata'
+  if (status === 'partial') return 'Parziale'
+  return 'Da pagare'
+}
+
+function sumField(rows, key) {
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => acc + (Number(row?.[key]) || 0), 0)
+}
+
+function moneyTotalsLabel(colId, totals) {
+  if (colId === 'invoice_number' || colId === 'invoice_date' || colId === 'created_at') return 'Totali'
+  if (colId === 'supplier_name' || colId === 'file_kind' || colId === 'original_filename') {
+    return totals?.count != null ? `${totals.count} doc.` : ''
+  }
+  if (colId === 'imponibile') return eur(totals?.imponibile)
+  if (colId === 'vat_amount') return eur(totals?.vat_amount)
+  if (colId === 'total' || colId === 'total_amount') return eur(totals?.total)
+  return ''
+}
 
 function pushSyncLog(entry) {
   try {
@@ -153,77 +212,58 @@ export function AdeSdiInvoicesPanel({
 
   function renderTable(list, withAssign = false) {
     return (
-      <div className="table-wrap pn-table-wrap" style={{ marginBottom: '0.75rem' }}>
-        <table className="app-table">
-          <thead>
-            <tr>
-              <th>Numero</th>
-              <th>Data</th>
-              <th>Fornitore</th>
-              <th>P.IVA dest.</th>
-              <th>Destinazione</th>
-              <th>Azioni</th>
-              {withAssign ? <th>Assegna</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((item) => (
-              <tr key={`sdi-${item.id}`}>
-                <td>{item.invoice_number || '—'}</td>
-                <td>{formatDate(item.invoice_date)}</td>
-                <td>{item.supplier_name || '—'}</td>
-                <td>{item.receiver_vat || '—'}</td>
-                <td>{item.destination || '—'}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <a
-                    className="btn btn-primary"
-                    style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none', marginRight: '0.35rem' }}
-                    href={getSdiInvoicePdfUrl(item.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="Apri PDF (allegato FatturaPA o anteprima generata dall'XML)"
+      <WorkbookGrid
+        title="Inbox SDI"
+        sheetLabel={`${list.length} documenti`}
+        hideToolbar
+        gridClassName="fatture-excel-grid"
+        columns={SDI_INVOICE_COLUMNS}
+        rows={list}
+        rowKey={(row) => `sdi-${row.id}`}
+        cellValue={(row, col) => {
+          if (col.id === 'invoice_date') return formatDate(row.invoice_date)
+          return row[col.id] || '—'
+        }}
+        emptyMessage={
+          companyId
+            ? `Nessuna fattura per ${companyLabel(companyId)} in questo periodo.`
+            : 'Seleziona una società dal menu in alto.'
+        }
+        actionsHeader={withAssign ? 'Azioni / Assegna' : 'Azioni'}
+        renderActions={(item) => (
+          <div className="fatture-excel-actions">
+            <a
+              className="btn btn-primary btn-sm"
+              href={getSdiInvoicePdfUrl(item.id)}
+              target="_blank"
+              rel="noreferrer"
+              title="Apri PDF"
+            >
+              PDF
+            </a>
+            <a
+              className="btn btn-secondary btn-sm"
+              href={getSdiInvoiceDownloadUrl(item.id)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              XML
+            </a>
+            {withAssign
+              ? FATTURE_COMPANY_ORDER.map((cid) => (
+                  <button
+                    key={cid}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleManualAssign(item, cid)}
                   >
-                    PDF
-                  </a>
-                  <a
-                    className="btn btn-secondary"
-                    style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem', textDecoration: 'none' }}
-                    href={getSdiInvoiceDownloadUrl(item.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    XML
-                  </a>
-                </td>
-                {withAssign ? (
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {FATTURE_COMPANY_ORDER.map((cid) => (
-                      <button
-                        key={cid}
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ marginRight: '0.25rem', marginBottom: '0.25rem', padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
-                        onClick={() => handleManualAssign(item, cid)}
-                      >
-                        {companyLabel(cid)}
-                      </button>
-                    ))}
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-            {list.length === 0 && (
-              <tr>
-                <td colSpan={withAssign ? 7 : 6} className="empty-state">
-                  {companyId
-                    ? `Nessuna fattura per ${companyLabel(companyId)} in questo periodo.`
-                    : 'Seleziona una società dal menu in alto.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                    {companyLabel(cid)}
+                  </button>
+                ))
+              : null}
+          </div>
+        )}
+      />
     )
   }
 
@@ -523,40 +563,34 @@ export function FattureRicevutePage() {
         <>
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Elenco importate (tutte le società)</h2>
-        <div className="table-wrap">
-          <table className="app-table">
-            <thead>
-              <tr>
-                <th>N.</th>
-                <th>Fornitore</th>
-                <th>Data</th>
-                <th className="text-end">Totale</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => (
-                <tr
-                  key={row.id}
-                  className={selectedId === row.id ? 'pn-row-click workbook-row-selected' : 'pn-row-click'}
-                  onClick={() => setSelectedId(row.id)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <td>{row.invoice_number}</td>
-                  <td>{row.supplier_name || '—'}</td>
-                  <td>{formatDate(row.invoice_date)}</td>
-                  <td className="text-end">{eur(row.total_amount)}</td>
-                </tr>
-              ))}
-              {!loading && items.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="empty-state">
-                    Nessuna fattura ricevuta. Usa Importa XML o il canale SDI.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        <WorkbookGrid
+          title="Elenco importate"
+          sheetLabel={`${items.length} documenti`}
+          hideToolbar
+          gridClassName="fatture-excel-grid"
+          columns={[
+            { id: 'invoice_number', label: 'N.', width: 100 },
+            { id: 'supplier_name', label: 'Fornitore', width: 220 },
+            { id: 'invoice_date', label: 'Data', width: 100 },
+            { id: 'total_amount', label: 'Totale', width: 110, numeric: true, emphasis: true },
+          ]}
+          rows={items}
+          rowKey={(row) => row.id}
+          cellValue={(row, col) => {
+            if (col.id === 'invoice_date') return formatDate(row.invoice_date)
+            if (col.id === 'total_amount') return eur(row.total_amount)
+            return row[col.id] || '—'
+          }}
+          totals={
+            items.length
+              ? { count: items.length, total: sumField(items, 'total_amount') }
+              : null
+          }
+          totalsLabel={moneyTotalsLabel}
+          emptyMessage="Nessuna fattura ricevuta. Usa Importa XML o il canale SDI."
+          onRowClick={(row) => setSelectedId(row.id)}
+          getRowClassName={(row) => (selectedId === row.id ? 'workbook-row-selected' : '')}
+        />
       </section>
 
       {selected ? (
@@ -712,11 +746,18 @@ export function FattureEmessePage() {
         company: companyId,
         fileKind: uploadKind,
       })
-      setImportMsg(
-        `Caricato ${kindLabel[uploadKind] || uploadKind}: ${row?.original_filename || file.name}${
-          row?.id ? ` · id ${row.id}` : ''
-        }`,
-      )
+      const num = row?.invoice_number || row?.extracted?.invoice_number
+      const tot = row?.total_amount ?? row?.extracted?.total_amount
+      const warns = Array.isArray(row?.extracted?.warnings) ? row.extracted.warnings.filter(Boolean) : []
+      const bits = [
+        `Caricato ${kindLabel[uploadKind] || uploadKind}: ${row?.original_filename || file.name}`,
+        num ? `n. ${num}` : null,
+        tot != null ? `importo ${eur(tot)}` : null,
+      ].filter(Boolean)
+      setImportMsg(bits.join(' · '))
+      if (warns.length) {
+        setError(warns.join(' · '))
+      }
       await reload()
     } catch (e) {
       setError(e?.message || 'Caricamento fallito')
@@ -806,57 +847,49 @@ export function FattureEmessePage() {
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
           <p className="fatture-note">
-            Menu «Tipo file» nel banner: PDF, Immagine o XML. I documenti restano legati a {companyLabel(companyId)}.
+            Al caricamento Atlas prova a leggere automaticamente <strong>numero</strong> e{' '}
+            <strong>importo</strong> (XML completo; PDF da testo; foto con AI se configurata).
           </p>
-          {loading ? <AnalisiLoadingBar active label="Caricamento fatture emesse" variant="subtle" /> : null}
-          <div className="table-wrap pn-table-wrap">
-            <table className="app-table">
-              <thead>
-                <tr>
-                  <th>Data carico</th>
-                  <th>Tipo</th>
-                  <th>File</th>
-                  <th>Numero</th>
-                  <th>Importo</th>
-                  <th>Stato</th>
-                  <th>Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row) => (
-                  <tr key={`emessa-${row.id}`}>
-                    <td>{formatDate(row.created_at || row.invoice_date)}</td>
-                    <td>{kindLabel[row.file_kind] || row.file_kind || '—'}</td>
-                    <td>{row.original_filename || '—'}</td>
-                    <td>{row.invoice_number || '—'}</td>
-                    <td>{row.total_amount != null ? eur(row.total_amount) : '—'}</td>
-                    <td>{row.status || 'caricata'}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <a
-                        className="btn btn-secondary btn-sm"
-                        href={getIssuedInvoiceFileUrl(row.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Apri
-                      </a>{' '}
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleDelete(row.id)}>
-                        Elimina
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!loading && items.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="empty-state">
-                      Nessuna fattura emessa per {companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal
-                      banner.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+          <WorkbookGrid
+            title={`Emesse · ${companyLabel(companyId)}`}
+            sheetLabel={`${items.length} documenti`}
+            hideToolbar
+            loading={loading}
+            loadingLabel="Caricamento fatture emesse"
+            gridClassName="fatture-excel-grid"
+            columns={EMESSE_COLUMNS}
+            rows={items}
+            rowKey={(row) => `emessa-${row.id}`}
+            cellValue={(row, col) => {
+              if (col.id === 'created_at') return formatDate(row.created_at || row.invoice_date)
+              if (col.id === 'file_kind') return kindLabel[row.file_kind] || row.file_kind || '—'
+              if (col.id === 'total_amount') return row.total_amount != null ? eur(row.total_amount) : '—'
+              return row[col.id] || '—'
+            }}
+            totals={
+              items.length
+                ? { count: items.length, total: sumField(items, 'total_amount') }
+                : null
+            }
+            totalsLabel={moneyTotalsLabel}
+            emptyMessage={`Nessuna fattura emessa per ${companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal banner.`}
+            actionsHeader="Azioni"
+            renderActions={(row) => (
+              <div className="fatture-excel-actions">
+                <a
+                  className="btn btn-secondary btn-sm"
+                  href={getIssuedInvoiceFileUrl(row.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Apri
+                </a>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleDelete(row.id)}>
+                  Elimina
+                </button>
+              </div>
+            )}
+          />
         </section>
       )}
     </FatturePageShell>
@@ -976,51 +1009,40 @@ export function FattureDaRegistrarePage() {
       {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       <section className="card fatture-panel">
-        <div className="table-wrap pn-table-wrap">
-          <table className="app-table">
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Numero</th>
-                <th>Fornitore</th>
-                <th>Imponibile</th>
-                <th>IVA</th>
-                <th>Totale</th>
-                <th>Scadenza</th>
-                <th>Stato</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <td>{formatDate(inv.invoice_date)}</td>
-                  <td>{inv.invoice_number}</td>
-                  <td>{inv.supplier_name}</td>
-                  <td>{eur(inv.imponibile)}</td>
-                  <td>{eur(inv.vat_amount)}</td>
-                  <td>{eur(inv.total)}</td>
-                  <td>{formatDate(inv.due_date)}</td>
-                  <td>
-                    <PaymentBadge status={inv.payment_status} ignored={inv.ignored} />
-                  </td>
-                  <td>
-                    <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
-                      Apri elenco
-                    </FattureLink>
-                  </td>
-                </tr>
-              ))}
-              {!loading && scopeReady && invoices.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="empty-state">
-                    Nessuna fattura da registrare.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <WorkbookGrid
+          title="Da registrare"
+          sheetLabel={`${invoices.length} documenti`}
+          hideToolbar
+          loading={loading}
+          gridClassName="fatture-excel-grid"
+          columns={DA_REGISTRARE_COLUMNS}
+          rows={scopeReady ? invoices : []}
+          rowKey={(row) => row.id}
+          cellValue={(row, col) => {
+            if (col.id === 'invoice_date' || col.id === 'due_date') return formatDate(row[col.id])
+            if (col.id === 'imponibile' || col.id === 'vat_amount' || col.id === 'total') return eur(row[col.id])
+            if (col.id === 'payment_status') return paymentStatusText(row.payment_status, row.ignored)
+            return row[col.id] || '—'
+          }}
+          totals={
+            invoices.length
+              ? {
+                  count: invoices.length,
+                  imponibile: sumField(invoices, 'imponibile'),
+                  vat_amount: sumField(invoices, 'vat_amount'),
+                  total: sumField(invoices, 'total'),
+                }
+              : null
+          }
+          totalsLabel={moneyTotalsLabel}
+          emptyMessage="Nessuna fattura da registrare."
+          actionsHeader="Azioni"
+          renderActions={() => (
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
+              Apri elenco
+            </FattureLink>
+          )}
+        />
       </section>
     </FatturePageShell>
   )
@@ -1135,50 +1157,45 @@ export function FattureScadenziarioPage() {
         </p>
       ) : (
       <section className="card fatture-panel">
-        <div className="table-wrap pn-table-wrap">
-          <table className="app-table">
-            <thead>
-              <tr>
-                <th>Scadenza</th>
-                <th>Data doc.</th>
-                <th>Numero</th>
-                <th>Fornitore</th>
-                <th>Totale</th>
-                <th>Stato</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <td>{formatDate(inv.due_date)}</td>
-                  <td>{formatDate(inv.invoice_date)}</td>
-                  <td>{inv.invoice_number}</td>
-                  <td>{inv.supplier_name}</td>
-                  <td>{eur(inv.total)}</td>
-                  <td>
-                    <PaymentBadge status={inv.payment_status} ignored={inv.ignored} />
-                  </td>
-                  <td style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => markPaid(inv)} disabled={inv.payment_status === 'paid'}>
-                      Segna pagata
-                    </button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => toggleIgnore(inv)}>
-                      {inv.ignored ? 'Ripristina' : 'Ignora'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && invoices.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="empty-state">
-                    Nessuna fattura in questa vista per {companyLabel(companyId)}.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <WorkbookGrid
+          title={`Scadenziario · ${companyLabel(companyId)}`}
+          sheetLabel={`${invoices.length} documenti`}
+          hideToolbar
+          loading={loading}
+          gridClassName="fatture-excel-grid"
+          columns={SCADENZIARIO_COLUMNS}
+          rows={invoices}
+          rowKey={(row) => row.id}
+          cellValue={(row, col) => {
+            if (col.id === 'due_date' || col.id === 'invoice_date') return formatDate(row[col.id])
+            if (col.id === 'total') return eur(row.total)
+            if (col.id === 'payment_status') return paymentStatusText(row.payment_status, row.ignored)
+            return row[col.id] || '—'
+          }}
+          totals={
+            invoices.length
+              ? { count: invoices.length, total: sumField(invoices, 'total') }
+              : null
+          }
+          totalsLabel={moneyTotalsLabel}
+          emptyMessage={`Nessuna fattura in questa vista per ${companyLabel(companyId)}.`}
+          actionsHeader="Azioni"
+          renderActions={(inv) => (
+            <div className="fatture-excel-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => markPaid(inv)}
+                disabled={inv.payment_status === 'paid'}
+              >
+                Segna pagata
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => toggleIgnore(inv)}>
+                {inv.ignored ? 'Ripristina' : 'Ignora'}
+              </button>
+            </div>
+          )}
+        />
       </section>
       )}
     </FatturePageShell>

@@ -31,31 +31,24 @@ function ContactListEditor({ title, hint, items, onItemsChange, setItems, inputT
   const list = Array.isArray(items) && items.length ? items : [emptyContactItem()]
 
   return (
-    <div className="supplier-contact-list" style={{ marginBottom: '0.85rem' }}>
-      <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>{title}</label>
-      {hint ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 0, marginBottom: '0.45rem' }}>{hint}</p>
-      ) : null}
+    <div className="supplier-contact-list">
+      <div className="supplier-contact-list-head">
+        <label className="supplier-contact-list-title">{title}</label>
+        {hint ? <p className="supplier-contact-list-hint">{hint}</p> : null}
+      </div>
       {list.map((item, index) => (
-        <div
-          key={`${title}-${index}`}
-          className="form-row"
-          style={{ alignItems: 'center', flexWrap: 'nowrap', gap: '0.45rem', marginBottom: '0.35rem' }}
-        >
-          <label
-            style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', margin: 0, flex: '0 0 auto', cursor: 'pointer' }}
-            title="Contatto attivo (usato per ordini e comunicazioni)"
-          >
+        <div key={`${title}-${index}`} className="supplier-contact-row">
+          <label className="supplier-contact-enable" title="Contatto attivo (usato per ordini e comunicazioni)">
             <input
               type="checkbox"
               checked={item.enabled !== false}
               onChange={(e) => updateItem(index, { enabled: e.target.checked })}
             />
+            <span className="supplier-contact-enable-label">Attivo</span>
           </label>
           <input
             type={inputType}
             className="form-control"
-            style={{ flex: '1 1 auto', minWidth: 0 }}
             value={item.value || ''}
             onChange={(e) => updateItem(index, { value: e.target.value })}
             placeholder={placeholder}
@@ -93,73 +86,74 @@ export default function SupplierMultiContactEditor({
 
   return (
     <div className="supplier-multi-contact-editor">
-      <ContactListEditor
-        title="Telefoni"
-        hint="Spunta i numeri attivi e aggiungine quanti ne servono. Il primo attivo è il principale."
-        items={phones}
-        setItems={setPhones}
-        inputType="tel"
-        placeholder="080 1234567 o 3331234567"
-        addLabel="+ Aggiungi telefono"
-      />
-      <ContactListEditor
-        title="Email"
-        hint="Spunta le email attive. La prima attiva è usata per gli ordini."
-        items={emails}
-        setItems={setEmails}
-        inputType="email"
-        placeholder="info@fornitore.it"
-        addLabel="+ Aggiungi email"
-      />
-      <ContactListEditor
-        title="Città"
-        hint="Puoi indicare più sedi o città di ritiro/consegna."
-        items={cities}
-        setItems={setCities}
-        placeholder="Lecce"
-        addLabel="+ Aggiungi città"
-      />
-      <div className="supplier-category-list" style={{ marginBottom: '0.5rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
-          Categorie merceologiche fornite
-        </label>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 0, marginBottom: '0.55rem' }}>
-          Seleziona una o più categorie: filtrano i pulsanti rapidi negli ordini verso questo fornitore.
-        </p>
-        <div
-          className="supplier-category-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-            gap: '0.35rem 0.75rem',
-            maxHeight: 220,
-            overflow: 'auto',
-            padding: '0.55rem',
-            border: '1px solid var(--border-subtle, rgba(0,0,0,0.1))',
-            borderRadius: 8,
-            background: 'var(--surface-2, rgba(0,0,0,0.03))',
-          }}
-        >
-          {SUPPLIER_MERCHANDISE_CATEGORY_OPTIONS.map((label) => (
-            <label
-              key={label}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem', margin: 0, cursor: 'pointer', fontSize: '0.88rem' }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(label)}
-                onChange={() => toggleCategory(label)}
-                style={{ marginTop: '0.15rem' }}
-              />
-              <span>{label}</span>
-            </label>
-          ))}
+      <div className="supplier-form-panel supplier-contacts-panel">
+        <div className="supplier-form-panel-head">
+          <h3 className="supplier-form-panel-title">Contatti e sedi</h3>
+          <p className="supplier-form-panel-lead">Telefoni, email e città usati per ordini e comunicazioni.</p>
         </div>
-        {selected.length ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.45rem', marginBottom: 0 }}>
-            Selezionate: {selected.join(', ')}
+        <div className="supplier-contacts-grid">
+          <ContactListEditor
+            title="Telefoni"
+            hint="Il primo attivo è il principale."
+            items={phones}
+            setItems={setPhones}
+            inputType="tel"
+            placeholder="080 1234567 o 3331234567"
+            addLabel="+ Aggiungi telefono"
+          />
+          <ContactListEditor
+            title="Email"
+            hint="La prima attiva è usata per gli ordini."
+            items={emails}
+            setItems={setEmails}
+            inputType="email"
+            placeholder="info@fornitore.it"
+            addLabel="+ Aggiungi email"
+          />
+          <ContactListEditor
+            title="Città"
+            hint="Più sedi o punti di ritiro/consegna."
+            items={cities}
+            setItems={setCities}
+            placeholder="Lecce"
+            addLabel="+ Aggiungi città"
+          />
+        </div>
+      </div>
+
+      <div className="supplier-form-panel supplier-category-panel">
+        <div className="supplier-form-panel-head">
+          <h3 className="supplier-form-panel-title">Categorie merceologiche</h3>
+          <p className="supplier-form-panel-lead">
+            Tocca le categorie fornite: filtrano i pulsanti rapidi negli ordini.
           </p>
-        ) : null}
+        </div>
+        <div className="supplier-category-chips" role="group" aria-label="Categorie merceologiche">
+          {SUPPLIER_MERCHANDISE_CATEGORY_OPTIONS.map((label) => {
+            const active = selected.includes(label)
+            return (
+              <button
+                key={label}
+                type="button"
+                className={active ? 'supplier-category-chip is-active' : 'supplier-category-chip'}
+                aria-pressed={active}
+                onClick={() => toggleCategory(label)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="supplier-category-selected">
+          {selected.length ? (
+            <>
+              <span className="supplier-category-selected-label">{selected.length} selezionate</span>
+              <span className="supplier-category-selected-list">{selected.join(' · ')}</span>
+            </>
+          ) : (
+            <span className="supplier-category-selected-empty">Nessuna categoria selezionata</span>
+          )}
+        </div>
       </div>
     </div>
   )

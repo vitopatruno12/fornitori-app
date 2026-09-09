@@ -5,6 +5,7 @@ import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
@@ -12,6 +13,25 @@ import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
 function formatAmount(value) {
   if (value == null || value === '') return '–'
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const REGISTRATE_COLUMNS = [
+  { id: 'invoice_number', label: 'N. doc.', width: 110, sticky: 'left' },
+  { id: 'invoice_date', label: 'Data doc.', width: 100 },
+  { id: 'due_date', label: 'Scadenza', width: 100 },
+  { id: 'supplier_name', label: 'Fornitore', width: 200 },
+  { id: 'imponibile', label: 'Imponibile', width: 110, numeric: true },
+  { id: 'vat_amount', label: 'IVA', width: 90, numeric: true },
+  { id: 'total', label: 'Totale', width: 110, numeric: true, emphasis: true },
+  { id: 'payment_status', label: 'Stato', width: 100 },
+  { id: 'amount_paid', label: 'Pagato', width: 100, numeric: true },
+]
+
+function paymentStatusText(status, ignored) {
+  if (ignored) return 'Ignorata'
+  if (status === 'paid') return 'Pagata'
+  if (status === 'partial') return 'Parziale'
+  return 'Da pagare'
 }
 
 export default function InvoicesPage() {
@@ -653,117 +673,84 @@ export default function InvoicesPage() {
         {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
 
         {!loading && !error && (
-          <div className="table-wrap invoices-elenco-wrap" style={{ fontSize: '0.88rem' }}>
-            <table className="app-table invoices-elenco-table">
-              <colgroup>
-                <col className="col-doc" />
-                <col className="col-date" />
-                <col className="col-date" />
-                <col className="col-supplier" />
-                <col className="col-money" />
-                <col className="col-money" />
-                <col className="col-money" />
-                <col className="col-status" />
-                <col className="col-money" />
-                <col className="col-file" />
-                <col className="col-cassa" />
-                <col className="col-actions" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>N. doc.</th>
-                  <th>Data doc.</th>
-                  <th>Scadenza</th>
-                  <th>Fornitore</th>
-                  <th className="text-end">Imponibile</th>
-                  <th className="text-end">IVA</th>
-                  <th className="text-end">Totale</th>
-                  <th>Stato</th>
-                  <th className="text-end">Pagato</th>
-                  <th>File</th>
-                  <th>Cassa</th>
-                  <th>Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInvoices.map(inv => (
-                  <tr
-                    key={inv.id}
-                    className="pn-row-click"
-                    onClick={() => openInvoiceDetail(inv)}
+          <WorkbookGrid
+            title="Storico fatture"
+            sheetLabel={`${filteredInvoices.length} documenti`}
+            hideToolbar
+            gridClassName="fatture-excel-grid"
+            columns={REGISTRATE_COLUMNS}
+            rows={filteredInvoices}
+            rowKey={(row) => row.id}
+            cellValue={(row, col) => {
+              if (col.id === 'invoice_date' || col.id === 'due_date') return formatDate(row[col.id])
+              if (col.id === 'supplier_name') return row.supplier_name || row.supplier_id || '—'
+              if (col.id === 'imponibile' || col.id === 'vat_amount' || col.id === 'total' || col.id === 'amount_paid') {
+                return formatAmount(row[col.id])
+              }
+              if (col.id === 'payment_status') return paymentStatusText(row.payment_status, row.ignored)
+              return row[col.id] || '—'
+            }}
+            totals={
+              filteredInvoices.length
+                ? {
+                    count: filteredInvoices.length,
+                    imponibile: filteredInvoices.reduce((a, r) => a + (Number(r.imponibile) || 0), 0),
+                    vat_amount: filteredInvoices.reduce((a, r) => a + (Number(r.vat_amount) || 0), 0),
+                    total: filteredInvoices.reduce((a, r) => a + (Number(r.total) || 0), 0),
+                    amount_paid: filteredInvoices.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
+                  }
+                : null
+            }
+            totalsLabel={(colId, totals) => {
+              if (colId === 'invoice_number') return 'Totali'
+              if (colId === 'supplier_name') return `${totals.count} doc.`
+              if (colId === 'imponibile') return formatAmount(totals.imponibile)
+              if (colId === 'vat_amount') return formatAmount(totals.vat_amount)
+              if (colId === 'total') return formatAmount(totals.total)
+              if (colId === 'amount_paid') return formatAmount(totals.amount_paid)
+              return ''
+            }}
+            emptyMessage={
+              invoices.length === 0 ? 'Nessuna fattura registrata.' : 'Nessuna fattura per i filtri selezionati.'
+            }
+            onRowClick={(inv) => openInvoiceDetail(inv)}
+            actionsHeader="Azioni"
+            renderActions={(inv) => (
+              <div className="fatture-excel-actions" onClick={(e) => e.stopPropagation()}>
+                {inv.file_path ? (
+                  <a
+                    href={getInvoicePdfUrl(inv.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn-primary btn-sm"
+                    title="Apri PDF"
                   >
-                    <td style={{ fontWeight: 600 }}>{inv.invoice_number}</td>
-                    <td>{formatDate(inv.invoice_date)}</td>
-                    <td>{formatDate(inv.due_date)}</td>
-                    <td>{inv.supplier_name || inv.supplier_id}</td>
-                    <td className="text-end amount">{formatAmount(inv.imponibile)}</td>
-                    <td className="text-end amount">
-                      {formatAmount(inv.vat_amount)}
-                      <div style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>{inv.vat_percent != null ? `${inv.vat_percent} %` : ''}</div>
-                    </td>
-                    <td className="text-end amount pn-amount-cell" style={{ fontWeight: 700 }}>{formatAmount(inv.total)}</td>
-                    <td onClick={e => e.stopPropagation()}><PaymentBadge status={inv.payment_status} ignored={inv.ignored} /></td>
-                    <td className="text-end amount">{formatAmount(inv.amount_paid)}</td>
-                    <td onClick={e => e.stopPropagation()}>
-                      {inv.file_path ? (
-                        <a
-                          href={getInvoicePdfUrl(inv.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-primary"
-                          style={{ textDecoration: 'none' }}
-                          title="Apri PDF (allegato FatturaPA o anteprima generata)"
-                        >
-                          PDF
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>–</span>
-                      )}
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => openPrimaNota(inv)}
-                        title="Apre Prima Nota con data documento e fornitore"
-                      >
-                        Cassa
-                      </button>
-                      {inv.cash_entry_id ? (
-                        <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>#{inv.cash_entry_id}</span>
-                      ) : null}
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <div className="invoices-elenco-actions">
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={() => handleMarkPaid(inv)}
-                          disabled={inv.payment_status === 'paid'}
-                        >
-                          Pagata
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => handleToggleIgnore(inv)}
-                        >
-                          {inv.ignored ? 'Ripristina' : 'Ignora'}
-                        </button>
-                        <button type="button" className="btn btn-secondary" onClick={() => handleEdit(inv)}>Modifica</button>
-                        <button type="button" className="btn btn-outline-danger" onClick={() => handleDelete(inv)}>Elimina</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filteredInvoices.length === 0 && (
-                  <tr>
-                    <td colSpan={12} className="empty-state">{invoices.length === 0 ? 'Nessuna fattura registrata.' : 'Nessuna fattura per i filtri selezionati.'}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    PDF
+                  </a>
+                ) : null}
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPrimaNota(inv)}>
+                  Cassa
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleMarkPaid(inv)}
+                  disabled={inv.payment_status === 'paid'}
+                >
+                  Pagata
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleIgnore(inv)}>
+                  {inv.ignored ? 'Ripristina' : 'Ignora'}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(inv)}>
+                  Modifica
+                </button>
+                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(inv)}>
+                  Elimina
+                </button>
+              </div>
+            )}
+          />
         )}
       </section>
 

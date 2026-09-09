@@ -4531,6 +4531,212 @@ select.form-control {
   color: var(--text-muted);
 }
 
+/* Anagrafica fornitori — identità + categorie */
+.supplier-anagrafica-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.supplier-form-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 1rem 1.1rem 1.05rem;
+  box-shadow: var(--shadow);
+}
+
+.supplier-identity-panel {
+  border-color: rgba(30, 58, 95, 0.18);
+  background:
+    linear-gradient(135deg, rgba(235, 244, 248, 0.85) 0%, rgba(255, 255, 255, 0.95) 42%, #fff 100%);
+}
+
+.supplier-form-panel-head {
+  margin-bottom: 0.85rem;
+}
+
+.supplier-form-panel-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-heading);
+}
+
+.supplier-form-panel-lead {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.supplier-identity-row {
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.supplier-identity-name {
+  flex: 1.6 1 260px;
+  min-width: 0;
+}
+
+.supplier-identity-vat,
+.supplier-identity-cf {
+  flex: 0.85 1 150px;
+  min-width: 0;
+}
+
+.supplier-identity-name-input {
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  min-height: 2.65rem;
+  border-color: rgba(30, 58, 95, 0.28);
+  background: #fff;
+}
+
+.supplier-identity-name-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.12);
+}
+
+.supplier-multi-contact-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.supplier-contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.supplier-contact-list {
+  min-width: 0;
+}
+
+.supplier-contact-list-title {
+  display: block;
+  margin: 0 0 0.2rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text-heading);
+}
+
+.supplier-contact-list-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.supplier-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.supplier-contact-row .form-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.supplier-contact-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.supplier-category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.supplier-category-chip {
+  appearance: none;
+  border: 1px solid rgba(30, 58, 95, 0.22);
+  background: #fff;
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 0.38rem 0.85rem;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.supplier-category-chip:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.supplier-category-chip.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(30, 58, 95, 0.22);
+}
+
+.supplier-category-chip:focus-visible {
+  outline: 2px solid rgba(30, 58, 95, 0.35);
+  outline-offset: 2px;
+}
+
+.supplier-category-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  align-items: baseline;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed rgba(30, 58, 95, 0.16);
+  font-size: 0.82rem;
+}
+
+.supplier-category-selected-label {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.supplier-category-selected-list {
+  color: var(--text);
+}
+
+.supplier-category-selected-empty {
+  color: var(--text-muted);
+}
+
+@media (max-width: 980px) {
+  .supplier-contacts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .supplier-form-panel {
+    padding: 0.85rem 0.8rem;
+  }
+
+  .supplier-identity-name-input {
+    font-size: 1rem;
+  }
+
+  .supplier-contact-enable-label {
+    display: none;
+  }
+}
+
 .sup-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -8669,6 +8875,32 @@ select.form-control {
 
 .fatture-scope-mode-btns .btn-primary {
   grid-column: auto;
+}
+
+/* Fatture fornitori — griglia Excel come Banca (header verde, totali giallo) */
+.fatture-page .workbook-card-nested {
+  margin-top: 0.35rem;
+}
+
+.fatture-page .workbook-grid.fatture-excel-grid {
+  min-width: 980px;
+}
+
+.fatture-page .workbook-grid.fatture-excel-grid th {
+  background: #e2efda;
+  color: #1f2937;
+}
+
+.fatture-excel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  padding: 0.25rem 0.35rem;
+}
+
+.fatture-page .workbook-row-selected .excel-cell {
+  background: #ecfdf5 !important;
 }
 
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {
