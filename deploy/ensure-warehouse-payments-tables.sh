@@ -89,6 +89,7 @@ _apply_sql_file() {
 log "Migrazioni schema Atlas su $DB_NAME (owner $DB_USER)"
 
 for mig in \
+  20260504_sdi_invoices.sql \
   20260616_staff_locale_access_code.sql \
   20260617_prima_nota_locale_access_code.sql \
   20260710_warehouse_movements.sql \
@@ -102,7 +103,10 @@ for mig in \
   20260812_carriers.sql \
   20260812_electronic_invoices.sql \
   20260812_sdi_electronic_invoice_link.sql \
-  20260816_pos_receipts.sql
+  20260902_sdi_receiver_vat.sql \
+  20260816_pos_receipts.sql \
+  20260828_pos_receipts_payment_split.sql \
+  20260909_issued_invoices.sql
 do
   _apply_sql_file "$mig"
 done
@@ -143,8 +147,10 @@ for table in \
   electronic_invoices \
   incoming_invoices \
   incoming_invoice_lines \
+  sdi_invoices \
   pos_receipts \
-  prima_nota_locale_packs
+  prima_nota_locale_packs \
+  issued_invoices
 do
   if sudo -u postgres psql -tAc \
     "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table'" \

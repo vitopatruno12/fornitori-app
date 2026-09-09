@@ -17,6 +17,7 @@ from sqlalchemy import text  # noqa: E402
 from app.database import engine  # noqa: E402
 
 SAFE_MIGRATIONS = [
+    "20260504_sdi_invoices.sql",
     "20260616_staff_locale_access_code.sql",
     "20260617_prima_nota_locale_access_code.sql",
     "20260710_warehouse_movements.sql",
@@ -30,8 +31,10 @@ SAFE_MIGRATIONS = [
     "20260812_carriers.sql",
     "20260812_electronic_invoices.sql",
     "20260812_sdi_electronic_invoice_link.sql",
+    "20260902_sdi_receiver_vat.sql",
     "20260816_pos_receipts.sql",
     "20260828_pos_receipts_payment_split.sql",
+    "20260909_issued_invoices.sql",
 ]
 
 

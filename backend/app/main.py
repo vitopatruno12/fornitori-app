@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI):
         _ensure_sdi_receiver_vat()
         _ensure_bank_module_tables()
         _ensure_pos_receipts_table()
+        _ensure_issued_invoices_table()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -227,6 +228,12 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     if "warehouse_movements" in err_text or "supplier_payments_workbooks" in err_text or "volume_liters" in err_text:
         detail = (
             "Schema database incompleto (magazzino, pagamenti fornitori o ordini). "
+            "Sul server esegui: sudo RESTART_API=1 bash deploy/release-safe.sh "
+            "oppure deploy/ensure-warehouse-payments-tables.sh"
+        )
+    elif "issued_invoices" in err_text:
+        detail = (
+            "Tabella issued_invoices assente. "
             "Sul server esegui: sudo RESTART_API=1 bash deploy/release-safe.sh "
             "oppure deploy/ensure-warehouse-payments-tables.sh"
         )
@@ -1185,6 +1192,40 @@ def _ensure_pos_receipts_table() -> None:
             _safe_exec_sql(col_sql, label=label)
     except Exception as e:
         logger.warning("Impossibile verificare/creare pos_receipts: %s", e)
+
+
+def _ensure_issued_invoices_table() -> None:
+    """Fatture emesse caricate a mano (migr. 20260909_issued_invoices.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS issued_invoices (
+                      id SERIAL PRIMARY KEY,
+                      company VARCHAR(64) NOT NULL,
+                      activity VARCHAR(64),
+                      file_kind VARCHAR(16) NOT NULL,
+                      file_path VARCHAR(500) NOT NULL,
+                      original_filename VARCHAR(255),
+                      invoice_number VARCHAR(100),
+                      invoice_date TIMESTAMPTZ,
+                      total_amount NUMERIC(12, 2),
+                      status VARCHAR(32) NOT NULL DEFAULT 'caricata',
+                      note TEXT,
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+        for sql, label in (
+            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_company ON issued_invoices (company)", "Index issued_invoices.company"),
+            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_activity ON issued_invoices (activity)", "Index issued_invoices.activity"),
+            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_id ON issued_invoices (id)", "Index issued_invoices.id"),
+        ):
+            _safe_exec_sql(sql, label=label)
+    except Exception as e:
+        logger.warning("Impossibile verificare/creare issued_invoices: %s", e)
 
 
 def _check_critical_schema_columns() -> None:
