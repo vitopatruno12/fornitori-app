@@ -11,6 +11,7 @@ from ..schemas.invoice import InvoiceCreate, InvoiceDetailOut, InvoiceListOut, I
 from ..services import invoice_service
 from ..services.invoice_analytics import get_invoices_analytics_summary
 from ..services import invoice_import_service
+from ..services import issued_invoice_service
 
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -60,6 +61,75 @@ async def import_invoice_xml(
     return invoice_import_service.import_xml(db, xml_text, filename=file.filename)
   except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/emesse")
+def list_issued_invoices(
+  company: Optional[str] = Query(default=None, description="Filtro società: mediazione_a|mediazione_z|…"),
+  limit: int = Query(200, ge=1, le=500),
+  db: Session = Depends(get_db),
+):
+  """Elenco fatture emesse caricate manualmente (XML / PDF / immagine)."""
+  return {"items": issued_invoice_service.list_issued_invoices(db, company=company, limit=limit)}
+
+
+@router.post("/emesse/upload")
+async def upload_issued_invoice(
+  file: UploadFile = File(...),
+  company: str = Form(...),
+  file_kind: Optional[str] = Form(None, description="xml|pdf|image"),
+  activity: Optional[str] = Form(None),
+  invoice_number: Optional[str] = Form(None),
+  invoice_date: Optional[str] = Form(None),
+  total_amount: Optional[str] = Form(None),
+  note: Optional[str] = Form(None),
+  db: Session = Depends(get_db),
+):
+  """Carica una fattura emessa (XML, PDF o immagine) per società."""
+  return await issued_invoice_service.upload_issued_invoice(
+    db,
+    file=file,
+    company=company,
+    file_kind=file_kind,
+    activity=activity,
+    invoice_number=invoice_number,
+    invoice_date=invoice_date,
+    total_amount=total_amount,
+    note=note,
+  )
+
+
+@router.get("/emesse/{invoice_id}/file")
+def download_issued_invoice_file(invoice_id: int, db: Session = Depends(get_db)):
+  from fastapi.responses import FileResponse
+
+  path, row = issued_invoice_service.resolve_issued_file(db, invoice_id)
+  media = {
+    "xml": "application/xml",
+    "pdf": "application/pdf",
+    "image": "application/octet-stream",
+  }.get(row.file_kind or "", "application/octet-stream")
+  if row.file_kind == "image":
+    suffix = path.suffix.lower()
+    media = {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".webp": "image/webp",
+      ".gif": "image/gif",
+    }.get(suffix, "image/jpeg")
+  return FileResponse(
+    path,
+    media_type=media,
+    filename=row.original_filename or path.name,
+  )
+
+
+@router.delete("/emesse/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_issued_invoice(invoice_id: int, db: Session = Depends(get_db)):
+  ok = issued_invoice_service.delete_issued_invoice(db, invoice_id)
+  if not ok:
+    raise HTTPException(status_code=404, detail="Fattura emessa non trovata")
 
 
 @router.get("/incoming")

@@ -106,6 +106,70 @@ export async function importInvoiceXml(file) {
   return response.json()
 }
 
+/** Fatture emesse caricate manualmente (XML / PDF / immagine). */
+export async function fetchIssuedInvoices({ company, limit = 200 } = {}) {
+  const searchParams = new URLSearchParams()
+  if (company) searchParams.append('company', String(company))
+  if (limit) searchParams.append('limit', String(limit))
+  const query = searchParams.toString()
+  return apiFetch(query ? `/invoices/emesse?${query}` : '/invoices/emesse')
+}
+
+export async function uploadIssuedInvoice({
+  file,
+  company,
+  fileKind,
+  activity,
+  invoiceNumber,
+  invoiceDate,
+  totalAmount,
+  note,
+} = {}) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('company', company)
+  if (fileKind) formData.append('file_kind', fileKind)
+  if (activity) formData.append('activity', activity)
+  if (invoiceNumber) formData.append('invoice_number', invoiceNumber)
+  if (invoiceDate) formData.append('invoice_date', invoiceDate)
+  if (totalAmount != null && totalAmount !== '') formData.append('total_amount', String(totalAmount))
+  if (note) formData.append('note', note)
+  const response = await fetch(apiUrl('/invoices/emesse/upload'), {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) {
+    let detail = 'Errore caricamento fattura emessa'
+    try {
+      const data = await response.json()
+      detail = data?.detail || detail
+    } catch {
+      const text = await response.text().catch(() => '')
+      if (text) detail = text
+    }
+    throw new Error(typeof detail === 'string' ? detail : 'Errore caricamento fattura emessa')
+  }
+  return response.json()
+}
+
+export function getIssuedInvoiceFileUrl(id) {
+  return apiUrl(`/invoices/emesse/${id}/file`)
+}
+
+export async function deleteIssuedInvoice(id) {
+  const response = await fetch(apiUrl(`/invoices/emesse/${id}`), { method: 'DELETE' })
+  if (!response.ok && response.status !== 204) {
+    let detail = 'Errore eliminazione'
+    try {
+      const data = await response.json()
+      detail = data?.detail || detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(typeof detail === 'string' ? detail : 'Errore eliminazione')
+  }
+}
+
 export async function fetchIncomingInvoices(limit = 100) {
   return apiFetch(`/invoices/incoming?limit=${limit}`)
 }

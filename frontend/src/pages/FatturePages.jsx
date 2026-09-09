@@ -27,6 +27,10 @@ import {
   postSdiReceiveXml,
   setInvoiceIgnored,
   updateAdeFisconlineCredentials,
+  fetchIssuedInvoices,
+  uploadIssuedInvoice,
+  getIssuedInvoiceFileUrl,
+  deleteIssuedInvoice,
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
@@ -652,32 +656,83 @@ export function FattureEmessePage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [uploadKind, setUploadKind] = useState('pdf')
   const [importBusy, setImportBusy] = useState(false)
   const [importMsg, setImportMsg] = useState('')
   const [error, setError] = useState('')
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
   const importInputRef = React.useRef(null)
+
+  const acceptByKind = {
+    xml: '.xml,.p7m,application/xml,text/xml',
+    pdf: '.pdf,application/pdf',
+    image: 'image/*,.jpg,.jpeg,.png,.webp,.gif',
+  }
+
+  const kindLabel = { xml: 'XML', pdf: 'PDF', image: 'Immagine' }
+
+  async function reload() {
+    if (!companyId) {
+      setItems([])
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetchIssuedInvoices({ company: companyId, limit: 200 })
+      setItems(Array.isArray(res?.items) ? res.items : [])
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento fatture emesse')
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId])
 
   async function handleBannerImport(ev) {
     const file = ev.target.files?.[0]
     ev.target.value = ''
     if (!file) return
+    if (!companyId) {
+      setError('Seleziona prima la società nel banner.')
+      return
+    }
     setImportBusy(true)
     setImportMsg('')
     setError('')
     try {
-      const res = await importInvoiceXml(file)
-      if (res?.duplicated) {
-        setImportMsg('XML già presente in Atlas.')
-      } else {
-        const inv = res?.incoming_invoice
-        setImportMsg(
-          `Caricata n. ${inv?.invoice_number || '—'} · ${inv?.supplier_name || inv?.customer_name || 'documento'} · ${eur(inv?.total_amount)}`,
-        )
-      }
+      const row = await uploadIssuedInvoice({
+        file,
+        company: companyId,
+        fileKind: uploadKind,
+      })
+      setImportMsg(
+        `Caricato ${kindLabel[uploadKind] || uploadKind}: ${row?.original_filename || file.name}${
+          row?.id ? ` · id ${row.id}` : ''
+        }`,
+      )
+      await reload()
     } catch (e) {
-      setError(e?.message || 'Caricamento XML fallito')
+      setError(e?.message || 'Caricamento fallito')
     } finally {
       setImportBusy(false)
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Eliminare questo documento emesso?')) return
+    try {
+      await deleteIssuedInvoice(id)
+      setImportMsg('Documento eliminato.')
+      await reload()
+    } catch (e) {
+      setError(e?.message || 'Eliminazione fallita')
     }
   }
 
@@ -686,13 +741,13 @@ export function FattureEmessePage() {
       title="Fatture emesse"
       lead={
         gestionaleMode
-          ? 'Fatture attive / emesse per società. Società e caricamento XML manuale nel banner verde.'
+          ? 'Fatture attive / emesse per società. Scegli PDF, immagine o XML e caricale dal banner.'
           : companyId
             ? `Fatture emesse del registro ${companyLabel(companyId)}.`
             : 'Fatture emesse del registro locale.'
       }
       actions={
-        <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e caricamento XML">
+        <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e caricamento documento">
           {gestionaleMode ? (
             <FattureCompanySelect
               className="mastrini-hero-tools-company"
@@ -707,22 +762,35 @@ export function FattureEmessePage() {
               <strong>{companyId ? companyLabel(companyId) : 'Locale'}</strong>
             </div>
           )}
+          <label className="staff-gestionale-locale-select fatture-company-select mastrini-hero-tools-company">
+            <span className="staff-gestionale-locale-select-label">Tipo file</span>
+            <select
+              className="form-control staff-gestionale-locale-select-field"
+              value={uploadKind}
+              onChange={(e) => setUploadKind(e.target.value)}
+              aria-label="Scegli tipo file da caricare"
+            >
+              <option value="pdf">PDF</option>
+              <option value="image">Immagine</option>
+              <option value="xml">XML FatturaPA</option>
+            </select>
+          </label>
           <div className="mastrini-hero-tools-btns">
             <input
               ref={importInputRef}
               type="file"
-              accept=".xml,.p7m,application/xml,text/xml"
+              accept={acceptByKind[uploadKind] || acceptByKind.pdf}
               style={{ display: 'none' }}
               onChange={(ev) => void handleBannerImport(ev)}
             />
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={importBusy}
+              disabled={importBusy || !companyId}
               onClick={() => importInputRef.current?.click()}
-              title="Carica una FatturaPA XML emessa in Atlas"
+              title={`Carica ${kindLabel[uploadKind] || 'documento'} in Atlas`}
             >
-              {importBusy ? 'Caricamento…' : 'Carica XML'}
+              {importBusy ? 'Caricamento…' : `Carica ${kindLabel[uploadKind] || 'file'}`}
             </button>
           </div>
           {importMsg ? <p className="fatture-hero-tools-msg">{importMsg}</p> : null}
@@ -732,35 +800,60 @@ export function FattureEmessePage() {
       {error && <div className="alert alert-danger">{error}</div>}
       {!companyId ? (
         <div className="alert alert-info">
-          Scegli la società nel banner verde, oppure usa <strong>Carica XML</strong> per inserire una fattura
-          emessa manualmente.
+          Scegli la società nel banner verde, poi il tipo file (PDF / Immagine / XML) e carica il documento.
         </div>
       ) : (
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
           <p className="fatture-note">
-            Puoi caricare una FatturaPA XML dal banner verde. L’elenco da canale AdE / SDI attive sarà collegato
-            qui.
+            Menu «Tipo file» nel banner: PDF, Immagine o XML. I documenti restano legati a {companyLabel(companyId)}.
           </p>
+          {loading ? <AnalisiLoadingBar active label="Caricamento fatture emesse" variant="subtle" /> : null}
           <div className="table-wrap pn-table-wrap">
             <table className="app-table">
               <thead>
                 <tr>
-                  <th>Data</th>
+                  <th>Data carico</th>
+                  <th>Tipo</th>
+                  <th>File</th>
                   <th>Numero</th>
-                  <th>Cliente</th>
-                  <th>Imponibile</th>
-                  <th>IVA</th>
-                  <th>Totale</th>
+                  <th>Importo</th>
                   <th>Stato</th>
+                  <th>Azioni</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td colSpan={7} className="empty-state">
-                    Nessuna fattura emessa in archivio per {companyLabel(companyId)}. Usa «Carica XML» nel banner.
-                  </td>
-                </tr>
+                {items.map((row) => (
+                  <tr key={`emessa-${row.id}`}>
+                    <td>{formatDate(row.created_at || row.invoice_date)}</td>
+                    <td>{kindLabel[row.file_kind] || row.file_kind || '—'}</td>
+                    <td>{row.original_filename || '—'}</td>
+                    <td>{row.invoice_number || '—'}</td>
+                    <td>{row.total_amount != null ? eur(row.total_amount) : '—'}</td>
+                    <td>{row.status || 'caricata'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <a
+                        className="btn btn-secondary btn-sm"
+                        href={getIssuedInvoiceFileUrl(row.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Apri
+                      </a>{' '}
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleDelete(row.id)}>
+                        Elimina
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && items.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="empty-state">
+                      Nessuna fattura emessa per {companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal
+                      banner.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
