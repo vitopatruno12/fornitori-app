@@ -9,10 +9,11 @@ import {
 
 const STORAGE_KEY = 'atlasFattureCompany:v1'
 
-export const FATTURE_COMPANY_ORDER = ['mediazione', 'via_lattea', 'risacca', 'pg']
+export const FATTURE_COMPANY_ORDER = ['mediazione_a', 'mediazione_z', 'via_lattea', 'risacca', 'pg']
 
 export const FATTURE_COMPANY_LABELS = {
-  mediazione: 'Mediazione',
+  mediazione_a: 'Mediazione A',
+  mediazione_z: 'Mediazione Z',
   via_lattea: 'Via Lattea',
   risacca: 'Risacca',
   pg: 'PG',
@@ -20,9 +21,11 @@ export const FATTURE_COMPANY_LABELS = {
 
 /** Slug attività postazione → società SDI (registro fatture locale). */
 const ACTIVITY_SLUG_TO_SDI_COMPANY = {
-  via_abba: 'mediazione',
-  via_zanardelli: 'mediazione',
-  mediazione: 'mediazione',
+  via_abba: 'mediazione_a',
+  via_zanardelli: 'mediazione_z',
+  mediazione_a: 'mediazione_a',
+  mediazione_z: 'mediazione_z',
+  mediazione: '',
   via_lattea: 'via_lattea',
   risacca: 'risacca',
   pg: 'pg',
@@ -30,7 +33,8 @@ const ACTIVITY_SLUG_TO_SDI_COMPANY = {
 
 /** Società → attività Prima Nota / centri di costo collegati. */
 export const COMPANY_TO_ACTIVITIES = {
-  mediazione: ['via_abba', 'via_zanardelli', 'mediazione'],
+  mediazione_a: ['via_abba'],
+  mediazione_z: ['via_zanardelli'],
   via_lattea: ['via_lattea'],
   risacca: ['risacca'],
   pg: ['pg'],
@@ -69,7 +73,13 @@ export function resolveEmbeddedFattureCompany() {
 
 export function readFattureCompany() {
   try {
-    return String(sessionStorage.getItem(STORAGE_KEY) || '').trim()
+    const raw = String(sessionStorage.getItem(STORAGE_KEY) || '').trim()
+    // Migrazione id unico Mediazione → scegli A/Z dal menu
+    if (raw === 'mediazione') {
+      sessionStorage.removeItem(STORAGE_KEY)
+      return ''
+    }
+    return raw
   } catch {
     return ''
   }
@@ -78,7 +88,7 @@ export function readFattureCompany() {
 export function writeFattureCompany(companyId) {
   try {
     const value = String(companyId || '').trim()
-    if (!value) sessionStorage.removeItem(STORAGE_KEY)
+    if (!value || value === 'mediazione') sessionStorage.removeItem(STORAGE_KEY)
     else sessionStorage.setItem(STORAGE_KEY, value)
   } catch {
     // ignore
@@ -93,6 +103,7 @@ export async function fetchFattureCompanies() {
 
 export function companyLabel(companyId) {
   const id = String(companyId || '').trim()
+  if (id === 'mediazione') return 'Mediazione (da assegnare A/Z)'
   return FATTURE_COMPANY_LABELS[id] || id || '—'
 }
 

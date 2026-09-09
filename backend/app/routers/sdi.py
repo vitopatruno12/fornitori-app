@@ -63,15 +63,10 @@ def _keyword_list(name: str, default: str) -> List[str]:
 
 
 def _legacy_destination_section(destination: str) -> str:
-  """Classificazione legacy per indirizzo (Abba / Zanardelli → Mediazione)."""
-  dest = (destination or "").lower()
-  abba = _keyword_list("SDI_DEST_ABBA_KEYWORDS", "abba,via abba")
-  zan = _keyword_list("SDI_DEST_ZANARDELLI_KEYWORDS", "zanardelli,via zanardelli")
-  if any(k in dest for k in abba):
-    return "abba"
-  if any(k in dest for k in zan):
-    return "zanardelli"
-  return "non_classificata"
+  """Classificazione legacy per indirizzo (Abba → Mediazione A, Zanardelli → Mediazione Z)."""
+  from ..constants.sdi_companies import destination_to_legacy_section
+
+  return destination_to_legacy_section(destination)
 
 
 def _read_manual_assignments() -> Dict[str, str]:
@@ -169,7 +164,7 @@ def sdi_status() -> Dict[str, Any]:
     "dest_zanardelli_keywords": _keyword_list("SDI_DEST_ZANARDELLI_KEYWORDS", "zanardelli,via zanardelli"),
     "notes": (
       "Inbox locale + server SOAP RicezioneFatture di test (senza accreditamento SdICoop). "
-      "Classificazione per P.IVA destinatario (Mediazione, Via Lattea, Risacca, PG)."
+      "Classificazione per P.IVA destinatario; Mediazione A/Z da indirizzo (Abba / Zanardelli)."
     ),
   }
 
@@ -243,7 +238,7 @@ async def soap_ricezione_fatture(
 @router.get("/invoices/received")
 def list_sdi_received_invoices(
   days: int = Query(default=60, ge=1, le=365),
-  company: Optional[str] = Query(default=None, description="Filtra per società (mediazione|via_lattea|risacca|pg)"),
+  company: Optional[str] = Query(default=None, description="Filtra per società (mediazione_a|mediazione_z|via_lattea|risacca|pg)"),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
   since = datetime.now(timezone.utc) - timedelta(days=days)

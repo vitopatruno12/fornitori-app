@@ -6,7 +6,11 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from ..constants.sdi_companies import company_from_vat, normalize_company_section, pick_company
+from ..constants.sdi_companies import (
+  destination_to_legacy_section,
+  normalize_company_section,
+  pick_company,
+)
 from ..models.cash_entry import CashEntry
 from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice
 from ..models.invoice import Invoice
@@ -19,11 +23,13 @@ from .vat_service import calculate_vat
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "invoices"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Prima Nota activity → società fatture
+# Prima Nota activity → società fatture (Mediazione A = Abba, Mediazione Z = Zanardelli)
 _ACTIVITY_TO_COMPANY = {
-  "via_abba": "mediazione",
-  "via_zanardelli": "mediazione",
-  "mediazione": "mediazione",
+  "via_abba": "mediazione_a",
+  "via_zanardelli": "mediazione_z",
+  "mediazione_a": "mediazione_a",
+  "mediazione_z": "mediazione_z",
+  "mediazione": "non_classificata",
   "via_lattea": "via_lattea",
   "risacca": "risacca",
   "pg": "pg",
@@ -55,19 +61,22 @@ def resolve_invoice_company(
   receiver_vat: Optional[str] = None,
   ade_profile_id: Optional[str] = None,
   cash_activity: Optional[str] = None,
+  destination: Optional[str] = None,
 ) -> str:
-  """Classifica fattura Atlas per società (P.IVA destinatario / profilo AdE / activity cassa)."""
-  by_customer = company_from_vat(customer_vat)
-  if by_customer:
-    return by_customer
+  """Classifica fattura Atlas per società (destinazione A/Z, P.IVA, profilo AdE, activity)."""
+  act_company = _company_from_activity(cash_activity)
+  if act_company in {"mediazione_a", "mediazione_z"}:
+    return act_company
+
+  legacy = destination_to_legacy_section(destination) if destination else None
   by_sdi = pick_company(
-    receiver_vat=receiver_vat,
+    receiver_vat=receiver_vat or customer_vat,
     ade_profile_id=ade_profile_id,
-    legacy_destination_section=None,
+    legacy_destination_section=legacy,
   )
   if by_sdi != "non_classificata":
     return by_sdi
-  return _company_from_activity(cash_activity)
+  return act_company
 
 
 def list_invoices(
@@ -139,6 +148,7 @@ def list_invoices(
       receiver_vat=receiver_vat,
       ade_profile_id=ade_profile_id,
       cash_activity=cash_activity,
+      destination=destination,
     )
     inv_activity = (cash_activity or "").strip().lower() or None
     if company_filter:
@@ -151,7 +161,7 @@ def list_invoices(
           continue
       else:
         linked = _company_from_activity(activity_filter)
-        if not linked or inv_company != linked:
+        if not linked or linked == "non_classificata" or inv_company != linked:
           continue
 
     base = InvoiceRead.model_validate(inv).model_dump()

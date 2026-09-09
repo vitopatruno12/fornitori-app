@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import List, Optional
 
 
-# Mappa sede Atlas → società inbox SDI (mediazione | via_lattea | risacca | pg)
+# Mappa sede Atlas → società inbox SDI (mediazione_a | mediazione_z | via_lattea | risacca | pg)
 SEDE_TO_SDI_SECTION = {
-  "via_abba": "mediazione",
-  "mediazione": "mediazione",
-  "via_zanardelli": "mediazione",
+  "via_abba": "mediazione_a",
+  "mediazione_a": "mediazione_a",
+  "via_zanardelli": "mediazione_z",
+  "mediazione_z": "mediazione_z",
+  # Profilo AdE "mediazione": usare auto_section e classificare A/Z da indirizzo XML
   "via_lattea": "via_lattea",
   "risacca": "risacca",
   "pg": "pg",

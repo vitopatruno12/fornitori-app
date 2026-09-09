@@ -91,14 +91,18 @@ export function AdeSdiInvoicesPanel({
       const d = Number(daysOverride || days || 60)
       const data = await fetchSdiReceivedInvoices({ days: d, company: companyId || undefined })
       const companies = data?.companies && typeof data.companies === 'object' ? data.companies : {}
+      const nextCompanies = {}
+      for (const cid of FATTURE_COMPANY_ORDER) {
+        nextCompanies[cid] = Array.isArray(companies[cid]) ? companies[cid] : []
+      }
+      // Compat: eventuali residui sotto id "mediazione" → non classificate
+      const legacyMediazione = Array.isArray(companies.mediazione) ? companies.mediazione : []
       const next = {
-        companies: {
-          mediazione: Array.isArray(companies.mediazione) ? companies.mediazione : [],
-          via_lattea: Array.isArray(companies.via_lattea) ? companies.via_lattea : [],
-          risacca: Array.isArray(companies.risacca) ? companies.risacca : [],
-          pg: Array.isArray(companies.pg) ? companies.pg : [],
-        },
-        non_classificata: Array.isArray(data?.non_classificata) ? data.non_classificata : [],
+        companies: nextCompanies,
+        non_classificata: [
+          ...(Array.isArray(data?.non_classificata) ? data.non_classificata : []),
+          ...legacyMediazione,
+        ],
       }
       setRows(next)
       const count = companyId ? sdiListForCompany(next, companyId).length : flattenSdi(next).length

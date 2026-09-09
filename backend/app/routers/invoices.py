@@ -175,7 +175,7 @@ def list_invoices(
   include_ignored: bool = Query(default=False),
   company: Optional[str] = Query(
     default=None,
-    description="Filtra per società: mediazione|via_lattea|risacca|pg|non_classificata",
+    description="Filtra per società: mediazione_a|mediazione_z|via_lattea|risacca|pg|non_classificata",
   ),
   activity: Optional[str] = Query(
     default=None,
