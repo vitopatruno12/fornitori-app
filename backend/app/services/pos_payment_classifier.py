@@ -133,8 +133,11 @@ def merge_payment_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         out["payment_type"] = "quote"
         out["cash_amount_eur"] = None
         out["card_amount_eur"] = None
+        raw_u = str(out.get("payment_raw") or "").strip().upper()
         if not out.get("payment_label"):
-            out["payment_label"] = "Non fiscale (VEA)"
+            out["payment_label"] = (
+                "Preventivo" if raw_u == "PREVENTIVO" else "Non fiscale (VEA)"
+            )
         if not out.get("payment_raw"):
             out["payment_raw"] = "VEA"
         return out

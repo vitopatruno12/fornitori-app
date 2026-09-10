@@ -317,6 +317,9 @@ def main() -> int:
         print(
             f"OK fetched={meta.get('fetched')} "
             f"with_payment={meta.get('with_payment_type', 0)} "
+            f"preventivi={meta.get('preventivo_non_fiscal', 0)} "
+            f"vea={meta.get('vea_non_fiscal', 0)} "
+            f"fatture={meta.get('fattura_count', 0)} "
             f"mode={(meta.get('payment_schema') or {}).get('mode')} "
             f"matched={(meta.get('payment_schema') or {}).get('payment_lines_matched')} "
             f"table={meta.get('table')} batches={total_batches}",

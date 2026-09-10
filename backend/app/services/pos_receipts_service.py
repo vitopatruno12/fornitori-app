@@ -21,7 +21,9 @@ from .pos_store_catalog import (  # noqa: F401 — re-export
     resolve_store,
 )
 
-# Vendita/stampa non fiscale EasyRetail (TIPODOCUMENTO=VEA) — fuori chiusura.
+# Vendita/stampa non fiscale EasyRetail:
+# - TIPODOCUMENTO=VEA
+# - VEN con NUMERODOCUMENTO che inizia con '5' (Preventivi nel Rapporto Complessivo)
 NON_FISCAL_PAYMENT_TYPES = frozenset({"quote", "non_fiscal", "vea", "preventivo"})
 
 
@@ -30,8 +32,12 @@ def _is_non_fiscal_receipt(payment_type: Optional[str], *, payment_raw: Optional
     if pt in NON_FISCAL_PAYMENT_TYPES:
         return True
     raw = (payment_raw or "").strip().upper()
-    return raw == "VEA" or raw.startswith("VEA:")
-
+    if raw in ("VEA", "PREVENTIVO") or raw.startswith("VEA:"):
+        return True
+    if raw.startswith("5") and raw[:1].isdigit() and "/" not in raw:
+        # NUMERODOCUMENTO preventivo (es. 5990070900018)
+        return len(raw) >= 10 and raw.isdigit()
+    return False
 
 _DATE_HEADERS = (
     "dataora",

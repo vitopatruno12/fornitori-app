@@ -23,6 +23,49 @@ except Exception:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+
+def _norm_doc_number(raw: Any) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, float):
+        try:
+            if raw == int(raw):
+                return str(int(raw))
+        except Exception:
+            pass
+    s = str(raw).strip()
+    if s.endswith(".0") and s[:-2].isdigit():
+        return s[:-2]
+    return s
+
+
+def classify_easyretail_ven_kind(doc_type: Any, doc_number: Any) -> str:
+    """Classifica documenti EasyRetail rispetto al Rapporto Complessivo.
+
+    Match verificato PDF Via Abba 08/09/2026 (n/EUR esatti):
+      NUMERODOCUMENTO che inizia con '2' -> scontrino fiscale
+      NUMERODOCUMENTO che inizia con '5' -> preventivo (non fiscale)
+      NUMERODOCUMENTO tipo '1253/A/2026' -> fattura
+      TIPODOCUMENTO=VEA -> vendita non fiscale salvata
+    """
+    dt = str(doc_type or "").strip().upper()
+    if dt == "VEA":
+        return "vea"
+    nd = _norm_doc_number(doc_number)
+    if not nd:
+        return "scontrino" if dt in ("", "VEN") else "other"
+    if "/" in nd:
+        return "fattura"
+    first = nd[0]
+    if first == "5":
+        return "preventivo"
+    if first == "2":
+        return "scontrino"
+    if first.isdigit():
+        return "scontrino"
+    return "other"
+
+
 # Tabelle candidate (EasyRetail POS)
 _TABLE_CANDIDATES = (
     "SCONTRINI",
@@ -506,6 +549,10 @@ def discover_receipt_mapping(cur) -> Dict[str, Any]:
         "card_amount": _pick_col(cols, _RECEIPT_CARD_AMOUNT_COLS),
         "payment_type": _pick_col(cols, _RECEIPT_PAYMENT_TYPE_COLS),
         "doc_type": "TIPODOCUMENTO" if "TIPODOCUMENTO" in {c.upper() for c in cols} else None,
+        # Discriminatore Rapporto Complessivo: 2…=scontrino, 5…=preventivo, NNN/A/YYYY=fattura
+        "doc_number": "NUMERODOCUMENTO"
+        if "NUMERODOCUMENTO" in {c.upper() for c in cols}
+        else None,
     }
     if not mapping["ts"] and not mapping["date"]:
         raise RuntimeError(
@@ -1079,6 +1126,7 @@ def fetch_receipts_from_gdb(
             "card_amount",
             "payment_type",
             "doc_type",
+            "doc_number",
         ):
             col = mapping.get(key)
             if col and col not in aliases:
@@ -1102,8 +1150,8 @@ def fetch_receipts_from_gdb(
             where.append(f"{mapping['date']} >= ?")
             params.append(cutoff.date())
 
-        # VEN = fiscale (chiusura). VEA = vendita/stampa non fiscale salvata (preventivo operativo).
-        # BIL = gemello gestionale → escluso (doppio conteggio).
+        # VEN = scontrini/preventivi/fatture (discriminati via NUMERODOCUMENTO).
+        # VEA = vendita non fiscale salvata. BIL = gemello gestionale → escluso.
         if mapping.get("doc_type"):
             where.append(f"{mapping['doc_type']} IN ('VEN', 'VEA')")
 
@@ -1165,8 +1213,10 @@ def fetch_receipts_from_gdb(
                 if doc_raw is not None and str(doc_raw).strip()
                 else "VEN"
             )
+            doc_number = get(row, "doc_number")
+            doc_kind = classify_easyretail_ven_kind(doc_type, doc_number)
             # Evita collisione id se in futuro VEN/VEA condividessero la stessa chiave
-            if doc_type == "VEA":
+            if doc_kind == "vea":
                 external_key = f"VEA:{external_key}"
             row_vals = {
                 "amount": amount,
@@ -1188,6 +1238,7 @@ def fetch_receipts_from_gdb(
                         "is_void": 1 if is_void else 0,
                         "raw_store": None if store_raw is None else str(store_raw)[:120],
                         "_doc_type": doc_type,
+                        "_doc_kind": doc_kind,
                         "_row_vals": row_vals,
                     },
                 )
@@ -1221,11 +1272,16 @@ def fetch_receipts_from_gdb(
         rows: List[Dict[str, Any]] = []
         matched_lines = 0
         vea_count = 0
+        preventivo_count = 0
+        fattura_count = 0
         for external, base in raw_rows:
             pay: Dict[str, Any] = {}
             ext_key = str(external).strip()
             row_vals = base.pop("_row_vals", {})
             doc_type = str(base.pop("_doc_type", "") or "VEN").upper()
+            doc_kind = str(base.pop("_doc_kind", "") or "").strip().lower()
+            if not doc_kind:
+                doc_kind = classify_easyretail_ven_kind(doc_type, None)
             pay_lookup_key = _norm_id_key(
                 ext_key[4:] if ext_key.upper().startswith("VEA:") else ext_key
             )
@@ -1239,7 +1295,7 @@ def fetch_receipts_from_gdb(
                     pay = line_pay
                 elif (pay.get("payment_type") or "unknown") == "unknown":
                     pay = line_pay
-            if doc_type == "VEA":
+            if doc_kind == "vea":
                 vea_count += 1
                 pay = {
                     "payment_type": "quote",
@@ -1248,6 +1304,18 @@ def fetch_receipts_from_gdb(
                     "payment_label": "Non fiscale (VEA)",
                     "payment_raw": "VEA",
                 }
+            elif doc_kind == "preventivo":
+                # VEN con NUMERODOCUMENTO 5... = riga Preventivi del Rapporto (fuori chiusura)
+                preventivo_count += 1
+                pay = {
+                    "payment_type": "quote",
+                    "cash_amount_eur": None,
+                    "card_amount_eur": None,
+                    "payment_label": "Preventivo",
+                    "payment_raw": "PREVENTIVO",
+                }
+            elif doc_kind == "fattura":
+                fattura_count += 1
             rows.append({**base, **pay})
         meta = {
             "table": table,
@@ -1265,6 +1333,7 @@ def fetch_receipts_from_gdb(
                     "card_amount",
                     "payment_type",
                     "doc_type",
+                    "doc_number",
                 )
             },
             "payment_schema": {
@@ -1277,6 +1346,8 @@ def fetch_receipts_from_gdb(
             },
             "fetched": len(rows),
             "vea_non_fiscal": vea_count,
+            "preventivo_non_fiscal": preventivo_count,
+            "fattura_count": fattura_count,
             "with_payment_type": sum(1 for r in rows if r.get("payment_type") and r["payment_type"] != "unknown"),
             "store_column": mapping.get("store"),
             "store_filter": list(allow_stores),
