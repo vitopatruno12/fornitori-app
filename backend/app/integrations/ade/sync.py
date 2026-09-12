@@ -204,9 +204,26 @@ def sync_all_profiles() -> Tuple[List[AdeSyncResult], List[Dict[str, Any]]]:
   Esegue sync su tutti i profili abilitati.
   Ritorna (risultati per profilo, lista push aggregata).
   """
+  from .agent_status import report
+
+  mode = (
+    "request"
+    if _env("ADE_RICHIESTE_ONLY") in ("1", "true", "yes")
+    else ("download" if _env("ADE_RISPOSTE_ONLY") in ("1", "true", "yes") else "full")
+  )
   state_path = Path(_env("ADE_STATE_PATH") or str(default_state_path()))
   state = load_state(state_path)
   profiles = load_profiles()
+
+  report(
+    "connecting",
+    "Collegamento all'Agenzia delle Entrate…",
+    mode=mode,
+    progress=5,
+    running=True,
+    ok=None,
+    error="",
+  )
 
   if not profiles:
     empty = AdeSyncResult(
@@ -218,15 +235,53 @@ def sync_all_profiles() -> Tuple[List[AdeSyncResult], List[Dict[str, Any]]]:
     )
     touch_run(state, ok=False, message=empty.message)
     save_state(state_path, state)
+    report(
+      "error",
+      empty.message,
+      mode=mode,
+      progress=100,
+      running=False,
+      ok=False,
+      error=empty.message,
+    )
     return [empty], []
 
   results: List[AdeSyncResult] = []
   all_pushes: List[Dict[str, Any]] = []
+  n = len(profiles)
 
-  for profile in profiles:
+  for i, profile in enumerate(profiles):
+    base = int(10 + (80 * i) / max(n, 1))
+    if mode == "request":
+      msg = f"Richiesta fatture in corso — {profile.label or profile.id}"
+      phase = "request"
+    elif mode == "download":
+      msg = f"Scarico fatture in corso — {profile.label or profile.id}"
+      phase = "download"
+    else:
+      msg = f"Sync AdE — {profile.label or profile.id}"
+      phase = "sync"
+    report(
+      phase,
+      msg,
+      mode=mode,
+      profile_id=profile.id,
+      progress=base,
+      running=True,
+    )
     result, pushes = sync_profile(profile, state)
     results.append(result)
     all_pushes.extend(pushes)
+    report(
+      phase,
+      result.message[:240],
+      mode=mode,
+      profile_id=profile.id,
+      progress=min(95, base + int(80 / max(n, 1))),
+      running=True,
+      ok=result.ok if result.login_ok else False,
+      error="" if result.login_ok else result.message[:400],
+    )
 
   ok_any = any(r.ok for r in results)
   login_any = any(r.login_ok for r in results)
@@ -237,4 +292,46 @@ def sync_all_profiles() -> Tuple[List[AdeSyncResult], List[Dict[str, Any]]]:
     message=msgs[:2000],
   )
   save_state(state_path, state)
+
+  imported = sum(1 for p in all_pushes if p.get("ok") and not (p.get("result") or {}).get("duplicate") and not p.get("skipped"))
+  duplicates = sum(1 for p in all_pushes if p.get("ok") and (p.get("result") or {}).get("duplicate"))
+  failed_login = [r for r in results if not r.login_ok]
+
+  if failed_login and not any(r.downloaded for r in results) and mode != "request":
+    err = failed_login[0].message[:400]
+    report(
+      "error",
+      err,
+      mode=mode,
+      progress=100,
+      running=False,
+      ok=False,
+      error=err,
+    )
+  elif mode == "request":
+    ok_req = any(r.login_ok for r in results)
+    report(
+      "done" if ok_req else "error",
+      "Richieste AdE inviate." if ok_req else "Errore durante le richieste AdE.",
+      mode=mode,
+      progress=100,
+      running=False,
+      ok=ok_req,
+      error="" if ok_req else msgs[:400],
+    )
+  else:
+    report(
+      "done" if login_any else "error",
+      (
+        f"Fatture aggiornate — nuovo scarico (nuove={imported}, duplicate={duplicates})."
+        if login_any
+        else "Errore sync AdE."
+      ),
+      mode=mode,
+      progress=100,
+      running=False,
+      ok=bool(login_any),
+      error="" if login_any else msgs[:400],
+    )
+
   return results, all_pushes

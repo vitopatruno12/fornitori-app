@@ -1272,6 +1272,7 @@ export function FattureSincronizzazionePage() {
           </li>
           <li>
             Script ufficio: <code>backend/scripts/run_ade_sync_ufficio.ps1</code>
+            (Request/Download in <strong>headless</strong>, barra progresso + toast assistente)
           </li>
           <li>
             Automatico: <code>ADE_FISCONLINE_PASSWORD</code>, <code>ADE_FISCONLINE_PIN</code>, profilo con{' '}

@@ -60,6 +60,7 @@ import {
 } from './pages/FatturePages.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
+import AdeAgentOverlay from './components/AdeAgentOverlay.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
 import PwaInstallPrompt from './components/PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './components/AtlasUpdateButton.jsx'
@@ -757,16 +758,26 @@ function App() {
   React.useEffect(() => {
     if (!aiToast) return
     setAiToastClosing(false)
-    const closeStart = window.setTimeout(() => setAiToastClosing(true), 2200)
+    const closeStart = window.setTimeout(() => setAiToastClosing(true), 3200)
     const closeEnd = window.setTimeout(() => {
       setAiToast('')
       setAiToastClosing(false)
-    }, 2600)
+    }, 3600)
     return () => {
       window.clearTimeout(closeStart)
       window.clearTimeout(closeEnd)
     }
   }, [aiToast])
+
+  React.useEffect(() => {
+    function onAtlasToast(ev: Event) {
+      const detail = (ev as CustomEvent<{ message?: string }>).detail
+      const msg = String(detail?.message || '').trim()
+      if (msg) setAiToast(msg)
+    }
+    window.addEventListener('atlas-ai-toast', onAtlasToast as EventListener)
+    return () => window.removeEventListener('atlas-ai-toast', onAtlasToast as EventListener)
+  }, [])
 
   if (!isAuthenticated) {
     return (
@@ -1073,6 +1084,7 @@ function App() {
       )}
       {aiToast && <div className={`ai-toast ${aiToastClosing ? 'is-closing' : 'is-open'}`}>{aiToast}</div>}
       <AiManagerPopups enabled={isAuthenticated} />
+      <AdeAgentOverlay enabled={isAuthenticated} />
     </div>
   )
 }

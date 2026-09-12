@@ -4342,6 +4342,49 @@ select.form-control {
   opacity: 0;
 }
 
+.ade-agent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.ade-agent-overlay-card {
+  width: min(420px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  padding: 1rem 1.1rem 1.15rem;
+  pointer-events: none;
+}
+
+.ade-agent-overlay-title {
+  font-weight: 650;
+  font-size: 1rem;
+  color: #0f172a;
+  margin-bottom: 0.35rem;
+}
+
+.ade-agent-overlay-msg {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: #475569;
+  line-height: 1.35;
+}
+
+.ade-agent-overlay-pct {
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+  color: #64748b;
+  text-align: right;
+}
+
 .ai-suggestions {
   margin-top: 0.6rem;
   display: flex;

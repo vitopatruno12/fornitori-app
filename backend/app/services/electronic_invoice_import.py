@@ -287,6 +287,8 @@ class ElectronicInvoiceImportService:
             "DettaglioLinee",
         )
 
+        used_line_nos: set[int] = set()
+        next_synthetic = 1
         for line in lines:
 
             line_number = self._find_text(
@@ -327,9 +329,19 @@ class ElectronicInvoiceImportService:
                 )
             )
 
+            try:
+                raw_no = int(line_number or 0)
+            except ValueError:
+                raw_no = 0
+            line_no = raw_no if raw_no > 0 else next_synthetic
+            while line_no in used_line_nos:
+                line_no = max(used_line_nos) + 1
+            used_line_nos.add(line_no)
+            next_synthetic = max(next_synthetic, line_no + 1)
+
             invoice_line = IncomingInvoiceLine(
                 invoice_id=incoming_invoice.id,
-                line_number=int(line_number or 0),
+                line_number=line_no,
                 description=description,
                 quantity=quantity,
                 unit_price=unit_price,

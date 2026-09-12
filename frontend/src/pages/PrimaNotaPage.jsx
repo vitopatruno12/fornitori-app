@@ -996,10 +996,12 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setFormAccountId('')
       setFormPaymentMethodId('')
       setFormCategoryId('')
-      setFormEntryDate('')
+      // Mantieni la data scelta (es. agosto) per registrare più movimenti storici di fila
+      const entryYmd = String(entryDate).slice(0, 10)
+      setFormEntryDate(entryYmd)
+      setSelectedDate(entryYmd)
       setFormType('entrata')
       setEditingId(null)
-      const entryYmd = String(entryDate).slice(0, 10)
       const period = expandMovementPeriodToInclude(entryYmd)
       applyMovementPeriodRange(period.from, period.to)
       await invalidateCachePrefix('/cash/entries')
@@ -1036,7 +1038,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setFormAccountId(entry.account_id ? String(entry.account_id) : '')
     setFormPaymentMethodId(entry.payment_method_id ? String(entry.payment_method_id) : '')
     setFormCategoryId(entry.category_id ? String(entry.category_id) : '')
-    setFormEntryDate(entry.entry_date ? entry.entry_date.slice(0, 10) : selectedDate)
+    const editYmd = entry.entry_date ? entry.entry_date.slice(0, 10) : selectedDate
+    setFormEntryDate(editYmd)
+    if (editYmd) setSelectedDate(editYmd)
     setError('')
     setSuccess('')
   }
@@ -1057,7 +1061,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setFormAccountId('')
     setFormPaymentMethodId('')
     setFormCategoryId('')
-    setFormEntryDate('')
+    // Non resettare la data a oggi: resta quella della giornata selezionata
+    setFormEntryDate(selectedDate)
     setError('')
   }
 
@@ -1705,7 +1710,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             type="date"
             className="form-control"
             value={selectedDate}
-            onChange={e => setSelectedDate(e.target.value)}
+            onChange={e => {
+              const ymd = e.target.value
+              setSelectedDate(ymd)
+              if (ymd) setFormEntryDate(ymd)
+            }}
             style={{ maxWidth: 160 }}
           />
         </div>
@@ -1791,7 +1800,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 type="date"
                 className="form-control"
                 value={formEntryDate || selectedDate}
-                onChange={e => setFormEntryDate(e.target.value)}
+                onChange={e => {
+                  const ymd = e.target.value
+                  setFormEntryDate(ymd)
+                  if (ymd) setSelectedDate(ymd)
+                }}
                 style={{ maxWidth: 160 }}
               />
             </div>

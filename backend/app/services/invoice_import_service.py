@@ -128,12 +128,20 @@ class InvoiceImportService:
     self.db.add(incoming)
     self.db.flush()
 
-    # 7. righe
+    # 7. righe — NumeroLinea può ripetersi (es. sconti Lidl Plus sulla stessa riga)
+    used_line_nos: set[int] = set()
+    next_synthetic = 1
     for line in data["lines"]:
+      raw_no = int(line.get("line_number") or 0)
+      line_no = raw_no if raw_no > 0 else next_synthetic
+      while line_no in used_line_nos:
+        line_no = max(used_line_nos) + 1
+      used_line_nos.add(line_no)
+      next_synthetic = max(next_synthetic, line_no + 1)
       self.db.add(
         IncomingInvoiceLine(
           invoice_id=incoming.id,
-          line_number=int(line.get("line_number") or 0),
+          line_number=line_no,
           description=line.get("description"),
           quantity=line.get("quantity"),
           unit_price=line.get("unit_price"),

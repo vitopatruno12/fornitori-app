@@ -1691,6 +1691,24 @@ class AdePlaywrightClient:
 
       self._shot(page, "03f_mass_tipo_periodo", shots)
 
+      # Chiudi datepicker / overlay che intercettano i click su Genera/Invia
+      try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        page.evaluate(
+          """() => {
+            document.querySelectorAll('.ui-datepicker, .p-datepicker, .mat-datepicker-popup, .cdk-overlay-backdrop')
+              .forEach(n => { try { n.click(); } catch(e) {} });
+            const body = document.body;
+            if (body) body.click();
+          }"""
+        )
+        page.wait_for_timeout(400)
+      except Exception:
+        pass
+
       # Genera richiesta (bottone corretto AdE)
       for btn in (
         r"^Genera richiesta$",
@@ -1724,114 +1742,122 @@ class AdePlaywrightClient:
 
       # Dopo Genera compare modal con XML: serve "Invia richiesta" (non solo Genera)
       try:
-        page.wait_for_timeout(1000)
-        # Elenca tutti i bottoni Invia + click su quello accanto a "Download richiesta (xml)"
-        invia_info = page.evaluate(
-          """() => {
-            const nodes = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit]'));
-            const inviaAll = nodes.filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||n.value||'').trim()));
-            const meta = inviaAll.map((b, i) => {
-              const r = b.getBoundingClientRect();
-              let nearDownload = false;
-              let p = b.parentElement;
-              for (let k=0; k<8 && p; k++, p=p.parentElement) {
-                const t = p.innerText||'';
-                // Contenitore stretto del modal (non body intera)
-                if (t.length < 1200
-                    && /Download richiesta/i.test(t)
-                    && /Invia richiesta/i.test(t)
-                    && /Richiesta generata|XML generato/i.test(t)) {
-                  nearDownload = true; break;
-                }
-              }
-              return {i, nearDownload, x:r.x+r.width/2, y:r.y+r.height/2, w:r.width, h:r.height};
-            });
-            // Nel modal Invia è a DESTRA di Download → preferisci nearDownload con x maggiore
-            const modalish = meta.filter(m => m.nearDownload);
-            let pick = null;
-            if (modalish.length) pick = modalish.slice().sort((a,b)=>b.x-a.x)[0];
-            else if (meta.length) pick = meta.slice().sort((a,b)=>b.x-a.x)[0];
-            return {meta, pick};
-          }"""
-        )
-        print(f"[{self.profile.id}] mass Invia bottoni={invia_info}", flush=True)
+        page.wait_for_timeout(1200)
         inviata = False
-        pick = (invia_info or {}).get("pick") or {}
-        if pick.get("x") is not None:
-          idx = int(pick.get("i", 0))
-          clicked_ok = False
-          # 1) locator button per testo (Angular mass-web)
+
+        def _presa_ok() -> bool:
           try:
-            loc = page.locator("button").filter(has_text=re.compile(r"^\s*Invia richiesta\s*$", re.I))
-            n = loc.count()
-            print(f"[{self.profile.id}] mass Invia locator count={n} pick_i={idx}", flush=True)
-            if n > 0:
-              el = loc.nth(min(idx, n - 1))
-              el.scroll_into_view_if_needed(timeout=3000)
-              el.click(timeout=8000, force=True)
-              clicked_ok = True
-              print(f"[{self.profile.id}] mass Invia locator.click ok", flush=True)
-          except Exception as e1:
-            print(f"[{self.profile.id}] mass Invia locator fail: {e1}", flush=True)
-          # 2) mouse CSS coords
-          if not clicked_ok:
-            try:
-              page.mouse.click(float(pick["x"]), float(pick["y"]))
-              clicked_ok = True
-              print(f"[{self.profile.id}] mass Invia mouse=({pick['x']:.0f},{pick['y']:.0f}) i={idx}", flush=True)
-            except Exception as e2:
-              print(f"[{self.profile.id}] mass Invia mouse fail: {e2}", flush=True)
-          # 3) JS click sull'elemento all'indice
-          if not clicked_ok:
-            try:
+            return bool(
               page.evaluate(
-                """(i) => {
-                  const nodes = Array.from(document.querySelectorAll('button'))
-                    .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||'').trim()));
-                  const b = nodes[i] || nodes[nodes.length-1];
-                  if (!b) return false;
-                  b.focus();
-                  b.click();
-                  return true;
-                }""",
-                idx,
+                """() => {
+                  const t = (document.body && document.body.innerText) || '';
+                  return /presa in carico|correttamente acquisita|acquisita con identificativo/i.test(t)
+                    || (/Identificativo\\s+richiesta/i.test(t) && /\\d{15,}/.test(t)
+                        && !/Richiesta generata/i.test(t));
+                }"""
               )
-              clicked_ok = True
-            except Exception as e3:
-              print(f"[{self.profile.id}] mass Invia js fail: {e3}", flush=True)
-          inviata = clicked_ok
-          # Secondo tentativo: anche l'altro bottone Invia (se il primo non apre presa in carico)
-          page.wait_for_timeout(1500)
-          if not page.evaluate("() => /presa in carico|Identificativo\\\\s+richiesta/i.test(document.body.innerText||'')"):
-            try:
-              loc = page.locator("button").filter(has_text=re.compile(r"^\s*Invia richiesta\s*$", re.I))
-              for j in range(loc.count()):
-                if j == idx:
-                  continue
-                loc.nth(j).click(timeout=5000, force=True)
-                print(f"[{self.profile.id}] mass Invia retry nth={j}", flush=True)
-                page.wait_for_timeout(2000)
-                if page.evaluate("() => /presa in carico/i.test(document.body.innerText||'')"):
-                  break
-            except Exception as e4:
-              print(f"[{self.profile.id}] mass Invia retry fail: {e4}", flush=True)
-        print(f"[{self.profile.id}] mass Invia richiesta={inviata}", flush=True)
-        for _ in range(18):
-          page.wait_for_timeout(1000)
-          try:
-            page.get_by_role("button", name=re.compile(r"^(Conferma|OK|Si|Sì|Chiudi)$", re.I)).first.click(
-              timeout=600
             )
           except Exception:
-            pass
-          ready = page.evaluate(
+            return False
+
+        def _modal_still_open() -> bool:
+          try:
+            return bool(
+              page.evaluate(
+                """() => {
+                  const t = (document.body && document.body.innerText) || '';
+                  return /Richiesta generata/i.test(t) && /Invia richiesta/i.test(t)
+                    && /Download richiesta/i.test(t);
+                }"""
+              )
+            )
+          except Exception:
+            return False
+
+        for attempt in range(5):
+          if _presa_ok():
+            inviata = True
+            break
+          clicked = page.evaluate(
             """() => {
-              const t = (document.body && document.body.innerText) || '';
-              return /presa in carico/i.test(t) || /Identificativo\\s+richiesta/i.test(t);
+              const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = window.getComputedStyle(el);
+                return r.width > 8 && r.height > 8 && st.visibility !== 'hidden'
+                  && st.display !== 'none' && st.pointerEvents !== 'none';
+              };
+              const roots = [
+                ...document.querySelectorAll(
+                  '[role=dialog], .modal, .cdk-overlay-pane, .ui-dialog, .mat-mdc-dialog-container, .p-dialog'
+                ),
+                document.body,
+              ];
+              for (const root of roots) {
+                const btns = Array.from(root.querySelectorAll('button,a,[role=button]'))
+                  .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||n.textContent||'').trim()) && visible(n));
+                if (!btns.length) continue;
+                // Preferisci quello a destra (accanto a Download)
+                btns.sort((a,b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
+                const b = btns[0];
+                b.scrollIntoView({block:'center', inline:'center'});
+                b.focus();
+                b.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
+                b.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window}));
+                b.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+                if (typeof b.click === 'function') b.click();
+                return {ok:true, x:b.getBoundingClientRect().x, y:b.getBoundingClientRect().y, attempt: true};
+              }
+              return {ok:false};
             }"""
           )
-          if ready:
+          print(f"[{self.profile.id}] mass Invia js attempt={attempt} {clicked}", flush=True)
+          # Playwright locator (Angular)
+          try:
+            loc = page.get_by_role("button", name=re.compile(r"^\s*Invia richiesta\s*$", re.I))
+            if loc.count() > 0:
+              el = loc.last
+              el.scroll_into_view_if_needed(timeout=3000)
+              el.click(timeout=8000, force=True)
+              print(f"[{self.profile.id}] mass Invia role.click attempt={attempt}", flush=True)
+          except Exception as e1:
+            print(f"[{self.profile.id}] mass Invia role fail: {e1}", flush=True)
+          # Mouse al centro del bottone trovato via JS
+          try:
+            box = page.evaluate(
+              """() => {
+                const nodes = Array.from(document.querySelectorAll('button'))
+                  .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||'').trim()));
+                if (!nodes.length) return null;
+                nodes.sort((a,b)=>b.getBoundingClientRect().x-a.getBoundingClientRect().x);
+                const r = nodes[0].getBoundingClientRect();
+                return {x:r.x+r.width/2, y:r.y+r.height/2};
+              }"""
+            )
+            if box and box.get("x") is not None:
+              page.mouse.click(float(box["x"]), float(box["y"]))
+              print(
+                f"[{self.profile.id}] mass Invia mouse=({box['x']:.0f},{box['y']:.0f}) attempt={attempt}",
+                flush=True,
+              )
+          except Exception as e2:
+            print(f"[{self.profile.id}] mass Invia mouse fail: {e2}", flush=True)
+
+          for _ in range(8):
+            page.wait_for_timeout(700)
+            try:
+              page.get_by_role(
+                "button", name=re.compile(r"^(Conferma|OK|Si|Sì|Chiudi)$", re.I)
+              ).first.click(timeout=400)
+            except Exception:
+              pass
+            if _presa_ok() or not _modal_still_open():
+              inviata = True
+              break
+          if inviata:
             break
+          page.wait_for_timeout(800)
+
+        print(f"[{self.profile.id}] mass Invia richiesta={inviata} presa={_presa_ok()}", flush=True)
         self._shot(page, "03f1b_mass_dopo_invia", shots, force=True)
       except Exception as e:
         print(f"[{self.profile.id}] mass Invia richiesta fail: {e}", flush=True)
@@ -1871,16 +1897,65 @@ class AdePlaywrightClient:
     else:
       print(f"[{self.profile.id}] mass ADE_RISPOSTE_ONLY=1 (skip Genera)", flush=True)
 
+    # Solo invio richiesta (schedulazione pomeridiana): niente attesa/scarico Risposte
+    if _env_bool("ADE_RICHIESTE_ONLY", False):
+      print(
+        f"[{self.profile.id}] mass ADE_RICHIESTE_ONLY=1 "
+        f"(skip Risposte; requested={requested})",
+        flush=True,
+      )
+      self._shot(page, "03f1c_richieste_only_done", shots, force=True)
+      return
+
     # Vai su Risposte: elenco con Identificativo richiesta / stato / Scarica
     try:
+      # Chiudi eventuali overlay che bloccano il menu
+      page.keyboard.press("Escape")
+      page.wait_for_timeout(400)
+    except Exception:
+      pass
+    navigated = False
+    # Tab Risposte (preferito) — #/risposte a volte è solo la home informativa
+    try:
       page.get_by_role("link", name=re.compile(r"^Risposte$", re.I)).first.click(timeout=5000)
-      page.wait_for_timeout(2000)
+      page.wait_for_timeout(1500)
+      navigated = True
     except Exception:
       try:
         page.get_by_text(re.compile(r"^Risposte$", re.I)).first.click(timeout=4000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1500)
+        navigated = True
       except Exception:
         pass
+    # Se siamo sulla landing, apri elenco
+    try:
+      body = (page.inner_text("body") or "")[:2500]
+      if re.search(r"Visualizza le risposte", body, re.I) and not re.search(
+        r"Elenco risposte|Identificativo richiesta", body, re.I
+      ):
+        page.get_by_text(re.compile(r"Visualizza le risposte", re.I)).first.click(timeout=5000)
+        page.wait_for_timeout(2000)
+        navigated = True
+        print(f"[{self.profile.id}] risposte click Visualizza elenco", flush=True)
+    except Exception as e:
+      print(f"[{self.profile.id}] risposte Visualizza fail: {e}", flush=True)
+    if not navigated:
+      try:
+        base = (page.url or "").split("#")[0].rstrip("/")
+        if "mass-web" in base:
+          for frag in ("#/risposte/fatture", "#/risposte"):
+            try:
+              page.goto(f"{base}/{frag}", wait_until="domcontentloaded", timeout=45000)
+              page.wait_for_timeout(1500)
+              t = page.inner_text("body") or ""
+              if re.search(r"Elenco risposte|Identificativo", t, re.I):
+                navigated = True
+                print(f"[{self.profile.id}] risposte goto {frag} ok", flush=True)
+                break
+            except Exception:
+              continue
+      except Exception as e:
+        print(f"[{self.profile.id}] risposte goto fail: {e}", flush=True)
 
     # Attendi fine spinner / tabella elenco (mass-web SPA)
     for _ in range(40):
@@ -1933,8 +2008,15 @@ class AdePlaywrightClient:
         try:
           opened = page.evaluate(
             """() => {
-              const row = Array.from(document.querySelectorAll('tr, [role=row], mat-row, li, .row'))
-                .find(r => /elaborat|predisposta/i.test(r.innerText||'') && /\\d{15,}/.test(r.innerText||''));
+              const rows = Array.from(document.querySelectorAll('tr, [role=row], mat-row, li, .row'))
+                .filter(r => /elaborat|predisposta/i.test(r.innerText||'') && /\\d{15,}/.test(r.innerText||''));
+              // Solo Fatture elettroniche / Ricevute — evita Corrispettivi (xml_ok=0)
+              const prefer = rows.find(r => {
+                const t = (r.innerText||'');
+                if (/corrispettiv/i.test(t)) return false;
+                return /fattur|ricevut/i.test(t) || !/corrispettiv/i.test(t);
+              }) || rows.find(r => !/corrispettiv/i.test(r.innerText||''));
+              const row = prefer || null;
               if (!row) return 'norow';
               const btns = Array.from(row.querySelectorAll('button,a,[role=button],i,span'));
               // Preferisci icona hamburger / dettaglio / download
@@ -1959,79 +2041,118 @@ class AdePlaywrightClient:
           print(f"[{self.profile.id}] risposte dettaglio={opened}", flush=True)
           page.wait_for_timeout(1500)
           self._shot(page, f"03f2b_dettaglio_{attempt}", shots, force=True)
+          if opened == "norow":
+            # Nessuna riga Fatture Elaborata: aspetta elaborazione (non scaricare Corrispettivi)
+            raise RuntimeError("norow_fatture_elaborata")
         except Exception as e:
           print(f"[{self.profile.id}] risposte dettaglio fail: {e}", flush=True)
+          if "norow_fatture" in str(e):
+            raise
 
         # Flusso AdE Risposte (semplice):
         # 1) riga Elaborata + pulsante blu (dettaglio)
         # 2) popup "Dati della Risposta" → apri "File prodotti"
         # 3) scarica ZIP fatture (NON "download file della richiesta")
-        with page.expect_download(timeout=25000) as dl_info:
-          clicked = False
+        try:
+          page.get_by_text(re.compile(r"File prodotti", re.I)).first.click(timeout=3000)
+          page.wait_for_timeout(1000)
+        except Exception:
           try:
-            page.get_by_text(re.compile(r"File prodotti", re.I)).first.click(timeout=3000)
-            page.wait_for_timeout(800)
+            page.evaluate(
+              """() => {
+                const el = Array.from(document.querySelectorAll('a,button,div,span,summary'))
+                  .find(n => /File prodotti\\s*\\(/i.test((n.innerText||'').trim())
+                    || /^\\s*File prodotti/i.test((n.innerText||'').trim()));
+                if (el) el.click();
+              }"""
+            )
+            page.wait_for_timeout(1000)
           except Exception:
-            try:
-              page.evaluate(
+            pass
+        self._shot(page, f"03f2c_file_prodotti_{attempt}", shots, force=True)
+
+        with page.expect_download(timeout=90000) as dl_info:
+          clicked = False
+          # Preferisci esplicito "download file" vicino a "ZIP prodotto"
+          try:
+            loc = page.get_by_text(re.compile(r"il file ZIP prodotto", re.I))
+            if loc.count() > 0:
+              # clicca il controllo download nella stessa riga/sezione
+              ok = page.evaluate(
                 """() => {
-                  const el = Array.from(document.querySelectorAll('a,button,div,span,summary'))
-                    .find(n => /File prodotti/i.test((n.innerText||'').trim()));
-                  if (el) el.click();
+                  const zipHint = Array.from(document.querySelectorAll('*'))
+                    .find(n => /il file ZIP prodotto/i.test((n.innerText||'').trim())
+                      && (n.children||[]).length < 8);
+                  let root = zipHint;
+                  for (let i=0; i<6 && root; i++) {
+                    const btn = Array.from(root.querySelectorAll('a,button,[role=button]'))
+                      .find(n => {
+                        const t = ((n.innerText||n.textContent||'') + ' '
+                          + (n.getAttribute('title')||'') + ' '
+                          + (n.getAttribute('aria-label')||'')).trim().toLowerCase();
+                        if (/della richiesta|fileinput|inputmassivo/i.test(t)) return false;
+                        return /^download file$/.test(t) || /download file(?! della)/i.test(t)
+                          || /cloud_download|file_download|\\.zip/i.test(t + ' ' + (n.className||''));
+                      });
+                    if (btn) { btn.click(); return 'zip-near'; }
+                    root = root.parentElement;
+                  }
+                  return false;
                 }"""
               )
-              page.wait_for_timeout(800)
-            except Exception:
-              pass
-          self._shot(page, f"03f2c_file_prodotti_{attempt}", shots, force=True)
+              if ok:
+                clicked = True
+                print(f"[{self.profile.id}] risposte download click={ok}", flush=True)
+          except Exception as e:
+            print(f"[{self.profile.id}] risposte zip-near fail: {e}", flush=True)
 
-          for name in (
-            r"download file prodotto",
-            r"Scarica file prodotto",
-            r"file prodotto",
-            r"Scarica ZIP",
-            r"Scarica risposta",
-            r"^Scarica$",
-            r"\.zip",
-          ):
-            try:
-              page.get_by_role("button", name=re.compile(name, re.I)).first.click(timeout=2500)
-              clicked = True
-              break
-            except Exception:
-              pass
-            try:
-              page.get_by_role("link", name=re.compile(name, re.I)).first.click(timeout=2500)
-              clicked = True
-              break
-            except Exception:
-              pass
+          if not clicked:
+            for name in (
+              r"^download file$",
+              r"download file prodotto",
+              r"Scarica file prodotto",
+              r"Scarica ZIP",
+            ):
+              try:
+                page.get_by_role("button", name=re.compile(name, re.I)).first.click(timeout=2500)
+                clicked = True
+                break
+              except Exception:
+                pass
+              try:
+                page.get_by_role("link", name=re.compile(name, re.I)).first.click(timeout=2500)
+                clicked = True
+                break
+              except Exception:
+                pass
           if not clicked:
             ok = page.evaluate(
               """() => {
-                // Solo dentro "File prodotti" — evita "download file della richiesta"
-                const sections = Array.from(document.querySelectorAll('div,section,details,li'))
-                  .filter(n => /File prodotti/i.test(n.innerText||'') && (n.innerText||'').length < 4000);
-                const scopes = sections.length ? sections : [document.body];
+                // Solo sotto File prodotti — MAI "download file della richiesta"
+                const markers = Array.from(document.querySelectorAll('*'))
+                  .filter(n => /^\\s*File prodotti/i.test((n.innerText||'').split('\\n')[0]||'')
+                    && (n.innerText||'').length < 2500);
+                const scopes = markers.length ? markers : [];
+                // fallback: blocco che contiene sia File prodotti sia ZIP prodotto
+                if (!scopes.length) {
+                  const big = Array.from(document.querySelectorAll('div,section,details'))
+                    .filter(n => /File prodotti/i.test(n.innerText||'')
+                      && /ZIP prodotto/i.test(n.innerText||'')
+                      && (n.innerText||'').length < 3500);
+                  scopes.push(...big);
+                }
                 for (const scope of scopes) {
                   const el = Array.from(scope.querySelectorAll('a,button,[role=button],i,span'))
                     .find(n => {
                       const t = ((n.innerText||n.textContent||'') + ' ' + (n.getAttribute('title')||'')
                         + ' ' + (n.getAttribute('aria-label')||'') + ' ' + (n.className||'')).toLowerCase();
-                      if (/file della richiesta|fileinput/i.test(t)) return false;
-                      return /prodotto|scarica|download|\\.zip|cloud_download|file_download/i.test(t);
+                      if (/file della richiesta|fileinput|inputmassivo/i.test(t)) return false;
+                      return /^\\s*download file\\s*$/i.test((n.innerText||'').trim())
+                        || /prodotto|scarica|cloud_download|file_download|\\.zip/i.test(t);
                     });
                   if (el) { el.click(); return 'ok'; }
                 }
-                const el2 = Array.from(document.querySelectorAll('a,button'))
-                  .find(n => {
-                    const t = (n.innerText||n.textContent||'').trim();
-                    if (/file della richiesta/i.test(t)) return false;
-                    return /file prodotto|scarica|download|\\.zip/i.test(t);
-                  });
-                if (!el2) return false;
-                el2.click();
-                return 'fallback';
+                return false;
               }"""
             )
             if not ok:
