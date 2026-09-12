@@ -98,6 +98,9 @@ def main() -> int:
 
   if not profiles:
     return 2
+  richieste_only = (os.getenv("ADE_RICHIESTE_ONLY") or "").strip().lower() in ("1", "true", "yes")
+  if richieste_only:
+    return 0 if any(r.login_ok for r in results) else 3
   if any(not r.login_ok for r in results) and not any(r.downloaded for r in results):
     return 3
   if not any(r.downloaded for r in results) and not any(p.get("ok") for p in pushes):

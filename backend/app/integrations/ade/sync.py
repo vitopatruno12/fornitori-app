@@ -11,7 +11,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .playwright_client import AdePlaywrightClient, AdeSyncResult, _looks_like_fatturapa
 from .profiles import AdeProfile, load_profiles
-from .push_to_atlas import assign_sdi_section, push_xml_bytes
+from .push_to_atlas import (
+  assign_sdi_section,
+  detect_invoice_direction,
+  issued_company_for_profile,
+  push_issued_xml,
+  push_xml_bytes,
+)
 from .state import (
   default_state_path,
   load_state,
@@ -120,6 +126,10 @@ def sync_profile(profile: AdeProfile, state: Dict[str, Any]) -> Tuple[AdeSyncRes
   result = client.run_download()
   pushes: List[Dict[str, Any]] = []
 
+  # Solo richiesta massiva: non ripushare drop locale
+  if _env("ADE_RICHIESTE_ONLY") in ("1", "true", "yes"):
+    return result, pushes
+
   if not result.downloaded:
     return result, pushes
 
@@ -155,19 +165,50 @@ def sync_profile(profile: AdeProfile, state: Dict[str, Any]) -> Tuple[AdeSyncRes
       duplicates += 1
       continue
 
+    direction = detect_invoice_direction(payload, profile.partita_iva or "")
+    if direction == "emessa":
+      company = issued_company_for_profile(
+        profile_id=profile.id,
+        sdi_section=profile.sdi_section,
+        auto_section=bool(profile.auto_section),
+        xml_bytes=payload,
+      )
+      push = push_issued_xml(payload, filename=push_name, company=company)
+      entry: Dict[str, Any] = {
+        "filename": push_name,
+        "sha256": digest,
+        "source": item.source,
+        "profile_id": profile.id,
+        "sede": profile.sede,
+        "direction": "emessa",
+        "company": company,
+        **push,
+      }
+      pushes.append(entry)
+      if push.get("ok"):
+        mark_sent(state, profile.id, digest)
+        mark_sent(state, profile.id, item.sha256)
+        already.add(digest)
+        already.add(item.sha256)
+        imported += 1
+      else:
+        errors += 1
+      continue
+
     push = push_xml_bytes(
       payload,
       filename=push_name,
       sede=profile.sede,
       profile_id=profile.id,
     )
-    entry: Dict[str, Any] = {
+    entry = {
       "filename": push_name,
       "sha256": digest,
       "source": item.source,
       "profile_id": profile.id,
       "sede": profile.sede,
       "sdi_section": profile.sdi_section,
+      "direction": "ricevuta",
       **push,
     }
     pushes.append(entry)

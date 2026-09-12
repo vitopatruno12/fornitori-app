@@ -52,8 +52,9 @@ export async function listGestionaleStaffLocaleNames() {
   return [...names.values()].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
 }
 
-export async function resolveGestionaleLocaleMembers(localeName) {
+export async function resolveGestionaleLocaleMembers(localeName, options = {}) {
   const locale = String(localeName || '').trim()
+  const accessCode = String(options.accessCode || '').replace(/\D/g, '')
   if (!locale) {
     return { members: [], memberIds: [], packNameKeys: new Set(), canonicalName: '' }
   }
@@ -63,15 +64,27 @@ export async function resolveGestionaleLocaleMembers(localeName) {
   let packMembers = Array.isArray(hit?.pack?.members) ? hit.pack.members : []
   const canonicalName = hit?.canonicalName || locale
 
-  if (!packMembers.length) {
+  // Pack remoto solo con codice (o se il pack locale non ha dipendenti)
+  if (!packMembers.length || accessCode.length === 6) {
     try {
-      const remote = await fetchStaffLocalePack(canonicalName)
+      const remote = await fetchStaffLocalePack(
+        canonicalName,
+        accessCode.length === 6 ? accessCode : undefined,
+      )
       if (Array.isArray(remote?.members) && remote.members.length) {
         packMembers = remote.members
       }
     } catch {
       // pack protetto o non disponibile
+      if (!packMembers.length) {
+        return { members: [], memberIds: [], packNameKeys: new Set(), canonicalName }
+      }
     }
+  }
+
+  // Senza membri nel pack del locale: lista vuota (mai tutto il personale globale)
+  if (!packMembers.length) {
+    return { members: [], memberIds: [], packNameKeys: new Set(), canonicalName }
   }
 
   let all = []

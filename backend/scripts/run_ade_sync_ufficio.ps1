@@ -54,6 +54,8 @@ $env:ADE_KEEP_SESSION = "1"
 $env:ADE_LOOKBACK_DAYS = if ($env:ADE_LOOKBACK_DAYS) { $env:ADE_LOOKBACK_DAYS } else { "60" }
 $env:ADE_STATUS_PUSH = "1"
 $env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUNBUFFERED = "1"
+$env:ADE_MASS_KINDS = if ($env:ADE_MASS_KINDS) { $env:ADE_MASS_KINDS } else { "ricevute,emesse" }
 
 Remove-Item Env:ADE_ONLY_PROFILE -ErrorAction SilentlyContinue
 Remove-Item Env:ADE_RISPOSTE_ONLY -ErrorAction SilentlyContinue
@@ -83,7 +85,7 @@ Write-Host "Log: $LogFile"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 Add-Type -AssemblyName System.Drawing | Out-Null
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Atlas — Aggiornamento fatture AdE"
+$form.Text = "Atlas - Aggiornamento fatture AdE"
 $form.Size = New-Object System.Drawing.Size(480, 160)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -95,11 +97,11 @@ $label.AutoSize = $false
 $label.Size = New-Object System.Drawing.Size(440, 40)
 $label.Location = New-Object System.Drawing.Point(16, 16)
 $label.Text = if ($Mode -eq "Request") {
-  "Collegamento all'Agenzia delle Entrate — fase richiesta…"
+  "Collegamento all'Agenzia delle Entrate - fase richiesta..."
 } elseif ($Mode -eq "Download") {
-  "Collegamento all'Agenzia delle Entrate — fase scarico…"
+  "Collegamento all'Agenzia delle Entrate - fase scarico..."
 } else {
-  "Collegamento all'Agenzia delle Entrate…"
+  "Collegamento all'Agenzia delle Entrate..."
 }
 $bar = New-Object System.Windows.Forms.ProgressBar
 $bar.Style = "Marquee"
@@ -144,7 +146,7 @@ $form.Dispose()
 
 if ($code -eq 0 -or ($st -and $st.ok -eq $true)) {
   [System.Windows.Forms.MessageBox]::Show(
-    $(if ($st -and $st.message) { [string]$st.message } else { "Fatture aggiornate — nuovo scarico completato." }),
+    $(if ($st -and $st.message) { [string]$st.message } else { "Fatture aggiornate - nuovo scarico completato." }),
     "Assistente Atlas",
     [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information
@@ -155,7 +157,7 @@ if ($code -eq 0 -or ($st -and $st.ok -eq $true)) {
 $errMsg = if ($st -and $st.error) { [string]$st.error } elseif ($st -and $st.message) { [string]$st.message } else { "Errore sync AdE (exit=$code). Vedi log: $LogFile" }
 [System.Windows.Forms.MessageBox]::Show(
   $errMsg,
-  "Assistente Atlas — errore",
+  "Assistente Atlas - errore",
   [System.Windows.Forms.MessageBoxButtons]::OK,
   [System.Windows.Forms.MessageBoxIcon]::Error
 ) | Out-Null

@@ -1616,9 +1616,23 @@ class AdePlaywrightClient:
     self._shot(page, "03e_mass_web", shots)
     return page
 
-  def _mass_web_richiesta_ricevute(self, page: Any, shots: List[str]) -> None:
-    """Su mass-web: Genera richiesta fatture ricevute + periodo, poi scarica da Risposte.
+  def _mass_kinds(self) -> List[str]:
+    raw = (_env("ADE_MASS_KINDS") or "ricevute,emesse").lower()
+    kinds: List[str] = []
+    for part in raw.replace(";", ",").split(","):
+      p = part.strip()
+      if p in ("ricevute", "ricevuta", "received"):
+        if "ricevute" not in kinds:
+          kinds.append("ricevute")
+      elif p in ("emesse", "emessa", "issued", "trasmesse"):
+        if "emesse" not in kinds:
+          kinds.append("emesse")
+    return kinds or ["ricevute"]
 
+  def _mass_web_richiesta_ricevute(self, page: Any, shots: List[str]) -> None:
+    """Su mass-web: Genera richiesta fatture (Ricevute e/o Emesse) + scarica da Risposte.
+
+    ADE_MASS_KINDS=ricevute,emesse (default entrambe).
     Con ADE_RISPOSTE_ONLY=1 salta Genera e controlla solo Risposte (file già richiesto).
     """
     risposte_only = _env_bool("ADE_RISPOSTE_ONLY", False)
@@ -1633,267 +1647,290 @@ class AdePlaywrightClient:
       pass
 
     requested = False
+    kinds = self._mass_kinds()
     if not risposte_only:
-      # Tipologia: Ricevute (non Emesse)
-      try:
-        ok = page.evaluate(
-          """() => {
-            const labels = Array.from(document.querySelectorAll('label, span, div'));
-            const lab = labels.find(n => /^\\s*Ricevute\\s*$/i.test((n.innerText||'').trim()));
-            if (!lab) return 'nolabel';
-            const input = lab.querySelector('input') || document.getElementById(lab.getAttribute('for')||'')
-              || lab.previousElementSibling || lab.parentElement?.querySelector('input');
-            if (input && 'click' in input) { input.click(); lab.click(); return 'input'; }
-            lab.click();
-            return 'label';
-          }"""
-        )
-        print(f"[{self.profile.id}] mass Ricevute={ok}", flush=True)
-        page.wait_for_timeout(800)
-      except Exception as e:
-        print(f"[{self.profile.id}] mass Ricevute fail: {e}", flush=True)
-
-      # Tipo data Ricezione
-      try:
-        page.get_by_text(re.compile(r"^Ricezione$", re.I)).first.click(timeout=3000)
-        page.wait_for_timeout(400)
-      except Exception:
-        pass
-
-      self._apply_invoice_search(page)
-      # Forza date nei campi Dal/Al se presenti
-      try:
-        end = datetime.now()
-        start = end - timedelta(days=max(7, self.lookback_days))
-        date_from = start.strftime("%d/%m/%Y")
-        date_to = end.strftime("%d/%m/%Y")
-        page.evaluate(
-          """([df, dt]) => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            const dal = inputs.find(i => /dal/i.test(i.name||'') || /dal/i.test(i.id||'')
-              || /dal/i.test(i.getAttribute('aria-label')||'') || /dal/i.test(i.placeholder||''));
-            const al = inputs.find(i => (/^al$/i.test(i.name||'') || /^al$/i.test(i.id||'')
-              || /\\bal\\b/i.test(i.getAttribute('aria-label')||'') || /^al$/i.test(i.placeholder||''))
-              && i !== dal);
-            // fallback: primi due date-like vicino a Data
-            const dateInputs = inputs.filter(i => /date|data|gg\\/mm/i.test(i.placeholder||i.name||i.id||'')
-              || (i.type === 'text' && i.offsetParent));
-            const a = dal || dateInputs[0];
-            const b = al || dateInputs[1];
-            if (a) { a.focus(); a.value = df; a.dispatchEvent(new Event('input', {bubbles:true})); a.dispatchEvent(new Event('change', {bubbles:true})); }
-            if (b) { b.focus(); b.value = dt; b.dispatchEvent(new Event('input', {bubbles:true})); b.dispatchEvent(new Event('change', {bubbles:true})); }
-            return !!(a && b);
-          }""",
-          [date_from, date_to],
-        )
-      except Exception:
-        pass
-
-      self._shot(page, "03f_mass_tipo_periodo", shots)
-
-      # Chiudi datepicker / overlay che intercettano i click su Genera/Invia
-      try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
-        page.evaluate(
-          """() => {
-            document.querySelectorAll('.ui-datepicker, .p-datepicker, .mat-datepicker-popup, .cdk-overlay-backdrop')
-              .forEach(n => { try { n.click(); } catch(e) {} });
-            const body = document.body;
-            if (body) body.click();
-          }"""
-        )
-        page.wait_for_timeout(400)
-      except Exception:
-        pass
-
-      # Genera richiesta (bottone corretto AdE)
-      for btn in (
-        r"^Genera richiesta$",
-        r"Genera richiesta",
-        r"Invia richiesta",
-        r"Richiedi",
-      ):
-        try:
-          page.get_by_role("button", name=re.compile(btn, re.I)).first.click(timeout=5000)
-          page.wait_for_timeout(2500)
-          requested = True
-          break
-        except Exception:
+      for kind_i, kind in enumerate(kinds):
+        tip_label = "Ricevute" if kind == "ricevute" else "Emesse"
+        date_label = "Ricezione" if kind == "ricevute" else "Emissione"
+        if kind_i > 0:
           try:
-            page.evaluate(
-              """() => {
-                const b = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit]'))
-                  .find(n => /genera richiesta/i.test((n.innerText||n.value||'').trim()));
-                if (!b) return false;
-                b.click();
-                return true;
-              }"""
-            )
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(400)
+          except Exception:
+            pass
+          try:
+            page.get_by_role("link", name=re.compile(r"^Richieste$", re.I)).first.click(timeout=4000)
+            page.wait_for_timeout(1000)
+          except Exception:
+            pass
+          try:
+            page.get_by_text(re.compile(r"Fatture Elettroniche", re.I)).first.click(timeout=4000)
+            page.wait_for_timeout(1000)
+          except Exception:
+            pass
+
+        # Tipologia: Ricevute / Emesse
+        try:
+          ok = page.evaluate(
+            """(tip) => {
+              const labels = Array.from(document.querySelectorAll('label, span, div'));
+              const reTip = new RegExp('^\\s*' + tip + '\\s*$', 'i');
+              const lab = labels.find(n => reTip.test((n.innerText||'').trim()));
+              if (!lab) return 'nolabel';
+              const input = lab.querySelector('input') || document.getElementById(lab.getAttribute('for')||'')
+                || lab.previousElementSibling || lab.parentElement?.querySelector('input');
+              if (input && 'click' in input) { input.click(); lab.click(); return 'input'; }
+              lab.click();
+              return 'label';
+            }""",
+            tip_label,
+          )
+          print(f"[{self.profile.id}] mass {tip_label}={ok}", flush=True)
+          page.wait_for_timeout(800)
+        except Exception as e:
+          print(f"[{self.profile.id}] mass {tip_label} fail: {e}", flush=True)
+
+        # Tipo data Ricezione / Emissione
+        try:
+          page.get_by_text(re.compile(rf"^{date_label}$", re.I)).first.click(timeout=3000)
+          page.wait_for_timeout(400)
+        except Exception:
+          pass
+
+        self._apply_invoice_search(page)
+        # Forza date nei campi Dal/Al se presenti
+        try:
+          end = datetime.now()
+          start = end - timedelta(days=max(7, self.lookback_days))
+          date_from = start.strftime("%d/%m/%Y")
+          date_to = end.strftime("%d/%m/%Y")
+          page.evaluate(
+            """([df, dt]) => {
+              const inputs = Array.from(document.querySelectorAll('input'));
+              const dal = inputs.find(i => /dal/i.test(i.name||'') || /dal/i.test(i.id||'')
+                || /dal/i.test(i.getAttribute('aria-label')||'') || /dal/i.test(i.placeholder||''));
+              const al = inputs.find(i => (/^al$/i.test(i.name||'') || /^al$/i.test(i.id||'')
+                || /\\bal\\b/i.test(i.getAttribute('aria-label')||'') || /^al$/i.test(i.placeholder||''))
+                && i !== dal);
+              // fallback: primi due date-like vicino a Data
+              const dateInputs = inputs.filter(i => /date|data|gg\\/mm/i.test(i.placeholder||i.name||i.id||'')
+                || (i.type === 'text' && i.offsetParent));
+              const a = dal || dateInputs[0];
+              const b = al || dateInputs[1];
+              if (a) { a.focus(); a.value = df; a.dispatchEvent(new Event('input', {bubbles:true})); a.dispatchEvent(new Event('change', {bubbles:true})); }
+              if (b) { b.focus(); b.value = dt; b.dispatchEvent(new Event('input', {bubbles:true})); b.dispatchEvent(new Event('change', {bubbles:true})); }
+              return !!(a && b);
+            }""",
+            [date_from, date_to],
+          )
+        except Exception:
+          pass
+
+        self._shot(page, "03f_mass_tipo_periodo", shots)
+
+        # Chiudi datepicker / overlay che intercettano i click su Genera/Invia
+        try:
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(300)
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(300)
+          page.evaluate(
+            """() => {
+              document.querySelectorAll('.ui-datepicker, .p-datepicker, .mat-datepicker-popup, .cdk-overlay-backdrop')
+                .forEach(n => { try { n.click(); } catch(e) {} });
+              const body = document.body;
+              if (body) body.click();
+            }"""
+          )
+          page.wait_for_timeout(400)
+        except Exception:
+          pass
+
+        # Genera richiesta (bottone corretto AdE)
+        for btn in (
+          r"^Genera richiesta$",
+          r"Genera richiesta",
+          r"Invia richiesta",
+          r"Richiedi",
+        ):
+          try:
+            page.get_by_role("button", name=re.compile(btn, re.I)).first.click(timeout=5000)
             page.wait_for_timeout(2500)
             requested = True
             break
           except Exception:
-            continue
-
-      self._shot(page, "03f1_mass_richiesta_inviata", shots, force=True)
-
-      # Dopo Genera compare modal con XML: serve "Invia richiesta" (non solo Genera)
-      try:
-        page.wait_for_timeout(1200)
-        inviata = False
-
-        def _presa_ok() -> bool:
-          try:
-            return bool(
-              page.evaluate(
-                """() => {
-                  const t = (document.body && document.body.innerText) || '';
-                  return /presa in carico|correttamente acquisita|acquisita con identificativo/i.test(t)
-                    || (/Identificativo\\s+richiesta/i.test(t) && /\\d{15,}/.test(t)
-                        && !/Richiesta generata/i.test(t));
-                }"""
-              )
-            )
-          except Exception:
-            return False
-
-        def _modal_still_open() -> bool:
-          try:
-            return bool(
-              page.evaluate(
-                """() => {
-                  const t = (document.body && document.body.innerText) || '';
-                  return /Richiesta generata/i.test(t) && /Invia richiesta/i.test(t)
-                    && /Download richiesta/i.test(t);
-                }"""
-              )
-            )
-          except Exception:
-            return False
-
-        for attempt in range(5):
-          if _presa_ok():
-            inviata = True
-            break
-          clicked = page.evaluate(
-            """() => {
-              const visible = (el) => {
-                const r = el.getBoundingClientRect();
-                const st = window.getComputedStyle(el);
-                return r.width > 8 && r.height > 8 && st.visibility !== 'hidden'
-                  && st.display !== 'none' && st.pointerEvents !== 'none';
-              };
-              const roots = [
-                ...document.querySelectorAll(
-                  '[role=dialog], .modal, .cdk-overlay-pane, .ui-dialog, .mat-mdc-dialog-container, .p-dialog'
-                ),
-                document.body,
-              ];
-              for (const root of roots) {
-                const btns = Array.from(root.querySelectorAll('button,a,[role=button]'))
-                  .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||n.textContent||'').trim()) && visible(n));
-                if (!btns.length) continue;
-                // Preferisci quello a destra (accanto a Download)
-                btns.sort((a,b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
-                const b = btns[0];
-                b.scrollIntoView({block:'center', inline:'center'});
-                b.focus();
-                b.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
-                b.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window}));
-                b.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
-                if (typeof b.click === 'function') b.click();
-                return {ok:true, x:b.getBoundingClientRect().x, y:b.getBoundingClientRect().y, attempt: true};
-              }
-              return {ok:false};
-            }"""
-          )
-          print(f"[{self.profile.id}] mass Invia js attempt={attempt} {clicked}", flush=True)
-          # Playwright locator (Angular)
-          try:
-            loc = page.get_by_role("button", name=re.compile(r"^\s*Invia richiesta\s*$", re.I))
-            if loc.count() > 0:
-              el = loc.last
-              el.scroll_into_view_if_needed(timeout=3000)
-              el.click(timeout=8000, force=True)
-              print(f"[{self.profile.id}] mass Invia role.click attempt={attempt}", flush=True)
-          except Exception as e1:
-            print(f"[{self.profile.id}] mass Invia role fail: {e1}", flush=True)
-          # Mouse al centro del bottone trovato via JS
-          try:
-            box = page.evaluate(
-              """() => {
-                const nodes = Array.from(document.querySelectorAll('button'))
-                  .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||'').trim()));
-                if (!nodes.length) return null;
-                nodes.sort((a,b)=>b.getBoundingClientRect().x-a.getBoundingClientRect().x);
-                const r = nodes[0].getBoundingClientRect();
-                return {x:r.x+r.width/2, y:r.y+r.height/2};
-              }"""
-            )
-            if box and box.get("x") is not None:
-              page.mouse.click(float(box["x"]), float(box["y"]))
-              print(
-                f"[{self.profile.id}] mass Invia mouse=({box['x']:.0f},{box['y']:.0f}) attempt={attempt}",
-                flush=True,
-              )
-          except Exception as e2:
-            print(f"[{self.profile.id}] mass Invia mouse fail: {e2}", flush=True)
-
-          for _ in range(8):
-            page.wait_for_timeout(700)
             try:
-              page.get_by_role(
-                "button", name=re.compile(r"^(Conferma|OK|Si|Sì|Chiudi)$", re.I)
-              ).first.click(timeout=400)
+              page.evaluate(
+                """() => {
+                  const b = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit]'))
+                    .find(n => /genera richiesta/i.test((n.innerText||n.value||'').trim()));
+                  if (!b) return false;
+                  b.click();
+                  return true;
+                }"""
+              )
+              page.wait_for_timeout(2500)
+              requested = True
+              break
             except Exception:
-              pass
-            if _presa_ok() or not _modal_still_open():
+              continue
+
+        self._shot(page, "03f1_mass_richiesta_inviata", shots, force=True)
+
+        # Dopo Genera compare modal con XML: serve "Invia richiesta" (non solo Genera)
+        try:
+          page.wait_for_timeout(1200)
+          inviata = False
+
+          def _presa_ok() -> bool:
+            try:
+              return bool(
+                page.evaluate(
+                  """() => {
+                    const t = (document.body && document.body.innerText) || '';
+                    return /presa in carico|correttamente acquisita|acquisita con identificativo/i.test(t)
+                      || (/Identificativo\\s+richiesta/i.test(t) && /\\d{15,}/.test(t)
+                          && !/Richiesta generata/i.test(t));
+                  }"""
+                )
+              )
+            except Exception:
+              return False
+
+          def _modal_still_open() -> bool:
+            try:
+              return bool(
+                page.evaluate(
+                  """() => {
+                    const t = (document.body && document.body.innerText) || '';
+                    return /Richiesta generata/i.test(t) && /Invia richiesta/i.test(t)
+                      && /Download richiesta/i.test(t);
+                  }"""
+                )
+              )
+            except Exception:
+              return False
+
+          for attempt in range(5):
+            if _presa_ok():
               inviata = True
               break
-          if inviata:
-            break
-          page.wait_for_timeout(800)
+            clicked = page.evaluate(
+              """() => {
+                const visible = (el) => {
+                  const r = el.getBoundingClientRect();
+                  const st = window.getComputedStyle(el);
+                  return r.width > 8 && r.height > 8 && st.visibility !== 'hidden'
+                    && st.display !== 'none' && st.pointerEvents !== 'none';
+                };
+                const roots = [
+                  ...document.querySelectorAll(
+                    '[role=dialog], .modal, .cdk-overlay-pane, .ui-dialog, .mat-mdc-dialog-container, .p-dialog'
+                  ),
+                  document.body,
+                ];
+                for (const root of roots) {
+                  const btns = Array.from(root.querySelectorAll('button,a,[role=button]'))
+                    .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||n.textContent||'').trim()) && visible(n));
+                  if (!btns.length) continue;
+                  // Preferisci quello a destra (accanto a Download)
+                  btns.sort((a,b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
+                  const b = btns[0];
+                  b.scrollIntoView({block:'center', inline:'center'});
+                  b.focus();
+                  b.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
+                  b.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window}));
+                  b.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+                  if (typeof b.click === 'function') b.click();
+                  return {ok:true, x:b.getBoundingClientRect().x, y:b.getBoundingClientRect().y, attempt: true};
+                }
+                return {ok:false};
+              }"""
+            )
+            print(f"[{self.profile.id}] mass Invia js attempt={attempt} {clicked}", flush=True)
+            # Playwright locator (Angular)
+            try:
+              loc = page.get_by_role("button", name=re.compile(r"^\s*Invia richiesta\s*$", re.I))
+              if loc.count() > 0:
+                el = loc.last
+                el.scroll_into_view_if_needed(timeout=3000)
+                el.click(timeout=8000, force=True)
+                print(f"[{self.profile.id}] mass Invia role.click attempt={attempt}", flush=True)
+            except Exception as e1:
+              print(f"[{self.profile.id}] mass Invia role fail: {e1}", flush=True)
+            # Mouse al centro del bottone trovato via JS
+            try:
+              box = page.evaluate(
+                """() => {
+                  const nodes = Array.from(document.querySelectorAll('button'))
+                    .filter(n => /^\\s*Invia richiesta\\s*$/i.test((n.innerText||'').trim()));
+                  if (!nodes.length) return null;
+                  nodes.sort((a,b)=>b.getBoundingClientRect().x-a.getBoundingClientRect().x);
+                  const r = nodes[0].getBoundingClientRect();
+                  return {x:r.x+r.width/2, y:r.y+r.height/2};
+                }"""
+              )
+              if box and box.get("x") is not None:
+                page.mouse.click(float(box["x"]), float(box["y"]))
+                print(
+                  f"[{self.profile.id}] mass Invia mouse=({box['x']:.0f},{box['y']:.0f}) attempt={attempt}",
+                  flush=True,
+                )
+            except Exception as e2:
+              print(f"[{self.profile.id}] mass Invia mouse fail: {e2}", flush=True)
 
-        print(f"[{self.profile.id}] mass Invia richiesta={inviata} presa={_presa_ok()}", flush=True)
-        self._shot(page, "03f1b_mass_dopo_invia", shots, force=True)
-      except Exception as e:
-        print(f"[{self.profile.id}] mass Invia richiesta fail: {e}", flush=True)
+            for _ in range(8):
+              page.wait_for_timeout(700)
+              try:
+                page.get_by_role(
+                  "button", name=re.compile(r"^(Conferma|OK|Si|Sì|Chiudi)$", re.I)
+                ).first.click(timeout=400)
+              except Exception:
+                pass
+              if _presa_ok() or not _modal_still_open():
+                inviata = True
+                break
+            if inviata:
+              break
+            page.wait_for_timeout(800)
 
-      # Conferma modal "Richiesta generata" + Identificativo richiesta
-      try:
-        page.wait_for_timeout(1000)
-        info = page.evaluate(
-          """() => {
-            const t = (document.body && (document.body.innerText || '')) || '';
-            const presa = /presa in carico|correttamente acquisita|identificativo\\s+richiesta|acquisita con identificativo/i.test(t);
-            let id = '';
-            const m1 = t.match(/Identificativo\\s+richiesta[^\\d\\n]*([0-9]{10,})/i)
-              || t.match(/acquisita con identificativo\\s*([0-9]{10,})/i)
-              || t.match(/identificativo\\s+([0-9]{10,})/i);
-            if (m1) id = m1[1];
-            if (!id) {
-              const m2 = t.match(/\\b([0-9]{20,})\\b/);
-              if (m2) id = m2[1];
-            }
-            return {presa: !!presa, id, snip: t.replace(/\\s+/g, ' ').slice(0, 500)};
-          }"""
-        )
-        rid = (info or {}).get("id") or ""
-        presa = bool((info or {}).get("presa"))
-        if rid or presa:
-          requested = True
-        print(
-          f"[{self.profile.id}] mass Genera richiesta={requested} "
-          f"presa_in_carico={presa} identificativo={rid or '-'}",
-          flush=True,
-        )
-        if (info or {}).get("snip"):
-          print(f"[{self.profile.id}] mass modal: {(info or {}).get('snip')}", flush=True)
-      except Exception as e:
-        print(f"[{self.profile.id}] mass Genera richiesta={requested} (modal parse fail: {e})", flush=True)
+          print(f"[{self.profile.id}] mass Invia richiesta={inviata} presa={_presa_ok()}", flush=True)
+          self._shot(page, "03f1b_mass_dopo_invia", shots, force=True)
+        except Exception as e:
+          print(f"[{self.profile.id}] mass Invia richiesta fail: {e}", flush=True)
+
+        # Conferma modal "Richiesta generata" + Identificativo richiesta
+        try:
+          page.wait_for_timeout(1000)
+          info = page.evaluate(
+            """() => {
+              const t = (document.body && (document.body.innerText || '')) || '';
+              const presa = /presa in carico|correttamente acquisita|identificativo\\s+richiesta|acquisita con identificativo/i.test(t);
+              let id = '';
+              const m1 = t.match(/Identificativo\\s+richiesta[^\\d\\n]*([0-9]{10,})/i)
+                || t.match(/acquisita con identificativo\\s*([0-9]{10,})/i)
+                || t.match(/identificativo\\s+([0-9]{10,})/i);
+              if (m1) id = m1[1];
+              if (!id) {
+                const m2 = t.match(/\\b([0-9]{20,})\\b/);
+                if (m2) id = m2[1];
+              }
+              return {presa: !!presa, id, snip: t.replace(/\\s+/g, ' ').slice(0, 500)};
+            }"""
+          )
+          rid = (info or {}).get("id") or ""
+          presa = bool((info or {}).get("presa"))
+          if rid or presa:
+            requested = True
+          print(
+            f"[{self.profile.id}] mass Genera richiesta={requested} "
+            f"presa_in_carico={presa} identificativo={rid or '-'}",
+            flush=True,
+          )
+          if (info or {}).get("snip"):
+            print(f"[{self.profile.id}] mass modal: {(info or {}).get('snip')}", flush=True)
+        except Exception as e:
+          print(f"[{self.profile.id}] mass Genera richiesta={requested} (modal parse fail: {e})", flush=True)
     else:
       print(f"[{self.profile.id}] mass ADE_RISPOSTE_ONLY=1 (skip Genera)", flush=True)
 
@@ -2014,7 +2051,7 @@ class AdePlaywrightClient:
               const prefer = rows.find(r => {
                 const t = (r.innerText||'');
                 if (/corrispettiv/i.test(t)) return false;
-                return /fattur|ricevut/i.test(t) || !/corrispettiv/i.test(t);
+                return /fattur|ricevut|emess/i.test(t) || !/corrispettiv/i.test(t);
               }) || rows.find(r => !/corrispettiv/i.test(r.innerText||''));
               const row = prefer || null;
               if (!row) return 'norow';

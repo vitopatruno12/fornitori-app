@@ -87,6 +87,12 @@ import {
   isOperatorStationStaffSessionOpen,
   setOperatorStationStaffSession,
 } from '../utils/operatorStationStaffSession.js'
+import {
+  closeOtherGestionaleStaffLocaleSessions,
+  isGestionaleStaffLocaleSessionOpen,
+  readStaffLocaleSessionOpenKeys,
+  writeStaffLocaleSessionOpenKeys,
+} from '../utils/gestionaleStaffLocaleSession.js'
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   fetchOperatorStationShifts,
@@ -110,28 +116,6 @@ import {
 
 const DAY_HEADERS = ['DOMENICA', 'LUNEDÌ', 'MARTEDÌ', 'MERCOLEDÌ', 'GIOVEDÌ', 'VENERDÌ', 'SABATO']
 const HIDDEN_PLANNING_SECTIONS = ['Pulizie', 'Mediazione']
-const STAFF_LOCALE_SESSION_KEY = 'staffLocaleSessionOpen'
-
-function readStaffLocaleSessionOpenKeys() {
-  try {
-    const raw = sessionStorage.getItem(STAFF_LOCALE_SESSION_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.map((k) => String(k || '').trim().toLocaleLowerCase('it')).filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-function writeStaffLocaleSessionOpenKeys(keys) {
-  try {
-    const unique = [...new Set((keys || []).map((k) => String(k || '').trim().toLocaleLowerCase('it')).filter(Boolean))]
-    sessionStorage.setItem(STAFF_LOCALE_SESSION_KEY, JSON.stringify(unique))
-  } catch {
-    // ignore
-  }
-}
 
 function formatEurAmount(value) {
   const n = Number(value)
@@ -1892,13 +1876,22 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       return
     }
+    // Gestionale: niente lista globale — solo pack del locale aperto
+    const localeName = normalizeLocaleName(localeStaffName)
+    if (!localeName || !isGestionaleStaffLocaleSessionOpen(localeName)) {
+      setMembers([])
+      return
+    }
     try {
-      const mem = await fetchStaffMembers()
-      setMembers(mem || [])
+      const code = normalizeLocaleAccessCode(localeAccessCode)
+      await loadMembersFromLocalePackSilently(
+        localeName,
+        isValidLocaleAccessCode(code) ? code : undefined,
+      )
     } catch (e) {
       setError(e?.message || 'Errore caricamento dipendenti')
     }
-  }, [operatorMode, operatorStationId, stationStaffLocaleName, localeStaffName, members])
+  }, [operatorMode, operatorStationId, stationStaffLocaleName, localeStaffName, members, localeAccessCode])
 
   const clearStaffDataFromMemory = useCallback(() => {
     setMembers([])
@@ -1911,12 +1904,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setPayrollShifts([])
     setPayrollImporto({})
   }, [])
-
-  useEffect(() => {
-    if (!operatorMode) {
-      refreshMembers()
-    }
-  }, [operatorMode, refreshMembers])
 
   useEffect(() => {
     const n = normalizeLocaleName(localeStaffName)
@@ -2759,13 +2746,19 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (!key) return
     if (operatorStationId) {
       setOperatorStationStaffSession(operatorStationId, localeName, open)
+    } else if (open) {
+      closeOtherGestionaleStaffLocaleSessions(localeName)
     }
     setLocaleSessionOpenKeys((prev) => {
-      const next = new Set([...prev])
+      const next = open ? new Set([key]) : new Set([...prev])
       if (open) next.add(key)
       else next.delete(key)
-      writeStaffLocaleSessionOpenKeys([...next])
-      return next
+      if (!operatorStationId && open) {
+        writeStaffLocaleSessionOpenKeys([key])
+      } else {
+        writeStaffLocaleSessionOpenKeys([...next])
+      }
+      return !operatorStationId && open ? new Set([key]) : next
     })
   }
 
@@ -3156,9 +3149,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       setStaffLocaleSessionOpen(localeName, true)
       setMembersBackupLocale(localeName)
-      if (operatorMode) {
-        await loadMembersFromLocalePackSilently(localeName, code)
-      }
+      await loadMembersFromLocalePackSilently(localeName, code)
       setSuccess(`Locale «${localeName}» aperto. Usa Chiudi per bloccarlo di nuovo.`)
     } finally {
       setLocaleSessionBusy(false)
@@ -3176,9 +3167,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setLocaleAccessCode('')
     setLocaleSessionBusy(false)
     setError('')
-    if (operatorMode) {
-      clearStaffDataFromMemory()
-    }
+    clearStaffDataFromMemory()
     setSuccess(
       wasOpen
         ? `Locale «${localeName}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`
@@ -3792,7 +3781,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       pack.members,
       localeName,
       isValidLocaleAccessCode(code) ? code : undefined,
-      { operatorScoped: operatorMode },
+      { operatorScoped: true },
     )
     if (operatorMode && operatorStationId) {
       invalidateOperatorStationMembersCache(operatorStationId, localeName)
@@ -4628,6 +4617,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
   async function handleSelectSavedLocale(value) {
     const name = normalizeLocaleName(value)
+    const prev = normalizeLocaleName(localeStaffName)
+    if (prev && localeNameCompareKey(prev) !== localeNameCompareKey(name)) {
+      setStaffLocaleSessionOpen(prev, false)
+      clearStaffDataFromMemory()
+    }
     setLocaleStaffName(name)
     if (!name) {
       setLocaleAccessCode('')
@@ -4993,11 +4987,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               </>
             ) : (
               <>
-                Gestisci i dipendenti e la pianificazione: <strong>turni</strong> con fascia oraria, <strong>permessi</strong>,{' '}
-                <strong>assenze</strong>, <strong>malattia</strong>, <strong>ferie</strong> e <strong>riposo</strong>. Scegli <strong>Settimana</strong>, un singolo <strong>Giorno</strong>,
-                oppure <strong>Periodo</strong> con date Dal/Al (fino a {MAX_PLANNING_PERIOD_DAYS} giorni), poi usa
-                <strong> «Carica piano»</strong> per scaricare i turni dal server in base alle date selezionate (il caricamento non
-                parte da solo quando cambi data). In ogni sezione usa <strong>Crea backup</strong> prima di cancellazioni importanti (salvataggio sul server, recuperabile da altri PC e browser).
+                Scegli il <strong>locale</strong>, inserisci il <strong>codice a 6 cifre</strong> e clicca{' '}
+                <strong>Accedi</strong> per vedere dipendenti e pianificazione di quel negozio. Senza codice i dati restano
+                nascosti; non vengono mostrati dipendenti di altri locali.
               </>
             )}
           </p>
@@ -5036,7 +5028,19 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             <input
               className="form-control"
               value={operatorMode ? stationStaffLocaleName || localeStaffName : localeStaffName}
-              onChange={(e) => setLocaleStaffName(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value
+                const prev = localeStaffName
+                if (
+                  !operatorMode &&
+                  localeNameCompareKey(prev) &&
+                  localeNameCompareKey(prev) !== localeNameCompareKey(next)
+                ) {
+                  setStaffLocaleSessionOpen(prev, false)
+                  clearStaffDataFromMemory()
+                }
+                setLocaleStaffName(next)
+              }}
               placeholder="Es. La Risacca"
               disabled={operatorMode || shiftBusy || loading || demoLoading || reportLoading}
               readOnly={operatorMode}
@@ -5138,7 +5142,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             Genera codice
           </button>
           ) : null}
-          {(!operatorMode || activeLocaleSessionOpen) ? (
+          {activeLocaleSessionOpen ? (
           <>
           <button
             type="button"
@@ -5196,13 +5200,14 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
           </p>
         </div>
-        {operatorMode && !activeLocaleSessionOpen ? (
+        {!activeLocaleSessionOpen ? (
           <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
-            Il personale di <strong>{stationStaffLocaleName || 'questa postazione'}</strong> è nascosto finché non inserisci il codice e
-            clicchi <strong>Accedi</strong>.
+            Il personale di{' '}
+            <strong>{operatorMode ? stationStaffLocaleName || 'questa postazione' : localeStaffName || 'questo locale'}</strong>{' '}
+            è nascosto finché non selezioni il locale, inserisci il codice e clicchi <strong>Accedi</strong>.
           </div>
         ) : null}
-        {(!operatorMode || activeLocaleSessionOpen) ? (
+        {activeLocaleSessionOpen ? (
         <>
         <StaffSectionBackupBar
           sectionTitle={
@@ -5484,7 +5489,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         ) : null}
       </section>
 
-      {(!operatorMode || activeLocaleSessionOpen) ? (
+      {activeLocaleSessionOpen ? (
       <>
       <section className="card" style={{ order: 2, marginBottom: '1rem' }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>

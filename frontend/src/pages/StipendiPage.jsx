@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
-import StaffGestionaleLocaleSelect from '../components/StaffGestionaleLocaleSelect.jsx'
+import GestionaleStaffLocaleGate from '../components/GestionaleStaffLocaleGate.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
-import { useGestionaleStaffLocale } from '../hooks/useGestionaleStaffLocale.js'
 import {
   createStaffStipendiMonth,
   deleteStaffStipendiMonth,
@@ -139,18 +138,15 @@ function moneyDisplay(n) {
 
 export default function StipendiPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
-  const {
-    localeNames: gestionaleLocaleNames,
-    localeName: gestionaleLocale,
-    setLocaleName: setGestionaleLocale,
-    loadingLocales: gestionaleLocalesLoading,
-  } = useGestionaleStaffLocale(!operatorMode)
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
-    if (!operatorMode) return true
+    if (!operatorMode) return false
     const sid = stationId || getLockedOperatorStationId()
     const localeName = getOperatorStationStaffLocaleName(sid, [])
     return isOperatorStationStaffSessionOpen(sid, localeName)
   })
+  const [gestionaleSessionOpen, setGestionaleSessionOpen] = useState(false)
+  const [gestionaleLocale, setGestionaleLocale] = useState('')
+  const [gestionaleAccessCode, setGestionaleAccessCode] = useState('')
   const [yearMonth, setYearMonth] = useState(currentYearMonth)
   const [archives, setArchives] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -159,7 +155,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   const [draft, setDraft] = useState(() => emptyLine())
   const [editIndex, setEditIndex] = useState(null)
   const [selectedIndex, setSelectedIndex] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -201,14 +197,14 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         setArchives([])
         return []
       }
-    } else if (!locale) {
+    } else if (!locale || !gestionaleSessionOpen) {
       setArchives([])
       return []
     }
     const rows = await fetchStaffStipendiMonths(locale)
     setArchives(Array.isArray(rows) ? rows : [])
     return Array.isArray(rows) ? rows : []
-  }, [gestionaleLocale, operatorMode, resolveOperatorLocaleName])
+  }, [gestionaleLocale, gestionaleSessionOpen, operatorMode, resolveOperatorLocaleName])
 
   const bootstrapFromMembers = useCallback(async () => {
     let list = []
@@ -220,8 +216,14 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         list = Array.isArray(scoped?.members) ? scoped.members : []
       }
     } else {
-      const scoped = await resolveGestionaleLocaleMembers(gestionaleLocale)
-      list = scoped.members
+      if (!gestionaleLocale || !gestionaleSessionOpen) {
+        list = []
+      } else {
+        const scoped = await resolveGestionaleLocaleMembers(gestionaleLocale, {
+          accessCode: gestionaleAccessCode,
+        })
+        list = scoped.members
+      }
     }
     const seen = new Set()
     const next = []
@@ -243,7 +245,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setActiveId(null)
     setSelectedIndex(null)
     resetDraft()
-  }, [resetDraft, gestionaleLocale, operatorMode, operatorStationId])
+  }, [resetDraft, gestionaleLocale, gestionaleSessionOpen, gestionaleAccessCode, operatorMode, operatorStationId])
 
   const openArchive = useCallback(
     (row) => {
@@ -272,7 +274,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setLoading(false)
       return
     }
-    if (!operatorMode && !gestionaleLocale) {
+    if (!operatorMode && (!gestionaleLocale || !gestionaleSessionOpen)) {
       setArchives([])
       setLines([])
       setActiveId(null)
@@ -310,6 +312,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     openArchive,
     operatorMode,
     operatorSessionOpen,
+    gestionaleSessionOpen,
     gestionaleLocale,
   ])
 
@@ -387,8 +390,8 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setError('')
     setSuccess('')
     try {
-      if (!operatorMode && !gestionaleLocale) {
-        setError('Seleziona il locale personale dal menu in alto.')
+      if (!operatorMode && (!gestionaleLocale || !gestionaleSessionOpen)) {
+        setError('Apri il locale con Accedi prima di salvare gli stipendi.')
         return
       }
       const operatorLocale = operatorMode ? await resolveOperatorLocaleName() : ''
@@ -540,30 +543,17 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           <p className="staff-page-lead" style={{ marginTop: '0.35rem' }}>
             {operatorMode
               ? 'Archivio buste paga della sede di questa postazione operativa.'
-              : 'Archivio buste paga per locale: scegli il negozio dal menu e compila solo i dipendenti di quella sede.'}
+              : 'Archivio buste paga per locale: apri il negozio con il codice e vedi solo i dipendenti di quella sede.'}
           </p>
         </div>
-        {!operatorMode ? (
-          <StaffGestionaleLocaleSelect
-            localeNames={gestionaleLocaleNames}
-            value={gestionaleLocale}
-            onChange={setGestionaleLocale}
-            loading={gestionaleLocalesLoading}
-          />
-        ) : null}
       </div>
     </header>
   )
 
   const stipendiBody = (
     <div className="pagamenti-page staff-report-page stipendi-page">
-      {!operatorMode ? stipendiHero : null}
-
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      {!operatorMode && !gestionaleLocale && !gestionaleLocalesLoading ? (
-        <div className="alert alert-warning">Seleziona il locale personale dal menu in alto per vedere e salvare gli stipendi.</div>
-      ) : null}
 
       <section className="card pagamenti-workbook-card stipendi-toolbar-card">
         <div className="stipendi-toolbar">
@@ -809,5 +799,22 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     )
   }
 
-  return stipendiBody
+  return (
+    <GestionaleStaffLocaleGate
+      title="Stipendi"
+      banner={stipendiHero}
+      onSessionChange={(open, locale, code) => {
+        setGestionaleSessionOpen(Boolean(open))
+        setGestionaleLocale(open ? String(locale || '') : '')
+        setGestionaleAccessCode(open ? String(code || '') : '')
+        if (!open) {
+          setArchives([])
+          setLines([])
+          setActiveId(null)
+        }
+      }}
+    >
+      {stipendiBody}
+    </GestionaleStaffLocaleGate>
+  )
 }

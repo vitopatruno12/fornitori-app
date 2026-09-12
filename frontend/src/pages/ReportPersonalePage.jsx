@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
-import StaffGestionaleLocaleSelect from '../components/StaffGestionaleLocaleSelect.jsx'
-import { useGestionaleStaffLocale } from '../hooks/useGestionaleStaffLocale.js'
+import GestionaleStaffLocaleGate from '../components/GestionaleStaffLocaleGate.jsx'
 import { fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import {
@@ -72,17 +71,14 @@ function daysInclusive(fromYmd, toYmdValue) {
 
 export default function ReportPersonalePage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
-  const {
-    localeNames: gestionaleLocaleNames,
-    localeName: gestionaleLocale,
-    setLocaleName: setGestionaleLocale,
-    loadingLocales: gestionaleLocalesLoading,
-  } = useGestionaleStaffLocale(!operatorMode)
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
-    if (!operatorMode) return true
+    if (!operatorMode) return false
     const sid = stationId || getLockedOperatorStationId()
     return isOperatorStationStaffSessionOpen(sid)
   })
+  const [gestionaleSessionOpen, setGestionaleSessionOpen] = useState(false)
+  const [gestionaleLocale, setGestionaleLocale] = useState('')
+  const [gestionaleAccessCode, setGestionaleAccessCode] = useState('')
   const initial = defaultPeriod(operatorMode)
   const [dateFrom, setDateFrom] = useState(initial.from)
   const [dateTo, setDateTo] = useState(initial.to)
@@ -90,11 +86,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     buildStaffReportWorkbook({ members: [], shifts: [], dateFrom: initial.from, dateTo: initial.to }),
   )
   const [activeSheet, setActiveSheet] = useState('VOCI')
-  const [loading, setLoading] = useState(() => {
-    if (!operatorMode) return true
-    const sid = stationId || getLockedOperatorStationId()
-    return isOperatorStationStaffSessionOpen(sid)
-  })
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [generatedAt, setGeneratedAt] = useState('')
@@ -110,10 +102,12 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
         const shifts = await fetchOperatorStationShifts(operatorStationId, from, to)
         return { members, shifts }
       }
-      if (!gestionaleLocale) {
+      if (!gestionaleLocale || !gestionaleSessionOpen) {
         return { members: [], shifts: [] }
       }
-      const { members, memberIds, packNameKeys } = await resolveGestionaleLocaleMembers(gestionaleLocale)
+      const { members, memberIds, packNameKeys } = await resolveGestionaleLocaleMembers(gestionaleLocale, {
+        accessCode: gestionaleAccessCode,
+      })
       let shifts = []
       if (memberIds.length) {
         const shiftsRaw = await fetchStaffShifts(from, to, { memberIds })
@@ -121,7 +115,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       }
       return { members, shifts }
     },
-    [operatorMode, operatorStationId, gestionaleLocale],
+    [operatorMode, operatorStationId, gestionaleLocale, gestionaleSessionOpen, gestionaleAccessCode],
   )
 
   useEffect(() => {
@@ -137,8 +131,8 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       setLoading(false)
       return
     }
-    if (!operatorMode && !gestionaleLocale) {
-      setError('Seleziona il locale personale dal menu in alto.')
+    if (!operatorMode && (!gestionaleLocale || !gestionaleSessionOpen)) {
+      setError('Apri il locale con Accedi per generare il report.')
       setLoading(false)
       return
     }
@@ -178,10 +172,14 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     } finally {
       setLoading(false)
     }
-  }, [loadReportData, operatorMode, gestionaleLocale])
+  }, [loadReportData, operatorMode, gestionaleLocale, gestionaleSessionOpen])
 
   useEffect(() => {
     if (operatorMode && !operatorSessionOpen) {
+      setLoading(false)
+      return
+    }
+    if (!operatorMode && !gestionaleSessionOpen) {
       setLoading(false)
       return
     }
@@ -189,10 +187,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   }, [
     operatorMode,
     operatorSessionOpen,
+    gestionaleSessionOpen,
+    gestionaleLocale,
     runRefresh,
     operatorMode ? undefined : dateFrom,
     operatorMode ? undefined : dateTo,
-    operatorMode ? undefined : gestionaleLocale,
   ])
 
   const currentSheet = useMemo(
@@ -240,27 +239,17 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             ) : (
               <>
                 {' '}
-                Scegli il <strong>locale</strong> dal menu: il report mostra solo il personale di quel negozio.
+                Apri il <strong>locale</strong> con il codice: il report mostra solo il personale di quel negozio.
               </>
             )}
           </p>
         </div>
-        {!operatorMode ? (
-          <StaffGestionaleLocaleSelect
-            localeNames={gestionaleLocaleNames}
-            value={gestionaleLocale}
-            onChange={setGestionaleLocale}
-            loading={gestionaleLocalesLoading}
-          />
-        ) : null}
       </div>
     </section>
   )
 
   const reportBody = (
     <div className="pagamenti-page staff-report-page">
-      {!operatorMode ? reportHero : null}
-
       {error && <div className="alert alert-danger staff-report-no-print">{error}</div>}
       {success && <div className="alert alert-success staff-report-no-print">{success}</div>}
 
@@ -384,5 +373,27 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     )
   }
 
-  return reportBody
+  return (
+    <GestionaleStaffLocaleGate
+      title="Report personale"
+      banner={reportHero}
+      onSessionChange={(open, locale, code) => {
+        setGestionaleSessionOpen(Boolean(open))
+        setGestionaleLocale(open ? String(locale || '') : '')
+        setGestionaleAccessCode(open ? String(code || '') : '')
+        if (!open) {
+          setWorkbook(
+            buildStaffReportWorkbook({
+              members: [],
+              shifts: [],
+              dateFrom: dateFromRef.current,
+              dateTo: dateToRef.current,
+            }),
+          )
+        }
+      }}
+    >
+      {reportBody}
+    </GestionaleStaffLocaleGate>
+  )
 }
