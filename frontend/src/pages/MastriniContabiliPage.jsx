@@ -130,6 +130,20 @@ function printMastro(account, periodLabel) {
 }
 
 function documentoLink(mv) {
+  if (mv.documentType === 'fattura_emessa' || mv.source === 'fatture_emesse' || mv.invoiceKind === 'emessa') {
+    return (
+      <Link to="/fatture/emesse" style={{ textDecoration: 'underline' }}>
+        {mv.documentLabel || `Emessa ${mv.linkedInvoiceId || ''}`}
+      </Link>
+    )
+  }
+  if (mv.documentType === 'fattura_ricevuta' || mv.source === 'fatture_ricevute' || mv.invoiceKind === 'ricevuta') {
+    return (
+      <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
+        {mv.documentLabel || `Ricevuta ${mv.linkedInvoiceId || ''}`}
+      </Link>
+    )
+  }
   if (mv.linkedInvoiceId && mv.linkedBankMovementId) {
     return (
       <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.35rem' }}>
@@ -184,6 +198,54 @@ function mastroCellValue(row, col) {
   if (col.id === 'avere') return eur(row.totalAvere)
   if (col.id === 'saldo') return eur(row.finalBalance)
   if (col.id === 'stato') return String(row.status || '').toUpperCase()
+  return ''
+}
+
+const FORNITORI_COLUMNS = [
+  { id: 'name', label: 'Fornitore / soggetto', width: 34, fluid: true, emphasis: true },
+  { id: 'ricevute', label: 'Ricevute', width: 10, fluid: true, numeric: true },
+  { id: 'emesse', label: 'Emesse', width: 10, fluid: true, numeric: true },
+  { id: 'dare', label: 'Dare', width: 14, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 14, fluid: true, numeric: true },
+  { id: 'saldo', label: 'Saldo', width: 14, fluid: true, numeric: true },
+]
+
+function fornitoriCellValue(row, col) {
+  if (!row) return ''
+  if (col.id === 'name') return row.name || ''
+  if (col.id === 'ricevute') return String(row.ricevuteCount || 0)
+  if (col.id === 'emesse') return String(row.emesseCount || 0)
+  if (col.id === 'dare') return eur(row.totalDare)
+  if (col.id === 'avere') return eur(row.totalAvere)
+  if (col.id === 'saldo') return eur(row.finalBalance)
+  return ''
+}
+
+const FORNITORE_DETAIL_COLUMNS = [
+  { id: 'date', label: 'Data', width: 110 },
+  { id: 'invoiceKind', label: 'Tipo', width: 100 },
+  { id: 'registrationNumber', label: 'N. reg.', width: 120, mono: true },
+  { id: 'description', label: 'Descrizione', width: 240, emphasis: true },
+  { id: 'documentLabel', label: 'Fattura', width: 160 },
+  { id: 'dare', label: 'Dare', width: 120, numeric: true },
+  { id: 'avere', label: 'Avere', width: 120, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 140, numeric: true },
+]
+
+function fornitoreDetailCellValue(row, col) {
+  if (!row) return ''
+  if (col.id === 'date') return formatDate(row.date)
+  if (col.id === 'invoiceKind') {
+    if (row.invoiceKind === 'emessa') return 'Emessa'
+    if (row.invoiceKind === 'ricevuta') return 'Ricevuta'
+    return row.causaleLabel || '—'
+  }
+  if (col.id === 'registrationNumber') return row.registrationNumber || '—'
+  if (col.id === 'description') return row.description || '—'
+  if (col.id === 'documentLabel') return row.documentLabel || '—'
+  if (col.id === 'dare') return row.dare ? eur(row.dare) : '—'
+  if (col.id === 'avere') return row.avere ? eur(row.avere) : '—'
+  if (col.id === 'progressiveBalance') return eur(row.progressiveBalance)
   return ''
 }
 
@@ -297,7 +359,7 @@ function sortMovementsNewestFirst(movements = []) {
 export default function MastriniContabiliPage() {
   const year = new Date().getFullYear()
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
-  const [viewMode, setViewMode] = useState('selezione')
+  const [viewMode, setViewMode] = useState('fornitori')
   const [dateFrom, setDateFrom] = useState(`${year}-01-01`)
   const [dateTo, setDateTo] = useState(`${year}-12-31`)
   const [category, setCategory] = useState('')
@@ -312,6 +374,8 @@ export default function MastriniContabiliPage() {
   const [data, setData] = useState(null)
   const [selectedCode, setSelectedCode] = useState('')
   const [selectedPartyKey, setSelectedPartyKey] = useState('')
+  const [selectedFornitoreKey, setSelectedFornitoreKey] = useState('')
+  const [fornitoreDetailOpen, setFornitoreDetailOpen] = useState(false)
 
   const selectedCompanyLabel =
     companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId)
@@ -337,6 +401,9 @@ export default function MastriniContabiliPage() {
       const firstCode = res?.accounts?.[0]?.code
       if (!selectedCode && firstCode) setSelectedCode(firstCode)
       if (!selectedPartyKey && res?.partitario?.parties?.[0]) setSelectedPartyKey(res.partitario.parties[0].key)
+      if (!selectedFornitoreKey && res?.fornitori?.parties?.[0]) {
+        setSelectedFornitoreKey(res.fornitori.parties[0].key)
+      }
       return res
     } catch (e) {
       setError(e?.message || 'Errore caricamento mastrini contabili')
@@ -536,6 +603,33 @@ export default function MastriniContabiliPage() {
     [parties, selectedPartyKey],
   )
 
+  const fornitoriParties = useMemo(() => {
+    const rows = Array.isArray(data?.fornitori?.parties) ? data.fornitori.parties : []
+    const q = String(advancedSearch || '').trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((p) => {
+      const blob = [
+        p.name,
+        ...p.movements.map((m) =>
+          [m.description, m.documentLabel, m.registrationNumber, m.invoiceKind].join(' '),
+        ),
+      ]
+        .join(' ')
+        .toLowerCase()
+      return blob.includes(q)
+    })
+  }, [data, advancedSearch])
+
+  const selectedFornitore = useMemo(
+    () => fornitoriParties.find((p) => p.key === selectedFornitoreKey) || fornitoriParties[0] || null,
+    [fornitoriParties, selectedFornitoreKey],
+  )
+
+  const fornitoreRows = useMemo(() => {
+    if (!selectedFornitore) return []
+    return sortMovementsNewestFirst(selectedFornitore.movements || [])
+  }, [selectedFornitore])
+
   const accountOptionsForSelect = accountOptions.length ? accountOptions : ACCOUNT_PLAN
 
   async function openScheda(e) {
@@ -571,7 +665,7 @@ export default function MastriniContabiliPage() {
       title="Schede contabili / Mastrini"
       lead={
         companyId
-          ? `Mastrini ${selectedCompanyLabel}: Prima Nota collegata ai conti Passcom (cassa/ricavi/costi per locale).`
+          ? `Mastrini ${selectedCompanyLabel}: elenco fornitori da fatture ricevute (Dare) ed emesse (Avere). Clic sul nome per aprire la scheda.`
           : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
       }
       actions={
@@ -625,6 +719,16 @@ export default function MastriniContabiliPage() {
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             type="button"
+            className={`btn btn-sm ${viewMode === 'fornitori' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => {
+              setViewMode('fornitori')
+              setFornitoreDetailOpen(false)
+            }}
+          >
+            Fornitori (Dare/Avere)
+          </button>
+          <button
+            type="button"
             className={`btn btn-sm ${viewMode === 'selezione' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setViewMode('selezione')}
           >
@@ -650,10 +754,174 @@ export default function MastriniContabiliPage() {
             className={`btn btn-sm ${viewMode === 'partitario' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setViewMode('partitario')}
           >
-            Partitario clienti/fornitori
+            Partitario PN/banca
           </button>
         </div>
       </section>
+      ) : null}
+
+      {companyId && viewMode === 'fornitori' ? (
+        <>
+          <div className="ui-kpi-row">
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Soggetti</div>
+              <div className="ui-kpi-card-value">{data?.fornitori?.metrics?.totalParties ?? '—'}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Dare (ricevute)</div>
+              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.totalDare)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Avere (emesse)</div>
+              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.totalAvere)}</div>
+            </div>
+            <div className="ui-kpi-card">
+              <div className="ui-kpi-card-label">Saldo</div>
+              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.finalBalance)}</div>
+            </div>
+          </div>
+
+          <section className="card fatture-panel">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                load()
+              }}
+              style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}
+            >
+              <label>
+                Periodo da
+                <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label>
+                a
+                <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+              <label style={{ minWidth: 240 }}>
+                Cerca fornitore
+                <input
+                  className="form-control"
+                  value={advancedSearch}
+                  onChange={(e) => setAdvancedSearch(e.target.value)}
+                  placeholder="Nome fornitore o n. fattura…"
+                />
+              </label>
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                {loading ? 'Aggiorno…' : 'Applica'}
+              </button>
+            </form>
+            <p className="fatture-note" style={{ marginBottom: 0 }}>
+              Ricevute → colonna Dare · Emesse → colonna Avere. Clic sul nome per aprire il mastrino del soggetto.
+            </p>
+          </section>
+
+          {!fornitoreDetailOpen ? (
+            <section className="card fatture-panel mastrini-fit-panel">
+              <h2 className="fatture-panel-title">Elenco fornitori</h2>
+              <WorkbookGrid
+                title="Mastrini fornitori"
+                sheetLabel={`${fornitoriParties.length} soggetti`}
+                columns={FORNITORI_COLUMNS}
+                rows={fornitoriParties}
+                cellValue={fornitoriCellValue}
+                emptyMessage="Nessun fornitore con fatture nel periodo per questa società."
+                gridClassName="mastrini-fit-grid"
+                rowKey={(row) => row.key}
+                onRowClick={(row) => {
+                  setSelectedFornitoreKey(row.key)
+                  setFornitoreDetailOpen(true)
+                }}
+                getRowClassName={(row) => (selectedFornitore?.key === row.key ? 'workbook-row-selected' : '')}
+                rowClickTitle="Apri mastrino dare/avere"
+                totals={{
+                  dare: fornitoriParties.reduce((acc, p) => acc + (Number(p.totalDare) || 0), 0),
+                  avere: fornitoriParties.reduce((acc, p) => acc + (Number(p.totalAvere) || 0), 0),
+                  saldo: fornitoriParties.reduce((acc, p) => acc + (Number(p.finalBalance) || 0), 0),
+                  ricevute: fornitoriParties.reduce((acc, p) => acc + (Number(p.ricevuteCount) || 0), 0),
+                  emesse: fornitoriParties.reduce((acc, p) => acc + (Number(p.emesseCount) || 0), 0),
+                }}
+                totalsLabel={(colId, totals) => {
+                  if (colId === 'name') return 'TOTALI'
+                  if (colId === 'dare') return eur(totals?.dare)
+                  if (colId === 'avere') return eur(totals?.avere)
+                  if (colId === 'saldo') return eur(totals?.saldo)
+                  if (colId === 'ricevute') return String(totals?.ricevute || 0)
+                  if (colId === 'emesse') return String(totals?.emesse || 0)
+                  return ''
+                }}
+                getCellTitle={(row, col) => (col.id === 'name' ? String(row?.name || '') : '')}
+              />
+            </section>
+          ) : selectedFornitore ? (
+            <section className="card fatture-panel mastrini-fit-panel">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'start' }}>
+                <div>
+                  <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                    Mastrino — {selectedFornitore.name}
+                  </h2>
+                  <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                    Periodo: {periodLabel} · Ricevute {selectedFornitore.ricevuteCount || 0} · Emesse{' '}
+                    {selectedFornitore.emesseCount || 0}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setFornitoreDetailOpen(false)}
+                >
+                  Torna all&apos;elenco
+                </button>
+              </div>
+
+              <div className="ui-kpi-row" style={{ marginTop: '0.75rem' }}>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Totale Dare</div>
+                  <div className="ui-kpi-card-value">{eur(selectedFornitore.totalDare)}</div>
+                </div>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Totale Avere</div>
+                  <div className="ui-kpi-card-value">{eur(selectedFornitore.totalAvere)}</div>
+                </div>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Saldo</div>
+                  <div className="ui-kpi-card-value">{eur(selectedFornitore.finalBalance)}</div>
+                </div>
+              </div>
+
+              <WorkbookGrid
+                title={`Scheda ${selectedFornitore.name}`}
+                sheetLabel={`${fornitoreRows.length} fatture`}
+                columns={FORNITORE_DETAIL_COLUMNS}
+                rows={fornitoreRows}
+                cellValue={fornitoreDetailCellValue}
+                emptyMessage="Nessuna fattura per questo soggetto nel periodo."
+                gridClassName="mastrini-fit-grid"
+                rowKey={(row, idx) => `${selectedFornitore.key}-${row.registrationNumber || 'reg'}-${idx}`}
+                actionsHeader="Documento"
+                renderActions={(row) => documentoLink(row)}
+                totals={{
+                  dare: fornitoreRows.reduce((acc, m) => acc + (Number(m.dare) || 0), 0),
+                  avere: fornitoreRows.reduce((acc, m) => acc + (Number(m.avere) || 0), 0),
+                  progressiveBalance: selectedFornitore.finalBalance,
+                }}
+                totalsLabel={(colId, totals) => {
+                  if (colId === 'description') return 'TOTALI'
+                  if (colId === 'dare') return eur(totals?.dare)
+                  if (colId === 'avere') return eur(totals?.avere)
+                  if (colId === 'progressiveBalance') return eur(totals?.progressiveBalance)
+                  return ''
+                }}
+                getCellTitle={(row, col) =>
+                  col.id === 'description'
+                    ? String(row?.description || '')
+                    : col.id === 'documentLabel'
+                      ? String(row?.documentLabel || '')
+                      : ''
+                }
+              />
+            </section>
+          ) : null}
+        </>
       ) : null}
 
       {companyId && viewMode === 'selezione' ? (

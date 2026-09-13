@@ -2036,54 +2036,106 @@ class AdePlaywrightClient:
     except Exception:
       pass
 
-    # Attendi elaborazione e scarica (più tentativi se check-only: file già pronto)
+    # Attendi elaborazione e scarica ZIP più recenti (non il più vecchio).
     attempts = 8 if risposte_only else 10
     got = False
+    downloaded_ids: List[str] = []
+    skip_ids: List[str] = []  # già scaricati + id senza ZIP (non riprovare)
+    max_zips = 6 if risposte_only else 3
     for attempt in range(attempts):
+      if len(downloaded_ids) >= max_zips:
+        break
       try:
-        # Apri menu/dettaglio riga Elaborata (icona ☰ / Dettaglio Risposta)
+        rid = ""
+        # Chiudi eventuale dettaglio/modal precedente
+        try:
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(400)
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(300)
+        except Exception:
+          pass
+        # Apri dettaglio sulla riga Elaborata PIÙ RECENTE (data/id)
         try:
           opened = page.evaluate(
-            """() => {
+            """(skipIds) => {
+              const skip = new Set(skipIds || []);
+              const scoreRow = (r) => {
+                const t = r.innerText || '';
+                const m = t.match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})/);
+                if (m) {
+                  return Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]);
+                }
+                // Identificativo AdE: DDMMYYHHMMSS…
+                const idm = t.match(/\\b(\\d{20,})\\b/);
+                const id = idm ? idm[1] : '';
+                if (id.length >= 12) {
+                  const dd = +id.slice(0, 2), mm = +id.slice(2, 4), yy = +id.slice(4, 6);
+                  const hh = +id.slice(6, 8), mi = +id.slice(8, 10), ss = +id.slice(10, 12);
+                  if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+                    return Date.UTC(2000 + yy, mm - 1, dd, hh, mi, ss);
+                  }
+                }
+                return 0;
+              };
               const rows = Array.from(document.querySelectorAll('tr, [role=row], mat-row, li, .row'))
-                .filter(r => /elaborat|predisposta/i.test(r.innerText||'') && /\\d{15,}/.test(r.innerText||''));
-              // Solo Fatture elettroniche / Ricevute — evita Corrispettivi (xml_ok=0)
-              const prefer = rows.find(r => {
-                const t = (r.innerText||'');
-                if (/corrispettiv/i.test(t)) return false;
+                .filter(r => /elaborat|predisposta/i.test(r.innerText || '') && /\\d{15,}/.test(r.innerText || ''))
+                .filter(r => !/corrispettiv/i.test(r.innerText || ''));
+              const prefer = rows.filter(r => {
+                const t = r.innerText || '';
                 return /fattur|ricevut|emess/i.test(t) || !/corrispettiv/i.test(t);
-              }) || rows.find(r => !/corrispettiv/i.test(r.innerText||''));
-              const row = prefer || null;
-              if (!row) return 'norow';
+              });
+              const pool = (prefer.length ? prefer : rows).slice();
+              pool.sort((a, b) => scoreRow(b) - scoreRow(a));
+              let row = null;
+              let rid = '';
+              for (const r of pool) {
+                const m = (r.innerText || '').match(/\\b(\\d{20,})\\b/);
+                rid = m ? m[1] : '';
+                if (rid && skip.has(rid)) continue;
+                row = r;
+                break;
+              }
+              if (!row) return { status: 'norow', id: '' };
               const btns = Array.from(row.querySelectorAll('button,a,[role=button],i,span'));
-              // Preferisci icona hamburger / dettaglio / download
               let el = btns.find(n => {
-                const t = ((n.getAttribute('title')||'') + ' ' + (n.getAttribute('aria-label')||'')
-                  + ' ' + (n.innerText||'') + ' ' + (n.className||'')).toLowerCase();
+                const t = ((n.getAttribute('title') || '') + ' ' + (n.getAttribute('aria-label') || '')
+                  + ' ' + (n.innerText || '') + ' ' + (n.className || '')).toLowerCase();
                 return /dettaglio|menu|more|azioni|opzioni|hamburger|bars|list/i.test(t);
               });
               if (!el) {
-                // ultimo controllo cliccabile nella riga (di solito icona a destra)
                 const clickable = btns.filter(n => {
                   const r = n.getBoundingClientRect();
                   return r.width > 8 && r.height > 8 && r.x > 200;
                 });
                 el = clickable[clickable.length - 1];
               }
-              if (!el) return 'nobtn';
+              if (!el) return { status: 'nobtn', id: rid };
               el.click();
-              return 'ok';
-            }"""
+              return { status: 'ok', id: rid };
+            }""",
+            skip_ids,
           )
-          print(f"[{self.profile.id}] risposte dettaglio={opened}", flush=True)
+          status = (opened or {}).get("status") if isinstance(opened, dict) else opened
+          rid = (opened or {}).get("id") if isinstance(opened, dict) else ""
+          print(
+            f"[{self.profile.id}] risposte dettaglio={status} id={rid or '-'} "
+            f"(ok={len(downloaded_ids)} skip={len(skip_ids)})",
+            flush=True,
+          )
           page.wait_for_timeout(1500)
           self._shot(page, f"03f2b_dettaglio_{attempt}", shots, force=True)
-          if opened == "norow":
-            # Nessuna riga Fatture Elaborata: aspetta elaborazione (non scaricare Corrispettivi)
+          if status == "norow":
+            if got:
+              break
             raise RuntimeError("norow_fatture_elaborata")
+          if status != "ok":
+            raise RuntimeError(f"dettaglio_{status}")
         except Exception as e:
           print(f"[{self.profile.id}] risposte dettaglio fail: {e}", flush=True)
           if "norow_fatture" in str(e):
+            if got:
+              break
             raise
 
         # Flusso AdE Risposte (semplice):
@@ -2200,6 +2252,16 @@ class AdePlaywrightClient:
             raise RuntimeError("no download control")
         download = dl_info.value
         suggested = download.suggested_filename or f"ade_mass_{attempt}.zip"
+        # Marca id richiesta dal nome file (prefisso) o dalla riga aperta
+        zip_id = ""
+        m_name = re.match(r"^(\d{15,})", suggested or "")
+        if m_name:
+          zip_id = m_name.group(1)
+        elif rid:
+          zip_id = str(rid)
+        if zip_id and zip_id in skip_ids:
+          print(f"[{self.profile.id}] skip zip già preso id={zip_id}", flush=True)
+          continue
         target = self._download_dir / re.sub(r"[^\w.\-]+", "_", suggested)[:180]
         download.save_as(str(target))
         raw = target.read_bytes()
@@ -2207,6 +2269,8 @@ class AdePlaywrightClient:
           suggested.lower().endswith(".xml") and b"InputMassivo" in raw[:2000]
         ):
           print(f"[{self.profile.id}] scaricato richiesta XML (skip): {suggested}", flush=True)
+          if zip_id and zip_id not in skip_ids:
+            skip_ids.append(zip_id)
           raise RuntimeError("got request xml not product zip")
         before = len(self._xml_captures)
         self._remember(raw, suggested, f"mass:risposte:{attempt}")
@@ -2222,10 +2286,31 @@ class AdePlaywrightClient:
           f"xml_ok={len(self._xml_captures)-before}",
           flush=True,
         )
+        mark = zip_id or (str(rid) if rid else "")
+        if mark:
+          if mark not in downloaded_ids:
+            downloaded_ids.append(mark)
+          if mark not in skip_ids:
+            skip_ids.append(mark)
         got = True
-        break
+        # Continua con la prossima risposta più recente (non fermarti al primo ZIP)
+        try:
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(600)
+        except Exception:
+          pass
+        continue
       except Exception as e:
         print(f"[{self.profile.id}] risposte download attempt={attempt} fail: {e}", flush=True)
+        # Non restare bloccati sulla stessa risposta: prova la successiva più recente
+        if rid and rid not in skip_ids:
+          skip_ids.append(str(rid))
+          print(f"[{self.profile.id}] skip id fallito={rid}", flush=True)
+        try:
+          page.keyboard.press("Escape")
+          page.wait_for_timeout(400)
+        except Exception:
+          pass
         try:
           page.get_by_role("button", name=re.compile(r"Aggiorna|Ricarica|Refresh", re.I)).first.click(
             timeout=2000
@@ -2244,6 +2329,12 @@ class AdePlaywrightClient:
     if not got:
       self._shot(page, "03f3_mass_risposte_non_pronte", shots, force=True)
       print(f"[{self.profile.id}] risposte: nessun download pronto", flush=True)
+    else:
+      print(
+        f"[{self.profile.id}] risposte: scaricati {len(downloaded_ids)} ZIP "
+        f"id={','.join(downloaded_ids) or '-'}",
+        flush=True,
+      )
 
     if not risposte_only and not requested:
       self._shot(page, "03f_mass_richiesta_fail", shots, force=True)

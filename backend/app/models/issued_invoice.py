@@ -18,6 +18,8 @@ class IssuedInvoice(Base):
   invoice_number = Column(String(100), nullable=True)
   invoice_date = Column(DateTime(timezone=True), nullable=True)
   total_amount = Column(Numeric(12, 2), nullable=True)
+  customer_name = Column(String(512), nullable=True)
+  customer_vat = Column(String(32), nullable=True)
   status = Column(String(32), nullable=False, server_default="caricata")
   note = Column(Text, nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now())

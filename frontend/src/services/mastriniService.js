@@ -1,6 +1,6 @@
 import { fetchBancaMovimenti } from './bancaService'
 import { fetchEntries } from './cashService'
-import { fetchInvoices } from './invoicesService'
+import { fetchInvoices, fetchIssuedInvoices } from './invoicesService'
 import {
   accountDescription,
   buildPasscomAccountPlan,
@@ -108,7 +108,7 @@ function invoiceNumber(inv) {
 function invoiceCompany(inv) {
   const fromField = String(inv?.company || '').trim()
   if (fromField) return fromField
-  return companyFromActivity(inv?.section) || 'non_classificata'
+  return companyFromActivity(inv?.activity || inv?.section) || 'non_classificata'
 }
 
 function mapCashEntries(entries = [], invoicesById = new Map()) {
@@ -162,12 +162,23 @@ function mapCashEntries(entries = [], invoicesById = new Map()) {
 
 function invoiceAmount(inv) {
   return Math.abs(
-    toNum(inv?.total_amount) ||
+    toNum(inv?.total) ||
+      toNum(inv?.total_amount) ||
       toNum(inv?.amount_total) ||
       toNum(inv?.amount) ||
       toNum(inv?.totale) ||
       toNum(inv?.residuo),
   )
+}
+
+function normalizePartyName(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function partyKey(name) {
+  return normalizePartyName(name).toLowerCase()
 }
 
 function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinkedInvoiceIds = new Set()) {
@@ -178,7 +189,7 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
     const number = invoiceNumber(inv)
     const invId = Number(inv?.id)
     const company = invoiceCompany(inv)
-    const locale = String(inv?.section || '').trim().toLowerCase()
+    const locale = String(inv?.activity || inv?.section || '').trim().toLowerCase()
     const base = {
       date: isoDate(inv?.created_at || inv?.issue_date || inv?.invoice_date || inv?.due_date),
       documentDate: isoDate(inv?.issue_date || inv?.invoice_date || inv?.created_at || inv?.due_date),
@@ -195,6 +206,7 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
       locale,
       company,
       source: 'fatture_fornitori',
+      linkedInvoiceId: inv?.id ? String(inv.id) : '',
     }
     pushDoubleEntry(out, GENERAL_ACCOUNTS.costi.code, GENERAL_ACCOUNTS.debiti.code, base, amount)
 
@@ -215,6 +227,154 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
     }
   }
   return out
+}
+
+/** Mastrino soggetto: fatture ricevute → Dare, fatture emesse → Avere. */
+function buildFornitoriMastrini(receivedInvoices = [], issuedInvoices = [], { dateFrom, dateTo, company } = {}) {
+  const groups = new Map()
+
+  const ensure = (name, extra = {}) => {
+    const label = normalizePartyName(name) || 'Soggetto non indicato'
+    const key = partyKey(label)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        name: label,
+        type: 'fornitore',
+        supplierId: extra.supplierId || null,
+        totalDare: 0,
+        totalAvere: 0,
+        finalBalance: 0,
+        ricevuteCount: 0,
+        emesseCount: 0,
+        movements: [],
+      })
+    }
+    const row = groups.get(key)
+    if (!row.supplierId && extra.supplierId) row.supplierId = extra.supplierId
+    return row
+  }
+
+  const inPeriod = (d) => {
+    const day = String(d || '')
+    if (dateFrom && day && day < dateFrom) return false
+    if (dateTo && day && day > dateTo) return false
+    return true
+  }
+
+  for (const inv of receivedInvoices) {
+    const companyId = invoiceCompany(inv)
+    if (company && companyId !== company) continue
+    const amount = invoiceAmount(inv)
+    if (!amount) continue
+    const date = isoDate(inv?.invoice_date || inv?.issue_date || inv?.created_at || inv?.due_date)
+    if (!inPeriod(date)) continue
+    const name = inv?.supplier_name || (inv?.supplier_id ? `Fornitore #${inv.supplier_id}` : '')
+    if (!normalizePartyName(name)) continue
+    const number = invoiceNumber(inv)
+    const party = ensure(name, { supplierId: inv?.supplier_id != null ? Number(inv.supplier_id) : null })
+    party.totalDare += amount
+    party.ricevuteCount += 1
+    party.finalBalance = party.totalDare - party.totalAvere
+    party.movements.push({
+      date,
+      documentDate: date,
+      registrationNumber: `FR-${inv?.id ?? ''}`,
+      causale: 'FR',
+      causaleLabel: 'Fattura ricevuta',
+      description: `Fattura ricevuta n. ${number}`.trim(),
+      documentLabel: `Ricevuta ${number}`.trim(),
+      documentType: 'fattura_ricevuta',
+      documentId: inv?.id ? String(inv.id) : '',
+      documentPath: '/fatture/registrate',
+      linkedInvoiceId: inv?.id ? String(inv.id) : '',
+      counterparty: party.name,
+      supplier: party.name,
+      customer: '',
+      company: companyId,
+      companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
+      locale: String(inv?.activity || inv?.section || '').trim().toLowerCase(),
+      amount,
+      dare: amount,
+      avere: 0,
+      source: 'fatture_ricevute',
+      invoiceKind: 'ricevuta',
+    })
+  }
+
+  for (const inv of issuedInvoices) {
+    const companyId = String(inv?.company || '').trim() || 'non_classificata'
+    if (company && companyId !== company) continue
+    const amount = invoiceAmount(inv)
+    if (!amount) continue
+    const date = isoDate(inv?.invoice_date || inv?.created_at)
+    if (!inPeriod(date)) continue
+    const name =
+      normalizePartyName(inv?.customer_name || inv?.customer || inv?.cessionario) ||
+      'Cliente non indicato'
+    const number = invoiceNumber(inv) || inv?.id || ''
+    const party = ensure(name)
+    party.totalAvere += amount
+    party.emesseCount += 1
+    party.finalBalance = party.totalDare - party.totalAvere
+    party.movements.push({
+      date,
+      documentDate: date,
+      registrationNumber: `FE-${inv?.id ?? ''}`,
+      causale: 'FE',
+      causaleLabel: 'Fattura emessa',
+      description: `Fattura emessa n. ${number}`.trim(),
+      documentLabel: `Emessa ${number}`.trim(),
+      documentType: 'fattura_emessa',
+      documentId: inv?.id ? String(inv.id) : '',
+      documentPath: '/fatture/emesse',
+      linkedInvoiceId: inv?.id ? String(inv.id) : '',
+      counterparty: party.name,
+      supplier: '',
+      customer: party.name,
+      company: companyId,
+      companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
+      locale: String(inv?.activity || '').trim().toLowerCase(),
+      amount,
+      dare: 0,
+      avere: amount,
+      source: 'fatture_emesse',
+      invoiceKind: 'emessa',
+    })
+  }
+
+  const parties = [...groups.values()]
+    .map((row) => {
+      const movements = [...row.movements].sort((a, b) => {
+        const da = String(a.date || '')
+        const db = String(b.date || '')
+        if (da !== db) return da.localeCompare(db)
+        return String(a.registrationNumber || '').localeCompare(String(b.registrationNumber || ''))
+      })
+      let progressive = 0
+      const withBalance = movements.map((m) => {
+        progressive += toNum(m.dare) - toNum(m.avere)
+        return { ...m, progressiveBalance: progressive }
+      })
+      return {
+        ...row,
+        movements: withBalance,
+        finalBalance: progressive,
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }))
+
+  return {
+    parties,
+    metrics: {
+      totalParties: parties.length,
+      totalDare: parties.reduce((acc, p) => acc + toNum(p.totalDare), 0),
+      totalAvere: parties.reduce((acc, p) => acc + toNum(p.totalAvere), 0),
+      finalBalance: parties.reduce((acc, p) => acc + toNum(p.finalBalance), 0),
+      ricevuteCount: parties.reduce((acc, p) => acc + toNum(p.ricevuteCount), 0),
+      emesseCount: parties.reduce((acc, p) => acc + toNum(p.emesseCount), 0),
+    },
+  }
 }
 
 function mapBankMovements(items = [], invoicesById = new Map()) {
@@ -424,9 +584,10 @@ async function fetchCashEntriesForCompany({ dateFrom, dateTo, company }) {
 
 export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   const companyId = String(company || '').trim()
-  const [cashRes, invoiceRes, bankRes] = await Promise.allSettled([
+  const [cashRes, invoiceRes, issuedRes, bankRes] = await Promise.allSettled([
     fetchCashEntriesForCompany({ dateFrom, dateTo, company: companyId }),
     fetchInvoices(companyId ? { company: companyId } : {}),
+    fetchIssuedInvoices({ company: companyId || undefined, limit: 500 }),
     fetchBancaMovimenti({
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
@@ -444,7 +605,15 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   }
 
   const invoices = invoiceRes.status === 'fulfilled' && Array.isArray(invoiceRes.value) ? invoiceRes.value : []
-  if (invoiceRes.status === 'rejected') warnings.push('Fatture non disponibili.')
+  if (invoiceRes.status === 'rejected') warnings.push('Fatture ricevute non disponibili.')
+
+  const issuedPayload = issuedRes.status === 'fulfilled' ? issuedRes.value : null
+  const issuedInvoices = Array.isArray(issuedPayload?.items)
+    ? issuedPayload.items
+    : Array.isArray(issuedPayload)
+      ? issuedPayload
+      : []
+  if (issuedRes.status === 'rejected') warnings.push('Fatture emesse non disponibili.')
 
   let bankMovements =
     bankRes.status === 'fulfilled' && Array.isArray(bankRes.value?.items) ? bankRes.value.items : []
@@ -483,10 +652,16 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   })
   const ledger = buildLedger(movements)
   const partitario = buildPartitario(movements)
+  const fornitori = buildFornitoriMastrini(invoices, issuedInvoices, {
+    dateFrom,
+    dateTo,
+    company: companyId || undefined,
+  })
   return {
     ...ledger,
     accountPlan: ACCOUNT_PLAN,
     partitario,
+    fornitori,
     company: companyId || '',
     companyLabel: companyId
       ? companyId === 'non_classificata'

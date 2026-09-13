@@ -192,6 +192,7 @@ def _extract_from_xml(content: bytes) -> Dict[str, Any]:
 
   parsed = parse_fatturapa_document(text)
   doc = parsed.get("document") or {}
+  customer = parsed.get("customer") or {}
   out: Dict[str, Any] = {"source": "xml", "warnings": []}
   if doc.get("number"):
     out["invoice_number"] = str(doc["number"]).strip()
@@ -205,6 +206,10 @@ def _extract_from_xml(content: bytes) -> Dict[str, Any]:
       pass
   if doc.get("date"):
     out["invoice_date"] = _date_to_dt(doc["date"])
+  if customer.get("name"):
+    out["customer_name"] = str(customer["name"]).strip()
+  if customer.get("vat"):
+    out["customer_vat"] = str(customer["vat"]).strip()
   if not out.get("invoice_number"):
     out["warnings"].append("Numero assente nell'XML")
   if out.get("total_amount") is None:
@@ -347,6 +352,8 @@ def _row_out(row: IssuedInvoice, extra: Optional[Dict[str, Any]] = None) -> Dict
     "invoice_number": row.invoice_number,
     "invoice_date": row.invoice_date.isoformat() if row.invoice_date else None,
     "total_amount": float(row.total_amount) if row.total_amount is not None else None,
+    "customer_name": row.customer_name,
+    "customer_vat": row.customer_vat,
     "status": row.status or "caricata",
     "note": row.note,
     "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -426,6 +433,8 @@ async def upload_issued_invoice(
     invoice_number=final_number,
     invoice_date=final_date,
     total_amount=final_amount,
+    customer_name=(str(extracted.get("customer_name") or "").strip() or None),
+    customer_vat=(str(extracted.get("customer_vat") or "").strip() or None),
     status="caricata",
     note=(note or "").strip() or None,
   )
@@ -462,7 +471,34 @@ def list_issued_invoices(
     if cid != "non_classificata":
       q = q.filter(IssuedInvoice.company == cid)
   rows = q.order_by(IssuedInvoice.created_at.desc(), IssuedInvoice.id.desc()).limit(max(1, min(limit, 500))).all()
-  return [_row_out(r) for r in rows]
+  out: List[Dict[str, Any]] = []
+  dirty = False
+  for row in rows:
+    if not (row.customer_name or "").strip() and (row.file_kind or "").lower() == "xml":
+      try:
+        path, _ = resolve_issued_file(db, int(row.id))
+        extracted = extract_issued_invoice_fields(
+          path.read_bytes(),
+          filename=row.original_filename or path.name,
+          file_kind="xml",
+        )
+        name = str(extracted.get("customer_name") or "").strip()
+        vat = str(extracted.get("customer_vat") or "").strip()
+        if name:
+          row.customer_name = name
+          dirty = True
+        if vat and not (row.customer_vat or "").strip():
+          row.customer_vat = vat
+          dirty = True
+      except Exception:
+        pass
+    out.append(_row_out(row))
+  if dirty:
+    try:
+      db.commit()
+    except Exception:
+      db.rollback()
+  return out
 
 
 def get_issued_invoice(db: Session, invoice_id: int) -> Optional[IssuedInvoice]:

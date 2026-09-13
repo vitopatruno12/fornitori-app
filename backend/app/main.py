@@ -1219,6 +1219,8 @@ def _ensure_issued_invoices_table() -> None:
                 )
             )
         for sql, label in (
+            ("ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_name VARCHAR(512)", "issued_invoices.customer_name"),
+            ("ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_vat VARCHAR(32)", "issued_invoices.customer_vat"),
             ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_company ON issued_invoices (company)", "Index issued_invoices.company"),
             ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_activity ON issued_invoices (activity)", "Index issued_invoices.activity"),
             ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_id ON issued_invoices (id)", "Index issued_invoices.id"),
