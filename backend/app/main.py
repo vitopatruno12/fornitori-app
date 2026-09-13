@@ -1126,6 +1126,18 @@ def _ensure_bank_module_tables() -> None:
                 )
             )
         _safe_exec_sql(
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS company VARCHAR(64)",
+            label="bank_accounts.company",
+        )
+        _safe_exec_sql(
+            "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS ledger_code VARCHAR(16) DEFAULT '1100'",
+            label="bank_accounts.ledger_code",
+        )
+        _safe_exec_sql(
+            "CREATE INDEX IF NOT EXISTS ix_bank_accounts_company ON bank_accounts (company)",
+            label="Index bank_accounts.company",
+        )
+        _safe_exec_sql(
             "CREATE INDEX IF NOT EXISTS ix_bank_movements_account ON bank_movements (bank_account_id)",
             label="Index bank_movements.bank_account_id",
         )

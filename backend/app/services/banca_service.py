@@ -36,11 +36,15 @@ def _dec(v) -> Decimal:
 
 
 def _account_out(row: BankAccount) -> Dict[str, Any]:
+  company = (getattr(row, "company", None) or "").strip() or None
+  ledger_code = (getattr(row, "ledger_code", None) or "1100").strip() or "1100"
   return {
     "id": row.id,
     "bank_name": row.bank_name,
     "account_name": row.account_name,
     "iban": row.iban,
+    "company": company,
+    "ledger_code": ledger_code,
     "saldo_disponibile": float(_dec(row.saldo_disponibile)),
     "saldo_contabile": float(_dec(row.saldo_contabile)),
     "connection_status": row.connection_status,
@@ -67,6 +71,12 @@ def _movement_out(
     "account_label": (
       f"{account.bank_name} · {account.account_name}" if account else None
     ),
+    "account_company": (getattr(account, "company", None) or None) if account else None,
+    "ledger_code": (
+      (getattr(account, "ledger_code", None) or "1100").strip() or "1100"
+    )
+    if account
+    else "1100",
     "movement_date": row.movement_date.isoformat() if row.movement_date else None,
     "description": row.description,
     "causale": row.causale,
@@ -117,10 +127,14 @@ def list_accounts(db: Session) -> List[Dict[str, Any]]:
 
 
 def create_account(db: Session, payload: Dict[str, Any]) -> Dict[str, Any]:
+  company = (payload.get("company") or "").strip() or None
+  ledger_code = (payload.get("ledger_code") or "1100").strip() or "1100"
   row = BankAccount(
     bank_name=(payload.get("bank_name") or "Banca").strip() or "Banca",
     account_name=(payload.get("account_name") or "Conto corrente").strip() or "Conto corrente",
     iban=(payload.get("iban") or "").strip() or None,
+    company=company,
+    ledger_code=ledger_code,
     saldo_disponibile=_dec(payload.get("saldo_disponibile")),
     saldo_contabile=_dec(payload.get("saldo_contabile")),
     connection_status="disconnected",
@@ -130,6 +144,40 @@ def create_account(db: Session, payload: Dict[str, Any]) -> Dict[str, Any]:
   db.commit()
   db.refresh(row)
   return _account_out(row)
+
+
+def update_account(db: Session, account_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+  row = db.query(BankAccount).filter(BankAccount.id == account_id).first()
+  if not row:
+    raise ValueError("Conto non trovato")
+  if "bank_name" in payload and payload.get("bank_name") is not None:
+    row.bank_name = str(payload.get("bank_name") or "").strip() or row.bank_name
+  if "account_name" in payload and payload.get("account_name") is not None:
+    row.account_name = str(payload.get("account_name") or "").strip() or row.account_name
+  if "iban" in payload:
+    row.iban = (str(payload.get("iban") or "").strip() or None)
+  if "company" in payload:
+    row.company = (str(payload.get("company") or "").strip() or None)
+  if "ledger_code" in payload and payload.get("ledger_code") is not None:
+    row.ledger_code = str(payload.get("ledger_code") or "1100").strip() or "1100"
+  if "notes" in payload:
+    row.notes = (str(payload.get("notes") or "").strip() or None)
+  db.commit()
+  db.refresh(row)
+  return _account_out(row)
+
+
+def accounts_for_company(db: Session, company: Optional[str] = None) -> List[Dict[str, Any]]:
+  """Conti per mastrini: priorità company match, altrimenti conti condivisi (company vuota)."""
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
+  company_id = (company or "").strip()
+  if not company_id:
+    return [_account_out(r) for r in rows]
+  linked = [r for r in rows if (getattr(r, "company", None) or "").strip() == company_id]
+  if linked:
+    return [_account_out(r) for r in linked]
+  shared = [r for r in rows if not (getattr(r, "company", None) or "").strip()]
+  return [_account_out(r) for r in shared]
 
 
 def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any]:

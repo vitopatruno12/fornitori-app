@@ -23,10 +23,12 @@ import {
   startEnableBankingAuth,
   syncBancaAccount,
   syncEnableBankingAccount,
+  updateBancaAccount,
 } from '../services/bancaService'
 import { SeriesBars } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { parseBanFile } from '../utils/banFileParser'
+import { companyLabel, FATTURE_COMPANY_ORDER, FATTURE_COMPANY_LABELS } from '../utils/fattureCompany.js'
 
 function resolveEnableBankingPayload(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
@@ -89,17 +91,21 @@ function bankLastMovementsCellValue(row, col) {
 }
 
 const BANK_ACCOUNTS_COLUMNS = [
-  { id: 'bank', label: 'Banca', width: 28, fluid: true, emphasis: true },
-  { id: 'iban', label: 'IBAN', width: 18, fluid: true, mono: true },
-  { id: 'saldo_disponibile', label: 'Saldo disponibile', width: 14, fluid: true, numeric: true },
-  { id: 'saldo_contabile', label: 'Saldo contabile', width: 14, fluid: true, numeric: true },
-  { id: 'status', label: 'Stato', width: 12, fluid: true },
-  { id: 'last_sync', label: 'Ultima sync', width: 14, fluid: true },
+  { id: 'bank', label: 'Banca', width: 22, fluid: true, emphasis: true },
+  { id: 'iban', label: 'IBAN', width: 16, fluid: true, mono: true },
+  { id: 'company', label: 'Società mastrini', width: 14, fluid: true },
+  { id: 'ledger_code', label: 'Mastro', width: 8, fluid: true, mono: true },
+  { id: 'saldo_disponibile', label: 'Saldo disponibile', width: 12, fluid: true, numeric: true },
+  { id: 'saldo_contabile', label: 'Saldo contabile', width: 12, fluid: true, numeric: true },
+  { id: 'status', label: 'Stato', width: 10, fluid: true },
+  { id: 'last_sync', label: 'Ultima sync', width: 12, fluid: true },
 ]
 
 function bankAccountsCellValue(row, col) {
   if (col.id === 'bank') return [row?.bank_name || '—', row?.account_name || ''].filter(Boolean).join(' · ')
   if (col.id === 'iban') return row?.iban || '—'
+  if (col.id === 'company') return row?.company ? companyLabel(row.company) : 'Condiviso (tutte)'
+  if (col.id === 'ledger_code') return row?.ledger_code || '1100'
   if (col.id === 'saldo_disponibile') return eur(row?.saldo_disponibile)
   if (col.id === 'saldo_contabile') return eur(row?.saldo_contabile)
   if (col.id === 'status') return row?.connection_status || '—'
@@ -606,6 +612,29 @@ export function BancaContiPage() {
     }
   }
 
+  async function saveMastriniLink(account, { company, ledger_code }) {
+    setBusyId(account.id)
+    setError('')
+    setSuccess('')
+    try {
+      await updateBancaAccount(account.id, {
+        company: company === undefined ? account.company || '' : company,
+        ledger_code: ledger_code || account.ledger_code || '1100',
+      })
+      const label = company ? companyLabel(company) : 'Condiviso (tutte le società)'
+      setSuccess(
+        isBppbAccount(account)
+          ? `Popolare Puglia e Basilicata → mastrini: ${label} (mastro ${ledger_code || account.ledger_code || '1100'})`
+          : `Conto associato ai mastrini: ${label}`,
+      )
+      await reload()
+    } catch (err) {
+      setError(err?.message || 'Errore associazione mastrini')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <BancaPageShell title="Conti correnti" lead="Conti collegati, saldi e sincronizzazione.">
       {error && <div className="alert alert-danger">{error}</div>}
@@ -768,6 +797,11 @@ export function BancaContiPage() {
 
       <section className="card fatture-panel banca-fit-panel">
         <h2 className="fatture-panel-title">Elenco conti</h2>
+        <p className="fatture-note">
+          Associa ogni c/c ai mastrini: oggi collega la <strong>Banca Popolare di Puglia e Basilicata</strong> (lascia
+          «Condiviso» per tutte le società, oppure scegli una società). Domani assegneremo Otranto e Sanpaolo.
+          Codice mastro default <code>1100</code> (Banca c/c).
+        </p>
         {loading ? (
           <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
         ) : (
@@ -792,7 +826,34 @@ export function BancaContiPage() {
             }}
             actionsHeader="Azioni"
             renderActions={(a) => (
-              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                <select
+                  className="form-control"
+                  style={{ minWidth: 150, maxWidth: 190, padding: '0.2rem 0.35rem', fontSize: '0.8rem' }}
+                  value={a.company || ''}
+                  disabled={busyId === a.id}
+                  title="Società per i mastrini"
+                  onChange={(e) => saveMastriniLink(a, { company: e.target.value, ledger_code: a.ledger_code || '1100' })}
+                >
+                  <option value="">Condiviso (tutte)</option>
+                  {FATTURE_COMPANY_ORDER.map((id) => (
+                    <option key={id} value={id}>
+                      {FATTURE_COMPANY_LABELS[id] || id}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-control"
+                  style={{ minWidth: 88, maxWidth: 100, padding: '0.2rem 0.35rem', fontSize: '0.8rem' }}
+                  value={a.ledger_code || '1100'}
+                  disabled={busyId === a.id}
+                  title="Codice mastro banca"
+                  onChange={(e) => saveMastriniLink(a, { company: a.company || '', ledger_code: e.target.value })}
+                >
+                  <option value="1100">1100</option>
+                  <option value="1101">1101</option>
+                  <option value="1102">1102</option>
+                </select>
                 {a.enable_banking_connected || a.connection_status === 'connected' ? (
                   <button
                     type="button"

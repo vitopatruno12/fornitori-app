@@ -1,4 +1,4 @@
-import { fetchBancaMovimenti } from './bancaService'
+import { fetchBancaAccountsForCompany, fetchBancaMovimenti } from './bancaService'
 import { fetchEntries } from './cashService'
 import { fetchInvoices, fetchIssuedInvoices } from './invoicesService'
 import {
@@ -229,8 +229,13 @@ function mapInvoices(invoices = [], bankMatchedInvoiceIds = new Set(), cashLinke
   return out
 }
 
-/** Mastrino soggetto: fatture ricevute → Dare, fatture emesse → Avere. */
-function buildFornitoriMastrini(receivedInvoices = [], issuedInvoices = [], { dateFrom, dateTo, company } = {}) {
+/** Mastrino soggetto: fatture ricevute → Dare, fatture emesse → Avere, pagamenti c/c → Avere. */
+function buildFornitoriMastrini(
+  receivedInvoices = [],
+  issuedInvoices = [],
+  bankMovements = [],
+  { dateFrom, dateTo, company } = {},
+) {
   const groups = new Map()
 
   const ensure = (name, extra = {}) => {
@@ -247,6 +252,7 @@ function buildFornitoriMastrini(receivedInvoices = [], issuedInvoices = [], { da
         finalBalance: 0,
         ricevuteCount: 0,
         emesseCount: 0,
+        pagamentiCount: 0,
         movements: [],
       })
     }
@@ -343,6 +349,59 @@ function buildFornitoriMastrini(receivedInvoices = [], issuedInvoices = [], { da
     })
   }
 
+  for (const row of bankMovements) {
+    const movementType = String(row?.movement_type || '').toLowerCase()
+    if (movementType !== 'uscita') continue
+    const matched = row?.matched_invoice
+    const amount = Math.abs(toNum(row?.amount))
+    if (!amount) continue
+    const date = isoDate(row?.movement_date)
+    if (!inPeriod(date)) continue
+    const name =
+      matched?.supplier_name ||
+      row?.counterparty ||
+      ''
+    if (!normalizePartyName(name)) continue
+    const companyId = matched ? invoiceCompany(matched) : company || 'non_classificata'
+    if (company && companyId !== company && matched) continue
+    const number = matched ? invoiceNumber(matched) : ''
+    const party = ensure(name, {
+      supplierId: matched?.supplier_id != null ? Number(matched.supplier_id) : null,
+    })
+    party.totalAvere += amount
+    party.pagamentiCount += 1
+    party.finalBalance = party.totalDare - party.totalAvere
+    party.movements.push({
+      date,
+      documentDate: date,
+      registrationNumber: `BA-${row?.id ?? ''}`,
+      causale: 'BOU',
+      causaleLabel: 'Pagamento c/c',
+      description: number
+        ? `Pagamento c/c fattura ${number} — ${row?.description || ''}`.trim()
+        : `Pagamento c/c — ${row?.description || row?.account_label || ''}`.trim(),
+      documentLabel: number ? `Pagamento ${number}` : `Mov. BA-${row?.id ?? ''}`,
+      documentType: 'pagamento_fattura_banca',
+      documentId: matched?.id ? String(matched.id) : row?.id ? String(row.id) : '',
+      documentPath: matched ? '/fatture/registrate' : '/banca/movimenti',
+      linkedInvoiceId: matched?.id ? String(matched.id) : '',
+      linkedBankMovementId: row?.id ? String(row.id) : '',
+      counterparty: party.name,
+      supplier: party.name,
+      customer: '',
+      company: companyId,
+      companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
+      locale: '',
+      amount,
+      dare: 0,
+      avere: amount,
+      source: 'pagamento_cc',
+      invoiceKind: 'pagamento',
+      bankAccountId: row?.bank_account_id || '',
+      ledgerCode: row?.ledger_code || GENERAL_ACCOUNTS.banca.code,
+    })
+  }
+
   const parties = [...groups.values()]
     .map((row) => {
       const movements = [...row.movements].sort((a, b) => {
@@ -373,11 +432,12 @@ function buildFornitoriMastrini(receivedInvoices = [], issuedInvoices = [], { da
       finalBalance: parties.reduce((acc, p) => acc + toNum(p.finalBalance), 0),
       ricevuteCount: parties.reduce((acc, p) => acc + toNum(p.ricevuteCount), 0),
       emesseCount: parties.reduce((acc, p) => acc + toNum(p.emesseCount), 0),
+      pagamentiCount: parties.reduce((acc, p) => acc + toNum(p.pagamentiCount), 0),
     },
   }
 }
 
-function mapBankMovements(items = [], invoicesById = new Map()) {
+function mapBankMovements(items = [], invoicesById = new Map(), ledgerByAccountId = new Map()) {
   const out = []
   for (const row of items) {
     const amount = Math.abs(toNum(row?.amount))
@@ -395,6 +455,11 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
     const matchedNum = matchedInv ? invoiceNumber(matchedInv) : ''
     const supplierName = matchedInv?.supplier_name || row?.matched_invoice?.supplier_name || row?.counterparty || ''
     const company = matchedInv ? invoiceCompany(matchedInv) : 'non_classificata'
+    const accountId = Number(row?.bank_account_id)
+    const bancaCode =
+      row?.ledger_code ||
+      ledgerByAccountId.get(accountId) ||
+      GENERAL_ACCOUNTS.banca.code
     const base = {
       date: isoDate(row?.movement_date),
       documentDate: isoDate(row?.movement_date),
@@ -420,23 +485,43 @@ function mapBankMovements(items = [], invoicesById = new Map()) {
       counterparty: supplierName,
       supplier: supplierName,
       source: matchedInv ? 'pagamento_fattura_banca' : movementType === 'entrata' ? 'incasso' : 'pagamento',
+      bankAccountId: accountId || '',
+      ledgerCode: bancaCode,
     }
     if (movementType === 'entrata') {
-      pushDoubleEntry(out, GENERAL_ACCOUNTS.banca.code, GENERAL_ACCOUNTS.crediti.code, base, amount)
+      pushDoubleEntry(out, bancaCode, GENERAL_ACCOUNTS.crediti.code, base, amount)
     } else if (isCommission) {
-      pushDoubleEntry(out, GENERAL_ACCOUNTS.commissioni.code, GENERAL_ACCOUNTS.banca.code, base, amount)
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.commissioni.code, bancaCode, base, amount)
     } else {
-      pushDoubleEntry(out, GENERAL_ACCOUNTS.debiti.code, GENERAL_ACCOUNTS.banca.code, base, amount)
+      pushDoubleEntry(out, GENERAL_ACCOUNTS.debiti.code, bancaCode, base, amount)
     }
   }
   return out
 }
 
-function buildLedger(movements) {
+function buildLedger(movements, extraAccounts = []) {
   const byAccount = new Map()
   for (const account of ACCOUNT_PLAN) {
     byAccount.set(account.code, {
       ...account,
+      openingBalance: 0,
+      totalDare: 0,
+      totalAvere: 0,
+      finalBalance: 0,
+      movements: [],
+      status: 'attivo',
+    })
+  }
+  for (const acc of extraAccounts) {
+    const code = String(acc?.code || '').trim()
+    if (!code || byAccount.has(code)) continue
+    byAccount.set(code, {
+      code,
+      description: acc.description || `Banca c/c ${code}`,
+      category: 'Patrimoniale',
+      type: 'attivo',
+      statementType: 'stato_patrimoniale',
+      group: 'Banca',
       openingBalance: 0,
       totalDare: 0,
       totalAvere: 0,
@@ -584,7 +669,7 @@ async function fetchCashEntriesForCompany({ dateFrom, dateTo, company }) {
 
 export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   const companyId = String(company || '').trim()
-  const [cashRes, invoiceRes, issuedRes, bankRes] = await Promise.allSettled([
+  const [cashRes, invoiceRes, issuedRes, bankRes, accountsRes] = await Promise.allSettled([
     fetchCashEntriesForCompany({ dateFrom, dateTo, company: companyId }),
     fetchInvoices(companyId ? { company: companyId } : {}),
     fetchIssuedInvoices({ company: companyId || undefined, limit: 500 }),
@@ -592,6 +677,7 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
     }),
+    fetchBancaAccountsForCompany(companyId || undefined),
   ])
 
   const warnings = []
@@ -615,18 +701,54 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
       : []
   if (issuedRes.status === 'rejected') warnings.push('Fatture emesse non disponibili.')
 
+  const bankAccounts =
+    accountsRes.status === 'fulfilled' && Array.isArray(accountsRes.value?.items)
+      ? accountsRes.value.items
+      : []
+  if (accountsRes.status === 'rejected') warnings.push('Conti correnti banca non disponibili.')
+
+  const ledgerByAccountId = new Map()
+  const linkedAccountIds = new Set()
+  const extraLedgerAccounts = []
+  for (const acc of bankAccounts) {
+    const id = Number(acc?.id)
+    const code = String(acc?.ledger_code || GENERAL_ACCOUNTS.banca.code).trim() || GENERAL_ACCOUNTS.banca.code
+    if (Number.isFinite(id) && id > 0) {
+      linkedAccountIds.add(id)
+      ledgerByAccountId.set(id, code)
+    }
+    if (code && code !== GENERAL_ACCOUNTS.banca.code) {
+      extraLedgerAccounts.push({
+        code,
+        description: `${acc.bank_name || 'Banca'} · ${acc.account_name || 'c/c'}`,
+      })
+    }
+  }
+  if (companyId && linkedAccountIds.size === 0) {
+    warnings.push(
+      'Nessun conto corrente associato a questa società (né condiviso). Collega la Popolare Puglia in Banca → Conti.',
+    )
+  } else if (companyId && bankAccounts.some((a) => !(a.company || '').trim())) {
+    warnings.push(
+      'Mastrini usano i c/c condivisi (es. Popolare Puglia e Basilicata). Quando colleghi Otranto/Sanpaolo, assegna ogni banca alla società.',
+    )
+  }
+
   let bankMovements =
     bankRes.status === 'fulfilled' && Array.isArray(bankRes.value?.items) ? bankRes.value.items : []
   if (bankRes.status === 'rejected') warnings.push('Movimenti bancari non disponibili.')
 
-  // Per società: movimenti banca solo se collegati a fattura della stessa società.
+  // Solo movimenti dei c/c associati (o condivisi) alla società
+  if (linkedAccountIds.size > 0) {
+    bankMovements = bankMovements.filter((m) => linkedAccountIds.has(Number(m?.bank_account_id)))
+  }
+
+  // Per società: movimenti banca non riconciliati restano; quelli con fattura devono essere della stessa società.
   if (companyId) {
     const invoiceIds = new Set(invoices.map((inv) => Number(inv.id)).filter((id) => Number.isFinite(id)))
     bankMovements = bankMovements.filter((m) => {
       const mid = Number(m?.matched_invoice_id)
-      if (!Number.isFinite(mid) || mid <= 0) {
-        return companyId === 'non_classificata'
-      }
+      if (!Number.isFinite(mid) || mid <= 0) return true
       return invoiceIds.has(mid)
     })
   }
@@ -642,17 +764,21 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   const movements = [
     ...mapCashEntries(cashEntries, invoicesById),
     ...mapInvoices(invoices, bankMatchedInvoiceIds, cashLinkedInvoiceIds),
-    ...mapBankMovements(bankMovements, invoicesById),
+    ...mapBankMovements(bankMovements, invoicesById, ledgerByAccountId),
   ].filter((m) => {
     const d = String(m.date || '')
     if (dateFrom && d && d < dateFrom) return false
     if (dateTo && d && d > dateTo) return false
+    // Movimenti banca: company può essere non_classificata se non riconciliati — già filtrati per account
+    if (m.source === 'pagamento' || m.source === 'incasso' || m.source === 'pagamento_fattura_banca') {
+      return true
+    }
     if (companyId && String(m.company || '') !== companyId) return false
     return true
   })
-  const ledger = buildLedger(movements)
+  const ledger = buildLedger(movements, extraLedgerAccounts)
   const partitario = buildPartitario(movements)
-  const fornitori = buildFornitoriMastrini(invoices, issuedInvoices, {
+  const fornitori = buildFornitoriMastrini(invoices, issuedInvoices, bankMovements, {
     dateFrom,
     dateTo,
     company: companyId || undefined,
@@ -662,6 +788,7 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
     accountPlan: ACCOUNT_PLAN,
     partitario,
     fornitori,
+    bankAccounts,
     company: companyId || '',
     companyLabel: companyId
       ? companyId === 'non_classificata'

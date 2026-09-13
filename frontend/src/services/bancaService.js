@@ -16,6 +16,19 @@ export async function createBancaAccount(payload) {
   })
 }
 
+export async function updateBancaAccount(id, payload) {
+  return apiFetch(`/banca/accounts/${id}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  })
+}
+
+export async function fetchBancaAccountsForCompany(company) {
+  const q = company ? `?company=${encodeURIComponent(company)}` : ''
+  return apiFetch(`/banca/accounts${q}`)
+}
+
 export async function connectBancaAccount(id) {
   return apiFetch(`/banca/accounts/${id}/connect`, { method: 'POST' })
 }

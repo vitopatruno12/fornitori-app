@@ -16,8 +16,19 @@ class BankAccountCreate(BaseModel):
   bank_name: str = Field(..., min_length=1, max_length=160)
   account_name: str = "Conto corrente"
   iban: Optional[str] = None
+  company: Optional[str] = None
+  ledger_code: Optional[str] = "1100"
   saldo_disponibile: float = 0
   saldo_contabile: float = 0
+  notes: Optional[str] = None
+
+
+class BankAccountUpdate(BaseModel):
+  bank_name: Optional[str] = None
+  account_name: Optional[str] = None
+  iban: Optional[str] = None
+  company: Optional[str] = None
+  ledger_code: Optional[str] = None
   notes: Optional[str] = None
 
 
@@ -151,13 +162,34 @@ def banca_enable_banking_sync(account_id: int, db: Session = Depends(get_db)) ->
 
 
 @router.get("/accounts")
-def banca_accounts(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def banca_accounts(
+  company: Optional[str] = Query(None, description="Filtro società per mastrini (match o conti condivisi)"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  if company:
+    return {"items": banca_service.accounts_for_company(db, company)}
   return {"items": banca_service.list_accounts(db)}
 
 
 @router.post("/accounts")
 def banca_create_account(body: BankAccountCreate, db: Session = Depends(get_db)) -> Dict[str, Any]:
   return banca_service.create_account(db, body.model_dump())
+
+
+@router.patch("/accounts/{account_id}")
+def banca_update_account(account_id: int, body: BankAccountUpdate, db: Session = Depends(get_db)) -> Dict[str, Any]:
+  try:
+    return banca_service.update_account(db, account_id, body.model_dump(exclude_unset=True))
+  except ValueError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/accounts/{account_id}/update")
+def banca_update_account_post(account_id: int, body: BankAccountUpdate, db: Session = Depends(get_db)) -> Dict[str, Any]:
+  try:
+    return banca_service.update_account(db, account_id, body.model_dump(exclude_unset=True))
+  except ValueError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post("/accounts/{account_id}/import-ban")

@@ -238,6 +238,7 @@ function fornitoreDetailCellValue(row, col) {
   if (col.id === 'invoiceKind') {
     if (row.invoiceKind === 'emessa') return 'Emessa'
     if (row.invoiceKind === 'ricevuta') return 'Ricevuta'
+    if (row.invoiceKind === 'pagamento') return 'Pagamento c/c'
     return row.causaleLabel || '—'
   }
   if (col.id === 'registrationNumber') return row.registrationNumber || '—'
@@ -811,7 +812,8 @@ export default function MastriniContabiliPage() {
               </button>
             </form>
             <p className="fatture-note" style={{ marginBottom: 0 }}>
-              Ricevute → colonna Dare · Emesse → colonna Avere. Clic sul nome per aprire il mastrino del soggetto.
+              Ricevute → Dare · Emesse / pagamenti c/c → Avere. Conti banca: Popolare Puglia (oggi condivisa); Otranto e
+              Sanpaolo si associano dopo. Clic sul nome per aprire il mastrino.
             </p>
           </section>
 
