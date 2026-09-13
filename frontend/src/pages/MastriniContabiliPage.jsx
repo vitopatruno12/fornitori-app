@@ -5,7 +5,7 @@ import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
-import { accountCodesForCompany } from '../constants/mastriniPasscom.js'
+import { accountCodesForCompany, GENERAL_ACCOUNTS } from '../constants/mastriniPasscom.js'
 import { companyLabel } from '../utils/fattureCompany.js'
 
 function statusBadge(status) {
@@ -129,26 +129,53 @@ function printMastro(account, periodLabel) {
   w.print()
 }
 
+function registrateHref(mv) {
+  const invId = mv.linkedInvoiceId || mv.documentId || ''
+  const params = new URLSearchParams()
+  if (invId) params.set('id', String(invId))
+  const number = String(mv.documentLabel || '')
+    .replace(/^Ricevuta\s+/i, '')
+    .replace(/^Fattura\s+/i, '')
+    .split(' · ')[0]
+    .trim()
+  if (number) params.set('n', number)
+  if (mv.company && mv.company !== 'non_classificata') params.set('company', String(mv.company))
+  if (mv.supplierId) params.set('supplier_id', String(mv.supplierId))
+  const qs = params.toString()
+  return qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'
+}
+
+function emesseHref(mv) {
+  const invId = mv.linkedInvoiceId || mv.documentId || ''
+  const params = new URLSearchParams()
+  if (invId) params.set('id', String(invId))
+  if (mv.company && mv.company !== 'non_classificata') params.set('company', String(mv.company))
+  const qs = params.toString()
+  return qs ? `/fatture/emesse?${qs}` : '/fatture/emesse'
+}
+
 function documentoLink(mv) {
+  const label = mv.documentLabel || ''
+
   if (mv.documentType === 'fattura_emessa' || mv.source === 'fatture_emesse' || mv.invoiceKind === 'emessa') {
     return (
-      <Link to="/fatture/emesse" style={{ textDecoration: 'underline' }}>
-        {mv.documentLabel || `Emessa ${mv.linkedInvoiceId || ''}`}
+      <Link to={emesseHref(mv)} style={{ textDecoration: 'underline' }}>
+        {label || `Emessa ${mv.linkedInvoiceId || ''}`}
       </Link>
     )
   }
   if (mv.documentType === 'fattura_ricevuta' || mv.source === 'fatture_ricevute' || mv.invoiceKind === 'ricevuta') {
     return (
-      <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
-        {mv.documentLabel || `Ricevuta ${mv.linkedInvoiceId || ''}`}
+      <Link to={registrateHref(mv)} style={{ textDecoration: 'underline' }}>
+        {label || `Ricevuta ${mv.linkedInvoiceId || ''}`}
       </Link>
     )
   }
   if (mv.linkedInvoiceId && mv.linkedBankMovementId) {
     return (
       <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-        <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
-          Fattura {mv.documentLabel?.split(' · ')[0]?.replace('Fattura ', '') || mv.linkedInvoiceId}
+        <Link to={registrateHref(mv)} style={{ textDecoration: 'underline' }}>
+          Fattura {label.split(' · ')[0]?.replace('Fattura ', '') || mv.linkedInvoiceId}
         </Link>
         <span aria-hidden>↔</span>
         <Link to="/banca/movimenti" style={{ textDecoration: 'underline' }}>
@@ -160,8 +187,8 @@ function documentoLink(mv) {
   if (mv.linkedInvoiceId && mv.linkedCashEntryId) {
     return (
       <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-        <Link to="/fatture/registrate" style={{ textDecoration: 'underline' }}>
-          {mv.documentLabel || `Fattura ${mv.linkedInvoiceId}`}
+        <Link to={registrateHref(mv)} style={{ textDecoration: 'underline' }}>
+          {label || `Fattura ${mv.linkedInvoiceId}`}
         </Link>
         <span aria-hidden>↔</span>
         <Link to="/prima-nota" style={{ textDecoration: 'underline' }}>
@@ -170,11 +197,18 @@ function documentoLink(mv) {
       </span>
     )
   }
+  if (mv.linkedInvoiceId && (mv.source === 'invoices' || mv.documentType === 'fattura')) {
+    return (
+      <Link to={registrateHref(mv)} style={{ textDecoration: 'underline' }}>
+        {label || `Fattura ${mv.linkedInvoiceId}`}
+      </Link>
+    )
+  }
   const path = mv.documentPath || ''
-  if (!path) return <span>{mv.documentLabel || '—'}</span>
+  if (!path) return <span>{label || '—'}</span>
   return (
     <Link to={path} style={{ textDecoration: 'underline' }}>
-      {mv.documentLabel || path}
+      {label || path}
     </Link>
   )
 }
@@ -337,7 +371,22 @@ function mastroDetailCellValue(row, col) {
 
 function filterMovementsBySourceRows(rows = [], sourceFilter = 'all') {
   if (sourceFilter === 'all') return rows
+  if (sourceFilter === 'prima_nota') {
+    return rows.filter((m) => String(m.source || '') === 'prima_nota')
+  }
+  if (sourceFilter === 'banca') {
+    return rows.filter((m) =>
+      ['pagamento', 'incasso', 'pagamento_fattura_banca', 'pagamento_cc'].includes(String(m.source || '')),
+    )
+  }
   return rows.filter((m) => String(m.source || '') === sourceFilter)
+}
+
+function isBankLedgerCode(code, bankAccounts = []) {
+  const c = String(code || '').trim()
+  if (!c) return false
+  if (c === GENERAL_ACCOUNTS.banca.code) return true
+  return (bankAccounts || []).some((a) => String(a.ledger_code || GENERAL_ACCOUNTS.banca.code).trim() === c)
 }
 
 function accountTotalsFromMovements(account, movements = []) {
@@ -513,18 +562,69 @@ export default function MastriniContabiliPage() {
   )
 
   const schedaAccount = useMemo(() => {
+    const code = String(selectedCode || accountCode || '').trim()
+    if (!code) return null
     const rows = Array.isArray(data?.accounts) ? data.accounts : []
-    const hit = rows.find((r) => r.code === (selectedCode || accountCode))
-    if (!hit) return null
-    const movements = filterMovementsBySourceRows(hit.movements || [], sourceFilter)
-    const totals = accountTotalsFromMovements(hit, movements)
+    const hit = rows.find((r) => r.code === code)
+    const plan = (data?.accountPlan || ACCOUNT_PLAN).find((r) => r.code === code)
+    const bankHit = (data?.bankAccounts || []).find(
+      (a) => String(a.ledger_code || GENERAL_ACCOUNTS.banca.code).trim() === code,
+    )
+    const base =
+      hit ||
+      (plan
+        ? {
+            ...plan,
+            openingBalance: 0,
+            totalDare: 0,
+            totalAvere: 0,
+            finalBalance: 0,
+            movements: [],
+            status: 'pareggio',
+          }
+        : bankHit
+          ? {
+              code,
+              description: [bankHit.bank_name, bankHit.account_name].filter(Boolean).join(' · ') || 'Banca c/c',
+              category: 'Patrimoniale',
+              type: 'attivo',
+              statementType: 'stato_patrimoniale',
+              group: 'Banca',
+              openingBalance: 0,
+              totalDare: 0,
+              totalAvere: 0,
+              finalBalance: 0,
+              movements: [],
+              status: 'pareggio',
+            }
+          : null)
+    if (!base) return null
+    const description = bankHit
+      ? `${[bankHit.bank_name, bankHit.account_name].filter(Boolean).join(' · ') || base.description} (mastro ${code})`
+      : base.description
+    const sourceForScheda = isBankLedgerCode(code, data?.bankAccounts) && sourceFilter === 'prima_nota' ? 'all' : sourceFilter
+    const movements = filterMovementsBySourceRows(base.movements || [], sourceForScheda)
+    const totals = accountTotalsFromMovements(base, movements)
     return {
-      ...hit,
+      ...base,
+      description,
       movements,
       ...totals,
       status: Math.abs(totals.finalBalance) < 0.005 ? 'pareggio' : totals.finalBalance > 0 ? 'attivo' : 'passivo',
     }
   }, [data, selectedCode, accountCode, sourceFilter])
+
+  const linkedBankAccounts = useMemo(() => (Array.isArray(data?.bankAccounts) ? data.bankAccounts : []), [data])
+
+  function openContoScheda(code) {
+    const next = String(code || '').trim()
+    if (!next) return
+    setAccountCode(next)
+    setSelectedCode(next)
+    if (isBankLedgerCode(next, linkedBankAccounts)) setSourceFilter('all')
+    setViewMode('scheda')
+    setError('')
+  }
 
   const schedaRows = useMemo(() => {
     if (!schedaAccount) return []
@@ -643,14 +743,8 @@ export default function MastriniContabiliPage() {
       setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
       return
     }
-    const res = await load()
-    const found = (res?.accounts || []).find((a) => a.code === accountCode)
-    if (!found && res) {
-      setError(`Conto ${accountCode} non trovato nel piano Atlas.`)
-      return
-    }
-    setSelectedCode(accountCode)
-    setViewMode('scheda')
+    await load()
+    openContoScheda(accountCode)
   }
 
   function exportListExcel() {
@@ -738,8 +832,16 @@ export default function MastriniContabiliPage() {
           <button
             type="button"
             className={`btn btn-sm ${viewMode === 'scheda' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewMode('scheda')}
-            disabled={!schedaAccount && !selected}
+            onClick={() => {
+              const banks = linkedBankAccounts
+              const preferred =
+                banks.find((a) => /popolare|puglia/i.test(`${a.bank_name || ''} ${a.account_name || ''}`)) ||
+                banks[0]
+              const code = preferred
+                ? String(preferred.ledger_code || GENERAL_ACCOUNTS.banca.code).trim()
+                : selectedCode || accountCode || GENERAL_ACCOUNTS.banca.code
+              openContoScheda(code)
+            }}
           >
             Scheda contabile
           </button>
@@ -942,12 +1044,45 @@ export default function MastriniContabiliPage() {
             </button>
             <button
               type="button"
+              className={`btn btn-sm ${sourceFilter === 'banca' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSourceFilter('banca')}
+            >
+              Solo banca c/c
+            </button>
+            <button
+              type="button"
               className={`btn btn-sm ${sourceFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setSourceFilter('all')}
             >
               Tutte le fonti
             </button>
           </div>
+          {linkedBankAccounts.length ? (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+              {linkedBankAccounts.map((a) => {
+                const code = String(a.ledger_code || GENERAL_ACCOUNTS.banca.code).trim()
+                const label = [a.bank_name, a.account_name].filter(Boolean).join(' · ') || `c/c ${code}`
+                return (
+                  <button
+                    key={a.id || code}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setAccountCode(code)
+                      openContoScheda(code)
+                    }}
+                  >
+                    Apri {label} ({code})
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="fatture-note">
+              Nessun c/c collegato. Vai in Banca → Conti e lascia la Popolare Puglia come conto condiviso (società vuota)
+              oppure assegnala a questa società.
+            </p>
+          )}
           <form
             onSubmit={openScheda}
             style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}
@@ -1124,10 +1259,31 @@ export default function MastriniContabiliPage() {
 
       {companyId && viewMode === 'scheda' && !schedaAccount ? (
         <section className="card fatture-panel">
-          <p className="fatture-note">Nessuna scheda aperta. Torna a Selezione scheda e conferma un conto.</p>
-          <button type="button" className="btn btn-primary" onClick={() => setViewMode('selezione')}>
-            Vai alla selezione
-          </button>
+          <p className="fatture-note">Nessuna scheda aperta. Scegli il conto banca oppure vai alla selezione.</p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {linkedBankAccounts.length ? (
+              linkedBankAccounts.map((a) => {
+                const code = String(a.ledger_code || GENERAL_ACCOUNTS.banca.code).trim()
+                const label = [a.bank_name, a.account_name].filter(Boolean).join(' · ') || `c/c ${code}`
+                return (
+                  <button key={a.id || code} type="button" className="btn btn-primary" onClick={() => openContoScheda(code)}>
+                    {label} ({code})
+                  </button>
+                )
+              })
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => openContoScheda(GENERAL_ACCOUNTS.banca.code)}
+              >
+                Apri Banca c/c 1100
+              </button>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={() => setViewMode('selezione')}>
+              Vai alla selezione
+            </button>
+          </div>
         </section>
       ) : null}
 

@@ -294,6 +294,7 @@ function buildFornitoriMastrini(
       documentId: inv?.id ? String(inv.id) : '',
       documentPath: '/fatture/registrate',
       linkedInvoiceId: inv?.id ? String(inv.id) : '',
+      supplierId: inv?.supplier_id != null ? Number(inv.supplier_id) : null,
       counterparty: party.name,
       supplier: party.name,
       customer: '',
@@ -514,7 +515,14 @@ function buildLedger(movements, extraAccounts = []) {
   }
   for (const acc of extraAccounts) {
     const code = String(acc?.code || '').trim()
-    if (!code || byAccount.has(code)) continue
+    if (!code) continue
+    if (byAccount.has(code)) {
+      const existing = byAccount.get(code)
+      if (acc.description) existing.description = acc.description
+      if (acc.bankAccountId != null) existing.bankAccountId = acc.bankAccountId
+      existing.keepEmpty = true
+      continue
+    }
     byAccount.set(code, {
       code,
       description: acc.description || `Banca c/c ${code}`,
@@ -522,6 +530,8 @@ function buildLedger(movements, extraAccounts = []) {
       type: 'attivo',
       statementType: 'stato_patrimoniale',
       group: 'Banca',
+      bankAccountId: acc.bankAccountId,
+      keepEmpty: true,
       openingBalance: 0,
       totalDare: 0,
       totalAvere: 0,
@@ -551,11 +561,14 @@ function buildLedger(movements, extraAccounts = []) {
   }
 
   const rows = [...byAccount.values()]
-    .filter((row) => row.movements.length > 0)
-    .map((row) => ({
-      ...row,
-      status: Math.abs(row.finalBalance) < 0.005 ? 'pareggio' : row.finalBalance > 0 ? 'attivo' : 'passivo',
-    }))
+    .filter((row) => row.movements.length > 0 || row.keepEmpty)
+    .map((row) => {
+      const { keepEmpty, ...rest } = row
+      return {
+        ...rest,
+        status: Math.abs(row.finalBalance) < 0.005 ? 'pareggio' : row.finalBalance > 0 ? 'attivo' : 'passivo',
+      }
+    })
 
   const totalDare = rows.reduce((acc, r) => acc + toNum(r.totalDare), 0)
   const totalAvere = rows.reduce((acc, r) => acc + toNum(r.totalAvere), 0)
@@ -717,12 +730,12 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
       linkedAccountIds.add(id)
       ledgerByAccountId.set(id, code)
     }
-    if (code && code !== GENERAL_ACCOUNTS.banca.code) {
-      extraLedgerAccounts.push({
-        code,
-        description: `${acc.bank_name || 'Banca'} · ${acc.account_name || 'c/c'}`,
-      })
-    }
+    const bankLabel = [acc.bank_name, acc.account_name].filter(Boolean).join(' · ') || 'Banca c/c'
+    extraLedgerAccounts.push({
+      code,
+      description: `${bankLabel} (mastro ${code})`,
+      bankAccountId: Number.isFinite(id) ? id : undefined,
+    })
   }
   if (companyId && linkedAccountIds.size === 0) {
     warnings.push(

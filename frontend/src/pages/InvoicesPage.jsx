@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
@@ -39,6 +40,9 @@ export default function InvoicesPage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const focusHandledRef = useRef('')
+  const [focusInvoiceId, setFocusInvoiceId] = useState('')
   const [scopeMode, setScopeMode] = useState(() => {
     try {
       return sessionStorage.getItem('atlasFattureScopeMode:v1') || 'company'
@@ -211,6 +215,99 @@ export default function InvoicesPage() {
   useEffect(() => {
     loadInvoices()
   }, [supplierId, dueFilter, showIgnored, gestionaleMode, scopeMode, companyId, localeId, scopeReady])
+
+  useEffect(() => {
+    const qId = String(searchParams.get('id') || '').trim()
+    const qNum = String(searchParams.get('n') || '').trim()
+    const qCompany = String(searchParams.get('company') || '').trim()
+    const qSupplier = String(searchParams.get('supplier_id') || '').trim()
+    if (!qId && !qNum) return
+
+    const targetKey = qId ? `id:${qId}` : `n:${qNum}`
+    if (focusHandledRef.current === targetKey) return
+
+    // Apply scope/filters so the target invoice can appear in the list.
+    if (qCompany && gestionaleMode) {
+      changeScopeMode('company')
+      if (companyId !== qCompany) setCompanyId(qCompany)
+    }
+    if (qSupplier) {
+      if (supplierId !== qSupplier) setSupplierId(qSupplier)
+    } else if (supplierId) {
+      setSupplierId('')
+      return
+    }
+    if (monthFilter) setMonthFilter('')
+    if (dueFilter) setDueFilter('')
+
+    if (loading) return
+
+    let match = null
+    if (qId) match = invoices.find((inv) => String(inv.id) === qId) || null
+    if (!match && qNum) {
+      const norm = qNum.toLowerCase()
+      match =
+        invoices.find((inv) => String(inv.invoice_number || '').trim().toLowerCase() === norm) || null
+    }
+
+    const finishFocus = (inv) => {
+      if (!inv?.id) return
+      focusHandledRef.current = `id:${inv.id}`
+      setFocusInvoiceId(String(inv.id))
+      openInvoiceDetail(inv)
+      setSuccess(`Documento ${inv.invoice_number || inv.id} selezionato`)
+      // Keep id in URL for share/reload, drop helper params once applied.
+      const next = new URLSearchParams()
+      next.set('id', String(inv.id))
+      setSearchParams(next, { replace: true })
+      window.setTimeout(() => {
+        document.getElementById(`invoice-row-${inv.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 80)
+    }
+
+    if (match) {
+      finishFocus(match)
+      return
+    }
+
+    if (!qId) {
+      focusHandledRef.current = targetKey
+      setError(`Documento n. ${qNum} non trovato in Fatture registrate`)
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const full = await fetchInvoice(qId)
+        if (cancelled || !full?.id) {
+          focusHandledRef.current = targetKey
+          setError(`Documento id ${qId} non trovato`)
+          return
+        }
+        finishFocus(full)
+      } catch (e) {
+        if (!cancelled) {
+          focusHandledRef.current = targetKey
+          setError(e?.message || `Documento id ${qId} non trovato`)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    searchParams,
+    invoices,
+    loading,
+    gestionaleMode,
+    companyId,
+    supplierId,
+    monthFilter,
+    dueFilter,
+    setCompanyId,
+    setSearchParams,
+  ])
 
   useEffect(() => {
     if (!pendingSupplierLabel || suppliers.length === 0 || supplierId) return
@@ -715,6 +812,10 @@ export default function InvoicesPage() {
               invoices.length === 0 ? 'Nessuna fattura registrata.' : 'Nessuna fattura per i filtri selezionati.'
             }
             onRowClick={(inv) => openInvoiceDetail(inv)}
+            getRowId={(inv) => `invoice-row-${inv.id}`}
+            getRowClassName={(inv) =>
+              focusInvoiceId && String(inv.id) === String(focusInvoiceId) ? 'workbook-row-selected' : ''
+            }
             actionsHeader="Azioni"
             actionsColWidth="8.75rem"
             renderActions={(inv) => (
