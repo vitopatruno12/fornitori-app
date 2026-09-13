@@ -96,8 +96,9 @@ export async function fetchBancaMovimenti(params = {}) {
   return apiFetch(q ? `/banca/movimenti?${q}` : '/banca/movimenti')
 }
 
-export async function fetchBancaRiconciliazione() {
-  return apiFetch('/banca/riconciliazione')
+export async function fetchBancaRiconciliazione(company) {
+  const q = company ? `?company=${encodeURIComponent(company)}` : ''
+  return apiFetch(`/banca/riconciliazione${q}`)
 }
 
 export async function postBancaRiconcilia(movementId, { invoice_id = null, status = 'matched' } = {}) {

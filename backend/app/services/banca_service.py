@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+import re
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from ..models.cash_entry import CashEntry
 from ..models.invoice import Invoice
 from ..models.supplier import Supplier
 from .cash_service import NON_FISCALE_CONTO
-from .invoice_service import payment_status_label
+from .invoice_service import list_invoices, payment_status_label
 
 
 def _fiscale_filter():
@@ -570,79 +571,238 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
   }
 
 
-def reconciliation_preview(db: Session, limit: int = 40) -> Dict[str, Any]:
-  """Abbina uscite non riconciliate a fatture fornitori aperte per importo."""
-  ensure_default_account(db)
-  open_invoices = (
-    db.query(Invoice, Supplier.name)
-    .join(Supplier, Invoice.supplier_id == Supplier.id)
-    .filter(Invoice.ignored.is_(False))
-    .order_by(Invoice.id.desc())
-    .limit(300)
-    .all()
+def _normalize_doc_token(value: str) -> str:
+  return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def _movement_search_blob(mov: BankMovement) -> str:
+  return " ".join(
+    [
+      str(mov.description or ""),
+      str(mov.causale or ""),
+      str(mov.counterparty or ""),
+      str(mov.notes or ""),
+    ]
   )
-  open_rows = []
-  for inv, supplier_name in open_invoices:
-    if payment_status_label(inv) == "paid":
-      continue
-    residuo = _dec(inv.total) - _dec(inv.amount_paid)
-    if residuo <= Decimal("0.009"):
-      continue
-    open_rows.append(
+
+
+def _invoice_number_in_text(invoice_number: Optional[str], text: str) -> bool:
+  """Cerca il numero documento nel testo movimento (bonifico / causale)."""
+  num = (invoice_number or "").strip()
+  if not num:
+    return False
+  text_u = (text or "").upper()
+  num_u = num.upper()
+  # Match con confini alfanumerici (evita falsi positivi su numeri corti)
+  pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(num_u)}(?![A-Z0-9])", re.IGNORECASE)
+  if pattern.search(text_u):
+    return True
+  norm_num = _normalize_doc_token(num)
+  if len(norm_num) >= 4:
+    return norm_num in _normalize_doc_token(text_u)
+  return False
+
+
+def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = None, reason: str = "") -> Dict[str, Any]:
+  total = _dec(getattr(inv, "total", 0))
+  paid = _dec(getattr(inv, "amount_paid", 0))
+  residuo = total - paid
+  due = getattr(inv, "due_date", None)
+  inv_date = getattr(inv, "invoice_date", None)
+  return {
+    "invoice_id": getattr(inv, "id", None),
+    "supplier_name": getattr(inv, "supplier_name", "") or "",
+    "invoice_number": getattr(inv, "invoice_number", None),
+    "invoice_date": inv_date.date().isoformat() if hasattr(inv_date, "date") else (inv_date.isoformat() if inv_date else None),
+    "due_date": due.date().isoformat() if hasattr(due, "date") else (due.isoformat() if due else None),
+    "total": float(total),
+    "amount_paid": float(paid),
+    "residuo": float(residuo),
+    "payment_status": getattr(inv, "payment_status", None) or payment_status_label(inv),
+    "company": getattr(inv, "company", None),
+    "match_reason": reason,
+    "matched_movement": match_movement,
+  }
+
+
+def reconciliation_preview(
+  db: Session,
+  limit: int = 40,
+  company: Optional[str] = None,
+) -> Dict[str, Any]:
+  """Classifica fatture pagate/da pagare tramite n. documento nei movimenti banca; propone abbinamenti."""
+  ensure_default_account(db)
+  company_id = (company or "").strip() or None
+
+  invoices = list_invoices(db, company=company_id, include_ignored=False)
+  # Limite pratico per UI
+  invoices = invoices[:500]
+
+  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
+  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
+
+  mov_q = db.query(BankMovement, BankAccount).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+  if account_ids:
+    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
+  # Ampio set per matching per numero (non solo unmatched)
+  movements = mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(800).all()
+
+  # Precompute blobs
+  mov_meta: List[Dict[str, Any]] = []
+  for mov, acc in movements:
+    mov_meta.append(
       {
-        "invoice_id": inv.id,
-        "supplier_name": supplier_name,
-        "invoice_number": inv.invoice_number,
-        "due_date": inv.due_date.date().isoformat() if hasattr(inv.due_date, "date") else (inv.due_date.isoformat() if inv.due_date else None),
-        "residuo": float(residuo),
+        "mov": mov,
+        "acc": acc,
+        "blob": _movement_search_blob(mov),
+        "out": _movement_out(mov, acc),
       }
     )
 
-  unmatched = (
-    db.query(BankMovement, BankAccount)
-    .join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
-    .filter(BankMovement.reconciliation_status == "unmatched", BankMovement.movement_type == "uscita")
-    .order_by(BankMovement.movement_date.desc())
-    .limit(limit)
-    .all()
-  )
+  paid_by_bank: List[Dict[str, Any]] = []
+  da_pagare: List[Dict[str, Any]] = []
+
+  for inv in invoices:
+    inv_id = int(inv.id)
+    num = str(inv.invoice_number or "").strip()
+    status = inv.payment_status or "unpaid"
+    residuo = _dec(inv.total) - _dec(inv.amount_paid)
+
+    # Già riconciliata su un movimento
+    already = next(
+      (
+        m
+        for m in mov_meta
+        if m["mov"].matched_invoice_id == inv_id
+      ),
+      None,
+    )
+    found = already
+    if not found and num:
+      for m in mov_meta:
+        if _invoice_number_in_text(num, m["blob"]):
+          found = m
+          break
+
+    if found:
+      paid_by_bank.append(
+        _invoice_row_out(
+          inv,
+          match_movement=found["out"],
+          reason="matched" if found["mov"].matched_invoice_id == inv_id else "numero_in_movimento",
+        )
+      )
+    elif status == "paid" or residuo <= Decimal("0.009"):
+      paid_by_bank.append(_invoice_row_out(inv, reason="gia_pagata_in_atlas"))
+    else:
+      da_pagare.append(_invoice_row_out(inv, reason="da_pagare"))
+
+  # Suggerimenti: prima match per numero su uscite unmatched, poi fallback importo
+  open_for_amount = [
+    {
+      "invoice_id": row["invoice_id"],
+      "supplier_name": row["supplier_name"],
+      "invoice_number": row["invoice_number"],
+      "due_date": row["due_date"],
+      "residuo": row["residuo"],
+    }
+    for row in da_pagare
+    if row["residuo"] > 0.009
+  ]
+
+  unmatched = [
+    (m["mov"], m["acc"], m["blob"], m["out"])
+    for m in mov_meta
+    if m["mov"].reconciliation_status == "unmatched" and m["mov"].movement_type == "uscita"
+  ][:limit]
 
   suggestions = []
   used_invoices = set()
-  for mov, acc in unmatched:
-    amt = _dec(mov.amount)
+  for mov, acc, blob, mov_out in unmatched:
+    # 1) Match per numero documento
     best = None
-    for inv in open_rows:
-      if inv["invoice_id"] in used_invoices:
+    for inv in invoices:
+      inv_id = int(inv.id)
+      if inv_id in used_invoices:
         continue
-      diff = abs(_dec(inv["residuo"]) - amt)
-      if diff <= Decimal("0.05"):
-        best = {**inv, "difference": float(diff), "match_quality": "exact"}
-        break
-      if best is None and diff <= Decimal("5.00"):
-        best = {**inv, "difference": float(diff), "match_quality": "near"}
+      if (inv.payment_status or "") == "paid":
+        continue
+      residuo = _dec(inv.total) - _dec(inv.amount_paid)
+      if residuo <= Decimal("0.009"):
+        continue
+      if not _invoice_number_in_text(inv.invoice_number, blob):
+        continue
+      diff = abs(residuo - _dec(mov.amount))
+      best = {
+        "invoice_id": inv_id,
+        "supplier_name": inv.supplier_name,
+        "invoice_number": inv.invoice_number,
+        "due_date": inv.due_date.date().isoformat()
+        if hasattr(inv.due_date, "date")
+        else (inv.due_date.isoformat() if inv.due_date else None),
+        "residuo": float(residuo),
+        "difference": float(diff),
+        "match_quality": "number",
+      }
+      break
+
+    # 2) Fallback per importo
+    if best is None:
+      amt = _dec(mov.amount)
+      near = None
+      for inv in open_for_amount:
+        if inv["invoice_id"] in used_invoices:
+          continue
+        diff = abs(_dec(inv["residuo"]) - amt)
+        if diff <= Decimal("0.05"):
+          best = {**inv, "difference": float(diff), "match_quality": "exact"}
+          break
+        if near is None and diff <= Decimal("5.00"):
+          near = {**inv, "difference": float(diff), "match_quality": "near"}
+      if best is None:
+        best = near
+
     if best:
       used_invoices.add(best["invoice_id"])
+      diff_dec = _dec(best.get("difference", 0))
+      if best["match_quality"] == "number":
+        status = "matched" if diff_dec <= Decimal("0.05") else "difference"
+      elif best["match_quality"] == "exact":
+        status = "matched"
+      else:
+        status = "difference"
       suggestions.append(
         {
-          "movement": _movement_out(mov, acc),
+          "movement": mov_out,
           "suggested_invoice": best,
-          "status": "matched" if best["match_quality"] == "exact" else "difference",
+          "status": status,
         }
       )
     else:
       suggestions.append(
         {
-          "movement": _movement_out(mov, acc),
+          "movement": mov_out,
           "suggested_invoice": None,
           "status": "unmatched",
         }
       )
 
   return {
+    "company": company_id or "",
     "suggestions": suggestions,
-    "open_invoices_count": len(open_rows),
-    "unmatched_movements": len(unmatched),
+    "paid_by_bank": paid_by_bank,
+    "da_pagare": da_pagare,
+    "open_invoices_count": len(da_pagare),
+    "paid_count": len(paid_by_bank),
+    "unmatched_movements": len([s for s in suggestions if s["status"] == "unmatched"]),
+    "accounts_used": [
+      {
+        "id": a.get("id"),
+        "label": f"{a.get('bank_name')} · {a.get('account_name')}",
+        "company": a.get("company"),
+      }
+      for a in account_items
+    ],
   }
 
 
