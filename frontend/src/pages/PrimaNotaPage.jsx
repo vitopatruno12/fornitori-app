@@ -74,6 +74,42 @@ const MOVEMENT_KIND_OPTIONS = [
   'versamento_banca',
 ]
 
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
+}
+
+function operatorPrimaNotaDateKey(stationId, activitySlug) {
+  const sid = String(stationId || 'operatore').trim().toLowerCase()
+  const act = String(activitySlug || 'default').trim().toLowerCase()
+  return `atlasOperatorPrimaNotaDate:v1:${sid}:${act}`
+}
+
+function readStoredOperatorPrimaNotaDate(key) {
+  if (!key) return null
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (isIsoDate(raw)) return String(raw).trim()
+  } catch {
+    // ignore
+  }
+  return null
+}
+
+function writeStoredOperatorPrimaNotaDate(key, ymd) {
+  if (!key || !isIsoDate(ymd)) return
+  try {
+    sessionStorage.setItem(key, ymd)
+  } catch {
+    // ignore
+  }
+}
+
+function resolveInitialPrimaNotaDate({ todayIso, operatorMode, operatorStationId, activitySlug }) {
+  if (!operatorMode) return todayIso
+  const saved = readStoredOperatorPrimaNotaDate(operatorPrimaNotaDateKey(operatorStationId, activitySlug))
+  return saved || todayIso
+}
+
 function isExtraCassaConto(conto) {
   return conto === CONTO_POS || conto === CONTO_REFILL || conto === CONTO_STACKER_SVUOTAMENTO
 }
@@ -144,9 +180,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const [selectedDate, setSelectedDate] = useState(() => todayIso)
-  const [movementPeriodFrom, setMovementPeriodFrom] = useState(() => todayIso)
-  const [movementPeriodTo, setMovementPeriodTo] = useState(() => todayIso)
+  const initialWorkDate = resolveInitialPrimaNotaDate({
+    todayIso,
+    operatorMode,
+    operatorStationId,
+    activitySlug: operatorActivitySlug,
+  })
+
+  const [selectedDate, setSelectedDate] = useState(() => initialWorkDate)
+  const [movementPeriodFrom, setMovementPeriodFrom] = useState(() => initialWorkDate)
+  const [movementPeriodTo, setMovementPeriodTo] = useState(() => initialWorkDate)
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
   const [resetRangeFrom, setResetRangeFrom] = useState(currentMonthFrom)
@@ -175,7 +218,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [categories, setCategories] = useState([])
   const [customers, setCustomers] = useState([])
   const [linkOptions, setLinkOptions] = useState({ invoices: [], deliveries: [] })
-  const [formEntryDate, setFormEntryDate] = useState('')
+  const [formEntryDate, setFormEntryDate] = useState(() => initialWorkDate)
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [deletingDay, setDeletingDay] = useState(false)
@@ -222,6 +265,29 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }, [locales, staffLocaleSummaries, protectedLocaleSummaries])
 
   const unlockedSlugsList = useMemo(() => [...unlockedSlugs], [unlockedSlugs])
+
+  const operatorActivityDateRef = useRef(activeActivity)
+  useEffect(() => {
+    if (!operatorMode) return
+    if (operatorActivityDateRef.current === activeActivity) return
+    operatorActivityDateRef.current = activeActivity
+    const saved = readStoredOperatorPrimaNotaDate(
+      operatorPrimaNotaDateKey(operatorStationId, activeActivity),
+    )
+    if (!saved) return
+    setSelectedDate(saved)
+    setFormEntryDate(saved)
+    setMovementPeriodFrom(saved)
+    setMovementPeriodTo(saved)
+  }, [operatorMode, operatorStationId, activeActivity])
+
+  useEffect(() => {
+    if (!operatorMode || !isIsoDate(selectedDate)) return
+    writeStoredOperatorPrimaNotaDate(
+      operatorPrimaNotaDateKey(operatorStationId, activeActivity),
+      selectedDate,
+    )
+  }, [operatorMode, operatorStationId, activeActivity, selectedDate])
 
   const activeStaffLocaleHint = staffLocaleHint(activeActivity, staffLocaleSummaries)
   const activeUsesStaffCode = Boolean(getStaffLocaleLinkForActivity(activeActivity))

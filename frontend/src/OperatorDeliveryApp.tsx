@@ -86,28 +86,76 @@ function DeliveryMainContent({
   onOperatorNavigate: (section: string) => void
   setDeliveryView: (next: OperatorDeliveryView) => void
 }) {
+  const [keepPrimaNotaMounted, setKeepPrimaNotaMounted] = React.useState(view === 'prima-nota')
+
+  React.useEffect(() => {
+    if (view === 'prima-nota') setKeepPrimaNotaMounted(true)
+  }, [view])
+
+  const primaNotaLayer =
+    keepPrimaNotaMounted ? (
+      <div style={{ display: view === 'prima-nota' ? 'block' : 'none' }} aria-hidden={view !== 'prima-nota'}>
+        <PrimaNotaPage operatorMode stationId="carrier" />
+      </div>
+    ) : null
+
   if (view === 'overview') {
-    return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
+    return (
+      <>
+        {primaNotaLayer}
+        <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
+      </>
+    )
   }
   if (view === 'suppliers') {
-    return <SuppliersPage />
+    return (
+      <>
+        {primaNotaLayer}
+        <SuppliersPage />
+      </>
+    )
   }
   if (view === 'magazzino') {
-    return <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+    return (
+      <>
+        {primaNotaLayer}
+        <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+      </>
+    )
   }
   if (view === 'trasportatori') {
-    return <TrasportatoriPage operatorMode />
+    return (
+      <>
+        {primaNotaLayer}
+        <TrasportatoriPage operatorMode />
+      </>
+    )
   }
   if (view === 'new-delivery') {
-    return <NewDeliveryPage operatorMode />
+    return (
+      <>
+        {primaNotaLayer}
+        <NewDeliveryPage operatorMode />
+      </>
+    )
   }
   if (view === 'prima-nota') {
-    return <PrimaNotaPage operatorMode />
+    return primaNotaLayer
   }
   if (view === 'fatturazione') {
-    return <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
+    return (
+      <>
+        {primaNotaLayer}
+        <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
+      </>
+    )
   }
-  return <DeliveriesHistoryPage operatorMode />
+  return (
+    <>
+      {primaNotaLayer}
+      <DeliveriesHistoryPage operatorMode />
+    </>
+  )
 }
 
 export default function OperatorDeliveryApp() {
