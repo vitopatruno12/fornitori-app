@@ -11,7 +11,8 @@ from typing import Any, Dict, Optional
 
 
 def _uploads_root() -> Path:
-  return Path(__file__).resolve().parents[2] / "uploads" / "ade"
+  # .../backend/app/integrations/ade/agent_status.py → backend/uploads/ade
+  return Path(__file__).resolve().parents[3] / "uploads" / "ade"
 
 
 def status_path() -> Path:
