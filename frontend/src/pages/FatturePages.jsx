@@ -35,8 +35,14 @@ import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
+import FattureSupplierDateFilters, {
+  filterInvoicesBySupplierAndDate,
+  supplierOptionsFromInvoices,
+} from '../components/FattureSupplierDateFilters.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
+import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 
 const SYNC_LOG_KEY = 'fattureAdeSdiSyncLog'
 
@@ -68,6 +74,22 @@ const DA_REGISTRARE_COLUMNS = [
   { id: 'payment_status', label: 'Stato', width: 10, fluid: true },
 ]
 
+const PAGATE_FORNITORI_COLUMNS = [
+  { id: 'supplier_name', label: 'Fornitore', width: 36, fluid: true, emphasis: true },
+  { id: 'invoice_count', label: 'Fatture', width: 10, fluid: true, numeric: true },
+  { id: 'total_paid', label: 'Totale pagato', width: 16, fluid: true, numeric: true, emphasis: true },
+  { id: 'last_date', label: 'Ultima data', width: 12, fluid: true },
+]
+
+const PAGATE_INVOICE_COLUMNS = [
+  { id: 'invoice_date', label: 'Data', width: 11, fluid: true },
+  { id: 'invoice_number', label: 'Numero', width: 12, fluid: true, emphasis: true },
+  { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true },
+  { id: 'amount_paid', label: 'Pagato', width: 12, fluid: true, numeric: true },
+  { id: 'bank_hit', label: 'Movimento banca', width: 28, fluid: true },
+  { id: 'reason', label: 'Esito', width: 14, fluid: true },
+]
+
 const SCADENZIARIO_COLUMNS = [
   { id: 'due_date', label: 'Scadenza', width: 12, fluid: true },
   { id: 'invoice_date', label: 'Data doc.', width: 12, fluid: true },
@@ -93,10 +115,53 @@ function moneyTotalsLabel(colId, totals) {
   if (colId === 'supplier_name' || colId === 'file_kind' || colId === 'original_filename') {
     return totals?.count != null ? `${totals.count} doc.` : ''
   }
+  if (colId === 'invoice_count') return totals?.count != null ? `${totals.count} forn.` : ''
   if (colId === 'imponibile') return eur(totals?.imponibile)
   if (colId === 'vat_amount') return eur(totals?.vat_amount)
-  if (colId === 'total' || colId === 'total_amount') return eur(totals?.total)
+  if (colId === 'total' || colId === 'total_amount' || colId === 'total_paid' || colId === 'amount_paid') {
+    return eur(totals?.total)
+  }
   return ''
+}
+
+function matchReasonLabel(reason) {
+  if (reason === 'numero_in_movimento') return 'N. in banca'
+  if (reason === 'matched') return 'Riconciliata'
+  if (reason === 'gia_pagata_in_atlas') return 'Pagata Atlas'
+  return reason || 'Pagata'
+}
+
+function supplierPartyKey(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+function buildPaidSuppliers(paidRows) {
+  const map = new Map()
+  for (const row of Array.isArray(paidRows) ? paidRows : []) {
+    const name = String(row?.supplier_name || '').trim() || 'Senza fornitore'
+    const key = supplierPartyKey(name)
+    let party = map.get(key)
+    if (!party) {
+      party = {
+        id: key,
+        supplier_name: name,
+        invoices: [],
+        invoice_count: 0,
+        total_paid: 0,
+        last_date: '',
+      }
+      map.set(key, party)
+    }
+    party.invoices.push(row)
+    party.invoice_count += 1
+    party.total_paid += Number(row?.amount_paid ?? row?.total) || 0
+    const d = String(row?.invoice_date || '').slice(0, 10)
+    if (d && (!party.last_date || d > party.last_date)) party.last_date = d
+  }
+  return Array.from(map.values()).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name, 'it'))
 }
 
 function pushSyncLog(entry) {
@@ -383,6 +448,9 @@ export function FattureDashboardPage() {
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
                 Da registrare
+              </FattureLink>
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/pagate">
+                Pagate
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
                 Scadenziario
@@ -928,6 +996,9 @@ export function FattureDaRegistrarePage() {
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   function changeScopeMode(next) {
     setScopeMode(next)
@@ -987,10 +1058,21 @@ export function FattureDaRegistrarePage() {
     }
   }, [gestionaleMode, scopeMode, companyId, localeId, scopeReady])
 
+  const supplierOptions = useMemo(() => supplierOptionsFromInvoices(invoices), [invoices])
+  const filteredInvoices = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(invoices, {
+        supplierId: supplierFilter,
+        dateFrom,
+        dateTo,
+      }),
+    [invoices, supplierFilter, dateFrom, dateTo],
+  )
+
   return (
     <FatturePageShell
       title="Da registrare"
-      lead="Fatture senza movimento di Prima Nota. Stato Pagata/Da pagare aggiornato in automatico dai movimenti banca."
+      lead="Fatture senza movimento di Prima Nota. Filtra per fornitore e periodo; stampa o esporta l'elenco."
       actions={
         gestionaleMode ? (
           <FattureScopeTools
@@ -1012,17 +1094,43 @@ export function FattureDaRegistrarePage() {
           registrare.
         </div>
       ) : null}
-      {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       <section className="card fatture-panel">
-        <WorkbookGrid
+        {scopeReady ? (
+          <FattureSupplierDateFilters
+            supplierMode="id"
+            supplierOptions={supplierOptions}
+            supplierValue={supplierFilter}
+            onSupplierChange={setSupplierFilter}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            onReset={() => {
+              setSupplierFilter('')
+              setDateFrom('')
+              setDateTo('')
+            }}
+          />
+        ) : null}
+        <VneWorkbookGrid
           title="Da registrare"
-          sheetLabel={`${invoices.length} documenti`}
-          hideToolbar
+          sheetLabel={`${filteredInvoices.length} documenti`}
+          exportSubtitle={
+            [
+              supplierFilter
+                ? supplierOptions.find((s) => String(s.supplier_id) === String(supplierFilter))?.supplier_name
+                : null,
+              dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'Elenco completo'
+          }
           loading={loading}
+          loadingLabel="Caricamento fatture"
           gridClassName="fatture-excel-grid"
           columns={DA_REGISTRARE_COLUMNS}
-          rows={scopeReady ? invoices : []}
+          rows={scopeReady ? filteredInvoices : []}
           rowKey={(row) => row.id}
           cellValue={(row, col) => {
             if (col.id === 'invoice_date' || col.id === 'due_date') return formatDate(row[col.id])
@@ -1031,17 +1139,17 @@ export function FattureDaRegistrarePage() {
             return row[col.id] || '—'
           }}
           totals={
-            invoices.length
+            filteredInvoices.length
               ? {
-                  count: invoices.length,
-                  imponibile: sumField(invoices, 'imponibile'),
-                  vat_amount: sumField(invoices, 'vat_amount'),
-                  total: sumField(invoices, 'total'),
+                  count: filteredInvoices.length,
+                  imponibile: sumField(filteredInvoices, 'imponibile'),
+                  vat_amount: sumField(filteredInvoices, 'vat_amount'),
+                  total: sumField(filteredInvoices, 'total'),
                 }
               : null
           }
           totalsLabel={moneyTotalsLabel}
-          emptyMessage="Nessuna fattura da registrare."
+          emptyMessage="Nessuna fattura da registrare con i filtri selezionati."
           actionsHeader="Azioni"
           renderActions={() => (
             <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
@@ -1050,6 +1158,279 @@ export function FattureDaRegistrarePage() {
           )}
         />
       </section>
+    </FatturePageShell>
+  )
+}
+
+export function FatturePagatePage() {
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const [paidRows, setPaidRows] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [selectedSupplierKey, setSelectedSupplierKey] = useState('')
+
+  async function reload(nextCompany = companyId) {
+    if (!nextCompany) {
+      setPaidRows([])
+      setSelectedSupplierKey('')
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const res = await postBancaRiconciliazioneAuto(nextCompany)
+      const rows = Array.isArray(res?.paid_by_bank) ? res.paid_by_bank : []
+      setPaidRows(rows)
+      setSelectedSupplierKey((prev) => {
+        if (!prev) return ''
+        const still = buildPaidSuppliers(rows).some((s) => s.id === prev)
+        return still ? prev : ''
+      })
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento fatture pagate')
+      setPaidRows([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    reload(companyId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId])
+
+  const filteredPaidRows = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(paidRows, {
+        supplierName: supplierFilter,
+        dateFrom,
+        dateTo,
+      }),
+    [paidRows, supplierFilter, dateFrom, dateTo],
+  )
+
+  const supplierOptions = useMemo(() => supplierOptionsFromInvoices(paidRows), [paidRows])
+  const suppliers = useMemo(() => buildPaidSuppliers(filteredPaidRows), [filteredPaidRows])
+  const selectedSupplier = useMemo(
+    () => suppliers.find((s) => s.id === selectedSupplierKey) || null,
+    [suppliers, selectedSupplierKey],
+  )
+
+  const supplierTotals = useMemo(
+    () => ({
+      count: suppliers.length,
+      total: suppliers.reduce((acc, s) => acc + (Number(s.total_paid) || 0), 0),
+    }),
+    [suppliers],
+  )
+
+  const invoiceListTotals = useMemo(
+    () => ({
+      count: filteredPaidRows.length,
+      total: filteredPaidRows.reduce((acc, r) => acc + (Number(r.amount_paid ?? r.total) || 0), 0),
+    }),
+    [filteredPaidRows],
+  )
+
+  const invoiceTotals = useMemo(() => {
+    const rows = selectedSupplier?.invoices || []
+    return {
+      count: rows.length,
+      total: rows.reduce((acc, r) => acc + (Number(r.amount_paid ?? r.total) || 0), 0),
+    }
+  }, [selectedSupplier])
+
+  function supplierCellValue(row, col) {
+    if (col.id === 'supplier_name') return row.supplier_name || '—'
+    if (col.id === 'invoice_count') return String(row.invoice_count || 0)
+    if (col.id === 'total_paid') return eur(row.total_paid)
+    if (col.id === 'last_date') return formatDate(row.last_date)
+    return ''
+  }
+
+  function invoiceCellValue(row, col) {
+    if (col.id === 'invoice_date') return formatDate(row.invoice_date)
+    if (col.id === 'invoice_number') return row.invoice_number || '—'
+    if (col.id === 'supplier_name') return row.supplier_name || '—'
+    if (col.id === 'total') return eur(row.total)
+    if (col.id === 'amount_paid') return eur(row.amount_paid ?? row.total)
+    if (col.id === 'bank_hit') {
+      const m = row.matched_movement
+      if (!m) return '—'
+      return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
+    }
+    if (col.id === 'reason') return matchReasonLabel(row.match_reason)
+    return ''
+  }
+
+  const companyName = companyId ? companyLabel(companyId) : ''
+  const filterSubtitle = [
+    supplierFilter || null,
+    dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  const elencoColumns = useMemo(
+    () => [
+      { id: 'invoice_date', label: 'Data', width: 10, fluid: true },
+      { id: 'invoice_number', label: 'Numero', width: 11, fluid: true, emphasis: true },
+      { id: 'supplier_name', label: 'Fornitore', width: 22, fluid: true },
+      { id: 'total', label: 'Totale', width: 11, fluid: true, numeric: true },
+      { id: 'amount_paid', label: 'Pagato', width: 11, fluid: true, numeric: true },
+      { id: 'bank_hit', label: 'Movimento banca', width: 22, fluid: true },
+      { id: 'reason', label: 'Esito', width: 12, fluid: true },
+    ],
+    [],
+  )
+
+  return (
+    <FatturePageShell
+      title="Pagate"
+      lead={
+        companyId
+          ? `Fatture pagate da riconciliazione · ${companyName}. Filtra fornitore/periodo e stampa l'elenco completo.`
+          : 'Scegli la società nel banner per vedere le fatture pagate dalla riconciliazione banca.'
+      }
+      actions={
+        <div className="mastrini-hero-tools" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <FattureCompanySelect
+            className="mastrini-hero-tools-company"
+            companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+            value={companyId}
+            onChange={setCompanyId}
+            loading={loadingCompanies}
+            disabled={loadingCompanies}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => reload(companyId)}
+            disabled={loading || !companyId}
+          >
+            Aggiorna da banca
+          </button>
+        </div>
+      }
+    >
+      {!companyId ? (
+        <div className="alert alert-info">Seleziona una società per caricare le fatture pagate.</div>
+      ) : null}
+      {error ? <div className="alert alert-danger">{error}</div> : null}
+
+      {companyId ? (
+        <section className="card fatture-panel">
+          <FattureSupplierDateFilters
+            supplierMode="name"
+            supplierOptions={supplierOptions}
+            supplierValue={supplierFilter}
+            onSupplierChange={(v) => {
+              setSupplierFilter(v)
+              setSelectedSupplierKey('')
+            }}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            onReset={() => {
+              setSupplierFilter('')
+              setDateFrom('')
+              setDateTo('')
+              setSelectedSupplierKey('')
+            }}
+          />
+
+          {!selectedSupplier ? (
+            <>
+              <VneWorkbookGrid
+                title="Elenco completo pagate"
+                sheetLabel={`${filteredPaidRows.length} documenti`}
+                exportSubtitle={[companyName, filterSubtitle || 'Tutti i fornitori'].filter(Boolean).join(' · ')}
+                loading={loading}
+                loadingLabel="Caricamento pagate"
+                gridClassName="fatture-excel-grid"
+                columns={elencoColumns}
+                rows={filteredPaidRows}
+                rowKey={(row, idx) => `${row.invoice_id || row.invoice_number || 'inv'}-${idx}`}
+                cellValue={invoiceCellValue}
+                totals={filteredPaidRows.length ? invoiceListTotals : null}
+                totalsLabel={moneyTotalsLabel}
+                emptyMessage="Nessuna fattura pagata con i filtri selezionati."
+              />
+
+              <div style={{ marginTop: '1.25rem' }}>
+                <h2 className="fatture-panel-title">Per fornitore</h2>
+                <p className="fatture-note">Clicca un fornitore per aprire la scheda dedicata.</p>
+                <VneWorkbookGrid
+                  title="Fornitori — fatture pagate"
+                  sheetLabel={`${suppliers.length} fornitori`}
+                  exportSubtitle={`${companyName} · riepilogo fornitori`}
+                  loading={loading}
+                  loadingLabel="Caricamento fornitori"
+                  gridClassName="fatture-excel-grid"
+                  columns={PAGATE_FORNITORI_COLUMNS}
+                  rows={suppliers}
+                  rowKey={(row) => row.id}
+                  cellValue={supplierCellValue}
+                  totals={suppliers.length ? supplierTotals : null}
+                  totalsLabel={moneyTotalsLabel}
+                  emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati."
+                  onRowClick={(row) => setSelectedSupplierKey(row.id)}
+                  rowClickTitle="Apri scheda fatture pagate del fornitore"
+                  actionsHeader="Azioni"
+                  renderActions={(row) => (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSelectedSupplierKey(row.id)
+                      }}
+                    >
+                      Scheda
+                    </button>
+                  )}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                <div>
+                  <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                    {selectedSupplier.supplier_name}
+                  </h2>
+                  <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                    {selectedSupplier.invoice_count} fatture pagate · Totale {eur(selectedSupplier.total_paid)}
+                  </p>
+                </div>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelectedSupplierKey('')}>
+                  Torna all&apos;elenco
+                </button>
+              </div>
+              <VneWorkbookGrid
+                title={`Pagate — ${selectedSupplier.supplier_name}`}
+                sheetLabel={`${selectedSupplier.invoices.length} documenti`}
+                exportSubtitle={[companyName, selectedSupplier.supplier_name, filterSubtitle].filter(Boolean).join(' · ')}
+                loading={loading}
+                loadingLabel="Aggiornamento scheda"
+                gridClassName="fatture-excel-grid"
+                columns={PAGATE_INVOICE_COLUMNS}
+                rows={selectedSupplier.invoices}
+                rowKey={(row, idx) => `${row.invoice_id || row.invoice_number || 'inv'}-${idx}`}
+                cellValue={invoiceCellValue}
+                totals={selectedSupplier.invoices.length ? invoiceTotals : null}
+                totalsLabel={moneyTotalsLabel}
+                emptyMessage="Nessuna fattura pagata per questo fornitore."
+              />
+            </>
+          )}
+        </section>
+      ) : null}
     </FatturePageShell>
   )
 }

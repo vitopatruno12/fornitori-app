@@ -18,6 +18,7 @@ import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
 import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
+  FatturePagatePage,
   FattureDashboardPage,
   FattureEmessePage,
   FattureImpostazioniPage,
@@ -121,6 +122,7 @@ function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
         <Route path="emesse" element={<FattureEmessePage />} />
         <Route path="passive" element={<FatturePassivePage />} />
         <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
+        <Route path="pagate" element={<FatturePagatePage />} />
         <Route path="registrate" element={<InvoicesPage />} />
         <Route path="scadenziario" element={<FattureScadenziarioPage />} />
         <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />

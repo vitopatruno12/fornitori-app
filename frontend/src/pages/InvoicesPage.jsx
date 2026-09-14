@@ -6,7 +6,8 @@ import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
-import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
+import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
 import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
@@ -104,6 +105,8 @@ export default function InvoicesPage() {
   const [detailInv, setDetailInv] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [monthFilter, setMonthFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [showIgnored, setShowIgnored] = useState(false)
   const [pendingSupplierLabel, setPendingSupplierLabel] = useState('')
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
@@ -125,9 +128,15 @@ export default function InvoicesPage() {
   }, [invoices])
 
   const filteredInvoices = useMemo(() => {
-    if (!monthFilter) return invoices
-    return invoices.filter((inv) => (inv.invoice_date ? String(inv.invoice_date).slice(0, 7) : '') === monthFilter)
-  }, [invoices, monthFilter])
+    let rows = invoices
+    if (monthFilter) {
+      rows = rows.filter((inv) => (inv.invoice_date ? String(inv.invoice_date).slice(0, 7) : '') === monthFilter)
+    }
+    return filterInvoicesBySupplierAndDate(rows, {
+      dateFrom,
+      dateTo,
+    })
+  }, [invoices, monthFilter, dateFrom, dateTo])
 
   const kpi = useMemo(() => {
     let residuoTot = 0
@@ -744,6 +753,30 @@ export default function InvoicesPage() {
             </select>
           </div>
           <div className="form-group">
+            <label>Data da</label>
+            <input
+              type="date"
+              className="form-control"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value)
+                if (e.target.value) setMonthFilter('')
+              }}
+            />
+          </div>
+          <div className="form-group">
+            <label>Data a</label>
+            <input
+              type="date"
+              className="form-control"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value)
+                if (e.target.value) setMonthFilter('')
+              }}
+            />
+          </div>
+          <div className="form-group">
             <label>Ignorate</label>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.45rem' }}>
               <input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} />
@@ -751,6 +784,20 @@ export default function InvoicesPage() {
             </label>
           </div>
           <button type="submit" className="btn btn-primary">Aggiorna</button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setSupplierId('')
+              setDueFilter('')
+              setMonthFilter('')
+              setDateFrom('')
+              setDateTo('')
+              setShowIgnored(false)
+            }}
+          >
+            Reset filtri
+          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -773,10 +820,18 @@ export default function InvoicesPage() {
         {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
 
         {!loading && !error && (
-          <WorkbookGrid
+          <VneWorkbookGrid
             title="Storico fatture"
             sheetLabel={`${filteredInvoices.length} documenti`}
-            hideToolbar
+            exportSubtitle={
+              [
+                supplierId ? suppliers.find((s) => String(s.id) === String(supplierId))?.name : null,
+                dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null,
+                monthFilter ? `Mese ${monthFilter}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'Elenco completo'
+            }
             gridClassName="fatture-excel-grid"
             columns={REGISTRATE_COLUMNS}
             rows={filteredInvoices}

@@ -48,6 +48,7 @@ import {
 import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
+  FatturePagatePage,
   FattureDashboardPage,
   FattureEmessePage,
   FattureImportXmlPage,
@@ -278,6 +279,7 @@ function App() {
     'fatture-ricevute': 'fatture ricevute',
     'fatture-emesse': 'fatture emesse',
     'fatture-da-registrare': 'fatture da registrare',
+    'fatture-pagate': 'fatture pagate',
     'fatture-registrate': 'fatture registrate',
     'fatture-scadenziario': 'scadenziario fatture',
     'fatture-sincronizzazione': 'sincronizzazione fatture',
@@ -502,6 +504,10 @@ function App() {
       'fatture-da-registrare': [
         'Come collego una fattura alla Prima Nota?',
         'Quali fatture mancano di movimento cassa?',
+      ],
+      'fatture-pagate': [
+        'Quali fatture risultano pagate dalla riconciliazione banca?',
+        'Apri la scheda pagate di un fornitore',
       ],
       'fatture-registrate': [
         'Mostrami subito le fatture scadute',
@@ -975,6 +981,7 @@ function App() {
           <Route path="/fatture/ricevute" element={<FattureRicevutePage />} />
           <Route path="/fatture/emesse" element={<FattureEmessePage />} />
           <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
+          <Route path="/fatture/pagate" element={<FatturePagatePage />} />
           <Route path="/fatture/registrate" element={<InvoicesPage />} />
           <Route path="/fatture/scadenziario" element={<FattureScadenziarioPage />} />
           <Route path="/fatture/sincronizzazione" element={<FattureSincronizzazionePage />} />
