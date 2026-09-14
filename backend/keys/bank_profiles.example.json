@@ -37,8 +37,8 @@
     "username": "",
     "password": "",
     "portal_url": "",
-    "enable_banking_app_id": "",
-    "enable_banking_key_path": "",
+    "enable_banking_app_id": "af4d364d-b4c8-447d-b30d-3516fcd5dee1",
+    "enable_banking_key_path": "./keys/af4d364d-b4c8-447d-b30d-3516fcd5dee1.pem",
     "enabled": true
   }
 ]
