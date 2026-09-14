@@ -93,6 +93,8 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
+        // Bundle principale può superare 2 MiB (default Workbox) dopo nuove sezioni fatture
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,webmanifest}'],
         globIgnores: ['**/section-versions.json'],
         navigateFallback: '/index.html',
