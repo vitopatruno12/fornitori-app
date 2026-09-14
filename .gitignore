@@ -22,6 +22,8 @@ backend/data/easyretail_agent_heartbeat.json
 backend/data/*.tmp
 backend/keys/*.pem
 backend/keys/*.env.fragment
+backend/keys/bank_profiles.json
+backend/uploads/banca/bank_profiles.json
 !backend/keys/.gitkeep
 
 # Backup DB / dump

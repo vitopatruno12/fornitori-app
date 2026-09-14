@@ -74,59 +74,82 @@ function exportMastroCsv(account, periodLabel, companyName = '') {
   downloadFile(`mastro_${account.code}.csv`, toCsv(rows), 'text/csv;charset=utf-8')
 }
 
+function escapePrintHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 function printMastro(account, periodLabel) {
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=1100,height=700')
-  if (!w) return
-  const html = `
-    <html>
-      <head>
-        <title>Mastro ${account.code}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 16px; color: #111827; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-          th, td { border: 1px solid #d1d5db; padding: 6px 8px; font-size: 12px; text-align: left; }
-          th { background: #f3f4f6; }
-          h1, h2 { margin: 0 0 8px; }
-        </style>
-      </head>
-      <body>
-        <h1>Mastro contabile</h1>
-        <h2>${account.code} - ${account.description}</h2>
-        <p>Periodo: ${periodLabel}</p>
-        <p>Saldo iniziale: ${eur(account.openingBalance)} · Dare: ${eur(account.totalDare)} · Avere: ${eur(
-    account.totalAvere,
-  )} · Saldo finale: ${eur(account.finalBalance)}</p>
-        <table>
-          <thead>
+  if (!account) return
+  const movements = Array.isArray(account.movements) ? account.movements : []
+  const rowsHtml = movements.length
+    ? movements
+        .map(
+          (m) => `
             <tr>
-              <th>Data</th><th>N. registrazione</th><th>Descrizione</th><th>Documento</th><th>Dare</th><th>Avere</th><th>Saldo</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${account.movements
-              .map(
-                (m) => `
-                  <tr>
-                    <td>${m.date || ''}</td>
-                    <td>${m.registrationNumber || ''}</td>
-                    <td>${m.description || ''}</td>
-                    <td>${m.documentLabel || ''}</td>
-                    <td>${eur(m.dare)}</td>
-                    <td>${eur(m.avere)}</td>
-                    <td>${eur(m.progressiveBalance)}</td>
-                  </tr>
-                `,
-              )
-              .join('')}
-          </tbody>
-        </table>
-      </body>
-    </html>
-  `
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  w.print()
+              <td>${escapePrintHtml(m.date)}</td>
+              <td>${escapePrintHtml(m.registrationNumber)}</td>
+              <td>${escapePrintHtml(m.description)}</td>
+              <td>${escapePrintHtml(m.documentLabel)}</td>
+              <td>${escapePrintHtml(eur(m.dare))}</td>
+              <td>${escapePrintHtml(eur(m.avere))}</td>
+              <td>${escapePrintHtml(eur(m.progressiveBalance))}</td>
+            </tr>`,
+        )
+        .join('')
+    : `<tr><td colspan="7">Nessun movimento nel periodo selezionato.</td></tr>`
+
+  const html = `<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mastro ${escapePrintHtml(account.code)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 16px; color: #111827; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border: 1px solid #d1d5db; padding: 6px 8px; font-size: 12px; text-align: left; }
+      th { background: #f3f4f6; }
+      h1, h2 { margin: 0 0 8px; }
+      @media print {
+        body { padding: 0; }
+      }
+    </style>
+  </head>
+  <body onload="setTimeout(function(){ try { window.focus(); window.print(); } catch (e) {} }, 250)">
+    <h1>Mastro contabile</h1>
+    <h2>${escapePrintHtml(account.code)} - ${escapePrintHtml(account.description)}</h2>
+    <p>Periodo: ${escapePrintHtml(periodLabel)}</p>
+    <p>Saldo iniziale: ${escapePrintHtml(eur(account.openingBalance))} · Dare: ${escapePrintHtml(
+      eur(account.totalDare),
+    )} · Avere: ${escapePrintHtml(eur(account.totalAvere))} · Saldo finale: ${escapePrintHtml(
+      eur(account.finalBalance),
+    )}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th><th>N. registrazione</th><th>Descrizione</th><th>Documento</th><th>Dare</th><th>Avere</th><th>Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+  </body>
+</html>`
+
+  // Blob URL: evita finestra bianca da window.open(..., 'noopener') + document.write
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const w = window.open(url, '_blank')
+  if (!w) {
+    URL.revokeObjectURL(url)
+    window.alert('Consenti i popup del browser per stampare la scheda contabile.')
+    return
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 function registrateHref(mv) {

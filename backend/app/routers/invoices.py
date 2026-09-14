@@ -251,10 +251,22 @@ def list_invoices(
     default=None,
     description="Filtra per locale/attività Prima Nota: via_abba|via_zanardelli|…",
   ),
+  sync_from_bank: bool = Query(
+    default=False,
+    description="Se true: segna pagate le fatture trovate nei movimenti banca prima di elencarle",
+  ),
   db: Session = Depends(get_db),
 ):
   if due_filter not in (None, "overdue", "due_soon"):
     raise HTTPException(status_code=400, detail="due_filter deve essere overdue o due_soon")
+  if sync_from_bank:
+    from ..services import banca_service
+
+    try:
+      banca_service.sync_payment_status_from_bank(db, company=company)
+    except Exception:
+      # Non bloccare l'elenco fatture se la sync banca fallisce
+      pass
   return invoice_service.list_invoices(
     db,
     supplier_id=supplier_id,

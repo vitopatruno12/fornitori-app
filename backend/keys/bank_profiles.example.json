@@ -1,0 +1,30 @@
+[
+  {
+    "id": "bppb_mediazione",
+    "label": "BPPB — conto Mediazione",
+    "company": "",
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "iban": "IT55B0538516000CC1410004512",
+    "account_number": "CC1410004512",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "",
+    "enable_banking_key_path": "",
+    "enabled": true
+  },
+  {
+    "id": "bppb_via_lattea",
+    "label": "BPPB — Via Lattea",
+    "company": "via_lattea",
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "iban": "IT25D0538516000CC410004514",
+    "account_number": "CC410004514",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "b88c128a-68e1-4b2e-b999-e87cc80c13b8",
+    "enable_banking_key_path": "./keys/b88c128a-68e1-4b2e-b999-e87cc80c13b8.pem",
+    "enabled": true
+  }
+]

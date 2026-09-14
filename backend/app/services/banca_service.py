@@ -207,7 +207,7 @@ def begin_bank_login(db: Session, account_id: int) -> Dict[str, Any]:
   row.connection_status = "pending"
   db.commit()
   try:
-    return request_bank_connect_otp(account_id=account_id)
+    return request_bank_connect_otp(account_id=account_id, account=_account_out(row))
   except Exception:
     row.connection_status = "disconnected"
     db.commit()
@@ -222,7 +222,7 @@ def confirm_bank_login(db: Session, account_id: int, otp: str) -> Dict[str, Any]
   if not row:
     raise ValueError("Conto non trovato")
   verify_bank_connect_otp(account_id=account_id, otp=otp)
-  profile = get_bank_env_profile()
+  profile = get_bank_env_profile(_account_out(row))
   if profile.get("bank_name") and (not row.bank_name or row.bank_name.strip().lower() in {"banca", "conto principale"}):
     row.bank_name = str(profile["bank_name"])
   if profile.get("iban") and not row.iban:
@@ -806,6 +806,90 @@ def reconciliation_preview(
   }
 
 
+def sync_payment_status_from_bank(
+  db: Session,
+  company: Optional[str] = None,
+) -> Dict[str, Any]:
+  """
+  Aggiorna lo stato pagamento fatture in base ai movimenti banca:
+  - n. documento trovato in banca → segna pagata
+  - non trovato → lascia da pagare (non modifica le già pagate)
+  """
+  company_id = (company or "").strip() or None
+  listed = list_invoices(db, company=company_id, include_ignored=False)
+  unpaid = [
+    inv
+    for inv in listed
+    if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+  ]
+  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
+  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
+
+  mov_q = db.query(BankMovement)
+  if account_ids:
+    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
+  movements = (
+    mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(800).all()
+  )
+  mov_meta = [{"mov": m, "blob": _movement_search_blob(m)} for m in movements]
+
+  marked: List[Dict[str, Any]] = []
+  changed = False
+  for inv_dto in unpaid:
+    inv_id = int(getattr(inv_dto, "id"))
+    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    if not num:
+      continue
+
+    found = None
+    for meta in mov_meta:
+      if not _invoice_number_in_text(num, meta["blob"]):
+        continue
+      mov = meta["mov"]
+      if found is None or (
+        mov.movement_type == "uscita" and found.movement_type != "uscita"
+      ):
+        found = mov
+      if mov.movement_type == "uscita":
+        break
+
+    if not found:
+      continue
+
+    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    if not row:
+      continue
+    row.amount_paid = _dec(row.total)
+    row.is_paid = True
+    if (
+      found.reconciliation_status == "unmatched"
+      and found.movement_type == "uscita"
+      and not found.matched_invoice_id
+    ):
+      found.reconciliation_status = "matched"
+      found.matched_invoice_id = inv_id
+      found.difference_amount = None
+    changed = True
+    marked.append(
+      {
+        "invoice_id": inv_id,
+        "invoice_number": num,
+        "movement_id": int(found.id),
+        "reason": "numero_in_movimento",
+      }
+    )
+
+  if changed:
+    db.commit()
+
+  return {
+    "ok": True,
+    "company": company_id or "",
+    "marked_paid": len(marked),
+    "items": marked,
+  }
+
+
 def auto_reconcile(
   db: Session,
   company: Optional[str] = None,
@@ -817,20 +901,23 @@ def auto_reconcile(
   errors: List[Dict[str, Any]] = []
 
   for sug in preview.get("suggestions") or []:
-    if sug.get("status") != "matched":
-      continue
     inv = sug.get("suggested_invoice") or {}
     mov = sug.get("movement") or {}
     mov_id = mov.get("id")
     inv_id = inv.get("invoice_id")
     quality = inv.get("match_quality")
-    # Solo match sicuri: numero documento o importo esatto
-    if quality not in {"number", "exact"} and quality is not None:
+    status = sug.get("status")
+    # Match sicuri: numero documento (anche se importo leggermente diverso) o importo esatto
+    if quality == "number" and status in {"matched", "difference"}:
+      apply_status = "matched"
+    elif quality == "exact" and status == "matched":
+      apply_status = "matched"
+    else:
       continue
     if not mov_id or not inv_id:
       continue
     try:
-      apply_match(db, int(mov_id), int(inv_id), "matched")
+      apply_match(db, int(mov_id), int(inv_id), apply_status)
       applied.append(
         {
           "movement_id": int(mov_id),
@@ -842,10 +929,14 @@ def auto_reconcile(
     except Exception as e:  # noqa: BLE001 — continua con gli altri match
       errors.append({"movement_id": mov_id, "invoice_id": inv_id, "error": str(e)})
 
+  # Copre anche movimenti già collegati / non in suggestion: n. documento → pagata
+  bank_sync = sync_payment_status_from_bank(db, company=company)
+
   refreshed = reconciliation_preview(db, limit=limit, company=company)
-  refreshed["auto_applied"] = len(applied)
-  refreshed["auto_applied_items"] = applied
+  refreshed["auto_applied"] = len(applied) + int(bank_sync.get("marked_paid") or 0)
+  refreshed["auto_applied_items"] = applied + list(bank_sync.get("items") or [])
   refreshed["auto_errors"] = errors
+  refreshed["bank_sync"] = bank_sync
   return refreshed
 
 

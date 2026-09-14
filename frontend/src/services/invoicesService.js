@@ -7,6 +7,7 @@ export async function fetchInvoices(params = {}) {
   if (params.include_ignored) searchParams.append('include_ignored', 'true')
   if (params.company) searchParams.append('company', String(params.company))
   if (params.activity) searchParams.append('activity', String(params.activity))
+  if (params.sync_from_bank) searchParams.append('sync_from_bank', 'true')
   const query = searchParams.toString()
   const path = query ? `/invoices?${query}` : '/invoices'
   return apiFetch(path)

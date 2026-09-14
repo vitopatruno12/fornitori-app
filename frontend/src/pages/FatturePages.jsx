@@ -964,7 +964,7 @@ export function FattureDaRegistrarePage() {
       setLoading(true)
       setError('')
       try {
-        const params = { include_ignored: false }
+        const params = { include_ignored: false, sync_from_bank: true }
         if (gestionaleMode) {
           if (scopeMode === 'company' && companyId) params.company = companyId
           if (scopeMode === 'locale' && localeId) params.activity = localeId
@@ -990,7 +990,7 @@ export function FattureDaRegistrarePage() {
   return (
     <FatturePageShell
       title="Da registrare"
-      lead="Fatture senza movimento di Prima Nota — filtra per società o locale dal banner."
+      lead="Fatture senza movimento di Prima Nota. Stato Pagata/Da pagare aggiornato in automatico dai movimenti banca."
       actions={
         gestionaleMode ? (
           <FattureScopeTools
@@ -1085,6 +1085,7 @@ export function FattureScadenziarioPage() {
         due_filter: filter,
         include_ignored: false,
         company: companyId,
+        sync_from_bank: true,
       })
       setInvoices(Array.isArray(rows) ? rows : [])
     } catch (e) {

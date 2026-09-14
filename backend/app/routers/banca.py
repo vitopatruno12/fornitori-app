@@ -66,12 +66,21 @@ def banca_dashboard(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.get("/connect-profile")
-def banca_connect_profile() -> Dict[str, Any]:
+def banca_connect_profile(
+  account_id: Optional[int] = Query(None, description="Profilo credenziali per conto specifico"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
   from ..services.bank_connect_otp_service import get_bank_env_profile
   from ..services.enable_banking_service import get_enable_banking_config
 
-  profile = get_bank_env_profile()
-  profile["enable_banking"] = get_enable_banking_config()
+  account = None
+  if account_id is not None:
+    for item in banca_service.list_accounts(db):
+      if int(item.get("id") or 0) == int(account_id):
+        account = item
+        break
+  profile = get_bank_env_profile(account)
+  profile["enable_banking"] = get_enable_banking_config(account)
   return profile
 
 

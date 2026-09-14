@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
+from .bank_profiles import profiles_public_list, resolve_profile_for_account
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
@@ -64,27 +66,32 @@ def _debug_enabled() -> bool:
   return flag in {"1", "true", "yes", "on"}
 
 
-def bank_credentials_configured() -> Tuple[bool, str]:
+def bank_credentials_configured(account: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
   _reload_bank_env()
-  user = (os.getenv("BANK_USERNAME") or "").strip()
-  password = (os.getenv("BANK_PASSWORD") or "").strip()
-  if not user or not password:
-    return False, "Credenziali banca mancanti in .env (BANK_USERNAME / BANK_PASSWORD)"
+  prof = resolve_profile_for_account(account)
+  if not prof.username or not prof.password:
+    return False, "Credenziali banca mancanti (profilo JSON o BANK_USERNAME / BANK_PASSWORD in .env)"
   return True, "OK"
 
 
-def get_bank_env_profile() -> Dict[str, Any]:
+def get_bank_env_profile(account: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
   _reload_bank_env()
-  ok, msg = bank_credentials_configured()
-  return {
+  prof = resolve_profile_for_account(account)
+  ok, msg = bank_credentials_configured(account)
+  out: Dict[str, Any] = {
     "credentials_configured": ok,
     "credentials_message": msg,
-    "bank_name": (os.getenv("BANK_NAME") or "").strip() or None,
-    "iban": (os.getenv("BANK_IBAN") or "").strip().upper().replace(" ", "") or None,
-    "portal_url": (os.getenv("BANK_PORTAL_URL") or "").strip() or None,
-    "username_hint": _mask_user(os.getenv("BANK_USERNAME") or ""),
+    "bank_name": prof.bank_name or None,
+    "iban": prof.iban or None,
+    "portal_url": prof.portal_url or None,
+    "username_hint": _mask_user(prof.username),
+    "profile_id": prof.id,
+    "profile_label": prof.label,
+    "company": prof.company or None,
     "otp_phone_configured": bool(_otp_phone()),
+    "profiles": profiles_public_list(),
   }
+  return out
 
 
 def _mask_user(user: str) -> str:
@@ -169,10 +176,15 @@ def _send_sms(phone: str, message: str) -> None:
   )
 
 
-def request_bank_connect_otp(*, account_id: int) -> Dict[str, Any]:
-  """Avvia login con BANK_USERNAME/PASSWORD da .env e invia OTP monouso."""
+def request_bank_connect_otp(
+  *,
+  account_id: int,
+  account: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+  """Avvia login con credenziali profilo banca (JSON o .env) e invia OTP monouso."""
   _reload_bank_env()
-  ok, msg = bank_credentials_configured()
+  prof = resolve_profile_for_account(account)
+  ok, msg = bank_credentials_configured(account)
   if not ok:
     raise ValueError(msg)
 
@@ -221,8 +233,10 @@ def request_bank_connect_otp(*, account_id: int) -> Dict[str, Any]:
     "ok": True,
     "phone_hint": hint,
     "ttl_sec": OTP_TTL_SEC,
-    "username_hint": _mask_user(os.getenv("BANK_USERNAME") or ""),
-    "message": "Login banca avviato con credenziali .env. Inserisci l'OTP ricevuto.",
+    "username_hint": _mask_user(prof.username),
+    "profile_id": prof.id,
+    "profile_label": prof.label,
+    "message": f"Login banca avviato ({prof.label}). Inserisci l'OTP ricevuto.",
   }
   if _debug_enabled():
     out["debug_otp"] = otp

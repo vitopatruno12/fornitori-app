@@ -362,6 +362,8 @@ export default function InvoicesPage() {
         supplier_id: supplierId || undefined,
         due_filter: dueFilter || undefined,
         include_ignored: showIgnored || undefined,
+        // Storico: aggiorna Pagata/Da pagare confrontando i movimenti banca
+        sync_from_bank: true,
       }
       if (gestionaleMode) {
         if (scopeMode === 'company' && companyId) params.company = companyId

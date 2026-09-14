@@ -566,7 +566,10 @@ export function BancaContiPage() {
     }
     const connected = bppb.filter((a) => a.enable_banking_connected)
     if (!connected.length) {
-      await startEnableBanking(bppb[0].id)
+      // Preferisci Via Lattea se presente, altrimenti il primo BPPB
+      const prefer =
+        bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea') || bppb[0]
+      await startEnableBanking(prefer.id)
       return
     }
     setError('')

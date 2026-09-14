@@ -5,6 +5,10 @@ from app.database import SessionLocal, engine
 from app.services import banca_service
 
 SQL = [
+    "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS company VARCHAR(64)",
+    "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS ledger_code VARCHAR(16) DEFAULT '1100'",
+    "UPDATE bank_accounts SET ledger_code = '1100' WHERE ledger_code IS NULL OR trim(ledger_code) = ''",
+    "CREATE INDEX IF NOT EXISTS ix_bank_accounts_company ON bank_accounts (company)",
     "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_session_id VARCHAR(64)",
     "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_account_uid VARCHAR(64)",
     "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS eb_aspsp_name VARCHAR(120)",
@@ -17,7 +21,7 @@ with engine.begin() as conn:
         print("ok", sql.split()[-1])
 
 
-def ensure(db, *, bank_name, account_name, iban, notes):
+def ensure(db, *, bank_name, account_name, iban, notes, company=None, ledger_code="1100"):
     iban_n = iban.replace(" ", "").upper()
     for a in banca_service.list_accounts(db):
         if (a.get("iban") or "").replace(" ", "").upper() == iban_n:
@@ -30,6 +34,8 @@ def ensure(db, *, bank_name, account_name, iban, notes):
             "account_name": account_name,
             "iban": iban_n,
             "notes": notes,
+            "company": company,
+            "ledger_code": ledger_code,
         },
     )
     print("created", acc["id"], bank_name, acc["iban"])
@@ -43,7 +49,16 @@ try:
         bank_name="BPPB - Banca Popolare di Puglia e Basilicata",
         account_name="CC1410004512",
         iban="IT55B0538516000CC1410004512",
-        notes="Conto BPPB (ABI 05385). Collegare via Enable Banking in produzione.",
+        notes="Conto BPPB Mediazione (ABI 05385). Collegare via Enable Banking in produzione.",
+    )
+    ensure(
+        db,
+        bank_name="BPPB - Banca Popolare di Puglia e Basilicata",
+        account_name="Via Lattea · CC410004514",
+        iban="IT25D0538516000CC410004514",
+        company="via_lattea",
+        ledger_code="1100",
+        notes="LA VIA LATTEA SOCIETA' AGRICOLA A R.L. · BPPB ABI 05385 CAB 16000 · CC410004514",
     )
     ensure(
         db,

@@ -6,10 +6,12 @@ import logging
 import os
 import re
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import jwt as pyjwt
@@ -26,6 +28,7 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = _BACKEND_ROOT / ".env"
 API_ORIGIN = "https://api.enablebanking.com"
 STATE_RE = re.compile(r"^atlas-(\d+)-([a-f0-9]{16,})$", re.IGNORECASE)
+_ACTIVE_EB_CFG: ContextVar[Optional[Dict[str, Any]]] = ContextVar("active_eb_cfg", default=None)
 
 
 def _reload_env() -> None:
@@ -43,7 +46,7 @@ def _backend_path(raw: str) -> Path:
   return p
 
 
-def get_enable_banking_config() -> Dict[str, Any]:
+def _base_enable_banking_config() -> Dict[str, Any]:
   _reload_env()
   app_id = (os.getenv("ENABLE_BANKING_APP_ID") or "").strip()
   key_path = _backend_path(os.getenv("ENABLE_BANKING_KEY_PATH") or "")
@@ -69,11 +72,77 @@ def get_enable_banking_config() -> Dict[str, Any]:
     "aspsp_country": aspsp_country,
     "frontend_url": frontend,
     "consent_days": consent_days,
+    "profile_id": None,
     "message": (
       "Enable Banking configurato"
       if configured
       else "Mancano ENABLE_BANKING_APP_ID / KEY_PATH / REDIRECT_URL o il file .pem"
     ),
+  }
+
+
+def get_enable_banking_config(account: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+  """Config EB globale, oppure override per conto/società (es. Via Lattea)."""
+  active = _ACTIVE_EB_CFG.get()
+  if active is not None and account is None:
+    return active
+
+  cfg = _base_enable_banking_config()
+  if account is None:
+    return cfg
+
+  from .bank_profiles import resolve_profile_for_account
+
+  prof = resolve_profile_for_account(account)
+  if prof.enable_banking_app_id:
+    key_raw = prof.enable_banking_key_path or f"./keys/{prof.enable_banking_app_id}.pem"
+    key_path = _backend_path(key_raw)
+    env_override = (
+      (os.getenv("ENABLE_BANKING_VIA_LATTEA_ENVIRONMENT") or "").strip().lower()
+      if (prof.company or "").lower() == "via_lattea"
+      else ""
+    )
+    cfg = {
+      **cfg,
+      "app_id": prof.enable_banking_app_id,
+      "key_path": str(key_path),
+      "key_exists": key_path.is_file(),
+      "profile_id": prof.id,
+      "aspsp_name": (prof.bank_name or cfg["aspsp_name"] or "Banca Popolare di Puglia e Basilicata"),
+      "aspsp_country": "IT",
+      "environment": env_override or "production",
+    }
+    # Preferisci nome ASPSP corto BPPB se nel profilo c'è BPPB
+    bank_l = (prof.bank_name or "").lower()
+    if "bppb" in bank_l or "puglia" in bank_l:
+      cfg["aspsp_name"] = "Banca Popolare di Puglia e Basilicata"
+    configured = bool(cfg["app_id"] and key_path.is_file() and cfg.get("redirect_url"))
+    cfg["configured"] = configured
+    cfg["message"] = (
+      f"Enable Banking configurato ({prof.label})"
+      if configured
+      else f"Manca .pem o redirect per profilo {prof.label} (app {prof.enable_banking_app_id})"
+    )
+  return cfg
+
+
+@contextmanager
+def enable_banking_for_account(account: Optional[Dict[str, Any]]) -> Iterator[Dict[str, Any]]:
+  cfg = get_enable_banking_config(account)
+  token = _ACTIVE_EB_CFG.set(cfg)
+  try:
+    yield cfg
+  finally:
+    _ACTIVE_EB_CFG.reset(token)
+
+
+def _account_dict(row: BankAccount) -> Dict[str, Any]:
+  return {
+    "id": row.id,
+    "iban": row.iban,
+    "company": getattr(row, "company", None),
+    "bank_name": row.bank_name,
+    "account_name": row.account_name,
   }
 
 
@@ -358,12 +427,13 @@ def begin_enable_banking_connect(
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
     raise ValueError("Conto non trovato")
-  auth = start_authorization(
-    account_id=account_id,
-    aspsp_name=aspsp_name or None,
-    aspsp_country=aspsp_country or None,
-    psu_type=psu_type,
-  )
+  with enable_banking_for_account(_account_dict(row)):
+    auth = start_authorization(
+      account_id=account_id,
+      aspsp_name=aspsp_name or None,
+      aspsp_country=aspsp_country or None,
+      psu_type=psu_type,
+    )
   row.connection_status = "pending"
   if auth.get("aspsp_name"):
     row.eb_aspsp_name = str(auth["aspsp_name"])[:120]
@@ -386,40 +456,41 @@ def complete_enable_banking_callback(
   if not row:
     raise ValueError("Conto Atlas non trovato per questo callback")
 
-  session = create_session(code)
-  session_id = str(session.get("session_id") or "").strip()
-  if not session_id:
-    raise RuntimeError("Sessione Enable Banking senza session_id")
+  with enable_banking_for_account(_account_dict(row)):
+    session = create_session(code)
+    session_id = str(session.get("session_id") or "").strip()
+    if not session_id:
+      raise RuntimeError("Sessione Enable Banking senza session_id")
 
-  acc = _pick_session_account(session, prefer_iban=row.iban)
-  account_uid = str(acc.get("uid") or "").strip()
-  if not account_uid:
-    raise RuntimeError("Conto banca senza uid nella sessione")
+    acc = _pick_session_account(session, prefer_iban=row.iban)
+    account_uid = str(acc.get("uid") or "").strip()
+    if not account_uid:
+      raise RuntimeError("Conto banca senza uid nella sessione")
 
-  iban = _extract_iban(acc)
-  row.eb_session_id = session_id[:64]
-  row.eb_account_uid = account_uid[:64]
-  if iban and not row.iban:
-    row.iban = iban[:34]
-  bank_label = (row.eb_aspsp_name or row.bank_name or "Banca").strip()
-  if row.bank_name.strip().lower() in {"banca", "conto principale"} and row.eb_aspsp_name:
-    row.bank_name = row.eb_aspsp_name[:160]
+    iban = _extract_iban(acc)
+    row.eb_session_id = session_id[:64]
+    row.eb_account_uid = account_uid[:64]
+    if iban and not row.iban:
+      row.iban = iban[:34]
+    bank_label = (row.eb_aspsp_name or row.bank_name or "Banca").strip()
+    if row.bank_name.strip().lower() in {"banca", "conto principale"} and row.eb_aspsp_name:
+      row.bank_name = row.eb_aspsp_name[:160]
 
-  try:
-    bal = get_account_balances(account_uid)
-    available, booked = _extract_balances(bal)
-    row.saldo_disponibile = available
-    row.saldo_contabile = booked
-  except Exception:
-    logger.warning("Enable Banking balances non disponibili per account %s", account_uid, exc_info=True)
+    try:
+      bal = get_account_balances(account_uid)
+      available, booked = _extract_balances(bal)
+      row.saldo_disponibile = available
+      row.saldo_contabile = booked
+    except Exception:
+      logger.warning("Enable Banking balances non disponibili per account %s", account_uid, exc_info=True)
 
-  imported = _import_transactions(db, row, account_uid)
-  row.connection_status = "connected"
-  row.last_sync_at = datetime.now(timezone.utc)
-  db.commit()
-  db.refresh(row)
+    imported = _import_transactions(db, row, account_uid)
+    row.connection_status = "connected"
+    row.last_sync_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
 
-  frontend = get_enable_banking_config()["frontend_url"]
+    frontend = get_enable_banking_config()["frontend_url"]
   qs = urlencode({"eb": "ok", "account_id": str(row.id), "imported": str(imported)})
   return {
     "ok": True,
@@ -441,19 +512,20 @@ def sync_enable_banking_account(db: Session, account_id: int) -> Dict[str, Any]:
   if not row.eb_account_uid:
     raise ValueError("Conto non collegato a Enable Banking: avvia prima Collega Enable Banking")
 
-  try:
-    bal = get_account_balances(row.eb_account_uid)
-    available, booked = _extract_balances(bal)
-    row.saldo_disponibile = available
-    row.saldo_contabile = booked
-  except Exception:
-    logger.warning("Sync balances fallito account %s", account_id, exc_info=True)
+  with enable_banking_for_account(_account_dict(row)):
+    try:
+      bal = get_account_balances(row.eb_account_uid)
+      available, booked = _extract_balances(bal)
+      row.saldo_disponibile = available
+      row.saldo_contabile = booked
+    except Exception:
+      logger.warning("Sync balances fallito account %s", account_id, exc_info=True)
 
-  imported = _import_transactions(db, row, row.eb_account_uid)
-  row.connection_status = "connected"
-  row.last_sync_at = datetime.now(timezone.utc)
-  db.commit()
-  db.refresh(row)
+    imported = _import_transactions(db, row, row.eb_account_uid)
+    row.connection_status = "connected"
+    row.last_sync_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
   return {
     "ok": True,
     "imported": imported,
