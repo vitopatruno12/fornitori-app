@@ -460,8 +460,8 @@ export function FattureDashboardPage() {
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
                 Scadenziario
               </FattureLink>
-              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/sincronizzazione">
-                Sincronizza
+              <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
+                Storico fatture
               </FattureLink>
             </div>
           </section>
@@ -746,7 +746,7 @@ export function FattureRicevutePage() {
           {selected.atlas_invoice_id ? (
             <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
               Collegata anche in{' '}
-              <FattureLink to="/fatture/registrate">Fatture registrate</FattureLink> (id {selected.atlas_invoice_id}).
+              <FattureLink to="/fatture/registrate">Storico fatture</FattureLink> (id {selected.atlas_invoice_id}).
             </p>
           ) : null}
         </section>
@@ -1158,7 +1158,7 @@ export function FattureDaRegistrarePage() {
           actionsHeader="Azioni"
           renderActions={() => (
             <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
-              Apri elenco
+              Apri storico
             </FattureLink>
           )}
         />

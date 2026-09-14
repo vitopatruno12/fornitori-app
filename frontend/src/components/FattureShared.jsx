@@ -7,12 +7,10 @@ export const FATTURE_NAV_ITEMS = [
   { to: '/fatture/emesse', label: 'Fatture emesse' },
   { to: '/fatture/da-registrare', label: 'Da registrare' },
   { to: '/fatture/pagate', label: 'Fatture pagate' },
-  { to: '/fatture/registrate', label: 'Registrate' },
+  { to: '/fatture/registrate', label: 'Storico fatture' },
   { to: '/fatture/scadenziario', label: 'Scadenziario' },
-  { to: '/fatture/sincronizzazione', label: 'Sincronizzazione' },
   { to: '/fatture/conservazione', label: 'Conservazione' },
   { to: '/fatture/importa-xml', label: 'Importa XML' },
-  { to: '/fatture/log', label: 'Log sync' },
   { to: '/fatture/impostazioni', label: 'Impostazioni fatture' },
   { to: '/pagamenti', label: 'Pagamenti' },
 ]

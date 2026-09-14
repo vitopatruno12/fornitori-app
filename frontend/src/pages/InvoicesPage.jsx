@@ -281,7 +281,7 @@ export default function InvoicesPage() {
 
     if (!qId) {
       focusHandledRef.current = targetKey
-      setError(`Documento n. ${qNum} non trovato in Fatture registrate`)
+      setError(`Documento n. ${qNum} non trovato nello storico fatture`)
       return
     }
 
@@ -596,8 +596,8 @@ export default function InvoicesPage() {
 
   return (
     <FatturePageShell
-      title="Registrate"
-      lead="Elenco fatture in archivio Atlas: filtra per società o locale dal banner, poi scadenza e stato."
+      title="Storico fatture"
+      lead="Archivio completo delle fatture: filtra per società o locale dal banner, poi scadenza e stato."
       actions={
         gestionaleMode ? (
           <FattureScopeTools
@@ -615,8 +615,8 @@ export default function InvoicesPage() {
     >
       {gestionaleMode && !scopeReady ? (
         <div className="alert alert-info">
-          Scegli <strong>Società</strong> o <strong>Locale</strong> nel banner verde per vedere le fatture
-          registrate.
+          Scegli <strong>Società</strong> o <strong>Locale</strong> nel banner verde per vedere lo storico
+          fatture.
         </div>
       ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
