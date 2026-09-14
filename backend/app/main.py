@@ -234,8 +234,8 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     elif "issued_invoices" in err_text:
         detail = (
             "Tabella issued_invoices assente. "
-            "Sul server esegui: sudo RESTART_API=1 bash deploy/release-safe.sh "
-            "oppure deploy/ensure-warehouse-payments-tables.sh"
+            "Sul server: sudo APP_DIR=/opt/fornitori-app bash deploy/ensure-issued-invoices-table.sh "
+            "oppure sudo RESTART_API=1 bash deploy/release-safe.sh"
         )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (
