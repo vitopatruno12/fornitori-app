@@ -22,6 +22,7 @@ import {
   fetchBancaRiconciliazione,
   importBanMovements,
   postBancaRiconcilia,
+  postBancaRiconciliazioneAuto,
   startEnableBankingAuth,
   syncBancaAccount,
   syncEnableBankingAccount,
@@ -813,29 +814,14 @@ export function BancaContiPage() {
             Collega conto
           </button>
         </form>
-        <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-          Carica un file <strong>BAN/CBI</strong> (estratto conto) per compilare IBAN, nome banca e importare i movimenti.
-          Premendo «Collega conto» il conto viene creato e i movimenti vengono importati.
-          <br />
-          <strong>Importa BAN</strong> = movimenti reali dall’estratto. <strong>Sync Prima Nota</strong> = solo movimenti
-          già registrati in Prima Nota. <strong>Enable Banking</strong> = SCA banca + sync API (sandbox/produzione).{' '}
-          <strong>Collega OTP</strong> = login con credenziali <code>.env</code> + OTP.
-          {pendingMovements.length > 0 ? (
-            <>
-              {' '}
-              <strong>{pendingMovements.length} movimenti</strong> pronti per l’import.
-            </>
-          ) : null}
-        </p>
+        {pendingMovements.length > 0 ? (
+          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+            <strong>{pendingMovements.length} movimenti</strong> pronti per l’import.
+          </p>
+        ) : null}
       </section>
 
       <section className="card fatture-panel banca-fit-panel">
-        <h2 className="fatture-panel-title">Elenco conti</h2>
-        <p className="fatture-note">
-          Associa ogni c/c ai mastrini: oggi collega la <strong>Banca Popolare di Puglia e Basilicata</strong> (lascia
-          «Condiviso» per tutte le società, oppure scegli una società). Domani assegneremo Otranto e Sanpaolo.
-          Codice mastro default <code>1100</code> (Banca c/c).
-        </p>
         {loading ? (
           <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
         ) : (
@@ -1109,7 +1095,7 @@ export function BancaRiconciliazionePage() {
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
 
-  async function reload(nextCompany = companyId) {
+  async function reload(nextCompany = companyId, { auto = true } = {}) {
     if (!nextCompany) {
       setData(null)
       setLoading(false)
@@ -1118,8 +1104,16 @@ export function BancaRiconciliazionePage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetchBancaRiconciliazione(nextCompany)
+      const res = auto
+        ? await postBancaRiconciliazioneAuto(nextCompany)
+        : await fetchBancaRiconciliazione(nextCompany)
       setData(res)
+      const n = Number(res?.auto_applied) || 0
+      if (auto && n > 0) {
+        setSuccess(`Riconciliati automaticamente ${n} movimenti (n. documento o importo esatto).`)
+      } else if (auto) {
+        setSuccess('Nessun nuovo match sicuro da applicare. Restano difference e unmatched da controllare.')
+      }
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
     } finally {
@@ -1128,7 +1122,7 @@ export function BancaRiconciliazionePage() {
   }
 
   useEffect(() => {
-    reload(companyId)
+    reload(companyId, { auto: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
@@ -1146,7 +1140,7 @@ export function BancaRiconciliazionePage() {
       const status = row.status === 'difference' ? 'difference' : 'matched'
       await postBancaRiconcilia(movId, { invoice_id: invId, status })
       setSuccess('Abbinamento salvato')
-      await reload()
+      await reload(companyId, { auto: true })
     } catch (e) {
       setError(e?.message || 'Errore salvataggio')
     } finally {
@@ -1157,14 +1151,15 @@ export function BancaRiconciliazionePage() {
   const paidRows = data?.paid_by_bank || []
   const unpaidRows = data?.da_pagare || []
   const companyName = companyId ? companyLabel(companyId) : ''
+  const pendingSuggestions = (data?.suggestions || []).filter((s) => s?.status !== 'matched')
 
   return (
     <BancaPageShell
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName}: pagate se il n. documento compare nei movimenti banca; altrimenti da pagare.`
-          : 'Scegli la società nel banner verde, poi Aggiorna per confrontare fatture e movimenti banca.'
+          ? `Fatture ${companyName}: i match sicuri (n. documento o importo uguale) si applicano da soli. Controlla solo difference e unmatched.`
+          : 'Scegli la società nel banner verde: Atlas riconcilia automaticamente i match sicuri.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
@@ -1179,10 +1174,13 @@ export function BancaRiconciliazionePage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => reload()}
+              onClick={() => {
+                setSuccess('')
+                reload(companyId, { auto: true })
+              }}
               disabled={loading || !companyId}
             >
-              {loading ? 'Aggiorno…' : 'Aggiorna'}
+              {loading ? 'Riconcilio…' : 'Aggiorna e riconcilia'}
             </button>
           </div>
         </aside>
@@ -1285,22 +1283,23 @@ export function BancaRiconciliazionePage() {
               </section>
 
               <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Suggerimenti abbinamento</h2>
+                <h2 className="fatture-panel-title">Da controllare (difference / unmatched)</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Priorità: n. documento nel movimento; altrimenti importo simile. Conferma per salvare la riconciliazione.
+                  I match sicuri sono già salvati in automatico. Qui restano solo importi diversi (
+                  <strong>difference</strong>) o senza fattura (<strong>unmatched</strong>) — conferma a mano se serve.
                 </p>
                 <WorkbookGrid
-                  title="Suggerimenti riconciliazione"
-                  sheetLabel={`${(data?.suggestions || []).length} righe`}
+                  title="Residui da controllare"
+                  sheetLabel={`${pendingSuggestions.length} righe`}
                   columns={BANK_RECON_COLUMNS}
-                  rows={data?.suggestions || []}
+                  rows={pendingSuggestions}
                   cellValue={bankReconCellValue}
-                  emptyMessage="Nessun movimento da riconciliare. Sincronizza i conti e riprova."
+                  emptyMessage="Niente da controllare: tutto riconciliato automaticamente o nessun movimento in uscita."
                   gridClassName="banca-fit-grid"
                   rowKey={(row, idx) => row?.movement?.id || idx}
                   totals={{
-                    amount: (data?.suggestions || []).reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),
-                    difference: (data?.suggestions || []).reduce(
+                    amount: pendingSuggestions.reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),
+                    difference: pendingSuggestions.reduce(
                       (acc, row) => acc + (Number(row?.suggested_invoice?.difference) || 0),
                       0,
                     ),

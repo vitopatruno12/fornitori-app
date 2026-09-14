@@ -806,6 +806,49 @@ def reconciliation_preview(
   }
 
 
+def auto_reconcile(
+  db: Session,
+  company: Optional[str] = None,
+  limit: int = 80,
+) -> Dict[str, Any]:
+  """Applica automaticamente i match sicuri (n. documento o importo esatto), poi ricalcola l'anteprima."""
+  preview = reconciliation_preview(db, limit=limit, company=company)
+  applied: List[Dict[str, Any]] = []
+  errors: List[Dict[str, Any]] = []
+
+  for sug in preview.get("suggestions") or []:
+    if sug.get("status") != "matched":
+      continue
+    inv = sug.get("suggested_invoice") or {}
+    mov = sug.get("movement") or {}
+    mov_id = mov.get("id")
+    inv_id = inv.get("invoice_id")
+    quality = inv.get("match_quality")
+    # Solo match sicuri: numero documento o importo esatto
+    if quality not in {"number", "exact"} and quality is not None:
+      continue
+    if not mov_id or not inv_id:
+      continue
+    try:
+      apply_match(db, int(mov_id), int(inv_id), "matched")
+      applied.append(
+        {
+          "movement_id": int(mov_id),
+          "invoice_id": int(inv_id),
+          "invoice_number": inv.get("invoice_number"),
+          "match_quality": quality or "exact",
+        }
+      )
+    except Exception as e:  # noqa: BLE001 — continua con gli altri match
+      errors.append({"movement_id": mov_id, "invoice_id": inv_id, "error": str(e)})
+
+  refreshed = reconciliation_preview(db, limit=limit, company=company)
+  refreshed["auto_applied"] = len(applied)
+  refreshed["auto_applied_items"] = applied
+  refreshed["auto_errors"] = errors
+  return refreshed
+
+
 def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status: str = "matched") -> Dict[str, Any]:
   mov = db.query(BankMovement).filter(BankMovement.id == movement_id).first()
   if not mov:

@@ -101,6 +101,11 @@ export async function fetchBancaRiconciliazione(company) {
   return apiFetch(`/banca/riconciliazione${q}`)
 }
 
+export async function postBancaRiconciliazioneAuto(company) {
+  const q = company ? `?company=${encodeURIComponent(company)}` : ''
+  return apiFetch(`/banca/riconciliazione/auto${q}`, { method: 'POST' })
+}
+
 export async function postBancaRiconcilia(movementId, { invoice_id = null, status = 'matched' } = {}) {
   return apiFetch(`/banca/movimenti/${movementId}/riconcilia`, {
     method: 'POST',

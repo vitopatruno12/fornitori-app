@@ -285,6 +285,15 @@ def banca_riconciliazione(
   return banca_service.reconciliation_preview(db, company=company)
 
 
+@router.post("/riconciliazione/auto")
+def banca_riconciliazione_auto(
+  company: Optional[str] = Query(None, description="Filtro società (come fatture)"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """Riconcilia automaticamente i match sicuri (n. documento / importo esatto)."""
+  return banca_service.auto_reconcile(db, company=company)
+
+
 @router.post("/movimenti/{movement_id}/riconcilia")
 def banca_riconcilia(movement_id: int, body: ReconcileBody, db: Session = Depends(get_db)) -> Dict[str, Any]:
   try:
