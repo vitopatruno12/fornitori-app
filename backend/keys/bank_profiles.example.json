@@ -26,5 +26,19 @@
     "enable_banking_app_id": "b88c128a-68e1-4b2e-b999-e87cc80c13b8",
     "enable_banking_key_path": "./keys/b88c128a-68e1-4b2e-b999-e87cc80c13b8.pem",
     "enabled": true
+  },
+  {
+    "id": "bcc_via_lattea",
+    "label": "BCC Terra d'Otranto — Via Lattea",
+    "company": "via_lattea",
+    "bank_name": "BCC Terra d'Otranto",
+    "iban": "IT06B0844516000000000972450",
+    "account_number": "00000972450",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "",
+    "enable_banking_key_path": "",
+    "enabled": true
   }
 ]

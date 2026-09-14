@@ -25,6 +25,21 @@ def ensure(db, *, bank_name, account_name, iban, notes, company=None, ledger_cod
     iban_n = iban.replace(" ", "").upper()
     for a in banca_service.list_accounts(db):
         if (a.get("iban") or "").replace(" ", "").upper() == iban_n:
+            updates = {}
+            if company is not None and (a.get("company") or "") != company:
+                updates["company"] = company
+            if account_name and a.get("account_name") != account_name:
+                updates["account_name"] = account_name
+            if bank_name and a.get("bank_name") != bank_name:
+                updates["bank_name"] = bank_name
+            if notes and a.get("notes") != notes:
+                updates["notes"] = notes
+            if ledger_code and a.get("ledger_code") != ledger_code:
+                updates["ledger_code"] = ledger_code
+            if updates:
+                acc = banca_service.update_account(db, a["id"], updates)
+                print("updated", acc["id"], bank_name, list(updates.keys()))
+                return acc
             print("already", a["id"], bank_name)
             return a
     acc = banca_service.create_account(
@@ -77,12 +92,19 @@ try:
     ensure(
         db,
         bank_name="BCC Terra d'Otranto",
-        account_name="Conto corrente Carmiano",
+        account_name="Via Lattea · BCC Terra d'Otranto",
         iban="IT06B0844516000000000972450",
-        notes="BCC Terra d'Otranto · Via C. Battisti 27 Carmiano · BIC ICRAITRRCD0 · ABI 08445",
+        company="via_lattea",
+        ledger_code="1100",
+        notes=(
+            "LA VIA LATTEA · BCC Terra d'Otranto S.C. · "
+            "IBAN IT06B0844516000000000972450 · BIC ICRAITRRCD0 · "
+            "ABI 08445 CAB 16000 CC 00000972450 · "
+            "Sede Via C. Battisti 27, 73041 Carmiano (LE)"
+        ),
     )
     print("accounts:")
     for a in banca_service.list_accounts(db):
-        print("-", a["id"], a["bank_name"], a.get("iban"))
+        print("-", a["id"], a.get("company") or "-", a["bank_name"], a.get("iban"))
 finally:
     db.close()

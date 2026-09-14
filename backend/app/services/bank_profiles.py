@@ -156,25 +156,42 @@ def _global_env_profile() -> BankProfile:
 
 
 def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> BankProfile:
-  """Trova profilo per IBAN, società o id profilo; fallback su BANK_* .env."""
+  """Trova profilo per IBAN, id profilo o società; fallback su BANK_* .env.
+
+  Priorità: profile_id → IBAN esatto → società (match univoco) → .env / primo con credenziali.
+  """
   acct = account or {}
   iban = _normalize_iban(acct.get("iban"))
   company = str(acct.get("company") or "").strip().lower()
   profile_id = str(acct.get("bank_profile_id") or acct.get("credentials_profile_id") or "").strip().lower()
 
-  for prof in load_profiles():
+  profiles = load_profiles()
+
+  for prof in profiles:
     if profile_id and prof.id.lower() == profile_id:
       return prof
+
+  for prof in profiles:
     if iban and prof.iban and prof.iban == iban:
       return prof
-    if company and prof.company and prof.company == company:
-      return prof
+
+  if company:
+    company_matches = [p for p in profiles if p.company and p.company == company]
+    if len(company_matches) == 1:
+      return company_matches[0]
+    # Più conti stessa società: preferisci quello con credenziali / EB se IBAN non c'è
+    for prof in company_matches:
+      if prof.username and prof.password:
+        return prof
+    for prof in company_matches:
+      if prof.enable_banking_app_id:
+        return prof
 
   fallback = _global_env_profile()
   if fallback.username and fallback.password:
     return fallback
 
-  for prof in load_profiles():
+  for prof in profiles:
     if prof.username and prof.password:
       return prof
   return fallback
