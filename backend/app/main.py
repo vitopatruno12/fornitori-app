@@ -1281,6 +1281,7 @@ def _check_critical_schema_columns() -> None:
             ("carriers", "20260812_carriers.sql"),
             ("electronic_invoices", "20260812_electronic_invoices.sql"),
             ("pos_receipts", "20260816_pos_receipts.sql"),
+            ("issued_invoices", "20260909_issued_invoices.sql"),
         ]
         insp = inspect(engine)
         missing = []

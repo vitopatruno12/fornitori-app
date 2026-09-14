@@ -11,9 +11,14 @@ CREATE TABLE IF NOT EXISTS issued_invoices (
     total_amount NUMERIC(12, 2),
     status VARCHAR(32) NOT NULL DEFAULT 'caricata',
     note TEXT,
+    customer_name VARCHAR(512),
+    customer_vat VARCHAR(32),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS ix_issued_invoices_company ON issued_invoices (company);
 CREATE INDEX IF NOT EXISTS ix_issued_invoices_activity ON issued_invoices (activity);
 CREATE INDEX IF NOT EXISTS ix_issued_invoices_id ON issued_invoices (id);
+
+ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_name VARCHAR(512);
+ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_vat VARCHAR(32);

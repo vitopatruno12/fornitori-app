@@ -170,7 +170,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE deliveries TO "$DB_USER";
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sdi_invoices TO "$DB_USER";
 SQL
 
-for table in warehouse_movements supplier_payments_workbooks; do
+for table in warehouse_movements supplier_payments_workbooks issued_invoices; do
   if ! sudo -u postgres psql -tAc \
     "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table'" \
     -d "$DB_NAME" | grep -q 1; then

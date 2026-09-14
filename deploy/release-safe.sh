@@ -123,6 +123,10 @@ if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/nu
   else
     warn "Script ensure-warehouse-payments-tables.sh assente: le API magazzino/pagamenti/fornitori possono restituire 500."
   fi
+  if [[ -f "$APP_DIR/deploy/ensure-issued-invoices-table.sh" ]]; then
+    log "Tabella fatture emesse (issued_invoices)"
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-issued-invoices-table.sh"
+  fi
 else
   warn "PostgreSQL non attivo: salto migrazioni database."
 fi
