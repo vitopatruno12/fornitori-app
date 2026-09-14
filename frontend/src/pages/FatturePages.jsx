@@ -1233,14 +1233,6 @@ export function FatturePagatePage() {
     [suppliers],
   )
 
-  const invoiceListTotals = useMemo(
-    () => ({
-      count: filteredPaidRows.length,
-      total: filteredPaidRows.reduce((acc, r) => acc + (Number(r.amount_paid ?? r.total) || 0), 0),
-    }),
-    [filteredPaidRows],
-  )
-
   const invoiceTotals = useMemo(() => {
     const rows = selectedSupplier?.invoices || []
     return {
@@ -1280,25 +1272,12 @@ export function FatturePagatePage() {
     .filter(Boolean)
     .join(' · ')
 
-  const elencoColumns = useMemo(
-    () => [
-      { id: 'invoice_date', label: 'Data', width: 10, fluid: true },
-      { id: 'invoice_number', label: 'Numero', width: 11, fluid: true, emphasis: true },
-      { id: 'supplier_name', label: 'Fornitore', width: 22, fluid: true },
-      { id: 'total', label: 'Totale', width: 11, fluid: true, numeric: true },
-      { id: 'amount_paid', label: 'Pagato', width: 11, fluid: true, numeric: true },
-      { id: 'bank_hit', label: 'Movimento banca', width: 22, fluid: true },
-      { id: 'reason', label: 'Esito', width: 12, fluid: true },
-    ],
-    [],
-  )
-
   return (
     <FatturePageShell
       title="Fatture pagate"
       lead={
         companyId
-          ? `Fatture pagate da riconciliazione · ${companyName}. Filtra fornitore/periodo e stampa l'elenco completo.`
+          ? `Fatture pagate da riconciliazione · ${companyName}. Scegli un fornitore per vedere e stampare l'elenco completo.`
           : 'Scegli la società nel banner per vedere le fatture pagate dalla riconciliazione banca.'
       }
       actions={
@@ -1351,56 +1330,38 @@ export function FatturePagatePage() {
 
           {!selectedSupplier ? (
             <>
+              <h2 className="fatture-panel-title">Per fornitore</h2>
+              <p className="fatture-note">Clicca un fornitore (o Scheda) per vedere l&apos;elenco completo delle sue fatture pagate.</p>
               <VneWorkbookGrid
-                title="Elenco completo pagate"
-                sheetLabel={`${filteredPaidRows.length} documenti`}
-                exportSubtitle={[companyName, filterSubtitle || 'Tutti i fornitori'].filter(Boolean).join(' · ')}
+                title="Fornitori — fatture pagate"
+                sheetLabel={`${suppliers.length} fornitori`}
+                exportSubtitle={`${companyName} · riepilogo fornitori`}
                 loading={loading}
-                loadingLabel="Caricamento pagate"
+                loadingLabel="Caricamento fornitori"
                 gridClassName="fatture-excel-grid"
-                columns={elencoColumns}
-                rows={filteredPaidRows}
-                rowKey={(row, idx) => `${row.invoice_id || row.invoice_number || 'inv'}-${idx}`}
-                cellValue={invoiceCellValue}
-                totals={filteredPaidRows.length ? invoiceListTotals : null}
+                columns={PAGATE_FORNITORI_COLUMNS}
+                rows={suppliers}
+                rowKey={(row) => row.id}
+                cellValue={supplierCellValue}
+                totals={suppliers.length ? supplierTotals : null}
                 totalsLabel={moneyTotalsLabel}
-                emptyMessage="Nessuna fattura pagata con i filtri selezionati."
+                emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati."
+                onRowClick={(row) => setSelectedSupplierKey(row.id)}
+                rowClickTitle="Apri elenco fatture pagate del fornitore"
+                actionsHeader="Azioni"
+                renderActions={(row) => (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedSupplierKey(row.id)
+                    }}
+                  >
+                    Scheda
+                  </button>
+                )}
               />
-
-              <div style={{ marginTop: '1.25rem' }}>
-                <h2 className="fatture-panel-title">Per fornitore</h2>
-                <p className="fatture-note">Clicca un fornitore per aprire la scheda dedicata.</p>
-                <VneWorkbookGrid
-                  title="Fornitori — fatture pagate"
-                  sheetLabel={`${suppliers.length} fornitori`}
-                  exportSubtitle={`${companyName} · riepilogo fornitori`}
-                  loading={loading}
-                  loadingLabel="Caricamento fornitori"
-                  gridClassName="fatture-excel-grid"
-                  columns={PAGATE_FORNITORI_COLUMNS}
-                  rows={suppliers}
-                  rowKey={(row) => row.id}
-                  cellValue={supplierCellValue}
-                  totals={suppliers.length ? supplierTotals : null}
-                  totalsLabel={moneyTotalsLabel}
-                  emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati."
-                  onRowClick={(row) => setSelectedSupplierKey(row.id)}
-                  rowClickTitle="Apri scheda fatture pagate del fornitore"
-                  actionsHeader="Azioni"
-                  renderActions={(row) => (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedSupplierKey(row.id)
-                      }}
-                    >
-                      Scheda
-                    </button>
-                  )}
-                />
-              </div>
             </>
           ) : (
             <>
