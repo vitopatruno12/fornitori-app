@@ -1001,9 +1001,12 @@ export function FattureDaRegistrarePage() {
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [supplierFilter, setSupplierFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [draftSupplier, setDraftSupplier] = useState('')
+  const [draftDateFrom, setDraftDateFrom] = useState('')
+  const [draftDateTo, setDraftDateTo] = useState('')
+  const [appliedSupplier, setAppliedSupplier] = useState('')
+  const [appliedDateFrom, setAppliedDateFrom] = useState('')
+  const [appliedDateTo, setAppliedDateTo] = useState('')
 
   function changeScopeMode(next) {
     setScopeMode(next)
@@ -1063,21 +1066,36 @@ export function FattureDaRegistrarePage() {
     }
   }, [gestionaleMode, scopeMode, companyId, localeId, scopeReady])
 
+  function applyFilters() {
+    setAppliedSupplier(draftSupplier)
+    setAppliedDateFrom(draftDateFrom)
+    setAppliedDateTo(draftDateTo)
+  }
+
+  function resetFilters() {
+    setDraftSupplier('')
+    setDraftDateFrom('')
+    setDraftDateTo('')
+    setAppliedSupplier('')
+    setAppliedDateFrom('')
+    setAppliedDateTo('')
+  }
+
   const supplierOptions = useMemo(() => supplierOptionsFromInvoices(invoices), [invoices])
   const filteredInvoices = useMemo(
     () =>
       filterInvoicesBySupplierAndDate(invoices, {
-        supplierId: supplierFilter,
-        dateFrom,
-        dateTo,
+        supplierId: appliedSupplier,
+        dateFrom: appliedDateFrom,
+        dateTo: appliedDateTo,
       }),
-    [invoices, supplierFilter, dateFrom, dateTo],
+    [invoices, appliedSupplier, appliedDateFrom, appliedDateTo],
   )
 
   return (
     <FatturePageShell
       title="Da registrare"
-      lead="Fatture senza movimento di Prima Nota. Filtra per fornitore e periodo; stampa o esporta l'elenco."
+      lead="Fatture senza movimento di Prima Nota. Imposta fornitore/periodo e premi Aggiorna; poi stampa o esporta."
       actions={
         gestionaleMode ? (
           <FattureScopeTools
@@ -1105,17 +1123,15 @@ export function FattureDaRegistrarePage() {
           <FattureSupplierDateFilters
             supplierMode="id"
             supplierOptions={supplierOptions}
-            supplierValue={supplierFilter}
-            onSupplierChange={setSupplierFilter}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onDateFromChange={setDateFrom}
-            onDateToChange={setDateTo}
-            onReset={() => {
-              setSupplierFilter('')
-              setDateFrom('')
-              setDateTo('')
-            }}
+            supplierValue={draftSupplier}
+            onSupplierChange={setDraftSupplier}
+            dateFrom={draftDateFrom}
+            dateTo={draftDateTo}
+            onDateFromChange={setDraftDateFrom}
+            onDateToChange={setDraftDateTo}
+            onReset={resetFilters}
+            onApply={applyFilters}
+            applyDisabled={loading}
           />
         ) : null}
         <VneWorkbookGrid
@@ -1123,10 +1139,10 @@ export function FattureDaRegistrarePage() {
           sheetLabel={`${filteredInvoices.length} documenti`}
           exportSubtitle={
             [
-              supplierFilter
-                ? supplierOptions.find((s) => String(s.supplier_id) === String(supplierFilter))?.supplier_name
+              appliedSupplier
+                ? supplierOptions.find((s) => String(s.supplier_id) === String(appliedSupplier))?.supplier_name
                 : null,
-              dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null,
+              appliedDateFrom || appliedDateTo ? `${appliedDateFrom || '…'} → ${appliedDateTo || '…'}` : null,
             ]
               .filter(Boolean)
               .join(' · ') || 'Elenco completo'
