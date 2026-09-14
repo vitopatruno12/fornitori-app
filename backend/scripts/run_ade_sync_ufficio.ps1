@@ -4,20 +4,25 @@
   Sync AdE (Fisconline) → Atlas sul PC ufficio (Chrome headless + stato per UI).
 
 .PARAMETER Mode
-  Request  = genera richiesta massiva Ricevute (pomeriggio 14:00)
+  Request  = genera richiesta massiva Ricevute+Emesse (pomeriggio 14:00)
   Download = scarica da Risposte e push su Atlas (mattina 06:00)
   Full     = genera + scarica (manuale; browser visibile se ADE_HEADLESS=0)
+
+.PARAMETER Quiet
+  Nessuna finestra/MessageBox (usato dai Task Scheduler).
 
 .USAGE
   .\scripts\run_ade_sync_ufficio.ps1 -Mode Request
   .\scripts\run_ade_sync_ufficio.ps1 -Mode Download
+  .\scripts\run_ade_sync_ufficio.ps1 -Mode Download -Quiet
 #>
 param(
   [ValidateSet("Request", "Download", "Full")]
   [string]$Mode = "Full",
   [string]$Profiles = "",
   [switch]$Setup,
-  [switch]$ShowBrowser
+  [switch]$ShowBrowser,
+  [switch]$Quiet
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,9 +45,14 @@ if (-not (Test-Path $VenvPython)) {
   exit 2
 }
 
+# Task Scheduler: silenzioso di default (Request/Download). Full resta con UI.
+if (-not $PSBoundParameters.ContainsKey("Quiet") -and -not $ShowBrowser -and $Mode -ne "Full") {
+  $Quiet = $true
+}
+
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
 # Schedulato: headless (niente finestre Chrome). -ShowBrowser o Full → visibile.
-if ($ShowBrowser -or $Mode -eq "Full") {
+if ($ShowBrowser -or ($Mode -eq "Full" -and -not $Quiet)) {
   $env:ADE_HEADLESS = if ($env:ADE_HEADLESS) { $env:ADE_HEADLESS } else { "0" }
 } else {
   $env:ADE_HEADLESS = "1"
@@ -53,6 +63,7 @@ $env:ADE_DEBUG_SCREENSHOTS = if ($env:ADE_HEADLESS -eq "1") { "0" } else { "1" }
 $env:ADE_KEEP_SESSION = "1"
 $env:ADE_LOOKBACK_DAYS = if ($env:ADE_LOOKBACK_DAYS) { $env:ADE_LOOKBACK_DAYS } else { "60" }
 $env:ADE_STATUS_PUSH = "1"
+$env:ATLAS_API_BASE = if ($env:ATLAS_API_BASE) { $env:ATLAS_API_BASE } else { "https://www.atlass.it/api" }
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUNBUFFERED = "1"
 $env:ADE_MASS_KINDS = if ($env:ADE_MASS_KINDS) { $env:ADE_MASS_KINDS } else { "ricevute,emesse" }
@@ -78,41 +89,45 @@ if ($Setup) {
 }
 
 $who = if ($Profiles) { $Profiles } else { "tutte (enabled)" }
-Write-Host "AdE sync Mode=$Mode headless=$($env:ADE_HEADLESS) profili=$who" -ForegroundColor Cyan
+Write-Host "AdE sync Mode=$Mode headless=$($env:ADE_HEADLESS) quiet=$Quiet profili=$who" -ForegroundColor Cyan
 Write-Host "Log: $LogFile"
 
-# Finestra progresso locale (non è Chrome AdE)
-Add-Type -AssemblyName System.Windows.Forms | Out-Null
-Add-Type -AssemblyName System.Drawing | Out-Null
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Atlas - Aggiornamento fatture AdE"
-$form.Size = New-Object System.Drawing.Size(480, 160)
-$form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedDialog"
-$form.MaximizeBox = $false
-$form.MinimizeBox = $true
-$form.TopMost = $true
-$label = New-Object System.Windows.Forms.Label
-$label.AutoSize = $false
-$label.Size = New-Object System.Drawing.Size(440, 40)
-$label.Location = New-Object System.Drawing.Point(16, 16)
-$label.Text = if ($Mode -eq "Request") {
-  "Collegamento all'Agenzia delle Entrate - fase richiesta..."
-} elseif ($Mode -eq "Download") {
-  "Collegamento all'Agenzia delle Entrate - fase scarico..."
-} else {
-  "Collegamento all'Agenzia delle Entrate..."
+$form = $null
+$label = $null
+$bar = $null
+if (-not $Quiet) {
+  Add-Type -AssemblyName System.Windows.Forms | Out-Null
+  Add-Type -AssemblyName System.Drawing | Out-Null
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = "Atlas - Aggiornamento fatture AdE"
+  $form.Size = New-Object System.Drawing.Size(480, 160)
+  $form.StartPosition = "CenterScreen"
+  $form.FormBorderStyle = "FixedDialog"
+  $form.MaximizeBox = $false
+  $form.MinimizeBox = $true
+  $form.TopMost = $true
+  $label = New-Object System.Windows.Forms.Label
+  $label.AutoSize = $false
+  $label.Size = New-Object System.Drawing.Size(440, 40)
+  $label.Location = New-Object System.Drawing.Point(16, 16)
+  $label.Text = if ($Mode -eq "Request") {
+    "Collegamento all'Agenzia delle Entrate - fase richiesta..."
+  } elseif ($Mode -eq "Download") {
+    "Collegamento all'Agenzia delle Entrate - fase scarico..."
+  } else {
+    "Collegamento all'Agenzia delle Entrate..."
+  }
+  $bar = New-Object System.Windows.Forms.ProgressBar
+  $bar.Style = "Marquee"
+  $bar.MarqueeAnimationSpeed = 30
+  $bar.Size = New-Object System.Drawing.Size(440, 24)
+  $bar.Location = New-Object System.Drawing.Point(16, 70)
+  $form.Controls.Add($label)
+  $form.Controls.Add($bar)
+  $form.Show()
+  $form.Refresh()
+  [System.Windows.Forms.Application]::DoEvents()
 }
-$bar = New-Object System.Windows.Forms.ProgressBar
-$bar.Style = "Marquee"
-$bar.MarqueeAnimationSpeed = 30
-$bar.Size = New-Object System.Drawing.Size(440, 24)
-$bar.Location = New-Object System.Drawing.Point(16, 70)
-$form.Controls.Add($label)
-$form.Controls.Add($bar)
-$form.Show()
-$form.Refresh()
-[System.Windows.Forms.Application]::DoEvents()
 
 $script = Join-Path $Backend "scripts\ade_sync_agent.py"
 $proc = Start-Process -FilePath $VenvPython -ArgumentList "`"$script`"" `
@@ -122,7 +137,7 @@ $proc = Start-Process -FilePath $VenvPython -ArgumentList "`"$script`"" `
 $statusFile = Join-Path $Backend "uploads\ade\agent_status.json"
 while (-not $proc.HasExited) {
   Start-Sleep -Milliseconds 800
-  if (Test-Path $statusFile) {
+  if ($form -and (Test-Path $statusFile)) {
     try {
       $st = Get-Content $statusFile -Raw -ErrorAction Stop | ConvertFrom-Json
       if ($st.message) { $label.Text = [string]$st.message }
@@ -131,9 +146,9 @@ while (-not $proc.HasExited) {
         $bar.Value = [Math]::Min(100, [int]$st.progress)
       }
     } catch { }
+    $form.Refresh()
+    [System.Windows.Forms.Application]::DoEvents()
   }
-  $form.Refresh()
-  [System.Windows.Forms.Application]::DoEvents()
 }
 
 $code = $proc.ExitCode
@@ -141,12 +156,24 @@ try {
   $st = if (Test-Path $statusFile) { Get-Content $statusFile -Raw | ConvertFrom-Json } else { $null }
 } catch { $st = $null }
 
-$form.Close()
-$form.Dispose()
+if ($form) {
+  $form.Close()
+  $form.Dispose()
+}
 
-if ($code -eq 0 -or ($st -and $st.ok -eq $true)) {
+$ok = ($code -eq 0) -or ($st -and $st.ok -eq $true)
+$msg = if ($st -and $st.message) { [string]$st.message } elseif ($ok) { "Fatture aggiornate - nuovo scarico completato." } else { "Errore sync AdE (exit=$code). Vedi log: $LogFile" }
+$errMsg = if ($st -and $st.error) { [string]$st.error } else { $msg }
+
+if ($Quiet) {
+  Write-Host $msg
+  if (-not $ok) { Write-Host $errMsg -ForegroundColor Red }
+  exit $(if ($ok) { 0 } else { $(if ($code) { $code } else { 1 }) })
+}
+
+if ($ok) {
   [System.Windows.Forms.MessageBox]::Show(
-    $(if ($st -and $st.message) { [string]$st.message } else { "Fatture aggiornate - nuovo scarico completato." }),
+    $msg,
     "Assistente Atlas",
     [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information
@@ -154,7 +181,6 @@ if ($code -eq 0 -or ($st -and $st.ok -eq $true)) {
   exit 0
 }
 
-$errMsg = if ($st -and $st.error) { [string]$st.error } elseif ($st -and $st.message) { [string]$st.message } else { "Errore sync AdE (exit=$code). Vedi log: $LogFile" }
 [System.Windows.Forms.MessageBox]::Show(
   $errMsg,
   "Assistente Atlas - errore",

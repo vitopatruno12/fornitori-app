@@ -71,7 +71,7 @@ $Settings = New-ScheduledTaskSettingsSet `
   -WakeToRun
 
 $userId = if ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { $env:USERNAME }
-$Principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
+$Principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
 
 function Register-AdeEvery3Days {
   param(
@@ -84,7 +84,7 @@ function Register-AdeEvery3Days {
 
   $action = New-ScheduledTaskAction `
     -Execute $Pwsh `
-    -Argument ("-NoProfile -ExecutionPolicy Bypass -File `"$Runner`" -Mode {0}" -f $Mode) `
+    -Argument ("-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Runner`" -Mode {0} -Quiet" -f $Mode) `
     -WorkingDirectory $Backend
 
   # Trigger giornaliero con intervallo 3 giorni
@@ -115,24 +115,24 @@ $reqAt = Register-AdeEvery3Days `
   -Mode "Request" `
   -StartDate $reqDate `
   -TimeOfDay "14:00" `
-  -Description "AdE ogni 3 giorni 14:00: genera richieste massive fatture ricevute (tutte le societa) per Atlas"
+  -Description "AdE ogni 3 giorni 14:00: richieste massive ricevute+emesse (tutte le societa) Atlas headless"
 
 $dlAt = Register-AdeEvery3Days `
   -TaskName $TaskDownload `
   -Mode "Download" `
   -StartDate $dlDate `
   -TimeOfDay "06:00" `
-  -Description "AdE ogni 3 giorni 06:00: scarica risposte mass-web e aggiorna Atlas (tutte le societa)"
+  -Description "AdE ogni 3 giorni 06:00: scarico risposte + push Atlas ricevute+emesse headless"
 
 Write-Host ""
-Write-Host "Task creati (utente: $userId)" -ForegroundColor Green
+Write-Host "Task creati (utente: $userId) - background headless" -ForegroundColor Green
 Write-Host ("  {0}" -f $TaskRequest)
 Write-Host ("    prima = {0:yyyy-MM-dd HH:mm}  poi ogni 3 giorni  Mode=Request" -f $reqAt)
 Write-Host ("  {0}" -f $TaskDownload)
 Write-Host ("    prima = {0:yyyy-MM-dd HH:mm}  poi ogni 3 giorni  Mode=Download" -f $dlAt)
 Write-Host ""
-Write-Host "PC acceso/sveglio a quegli orari; utente loggato consigliato (Chrome headed)."
-Write-Host "Log: $Backend\uploads\ade_logs\"
+Write-Host "PC acceso (o sveglio) a quegli orari; utente vpatr loggato consigliato."
+Write-Host "Kinds: ricevute,emesse | Log: $Backend\uploads\ade_logs"
 Write-Host ""
 Get-ScheduledTask -TaskName $TaskRequest, $TaskDownload | ForEach-Object {
   $info = $_ | Get-ScheduledTaskInfo
