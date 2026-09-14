@@ -133,6 +133,20 @@ fi
 
 API_DIR="${API_DIR:-/opt/fornitori-app}"
 
+# Se l'API vive in un path diverso, applica ensure anche lì (stesso DB tipicamente, ma script e .env locali)
+if [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f "$API_DIR" 2>/dev/null || echo "$API_DIR")" != "$(readlink -f "$APP_DIR" 2>/dev/null || echo "$APP_DIR")" ]]; then
+  if [[ -f "$API_DIR/deploy/ensure-issued-invoices-table.sh" ]] || [[ -f "$APP_DIR/deploy/ensure-issued-invoices-table.sh" ]]; then
+    _ensure_script="$APP_DIR/deploy/ensure-issued-invoices-table.sh"
+    [[ -f "$API_DIR/deploy/ensure-issued-invoices-table.sh" ]] && _ensure_script="$API_DIR/deploy/ensure-issued-invoices-table.sh"
+    if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+      log "Tabella issued_invoices (path API $API_DIR)"
+      APP_DIR="$API_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$_ensure_script" || {
+        warn "ensure issued_invoices su API_DIR non riuscito — verifica ownership DB."
+      }
+    fi
+  fi
+fi
+
 ensure_access_codes_unlock_password() {
   local env_file="$1"
   [[ -f "$env_file" ]] || return 0

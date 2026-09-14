@@ -8,18 +8,31 @@ import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import normalize_company_section
+from ..database import engine
 from ..models.issued_invoice import IssuedInvoice
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_ROOT = Path(__file__).resolve().parent.parent / "uploads" / "fatture_emesse"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+
+_T = TypeVar("_T")
+_table_ready = False
+
+ISSUED_INVOICES_ENSURE_HINT = (
+  "Tabella issued_invoices assente. Sul server esegui: "
+  "sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-issued-invoices-table.sh "
+  "(oppure APP_DIR=/opt/fornitori-app) e poi "
+  "sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/release-safe.sh"
+)
 
 ALLOWED_KINDS = {
   "xml": {".xml", ".p7m"},
@@ -43,6 +56,101 @@ IMAGE_MIME_BY_SUFFIX = {
   ".tiff": "image/tiff",
   ".bmp": "image/bmp",
 }
+
+
+def _verify_issued_invoices_table() -> bool:
+  try:
+    with engine.connect() as conn:
+      conn.execute(text("SELECT 1 FROM issued_invoices LIMIT 1"))
+    return True
+  except SQLAlchemyError as exc:
+    logger.warning("issued_invoices non accessibile: %s", exc)
+    return False
+
+
+def ensure_issued_invoices_schema(*, force: bool = False) -> bool:
+  """Crea issued_invoices se manca (DDL idempotente). Ritorna True se la tabella è usabile."""
+  global _table_ready
+  if _table_ready and not force and _verify_issued_invoices_table():
+    return True
+  if not force and _verify_issued_invoices_table():
+    _table_ready = True
+    return True
+  try:
+    with engine.begin() as conn:
+      conn.execute(
+        text(
+          """
+          CREATE TABLE IF NOT EXISTS issued_invoices (
+            id SERIAL PRIMARY KEY,
+            company VARCHAR(64) NOT NULL,
+            activity VARCHAR(64),
+            file_kind VARCHAR(16) NOT NULL,
+            file_path VARCHAR(500) NOT NULL,
+            original_filename VARCHAR(255),
+            invoice_number VARCHAR(100),
+            invoice_date TIMESTAMPTZ,
+            total_amount NUMERIC(12, 2),
+            customer_name VARCHAR(512),
+            customer_vat VARCHAR(32),
+            status VARCHAR(32) NOT NULL DEFAULT 'caricata',
+            note TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          )
+          """
+        )
+      )
+      for stmt in (
+        "ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_name VARCHAR(512)",
+        "ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_vat VARCHAR(32)",
+        "CREATE INDEX IF NOT EXISTS ix_issued_invoices_company ON issued_invoices (company)",
+        "CREATE INDEX IF NOT EXISTS ix_issued_invoices_activity ON issued_invoices (activity)",
+        "CREATE INDEX IF NOT EXISTS ix_issued_invoices_id ON issued_invoices (id)",
+      ):
+        try:
+          conn.execute(text(stmt))
+        except SQLAlchemyError as col_exc:
+          logger.warning("issued_invoices schema step fallito (%s): %s", stmt, col_exc)
+  except SQLAlchemyError as exc:
+    logger.error("Impossibile creare issued_invoices: %s", exc)
+    _table_ready = False
+    return False
+
+  ok = _verify_issued_invoices_table()
+  _table_ready = ok
+  if not ok:
+    logger.error(ISSUED_INVOICES_ENSURE_HINT)
+  else:
+    logger.info("Schema issued_invoices pronto")
+  return ok
+
+
+def _rollback_db(db: Session) -> None:
+  try:
+    db.rollback()
+  except SQLAlchemyError:
+    pass
+
+
+def _with_issued_invoices_table(db: Session, fn: Callable[[], _T]) -> _T:
+  """Esegue fn; se la tabella manca prova a crearla e ritenta una volta."""
+  try:
+    return fn()
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "issued_invoices" not in err:
+      raise
+    _rollback_db(db)
+    global _table_ready
+    _table_ready = False
+    if not ensure_issued_invoices_schema(force=True):
+      raise HTTPException(status_code=503, detail=ISSUED_INVOICES_ENSURE_HINT) from exc
+    try:
+      return fn()
+    except ProgrammingError as retry_exc:
+      _rollback_db(db)
+      raise HTTPException(status_code=503, detail=ISSUED_INVOICES_ENSURE_HINT) from retry_exc
+
 
 
 def _safe_name(name: str) -> str:
@@ -424,23 +532,28 @@ async def upload_issued_invoice(
   dest.write_bytes(raw)
 
   rel = str(dest.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
-  row = IssuedInvoice(
-    company=company_id,
-    activity=(activity or "").strip().lower() or None,
-    file_kind=kind,
-    file_path=rel,
-    original_filename=file.filename or stored_name,
-    invoice_number=final_number,
-    invoice_date=final_date,
-    total_amount=final_amount,
-    customer_name=(str(extracted.get("customer_name") or "").strip() or None),
-    customer_vat=(str(extracted.get("customer_vat") or "").strip() or None),
-    status="caricata",
-    note=(note or "").strip() or None,
-  )
-  db.add(row)
-  db.commit()
-  db.refresh(row)
+
+  def _persist() -> IssuedInvoice:
+    row = IssuedInvoice(
+      company=company_id,
+      activity=(activity or "").strip().lower() or None,
+      file_kind=kind,
+      file_path=rel,
+      original_filename=file.filename or stored_name,
+      invoice_number=final_number,
+      invoice_date=final_date,
+      total_amount=final_amount,
+      customer_name=(str(extracted.get("customer_name") or "").strip() or None),
+      customer_vat=(str(extracted.get("customer_vat") or "").strip() or None),
+      status="caricata",
+      note=(note or "").strip() or None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+  row = _with_issued_invoices_table(db, _persist)
 
   extracted_amount = extracted.get("total_amount")
   return _row_out(
@@ -465,44 +578,50 @@ def list_issued_invoices(
   company: Optional[str] = None,
   limit: int = 200,
 ) -> List[Dict[str, Any]]:
-  q = db.query(IssuedInvoice)
-  if company:
-    cid = normalize_company_section(company)
-    if cid != "non_classificata":
-      q = q.filter(IssuedInvoice.company == cid)
-  rows = q.order_by(IssuedInvoice.created_at.desc(), IssuedInvoice.id.desc()).limit(max(1, min(limit, 500))).all()
-  out: List[Dict[str, Any]] = []
-  dirty = False
-  for row in rows:
-    if not (row.customer_name or "").strip() and (row.file_kind or "").lower() == "xml":
+  def _run() -> List[Dict[str, Any]]:
+    q = db.query(IssuedInvoice)
+    if company:
+      cid = normalize_company_section(company)
+      if cid != "non_classificata":
+        q = q.filter(IssuedInvoice.company == cid)
+    rows = q.order_by(IssuedInvoice.created_at.desc(), IssuedInvoice.id.desc()).limit(max(1, min(limit, 500))).all()
+    out: List[Dict[str, Any]] = []
+    dirty = False
+    for row in rows:
+      if not (row.customer_name or "").strip() and (row.file_kind or "").lower() == "xml":
+        try:
+          path, _ = resolve_issued_file(db, int(row.id))
+          extracted = extract_issued_invoice_fields(
+            path.read_bytes(),
+            filename=row.original_filename or path.name,
+            file_kind="xml",
+          )
+          name = str(extracted.get("customer_name") or "").strip()
+          vat = str(extracted.get("customer_vat") or "").strip()
+          if name:
+            row.customer_name = name
+            dirty = True
+          if vat and not (row.customer_vat or "").strip():
+            row.customer_vat = vat
+            dirty = True
+        except Exception:
+          pass
+      out.append(_row_out(row))
+    if dirty:
       try:
-        path, _ = resolve_issued_file(db, int(row.id))
-        extracted = extract_issued_invoice_fields(
-          path.read_bytes(),
-          filename=row.original_filename or path.name,
-          file_kind="xml",
-        )
-        name = str(extracted.get("customer_name") or "").strip()
-        vat = str(extracted.get("customer_vat") or "").strip()
-        if name:
-          row.customer_name = name
-          dirty = True
-        if vat and not (row.customer_vat or "").strip():
-          row.customer_vat = vat
-          dirty = True
+        db.commit()
       except Exception:
-        pass
-    out.append(_row_out(row))
-  if dirty:
-    try:
-      db.commit()
-    except Exception:
-      db.rollback()
-  return out
+        db.rollback()
+    return out
+
+  return _with_issued_invoices_table(db, _run)
 
 
 def get_issued_invoice(db: Session, invoice_id: int) -> Optional[IssuedInvoice]:
-  return db.query(IssuedInvoice).filter(IssuedInvoice.id == invoice_id).first()
+  return _with_issued_invoices_table(
+    db,
+    lambda: db.query(IssuedInvoice).filter(IssuedInvoice.id == invoice_id).first(),
+  )
 
 
 def resolve_issued_file(db: Session, invoice_id: int) -> Tuple[Path, IssuedInvoice]:

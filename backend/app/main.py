@@ -234,8 +234,9 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     elif "issued_invoices" in err_text:
         detail = (
             "Tabella issued_invoices assente. "
-            "Sul server: sudo APP_DIR=/opt/fornitori-app bash deploy/ensure-issued-invoices-table.sh "
-            "oppure sudo RESTART_API=1 bash deploy/release-safe.sh"
+            "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-issued-invoices-table.sh "
+            "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/release-safe.sh "
+            "(se l'API è in /opt/fornitori-app usa anche quel APP_DIR per lo script ensure)."
         )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (
@@ -1208,38 +1209,13 @@ def _ensure_pos_receipts_table() -> None:
 
 def _ensure_issued_invoices_table() -> None:
     """Fatture emesse caricate a mano (migr. 20260909_issued_invoices.sql)."""
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS issued_invoices (
-                      id SERIAL PRIMARY KEY,
-                      company VARCHAR(64) NOT NULL,
-                      activity VARCHAR(64),
-                      file_kind VARCHAR(16) NOT NULL,
-                      file_path VARCHAR(500) NOT NULL,
-                      original_filename VARCHAR(255),
-                      invoice_number VARCHAR(100),
-                      invoice_date TIMESTAMPTZ,
-                      total_amount NUMERIC(12, 2),
-                      status VARCHAR(32) NOT NULL DEFAULT 'caricata',
-                      note TEXT,
-                      created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                    """
-                )
-            )
-        for sql, label in (
-            ("ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_name VARCHAR(512)", "issued_invoices.customer_name"),
-            ("ALTER TABLE issued_invoices ADD COLUMN IF NOT EXISTS customer_vat VARCHAR(32)", "issued_invoices.customer_vat"),
-            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_company ON issued_invoices (company)", "Index issued_invoices.company"),
-            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_activity ON issued_invoices (activity)", "Index issued_invoices.activity"),
-            ("CREATE INDEX IF NOT EXISTS ix_issued_invoices_id ON issued_invoices (id)", "Index issued_invoices.id"),
-        ):
-            _safe_exec_sql(sql, label=label)
-    except Exception as e:
-        logger.warning("Impossibile verificare/creare issued_invoices: %s", e)
+    from .services.issued_invoice_service import ensure_issued_invoices_schema
+
+    if not ensure_issued_invoices_schema(force=True):
+        logger.error(
+            "Tabella issued_invoices non disponibile dopo ensure. "
+            "Esegui: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-issued-invoices-table.sh"
+        )
 
 
 def _check_critical_schema_columns() -> None:
@@ -1296,6 +1272,11 @@ def _check_critical_schema_columns() -> None:
         for table, migration in required_tables:
             try:
                 if not insp.has_table(table):
+                    if table == "issued_invoices":
+                        from .services.issued_invoice_service import ensure_issued_invoices_schema
+
+                        if ensure_issued_invoices_schema(force=True):
+                            continue
                     missing.append((table, "(tabella)", migration))
             except Exception:
                 missing.append((table, "(tabella)", migration))
