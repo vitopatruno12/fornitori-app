@@ -63,6 +63,9 @@ export default function FattureSupplierDateFilters({
   onDateFromChange,
   onDateToChange,
   onReset,
+  onApply,
+  applyLabel = 'Aggiorna',
+  applyDisabled = false,
   children = null,
 }) {
   const options = useMemo(() => {
@@ -120,11 +123,24 @@ export default function FattureSupplierDateFilters({
           onChange={(e) => onDateToChange?.(e.target.value)}
         />
       </div>
-      {typeof onReset === 'function' ? (
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onReset} style={{ alignSelf: 'flex-end' }}>
-          Reset filtri
-        </button>
-      ) : null}
+      <div style={{ display: 'inline-flex', gap: '0.45rem', alignSelf: 'flex-end', flexWrap: 'wrap' }}>
+        {typeof onReset === 'function' ? (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onReset}>
+            Reset filtri
+          </button>
+        ) : null}
+        {typeof onApply === 'function' ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={onApply}
+            disabled={applyDisabled}
+            title="Applica fornitore e periodo all'elenco"
+          >
+            {applyLabel}
+          </button>
+        ) : null}
+      </div>
       {children}
     </div>
   )

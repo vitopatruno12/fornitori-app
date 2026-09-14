@@ -1172,9 +1172,12 @@ export function FatturePagatePage() {
   const [paidRows, setPaidRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [supplierFilter, setSupplierFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [draftSupplier, setDraftSupplier] = useState('')
+  const [draftDateFrom, setDraftDateFrom] = useState('')
+  const [draftDateTo, setDraftDateTo] = useState('')
+  const [appliedSupplier, setAppliedSupplier] = useState('')
+  const [appliedDateFrom, setAppliedDateFrom] = useState('')
+  const [appliedDateTo, setAppliedDateTo] = useState('')
   const [selectedSupplierKey, setSelectedSupplierKey] = useState('')
 
   async function reload(nextCompany = companyId) {
@@ -1208,14 +1211,31 @@ export function FatturePagatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
+  function applyFilters() {
+    setAppliedSupplier(draftSupplier)
+    setAppliedDateFrom(draftDateFrom)
+    setAppliedDateTo(draftDateTo)
+    setSelectedSupplierKey('')
+  }
+
+  function resetFilters() {
+    setDraftSupplier('')
+    setDraftDateFrom('')
+    setDraftDateTo('')
+    setAppliedSupplier('')
+    setAppliedDateFrom('')
+    setAppliedDateTo('')
+    setSelectedSupplierKey('')
+  }
+
   const filteredPaidRows = useMemo(
     () =>
       filterInvoicesBySupplierAndDate(paidRows, {
-        supplierName: supplierFilter,
-        dateFrom,
-        dateTo,
+        supplierName: appliedSupplier,
+        dateFrom: appliedDateFrom,
+        dateTo: appliedDateTo,
       }),
-    [paidRows, supplierFilter, dateFrom, dateTo],
+    [paidRows, appliedSupplier, appliedDateFrom, appliedDateTo],
   )
 
   const supplierOptions = useMemo(() => supplierOptionsFromInvoices(paidRows), [paidRows])
@@ -1266,8 +1286,8 @@ export function FatturePagatePage() {
 
   const companyName = companyId ? companyLabel(companyId) : ''
   const filterSubtitle = [
-    supplierFilter || null,
-    dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : null,
+    appliedSupplier || null,
+    appliedDateFrom || appliedDateTo ? `${appliedDateFrom || '…'} → ${appliedDateTo || '…'}` : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -1277,7 +1297,7 @@ export function FatturePagatePage() {
       title="Fatture pagate"
       lead={
         companyId
-          ? `Fatture pagate da riconciliazione · ${companyName}. Scegli un fornitore per vedere e stampare l'elenco completo.`
+          ? `Fatture pagate da riconciliazione · ${companyName}. Imposta periodo/fornitore e premi Aggiorna per l'elenco fornitori.`
           : 'Scegli la società nel banner per vedere le fatture pagate dalla riconciliazione banca.'
       }
       actions={
@@ -1311,31 +1331,29 @@ export function FatturePagatePage() {
           <FattureSupplierDateFilters
             supplierMode="name"
             supplierOptions={supplierOptions}
-            supplierValue={supplierFilter}
-            onSupplierChange={(v) => {
-              setSupplierFilter(v)
-              setSelectedSupplierKey('')
-            }}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onDateFromChange={setDateFrom}
-            onDateToChange={setDateTo}
-            onReset={() => {
-              setSupplierFilter('')
-              setDateFrom('')
-              setDateTo('')
-              setSelectedSupplierKey('')
-            }}
+            supplierValue={draftSupplier}
+            onSupplierChange={setDraftSupplier}
+            dateFrom={draftDateFrom}
+            dateTo={draftDateTo}
+            onDateFromChange={setDraftDateFrom}
+            onDateToChange={setDraftDateTo}
+            onReset={resetFilters}
+            onApply={applyFilters}
+            applyDisabled={loading}
           />
 
           {!selectedSupplier ? (
             <>
               <h2 className="fatture-panel-title">Per fornitore</h2>
-              <p className="fatture-note">Clicca un fornitore (o Scheda) per vedere l&apos;elenco completo delle sue fatture pagate.</p>
+              <p className="fatture-note">
+                {filterSubtitle
+                  ? `Filtro attivo: ${filterSubtitle}. Clicca un fornitore per l'elenco fatture.`
+                  : "Premi Aggiorna dopo aver scelto il periodo. Poi clicca un fornitore per l'elenco fatture."}
+              </p>
               <VneWorkbookGrid
                 title="Fornitori — fatture pagate"
                 sheetLabel={`${suppliers.length} fornitori`}
-                exportSubtitle={`${companyName} · riepilogo fornitori`}
+                exportSubtitle={[companyName, filterSubtitle || 'Tutti i periodi'].filter(Boolean).join(' · ')}
                 loading={loading}
                 loadingLabel="Caricamento fornitori"
                 gridClassName="fatture-excel-grid"
@@ -1345,7 +1363,7 @@ export function FatturePagatePage() {
                 cellValue={supplierCellValue}
                 totals={suppliers.length ? supplierTotals : null}
                 totalsLabel={moneyTotalsLabel}
-                emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati."
+                emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati. Premi Aggiorna dopo aver impostato il periodo."
                 onRowClick={(row) => setSelectedSupplierKey(row.id)}
                 rowClickTitle="Apri elenco fatture pagate del fornitore"
                 actionsHeader="Azioni"
