@@ -40,6 +40,11 @@ import FattureSupplierDateFilters, {
   filterInvoicesBySupplierAndDate,
   supplierOptionsFromInvoices,
 } from '../components/FattureSupplierDateFilters.jsx'
+import {
+  downloadVneTableCsv,
+  downloadVneTableExcel,
+  printVneTable,
+} from '../utils/vneTableExport.js'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
@@ -450,7 +455,7 @@ export function FattureDashboardPage() {
                 Da registrare
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/pagate">
-                Pagate
+                Fatture pagate
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
                 Scadenziario
@@ -1290,7 +1295,7 @@ export function FatturePagatePage() {
 
   return (
     <FatturePageShell
-      title="Pagate"
+      title="Fatture pagate"
       lead={
         companyId
           ? `Fatture pagate da riconciliazione · ${companyName}. Filtra fornitore/periodo e stampa l'elenco completo.`
@@ -1408,14 +1413,85 @@ export function FatturePagatePage() {
                     {selectedSupplier.invoice_count} fatture pagate · Totale {eur(selectedSupplier.total_paid)}
                   </p>
                 </div>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelectedSupplierKey('')}>
-                  Torna all&apos;elenco
-                </button>
+                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={loading || !(selectedSupplier.invoices || []).length}
+                    title="Apre la stampa: da lì puoi salvare come PDF"
+                    onClick={() => {
+                      try {
+                        printVneTable({
+                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          subtitle: [companyName, selectedSupplier.supplier_name, filterSubtitle]
+                            .filter(Boolean)
+                            .join(' · '),
+                          columns: PAGATE_INVOICE_COLUMNS,
+                          rows: selectedSupplier.invoices,
+                          cellValue: invoiceCellValue,
+                          totalsLabel: moneyTotalsLabel,
+                          totals: selectedSupplier.invoices.length ? invoiceTotals : null,
+                        })
+                      } catch (err) {
+                        window.alert(err?.message || 'Stampa non riuscita')
+                      }
+                    }}
+                  >
+                    Stampa / PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={loading || !(selectedSupplier.invoices || []).length}
+                    onClick={() => {
+                      try {
+                        downloadVneTableExcel({
+                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          columns: PAGATE_INVOICE_COLUMNS,
+                          rows: selectedSupplier.invoices,
+                          cellValue: invoiceCellValue,
+                          totalsLabel: moneyTotalsLabel,
+                          totals: selectedSupplier.invoices.length ? invoiceTotals : null,
+                          sheetName: 'Fatture pagate',
+                        })
+                      } catch (err) {
+                        window.alert(err?.message || 'Export Excel non riuscito')
+                      }
+                    }}
+                  >
+                    Scarica Excel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={loading || !(selectedSupplier.invoices || []).length}
+                    onClick={() => {
+                      try {
+                        downloadVneTableCsv({
+                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          columns: PAGATE_INVOICE_COLUMNS,
+                          rows: selectedSupplier.invoices,
+                          cellValue: invoiceCellValue,
+                          totalsLabel: moneyTotalsLabel,
+                          totals: selectedSupplier.invoices.length ? invoiceTotals : null,
+                        })
+                      } catch (err) {
+                        window.alert(err?.message || 'Export CSV non riuscito')
+                      }
+                    }}
+                  >
+                    Scarica CSV
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelectedSupplierKey('')}>
+                    Torna all&apos;elenco
+                  </button>
+                </div>
               </div>
               <VneWorkbookGrid
-                title={`Pagate — ${selectedSupplier.supplier_name}`}
+                title={`Fatture pagate — ${selectedSupplier.supplier_name}`}
                 sheetLabel={`${selectedSupplier.invoices.length} documenti`}
                 exportSubtitle={[companyName, selectedSupplier.supplier_name, filterSubtitle].filter(Boolean).join(' · ')}
+                exportEnabled
                 loading={loading}
                 loadingLabel="Aggiornamento scheda"
                 gridClassName="fatture-excel-grid"

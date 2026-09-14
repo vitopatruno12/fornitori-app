@@ -6,7 +6,7 @@ const STATION_DESCRIPTION =
   'Postazione operativa PWA: Panoramica, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne, Personale (turni, report, stipendi), Amministrazione ▾ (Fatture fornitori, Prima Nota) e Assistenza tecnici.'
 
 const CARRIER_DESCRIPTION =
-  'Postazione trasportatore PWA: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatturazione, Prima Nota).'
+  'Postazione trasportatore PWA: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatture fornitori, Prima Nota).'
 
 /**
  * Link PWA unificati per sede (operatori) e guidatore (trasportatore).

@@ -6,7 +6,7 @@ export const FATTURE_NAV_ITEMS = [
   { to: '/fatture/ricevute', label: 'Fatture ricevute' },
   { to: '/fatture/emesse', label: 'Fatture emesse' },
   { to: '/fatture/da-registrare', label: 'Da registrare' },
-  { to: '/fatture/pagate', label: 'Pagate' },
+  { to: '/fatture/pagate', label: 'Fatture pagate' },
   { to: '/fatture/registrate', label: 'Registrate' },
   { to: '/fatture/scadenziario', label: 'Scadenziario' },
   { to: '/fatture/sincronizzazione', label: 'Sincronizzazione' },

@@ -38,7 +38,7 @@ const DELIVERY_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
 ]
 
 const ADMIN_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
-  { id: 'fatturazione', label: 'Fatturazione' },
+  { id: 'fatturazione', label: 'Fatture fornitori' },
   { id: 'prima-nota', label: 'Prima Nota' },
 ]
 
@@ -52,7 +52,7 @@ const TITLES: Record<OperatorDeliveryView, string> = {
   history: 'Storico consegne',
   magazzino: 'Magazzino',
   trasportatori: 'Trasportatori',
-  fatturazione: 'Fatturazione',
+  fatturazione: 'Fatture fornitori',
   'prima-nota': 'Prima Nota',
 }
 

@@ -5,7 +5,7 @@ export const AMMINISTRAZIONE_NAV_ITEMS = [
   { to: '/amministrazione', label: 'Dashboard', end: true },
   { to: '/amministrazione/mastrini', label: 'Mastrini contabili' },
   { to: '/banca', label: 'Banca' },
-  { to: '/fatture', label: 'Fatture Fornitori' },
+  { to: '/fatture', label: 'Fatture fornitori' },
   { to: '/prima-nota', label: 'Prima Nota' },
   { to: '/amministrazione/impostazioni', label: 'Impostazioni' },
 ]

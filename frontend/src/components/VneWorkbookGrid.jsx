@@ -19,6 +19,8 @@ export default function VneWorkbookGrid({
   sheetLabel = '',
   loading = false,
   loadingLabel = 'Lettura dati VNE',
+  toolbarActions: toolbarActionsProp = null,
+  hideToolbar = false,
   ...rest
 }) {
   const canExport = exportEnabled && !loading && Array.isArray(rows) && rows.length > 0
@@ -40,7 +42,7 @@ export default function VneWorkbookGrid({
     }
   }
 
-  const toolbarActions = exportEnabled ? (
+  const exportActions = exportEnabled ? (
     <div className="pagamenti-workbook-actions vne-workbook-export-actions">
       <button
         type="button"
@@ -49,7 +51,7 @@ export default function VneWorkbookGrid({
         onClick={() => runExport(printVneTable)}
         title="Apre la finestra di stampa: puoi salvare come PDF"
       >
-        Stampa
+        Stampa / PDF
       </button>
       <button
         type="button"
@@ -70,11 +72,19 @@ export default function VneWorkbookGrid({
     </div>
   ) : null
 
+  const toolbarActions = (
+    <>
+      {exportActions}
+      {toolbarActionsProp}
+    </>
+  )
+
   return (
     <>
       <AnalisiLoadingBar active={Boolean(loading)} label={loadingLabel} variant="subtle" />
       {(!loading || (Array.isArray(rows) && rows.length > 0)) && (
         <WorkbookGrid
+          {...rest}
           title={title}
           sheetLabel={loading ? 'Aggiornamento…' : sheetLabel}
           columns={columns}
@@ -83,8 +93,8 @@ export default function VneWorkbookGrid({
           totalsLabel={totalsLabel}
           totals={totals}
           loading={false}
+          hideToolbar={hideToolbar}
           toolbarActions={toolbarActions}
-          {...rest}
         />
       )}
     </>
