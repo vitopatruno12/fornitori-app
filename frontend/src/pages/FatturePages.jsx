@@ -48,6 +48,16 @@ import {
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
+import {
+  buildConservationPackage,
+  createConservationPackage,
+  deleteConservationPackage,
+  fetchConservationCandidates,
+  fetchConservationPackage,
+  fetchConservationPackages,
+  getConservationPackageDownloadUrl,
+  setConservationPackageStatus,
+} from '../services/conservationService.js'
 
 const SYNC_LOG_KEY = 'fattureAdeSdiSyncLog'
 
@@ -1770,16 +1780,356 @@ export function FattureSincronizzazionePage() {
 }
 
 export function FattureConservazionePage() {
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const [periodFrom, setPeriodFrom] = useState('')
+  const [periodTo, setPeriodTo] = useState('')
+  const [candidates, setCandidates] = useState([])
+  const [selectedKeys, setSelectedKeys] = useState(() => new Set())
+  const [packages, setPackages] = useState([])
+  const [selectedPkg, setSelectedPkg] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+
+  async function loadPackages(nextCompany = companyId) {
+    if (!nextCompany) {
+      setPackages([])
+      return
+    }
+    const res = await fetchConservationPackages({ company: nextCompany })
+    setPackages(Array.isArray(res?.items) ? res.items : [])
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setError('')
+      try {
+        if (!cancelled) await loadPackages(companyId)
+      } catch (e) {
+        if (!cancelled) setError(e?.message || 'Errore caricamento pacchetti')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId])
+
+  async function loadCandidates() {
+    if (!companyId) {
+      setError('Seleziona una società')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setMsg('')
+    try {
+      const res = await fetchConservationCandidates({
+        company: companyId,
+        periodFrom,
+        periodTo,
+        includeIssued: true,
+      })
+      const items = Array.isArray(res?.items) ? res.items : []
+      setCandidates(items)
+      setSelectedKeys(new Set(items.map((d) => d.selected_key)))
+      setMsg(`${items.length} documenti candidati nel periodo`)
+    } catch (e) {
+      setError(e?.message || 'Errore caricamento candidati')
+      setCandidates([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggleKey(key) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  async function createPackage() {
+    if (!companyId) return
+    if (selectedKeys.size === 0) {
+      setError('Seleziona almeno un documento')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMsg('')
+    try {
+      const pkg = await createConservationPackage({
+        company: companyId,
+        period_from: periodFrom || null,
+        period_to: periodTo || null,
+        document_keys: Array.from(selectedKeys),
+        label: `Conservazione ${companyLabel(companyId)} ${periodFrom || '…'}→${periodTo || '…'}`,
+      })
+      setSelectedPkg(pkg)
+      setMsg(`Pacchetto #${pkg.id} creato in bozza (${pkg.document_count} file)`)
+      await loadPackages(companyId)
+    } catch (e) {
+      setError(e?.message || 'Creazione pacchetto fallita')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openPackage(id) {
+    setBusy(true)
+    setError('')
+    try {
+      const pkg = await fetchConservationPackage(id)
+      setSelectedPkg(pkg)
+    } catch (e) {
+      setError(e?.message || 'Pacchetto non trovato')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function buildSelected() {
+    if (!selectedPkg?.id) return
+    setBusy(true)
+    setError('')
+    try {
+      const pkg = await buildConservationPackage(selectedPkg.id)
+      setSelectedPkg(pkg)
+      setMsg(`Pacchetto #${pkg.id} pronto · hash ${String(pkg.package_hash || '').slice(0, 12)}…`)
+      await loadPackages(companyId)
+    } catch (e) {
+      setError(e?.message || 'Generazione pacchetto fallita')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function advanceStatus(status) {
+    if (!selectedPkg?.id) return
+    setBusy(true)
+    setError('')
+    try {
+      const pkg = await setConservationPackageStatus(selectedPkg.id, status)
+      setSelectedPkg(pkg)
+      setMsg(`Stato aggiornato: ${statusLabel(pkg.status)}`)
+      await loadPackages(companyId)
+    } catch (e) {
+      setError(e?.message || 'Aggiornamento stato fallito')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removePackage(id) {
+    if (!window.confirm(`Eliminare il pacchetto #${id}?`)) return
+    setBusy(true)
+    try {
+      await deleteConservationPackage(id)
+      if (selectedPkg?.id === id) setSelectedPkg(null)
+      await loadPackages(companyId)
+      setMsg(`Pacchetto #${id} eliminato`)
+    } catch (e) {
+      setError(e?.message || 'Eliminazione fallita')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const statusLabel = (s) =>
+    ({
+      bozza: 'Bozza',
+      pronto: 'Pronto',
+      esportato: 'Esportato',
+      inviato_conservatore: 'Inviato al conservatore',
+      conservato: 'Conservato',
+      errore: 'Errore',
+    })[s] || s
+
   return (
-    <FatturePageShell title="Conservazione digitale" lead="Archiviazione a norma (fase successiva).">
-      <FattureStubCard
-        title="In arrivo"
-        points={[
-          'Conservazione sostitutiva conforme',
-          'Indice di ricerca e hash documenti',
-          'Esportazione pacchetti di conservazione',
-        ]}
-      />
+    <FatturePageShell
+      title="Conservazione digitale"
+      lead="Prepara pacchetti di conservazione sostitutiva (XML/PDF + indice + hash SHA-256). Poi scarica lo ZIP e invialo al conservatore accreditato."
+      actions={
+        <FattureCompanySelect
+          className="mastrini-hero-tools-company"
+          companies={companies}
+          value={companyId}
+          onChange={setCompanyId}
+          loading={loadingCompanies}
+          disabled={loadingCompanies}
+        />
+      }
+    >
+      {error ? <div className="alert alert-danger">{error}</div> : null}
+      {msg ? <div className="alert alert-success">{msg}</div> : null}
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">1 · Seleziona documenti</h2>
+        <p className="fatture-note">
+          Scegli società, periodo e documenti (ricevute Atlas + emesse). Poi crea il pacchetto.
+        </p>
+        <div className="ui-toolbar-one" style={{ flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.85rem' }}>
+          <div className="form-group">
+            <label>Data da</label>
+            <input type="date" className="form-control" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Data a</label>
+            <input type="date" className="form-control" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-end' }} onClick={() => void loadCandidates()} disabled={!companyId || loading}>
+            {loading ? 'Carico…' : 'Aggiorna candidati'}
+          </button>
+          <button type="button" className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-end' }} onClick={() => void createPackage()} disabled={!companyId || busy || selectedKeys.size === 0}>
+            Crea pacchetto
+          </button>
+        </div>
+
+        {candidates.length === 0 ? (
+          <p className="fatture-note">Nessun candidato caricato. Imposta il periodo e premi Aggiorna candidati.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Tipo</th>
+                  <th>Numero</th>
+                  <th>Data</th>
+                  <th>Soggetto</th>
+                  <th>Importo</th>
+                  <th>File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {candidates.map((d) => (
+                  <tr key={d.selected_key}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedKeys.has(d.selected_key)}
+                        onChange={() => toggleKey(d.selected_key)}
+                      />
+                    </td>
+                    <td>{d.source_kind === 'issued' ? 'Emessa' : 'Ricevuta'}</td>
+                    <td>{d.invoice_number || '—'}</td>
+                    <td>{formatDate(d.invoice_date)}</td>
+                    <td>{d.supplier_name || '—'}</td>
+                    <td>{d.total_amount != null ? eur(d.total_amount) : '—'}</td>
+                    <td>
+                      {[d.has_xml ? 'XML' : null, d.has_pdf ? 'PDF' : null].filter(Boolean).join(' + ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">2 · Pacchetti</h2>
+        {packages.length === 0 ? (
+          <p className="fatture-note">Nessun pacchetto per questa società.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Etichetta</th>
+                  <th>Periodo</th>
+                  <th>Doc.</th>
+                  <th>Stato</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packages.map((p) => (
+                  <tr key={p.id} className={selectedPkg?.id === p.id ? 'workbook-row-selected' : ''}>
+                    <td>{p.id}</td>
+                    <td>{p.label || '—'}</td>
+                    <td>
+                      {formatDate(p.period_from)} → {formatDate(p.period_to)}
+                    </td>
+                    <td>{p.document_count}</td>
+                    <td>{statusLabel(p.status)}</td>
+                    <td style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void openPackage(p.id)}>
+                        Apri
+                      </button>
+                      {p.status !== 'conservato' ? (
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => void removePackage(p.id)}>
+                          Elimina
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {selectedPkg ? (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">3 · Flusso pacchetto #{selectedPkg.id}</h2>
+          <p className="fatture-note">
+            Stato: <strong>{statusLabel(selectedPkg.status)}</strong>
+            {selectedPkg.package_hash ? ` · SHA-256 ${selectedPkg.package_hash}` : ''}
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void buildSelected()}>
+              Genera pacchetto (indice + ZIP)
+            </button>
+            {selectedPkg.package_path || selectedPkg.download_url ? (
+              <a className="btn btn-secondary btn-sm" href={getConservationPackageDownloadUrl(selectedPkg.id)} target="_blank" rel="noreferrer">
+                Scarica ZIP
+              </a>
+            ) : null}
+            <button type="button" className="btn btn-secondary btn-sm" disabled={busy || (selectedPkg.status !== 'esportato' && selectedPkg.status !== 'pronto')} onClick={() => void advanceStatus('inviato_conservatore')}>
+              Segna inviato al conservatore
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={busy || selectedPkg.status !== 'inviato_conservatore'} onClick={() => void advanceStatus('conservato')}>
+              Segna conservato
+            </button>
+          </div>
+          <div className="table-wrap">
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th>Ruolo</th>
+                  <th>Numero</th>
+                  <th>Soggetto</th>
+                  <th>File</th>
+                  <th>SHA-256</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(selectedPkg.items || []).map((it) => (
+                  <tr key={it.id}>
+                    <td>{it.file_role}</td>
+                    <td>{it.invoice_number || '—'}</td>
+                    <td>{it.supplier_name || '—'}</td>
+                    <td>{it.original_filename || '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{String(it.content_sha256 || '').slice(0, 16)}…</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+            Nota legale: Atlas prepara il pacchetto (file + hash + indice). Per la conformità completa serve
+            firma qualificata / invio a un <strong>conservatore accreditato</strong> AgID.
+          </p>
+        </section>
+      ) : null}
     </FatturePageShell>
   )
 }

@@ -35,6 +35,7 @@ SAFE_MIGRATIONS = [
     "20260816_pos_receipts.sql",
     "20260828_pos_receipts_payment_split.sql",
     "20260909_issued_invoices.sql",
+    "20260915_conservation_packages.sql",
 ]
 
 

@@ -15,7 +15,7 @@ from . import models  # noqa: F401
 from .database import Base, engine
 from .services.prima_nota_locale_service import ensure_prima_nota_locale_packs_table
 from .ai.module import register_ai_module
-from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices, pos_receipts, whatsapp, ade
+from .routers import suppliers, deliveries, invoices, cash, price_list, dashboard, analytics, reference, customers, attachments, supplier_orders, staff, support_technicians, carriers, vne, sdi, banca, warehouse, supplier_payments, electronic_invoices, pos_receipts, whatsapp, ade, conservazione
 
 # Logging di base per Render/uvicorn: assicura che i WARNING/ERROR
 # del nostro logger arrivino sempre nel log del servizio.
@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
         _ensure_bank_module_tables()
         _ensure_pos_receipts_table()
         _ensure_issued_invoices_table()
+        _ensure_conservation_tables()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "
@@ -284,6 +285,7 @@ app.include_router(electronic_invoices.router)
 app.include_router(banca.router)
 app.include_router(pos_receipts.router)
 app.include_router(whatsapp.router)
+app.include_router(conservazione.router)
 
 
 def _ensure_support_technicians_columns() -> None:
@@ -1218,6 +1220,67 @@ def _ensure_issued_invoices_table() -> None:
         )
 
 
+def _ensure_conservation_tables() -> None:
+    """Pacchetti conservazione sostitutiva (migr. 20260915_conservation_packages.sql)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS conservation_packages (
+                      id SERIAL PRIMARY KEY,
+                      company VARCHAR(64) NOT NULL,
+                      label VARCHAR(255),
+                      period_from TIMESTAMPTZ,
+                      period_to TIMESTAMPTZ,
+                      status VARCHAR(32) NOT NULL DEFAULT 'bozza',
+                      document_count INTEGER NOT NULL DEFAULT 0,
+                      package_hash VARCHAR(64),
+                      package_path VARCHAR(500),
+                      index_json_path VARCHAR(500),
+                      note TEXT,
+                      built_at TIMESTAMPTZ,
+                      exported_at TIMESTAMPTZ,
+                      sent_at TIMESTAMPTZ,
+                      conserved_at TIMESTAMPTZ,
+                      created_at TIMESTAMPTZ DEFAULT NOW(),
+                      updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS conservation_package_items (
+                      id SERIAL PRIMARY KEY,
+                      package_id INTEGER NOT NULL REFERENCES conservation_packages(id) ON DELETE CASCADE,
+                      source_kind VARCHAR(32) NOT NULL,
+                      source_id INTEGER NOT NULL,
+                      invoice_number VARCHAR(128),
+                      invoice_date TIMESTAMPTZ,
+                      supplier_name VARCHAR(512),
+                      customer_vat VARCHAR(32),
+                      total_amount NUMERIC(12, 2),
+                      file_role VARCHAR(16) NOT NULL,
+                      original_filename VARCHAR(255),
+                      stored_relpath VARCHAR(500),
+                      content_sha256 VARCHAR(64),
+                      created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+        for sql, label in (
+            ("CREATE INDEX IF NOT EXISTS ix_conservation_packages_company ON conservation_packages (company)", "idx company"),
+            ("CREATE INDEX IF NOT EXISTS ix_conservation_packages_status ON conservation_packages (status)", "idx status"),
+            ("CREATE INDEX IF NOT EXISTS ix_conservation_package_items_package ON conservation_package_items (package_id)", "idx items package"),
+        ):
+            _safe_exec_sql(sql, label=label)
+    except Exception as e:
+        logger.warning("Impossibile verificare/creare tabelle conservazione: %s", e)
+
+
 def _check_critical_schema_columns() -> None:
     """Warn if critical migration columns are missing (non-blocking)."""
     try:
@@ -1258,6 +1321,7 @@ def _check_critical_schema_columns() -> None:
             ("electronic_invoices", "20260812_electronic_invoices.sql"),
             ("pos_receipts", "20260816_pos_receipts.sql"),
             ("issued_invoices", "20260909_issued_invoices.sql"),
+            ("conservation_packages", "20260915_conservation_packages.sql"),
         ]
         insp = inspect(engine)
         missing = []

@@ -30,4 +30,5 @@ from .bank_account import BankAccount  # noqa: F401
 from .bank_movement import BankMovement  # noqa: F401
 from .pos_receipt import PosReceipt  # noqa: F401
 from .issued_invoice import IssuedInvoice  # noqa: F401
+from .conservation import ConservationPackage, ConservationPackageItem  # noqa: F401
 
