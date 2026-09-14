@@ -119,7 +119,7 @@ def get_enable_banking_config(account: Optional[Dict[str, Any]] = None) -> Dict[
     elif "terra d'otranto" in bank_l or "terra dotranto" in bank_l.replace("'", "") or (
       "bcc" in bank_l and "otranto" in bank_l
     ):
-      cfg["aspsp_name"] = "Banca di Credito Cooperativo di Terra d'Otranto"
+      cfg["aspsp_name"] = "BCC Terra d'Otranto"
     configured = bool(cfg["app_id"] and key_path.is_file() and cfg.get("redirect_url"))
     cfg["configured"] = configured
     cfg["message"] = (

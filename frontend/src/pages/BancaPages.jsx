@@ -63,7 +63,7 @@ function resolveEnableBankingPayload(account) {
     || (bank.includes('bcc') && (label.includes('otranto') || label.includes('carmiano')))
   ) {
     return {
-      aspsp_name: "BCC di Terra d'Otranto",
+      aspsp_name: "BCC Terra d'Otranto",
       aspsp_country: 'IT',
       psu_type: 'business',
     }
