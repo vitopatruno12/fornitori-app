@@ -406,14 +406,27 @@ def _resolve_session_accounts(session: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 def _pick_session_account(session: Dict[str, Any], prefer_iban: Optional[str] = None) -> Dict[str, Any]:
   session, accounts = _resolve_session_accounts(session)
   if not accounts:
+    cfg = get_enable_banking_config()
+    app_id = str(cfg.get("app_id") or "").strip() or "?"
+    profile_id = str(cfg.get("profile_id") or "").strip() or "?"
     iban_hint = (prefer_iban or "").replace(" ", "").upper()
+    session_keys = ",".join(sorted(str(k) for k in (session or {}).keys())) if isinstance(session, dict) else ""
+    logger.error(
+      "EB sessione senza conti app=%s profile=%s iban=%s keys=%s session=%s",
+      app_id,
+      profile_id,
+      iban_hint,
+      session_keys,
+      {k: session.get(k) for k in ("session_id", "accounts", "accounts_data", "status") if isinstance(session, dict)},
+    )
     raise RuntimeError(
       "Sessione Enable Banking senza conti autorizzati. "
-      "Se l'app è in Restricted Mode, nel Control Panel Enable Banking "
-      "devi collegare (whitelist) l'IBAN del conto"
-      + (f" {iban_hint}" if iban_hint else "")
-      + " con «Activate by linking accounts», poi ripetere l'autorizzazione. "
-      "Senza IBAN in whitelist la sessione torna vuota anche dopo OTP corretto."
+      f"App usata da Atlas: {app_id} (profilo {profile_id}). "
+      "Gli IBAN devono essere in whitelist SU QUESTA STESSA app nel Control Panel "
+      "(non su un'altra applicazione). "
+      + (f"IBAN atteso: {iban_hint}. " if iban_hint else "")
+      + "Se l'app è corretta e gli IBAN sono già collegati: in banca seleziona proprio quel conto "
+      "e riprova con l'altro canale (privato↔impresa)."
     )
   prefer = (prefer_iban or "").replace(" ", "").upper()
   if prefer:
@@ -522,7 +535,19 @@ def begin_enable_banking_connect(
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
     raise ValueError("Conto non trovato")
+  bank_l = f"{row.bank_name or ''} {row.account_name or ''}".lower()
+  is_bcc = "bcc" in bank_l or "otranto" in bank_l or "terra" in bank_l
   with enable_banking_for_account(_account_dict(row)):
+    cfg = get_enable_banking_config()
+    app_id = str(cfg.get("app_id") or "").strip()
+    if is_bcc and app_id and app_id != "4625919e-22a1-4d40-8267-7587ff2360c0":
+      raise RuntimeError(
+        f"Profilo Enable Banking sbagliato per BCC: Atlas userebbe app {app_id} "
+        f"(profilo {cfg.get('profile_id')}), ma i conti BCC sono legati all'app "
+        "4625919e-22a1-4d40-8267-7587ff2360c0. "
+        "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
+        "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
+      )
     auth = start_authorization(
       account_id=account_id,
       aspsp_name=aspsp_name or None,
@@ -530,6 +555,8 @@ def begin_enable_banking_connect(
       psu_type=psu_type,
       prefer_iban=row.iban,
     )
+    auth["enable_banking_app_id"] = app_id
+    auth["enable_banking_profile_id"] = cfg.get("profile_id")
   row.connection_status = "pending"
   if auth.get("aspsp_name"):
     row.eb_aspsp_name = str(auth["aspsp_name"])[:120]
