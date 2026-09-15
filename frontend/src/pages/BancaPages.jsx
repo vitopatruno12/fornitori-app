@@ -193,7 +193,7 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'reason') {
     if (row?.match_reason === 'numero_in_movimento') return 'N. in banca'
     if (row?.match_reason === 'matched') return 'Riconciliata'
-    if (row?.match_reason === 'gia_pagata_in_atlas') return 'Pagata Atlas'
+    if (row?.match_reason === 'gia_pagata_in_atlas') return 'Pagata'
     if (row?.match_reason === 'da_pagare') return 'Da pagare'
     return row?.match_reason || '—'
   }

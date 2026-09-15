@@ -142,7 +142,7 @@ function moneyTotalsLabel(colId, totals) {
 function matchReasonLabel(reason) {
   if (reason === 'numero_in_movimento') return 'N. in banca'
   if (reason === 'matched') return 'Riconciliata'
-  if (reason === 'gia_pagata_in_atlas') return 'Pagata Atlas'
+  if (reason === 'gia_pagata_in_atlas') return 'Pagata'
   return reason || 'Pagata'
 }
 

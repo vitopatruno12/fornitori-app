@@ -205,6 +205,18 @@ def _request(method: str, path: str, *, json_body: Any = None, params: Optional[
     raise RuntimeError(f"Enable Banking rete: {exc}") from exc
   if resp.status_code >= 400:
     detail = (resp.text or "")[:800]
+    low = detail.lower()
+    if resp.status_code == 403 and "application is not active" in low:
+      cfg = get_enable_banking_config()
+      app_id = cfg.get("app_id") or "?"
+      env = cfg.get("environment") or "?"
+      raise RuntimeError(
+        "Enable Banking: applicazione non attiva (403). "
+        f"App ID {app_id} · ambiente {env}. "
+        "Apri https://enablebanking.com/cp/applications , seleziona questa app e "
+        "attivala (Restricted Mode collegando un conto, oppure Production dopo contratto/KYB). "
+        "Finché lo stato non è Active / Active (Restricted), Atlas non può collegare o sincronizzare."
+      )
     raise RuntimeError(f"Enable Banking HTTP {resp.status_code}: {detail}")
   if not resp.content:
     return {}
