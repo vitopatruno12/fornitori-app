@@ -271,6 +271,7 @@ def start_authorization(
   aspsp_name: Optional[str] = None,
   aspsp_country: Optional[str] = None,
   psu_type: str = "personal",
+  prefer_iban: Optional[str] = None,
 ) -> Dict[str, Any]:
   cfg = get_enable_banking_config()
   if not cfg["configured"]:
@@ -279,8 +280,16 @@ def start_authorization(
   country = (aspsp_country or cfg["aspsp_country"] or "FI").strip().upper()
   valid_until = (datetime.now(timezone.utc) + timedelta(days=int(cfg["consent_days"]))).isoformat()
   state = build_state(account_id)
+  access: Dict[str, Any] = {
+    "valid_until": valid_until,
+    "balances": True,
+    "transactions": True,
+  }
+  iban = (prefer_iban or "").replace(" ", "").upper()
+  if iban:
+    access["accounts"] = [{"iban": iban}]
   body = {
-    "access": {"valid_until": valid_until},
+    "access": access,
     "aspsp": {"name": name, "country": country},
     "state": state,
     "redirect_url": cfg["redirect_url"],
@@ -344,10 +353,63 @@ def get_account_transactions(
   return out
 
 
+def _normalize_session_accounts(session: Dict[str, Any]) -> List[Dict[str, Any]]:
+  """Estrae conti dalla risposta POST/GET session (accounts o accounts_data)."""
+  if not isinstance(session, dict):
+    return []
+  accounts = session.get("accounts")
+  if isinstance(accounts, list) and accounts:
+    out = [a for a in accounts if isinstance(a, dict) and (a.get("uid") or _extract_iban(a))]
+    if out:
+      return out
+  # GET /sessions/{id} può restituire accounts_data con uid
+  data = session.get("accounts_data")
+  if isinstance(data, list):
+    out = []
+    for item in data:
+      if not isinstance(item, dict):
+        continue
+      uid = str(item.get("uid") or item.get("account_uid") or "").strip()
+      if not uid:
+        continue
+      out.append(
+        {
+          "uid": uid,
+          "identification_hash": item.get("identification_hash"),
+          "account_id": item.get("account_id") if isinstance(item.get("account_id"), dict) else None,
+        }
+      )
+    return out
+  return []
+
+
+def _resolve_session_accounts(session: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+  accounts = _normalize_session_accounts(session)
+  if accounts:
+    return session, accounts
+  session_id = str(session.get("session_id") or "").strip()
+  if not session_id:
+    return session, []
+  try:
+    refreshed = get_session(session_id)
+  except Exception:
+    logger.warning("GET /sessions/%s fallito dopo create senza conti", session_id, exc_info=True)
+    return session, []
+  return refreshed, _normalize_session_accounts(refreshed)
+
+
 def _pick_session_account(session: Dict[str, Any], prefer_iban: Optional[str] = None) -> Dict[str, Any]:
-  accounts = session.get("accounts") if isinstance(session, dict) else None
-  if not isinstance(accounts, list) or not accounts:
-    raise RuntimeError("Sessione Enable Banking senza conti autorizzati")
+  session, accounts = _resolve_session_accounts(session)
+  if not accounts:
+    iban_hint = (prefer_iban or "").replace(" ", "").upper()
+    raise RuntimeError(
+      "Sessione Enable Banking senza conti autorizzati. "
+      "Se l'app è in Restricted Mode, nel Control Panel Enable Banking "
+      "devi collegare (whitelist) l'IBAN del conto"
+      + (f" {iban_hint}" if iban_hint else "")
+      + " con «Activate by linking accounts», poi ripetere l'autorizzazione. "
+      "Senza IBAN in whitelist la sessione torna vuota anche dopo OTP corretto."
+    )
   prefer = (prefer_iban or "").replace(" ", "").upper()
   if prefer:
     for acc in accounts:
@@ -461,6 +523,7 @@ def begin_enable_banking_connect(
       aspsp_name=aspsp_name or None,
       aspsp_country=aspsp_country or None,
       psu_type=psu_type,
+      prefer_iban=row.iban,
     )
   row.connection_status = "pending"
   if auth.get("aspsp_name"):

@@ -617,6 +617,41 @@ export function BancaContiPage() {
     await reload()
   }
 
+  async function syncAllBccAccounts() {
+    const bcc = items.filter(isBccTerraOtrantoAccount)
+    if (!bcc.length) {
+      setError("Nessun conto BCC Terra d'Otranto in elenco. Crea prima i conti BCC.")
+      return
+    }
+    const connected = bcc.filter((a) => a.enable_banking_connected)
+    if (!connected.length) {
+      const prefer =
+        bcc.find((a) => String(a.company || '').toLowerCase() === 'via_lattea') || bcc[0]
+      await startEnableBanking(prefer.id)
+      return
+    }
+    setError('')
+    setSuccess('')
+    let totalImported = 0
+    for (const acc of connected) {
+      setBusyId(acc.id)
+      try {
+        const res = await syncEnableBankingAccount(acc.id)
+        totalImported += Number(res?.imported || 0)
+      } catch (err) {
+        setError(err?.message || `Sync fallito per ${acc.bank_name}`)
+        setBusyId(null)
+        await reload()
+        return
+      }
+    }
+    setBusyId(null)
+    setSuccess(
+      `BCC sincronizzato: ${connected.length} conti, ${totalImported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+    )
+    await reload()
+  }
+
   async function startConnect(accountId) {
     setBusyId(accountId)
     setError('')
@@ -796,6 +831,39 @@ export function BancaContiPage() {
         </section>
       ) : null}
 
+      {items.some(isBccTerraOtrantoAccount) ? (
+        <section className="card fatture-panel">
+          <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
+          <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+            Scarica saldi e movimenti da BCC Terra d&apos;Otranto e li mostra in Atlas
+            (Conti + Movimenti banca).
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+              onClick={syncAllBccAccounts}
+              title="Collega o sincronizza i conti BCC via Enable Banking"
+            >
+              {busyId != null && items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a))
+                ? 'Sincronizzo…'
+                : items.some((a) => isBccTerraOtrantoAccount(a) && a.enable_banking_connected)
+                  ? 'Sincronizza conti BCC'
+                  : 'Collega e sincronizza BCC'}
+            </button>
+            <Link className="btn btn-secondary" to="/banca/movimenti">
+              Vedi movimenti
+            </Link>
+          </div>
+          {!connectProfile?.enable_banking?.configured ? (
+            <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+              Enable Banking non configurato sul server.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Collega conto</h2>
         <form onSubmit={onCreate} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -920,7 +988,7 @@ export function BancaContiPage() {
                   >
                     {busyId === a.id
                       ? '…'
-                      : isBppbAccount(a)
+                      : isBppbAccount(a) || isBccTerraOtrantoAccount(a)
                         ? 'Sincronizza conti'
                         : 'Sincronizza'}
                   </button>
@@ -932,7 +1000,7 @@ export function BancaContiPage() {
                     onClick={() => startEnableBanking(a.id)}
                     title="Collega via Enable Banking (SCA + consenso API)"
                   >
-                    {isBppbAccount(a) ? 'Collega BPPB' : 'Enable Banking'}
+                    {isBppbAccount(a) ? 'Collega BPPB' : isBccTerraOtrantoAccount(a) ? 'Collega BCC' : 'Enable Banking'}
                   </button>
                 )}
                 {!a.enable_banking_connected && a.connection_status !== 'connected' ? (
