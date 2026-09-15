@@ -1839,14 +1839,15 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
   }, [formGenere, editingShiftId, hiddenPlanningSections])
 
-  const loadForRange = useCallback(async (startDate, endDate) => {
+  const loadForRange = useCallback(async (startDate, endDate, membersOverride) => {
     const from = toYMD(startDate)
     const to = toYMD(endDate)
+    const memberList = Array.isArray(membersOverride) ? membersOverride : members
     const sh =
       operatorMode && operatorStationId
         ? await fetchOperatorStationShifts(operatorStationId, from, to)
         : await fetchStaffShifts(from, to)
-    setShifts(normalizeShiftRows(sh, members))
+    setShifts(normalizeShiftRows(sh, memberList))
   }, [members, operatorMode, operatorStationId])
 
   const stationStaffLocaleName = useMemo(
@@ -2067,7 +2068,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [weekAnchor])
 
   const markPlanningStale = useCallback(() => {
-    setShifts([])
+    // Non svuotare la griglia: i turni restano visibili finché non arriva il nuovo caricamento.
     setPlanningLoaded(false)
   }, [])
 
@@ -2085,19 +2086,18 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setWeekAnchor(range.weekAnchor)
   }, [])
 
-  const reloadPlanning = useCallback(async () => {
+  const reloadPlanning = useCallback(async (membersOverride) => {
     setLoading(true)
     setError('')
     try {
       if (planView === 'week') {
-        await loadForRange(weekAnchor, addDays(weekAnchor, 6))
+        await loadForRange(weekAnchor, addDays(weekAnchor, 6), membersOverride)
       } else if (planView === 'day') {
-        await loadForRange(dayFocus, dayFocus)
+        await loadForRange(dayFocus, dayFocus, membersOverride)
       } else {
         const n = daysInclusiveCount(periodFrom, periodTo)
         if (n > MAX_PLANNING_PERIOD_DAYS) {
           setError(`Intervallo troppo lungo (${n} giorni). Massimo ${MAX_PLANNING_PERIOD_DAYS} giorni: restringi «Dal» / «Al».`)
-          setShifts([])
           setPlanningLoaded(false)
           return
         }
@@ -2105,7 +2105,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         const fb = toYMD(periodTo)
         const start = fa <= fb ? periodFrom : periodTo
         const end = fa <= fb ? periodTo : periodFrom
-        await loadForRange(start, end)
+        await loadForRange(start, end, membersOverride)
       }
       setPlanningLoaded(true)
     } catch (e) {
@@ -2766,6 +2766,25 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     ? isOperatorStationStaffSessionOpen(operatorStationId, localeStaffName || stationStaffLocaleName)
     : isStaffLocaleSessionOpen(localeStaffName)
 
+  // Con locale aperto: ricarica i turni a ogni cambio settimana/giorno/periodo (restano sempre visibili).
+  useEffect(() => {
+    if (!activeLocaleSessionOpen) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        await reloadPlanning()
+      } catch {
+        if (!cancelled) {
+          /* errore già gestito in reloadPlanning */
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLocaleSessionOpen, planView, weekAnchor, dayFocus, periodFrom, periodTo])
+
   function findLocaleStoreKey(store, localeName) {
     const names = Object.keys(store || {})
     const slug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
@@ -3149,8 +3168,23 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       setStaffLocaleSessionOpen(localeName, true)
       setMembersBackupLocale(localeName)
-      await loadMembersFromLocalePackSilently(localeName, code)
-      setSuccess(`Locale «${localeName}» aperto. Usa Chiudi per bloccarlo di nuovo.`)
+      const mem = await loadMembersFromLocalePackSilently(localeName, code)
+      await reloadPlanning(Array.isArray(mem) ? mem : [])
+      let savedOk = false
+      if (Array.isArray(mem) && mem.length > 0) {
+        try {
+          await handleSaveMembersByLocale({ members: mem, quiet: true })
+          savedOk = true
+        } catch {
+          savedOk = false
+        }
+      }
+      setSuccess(
+        savedOk
+          ? `Locale «${localeName}» aperto. Piano caricato e dipendenti salvati automaticamente.`
+          : `Locale «${localeName}» aperto. Piano caricato.` +
+              (Array.isArray(mem) && mem.length === 0 ? ' Nessun dipendente nel pack locale.' : ''),
+      )
     } finally {
       setLocaleSessionBusy(false)
     }
@@ -3488,7 +3522,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
   }, [refreshSavedLocaleNames, refreshBackupMeta, refreshPayrollBackupOptions])
 
-  async function handleSaveMembersByLocale() {
+  async function handleSaveMembersByLocale(opts = {}) {
+    const quiet = Boolean(opts?.quiet)
+    const memberRows = Array.isArray(opts?.members) ? opts.members : members
     const localeName = normalizeLocaleName(localeStaffName)
     if (!localeName) {
       setError('Inserisci il nome del locale prima di salvare i dipendenti')
@@ -3496,7 +3532,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
     try {
       setError('')
-      const snapshot = members.map(memberSnapshotFromRow)
+      const snapshot = memberRows.map(memberSnapshotFromRow)
       const sectionsForPack = resolveLocaleSections({
         localeName: localeName,
         savedSections: localeSections,
@@ -3537,20 +3573,24 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         const msg = err?.message || ''
         await refreshSavedLocaleNames()
         if (isOfflineQueuedMessage(msg)) {
-          setSuccess(
-            `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — condividilo con il personale. Verrà sincronizzata quando torna la connessione.`,
-          )
+          if (!quiet) {
+            setSuccess(
+              `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — condividilo con il personale. Verrà sincronizzata quando torna la connessione.`,
+            )
+          }
         } else {
           setError(msg || 'Salvato solo su questo browser: il server non ha ricevuto il locale (riprova con connessione attiva).')
         }
         return
       }
       await refreshSavedLocaleNames()
-      setSuccess(
-        check.renamed
-          ? `${check.message} Codice zona: ${accessCode}.`
-          : `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — solo chi conosce il codice può caricare questo locale.`,
-      )
+      if (!quiet) {
+        setSuccess(
+          check.renamed
+            ? `${check.message} Codice zona: ${accessCode}.`
+            : `Lista dipendenti salvata per "${saveName}" (${snapshot.length} elementi). Codice zona: ${accessCode} — solo chi conosce il codice può caricare questo locale.`,
+        )
+      }
     } catch {
       setError('Errore nel salvataggio locale dei dipendenti')
     }
@@ -3792,7 +3832,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       mem,
     )
     applyHiddenPlanningSectionsFromSources(pack.hidden_planning_sections)
-    markPlanningStale()
     return mem
   }
 
@@ -3844,7 +3883,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         mem,
       )
       applyHiddenPlanningSectionsFromSources(pack.hidden_planning_sections)
-      markPlanningStale()
+      await reloadPlanning(mem)
       setMemberInfoId(null)
       setEditingShiftId(null)
       setFormMemberIds(new Set())
