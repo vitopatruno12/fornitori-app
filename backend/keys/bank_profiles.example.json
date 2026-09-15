@@ -32,13 +32,27 @@
     "label": "BCC Terra d'Otranto — Via Lattea",
     "company": "via_lattea",
     "bank_name": "BCC Terra d'Otranto",
+    "iban": "IT37M0844516000000000967252",
+    "account_number": "00000967252",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "4625919e-22a1-4d40-8267-7587ff2360c0",
+    "enable_banking_key_path": "./keys/4625919e-22a1-4d40-8267-7587ff2360c0.pem",
+    "enabled": true
+  },
+  {
+    "id": "bcc_mediazione",
+    "label": "BCC Terra d'Otranto — Mediazione",
+    "company": "mediazione_a",
+    "bank_name": "BCC Terra d'Otranto",
     "iban": "IT06B0844516000000000972450",
     "account_number": "00000972450",
     "username": "",
     "password": "",
     "portal_url": "",
-    "enable_banking_app_id": "cb06af4c-419a-4867-b1f2-73ed0c0adef1",
-    "enable_banking_key_path": "./keys/cb06af4c-419a-4867-b1f2-73ed0c0adef1.pem",
+    "enable_banking_app_id": "4625919e-22a1-4d40-8267-7587ff2360c0",
+    "enable_banking_key_path": "./keys/4625919e-22a1-4d40-8267-7587ff2360c0.pem",
     "enabled": true
   }
 ]

@@ -93,11 +93,24 @@ try:
         db,
         bank_name="BCC Terra d'Otranto",
         account_name="Via Lattea · BCC Terra d'Otranto",
-        iban="IT06B0844516000000000972450",
+        iban="IT37M0844516000000000967252",
         company="via_lattea",
         ledger_code="1100",
         notes=(
             "LA VIA LATTEA · BCC Terra d'Otranto S.C. · "
+            "IBAN IT37M0844516000000000967252 · BIC ICRAITRRCD0 · "
+            "ABI 08445 CAB 16000 CC 00000967252"
+        ),
+    )
+    ensure(
+        db,
+        bank_name="BCC Terra d'Otranto",
+        account_name="Mediazione · BCC Terra d'Otranto",
+        iban="IT06B0844516000000000972450",
+        company="mediazione_a",
+        ledger_code="1100",
+        notes=(
+            "MEDIAZIONE · BCC Terra d'Otranto S.C. · "
             "IBAN IT06B0844516000000000972450 · BIC ICRAITRRCD0 · "
             "ABI 08445 CAB 16000 CC 00000972450 · "
             "Sede Via C. Battisti 27, 73041 Carmiano (LE)"
