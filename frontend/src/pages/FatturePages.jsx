@@ -1182,11 +1182,24 @@ export function FattureDaRegistrarePage() {
           totalsLabel={moneyTotalsLabel}
           emptyMessage="Nessuna fattura da registrare con i filtri selezionati."
           actionsHeader="Azioni"
-          renderActions={() => (
-            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/registrate">
-              Apri storico
-            </FattureLink>
-          )}
+          renderActions={(row) => {
+            const params = new URLSearchParams()
+            if (row?.supplier_id != null && row.supplier_id !== '') {
+              params.set('supplier_id', String(row.supplier_id))
+            } else if (row?.supplier_name) {
+              params.set('supplier', String(row.supplier_name).trim())
+            }
+            if (companyId) params.set('company', String(companyId))
+            const qs = params.toString()
+            return (
+              <FattureLink
+                className="btn btn-secondary btn-sm"
+                to={qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'}
+              >
+                Apri storico
+              </FattureLink>
+            )
+          }}
         />
       </section>
     </FatturePageShell>

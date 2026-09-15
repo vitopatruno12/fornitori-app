@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { AmministrazionePageShell, eur, formatDate } from '../components/BancaShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
@@ -150,6 +152,51 @@ function printMastro(account, periodLabel) {
     return
   }
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+function exportElencoPdf({ accounts, companyLabelText, periodLabel }) {
+  const rows = Array.isArray(accounts) ? accounts : []
+  if (!rows.length) return
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageW = doc.internal.pageSize.getWidth()
+  const generatedAt = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+
+  doc.setFontSize(16)
+  doc.text('Elenco mastrini / piano dei conti', 14, 14)
+  doc.setFontSize(10)
+  doc.setTextColor(60, 60, 60)
+  doc.text(`Società: ${companyLabelText || '—'}`, 14, 21)
+  doc.text(`Periodo: ${periodLabel || '—'}`, 14, 27)
+  doc.text(`Generato: ${generatedAt}`, pageW - 14, 14, { align: 'right' })
+
+  const body = rows.map((r) => [
+    r.code || '',
+    r.description || '',
+    r.category || '',
+    eur(r.totalDare),
+    eur(r.totalAvere),
+    eur(r.finalBalance),
+    r.status || '',
+  ])
+
+  autoTable(doc, {
+    startY: 32,
+    head: [['Codice', 'Descrizione', 'Categoria', 'Dare', 'Avere', 'Saldo', 'Stato']],
+    body,
+    styles: { fontSize: 8, cellPadding: 1.8 },
+    headStyles: { fillColor: [17, 76, 95], textColor: 255 },
+    alternateRowStyles: { fillColor: [245, 248, 250] },
+    margin: { left: 10, right: 10 },
+    columnStyles: {
+      1: { cellWidth: 70 },
+    },
+  })
+
+  const safeCompany = String(companyLabelText || 'mastrini')
+    .replace(/[^\w\-]+/g, '_')
+    .slice(0, 40)
+  doc.save(`mastrini_elenco_${safeCompany || 'export'}.pdf`)
 }
 
 function registrateHref(mv) {
@@ -789,6 +836,14 @@ export default function MastriniContabiliPage() {
     downloadFile('mastrini_elenco.csv', toCsv(rows), 'text/csv;charset=utf-8')
   }
 
+  function exportListPdf() {
+    exportElencoPdf({
+      accounts: filteredAccounts,
+      companyLabelText: selectedCompanyLabel,
+      periodLabel,
+    })
+  }
+
   return (
     <AmministrazionePageShell
       title="Schede contabili / Mastrini"
@@ -889,6 +944,14 @@ export default function MastriniContabiliPage() {
             disabled={!filteredAccounts.length || !companyId}
           >
             Elenco Excel
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={exportListPdf}
+            disabled={!filteredAccounts.length || !companyId}
+          >
+            Elenco PDF
           </button>
         </div>
       </section>
@@ -1289,10 +1352,6 @@ export default function MastriniContabiliPage() {
                   : ''
             }
           />
-          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-            Fonti: Prima Nota con codici Passcom per locale (100x cassa, 410x ricavi, 510x costi). Fatture e banca restano disponibili con «Tutte le fonti».
-            Colonne Causale e Contropartita seguono il modello scheda contabile Passcom.
-          </p>
         </section>
       ) : null}
 

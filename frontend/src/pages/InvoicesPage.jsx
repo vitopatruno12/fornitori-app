@@ -230,7 +230,21 @@ export default function InvoicesPage() {
     const qNum = String(searchParams.get('n') || '').trim()
     const qCompany = String(searchParams.get('company') || '').trim()
     const qSupplier = String(searchParams.get('supplier_id') || '').trim()
-    if (!qId && !qNum) return
+    const qSupplierName = String(searchParams.get('supplier') || '').trim()
+
+    // Deep-link solo filtro fornitore (es. Da registrare → Apri storico della riga)
+    if (!qId && !qNum) {
+      if (qCompany && gestionaleMode) {
+        changeScopeMode('company')
+        if (companyId !== qCompany) setCompanyId(qCompany)
+      }
+      if (qSupplier) {
+        if (supplierId !== qSupplier) setSupplierId(qSupplier)
+      } else if (qSupplierName) {
+        setPendingSupplierLabel(qSupplierName)
+      }
+      return
+    }
 
     const targetKey = qId ? `id:${qId}` : `n:${qNum}`
     if (focusHandledRef.current === targetKey) return
@@ -242,6 +256,8 @@ export default function InvoicesPage() {
     }
     if (qSupplier) {
       if (supplierId !== qSupplier) setSupplierId(qSupplier)
+    } else if (qSupplierName) {
+      setPendingSupplierLabel(qSupplierName)
     } else if (supplierId) {
       setSupplierId('')
       return
