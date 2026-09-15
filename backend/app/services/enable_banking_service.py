@@ -164,6 +164,12 @@ def make_jwt(*, ttl_sec: int = 3600) -> str:
   app_id = cfg.get("app_id")
   if not app_id:
     raise RuntimeError("ENABLE_BANKING_APP_ID mancante")
+  try:
+    private_key = _load_private_key()
+  except RuntimeError:
+    raise
+  except Exception as exc:
+    raise RuntimeError(f"Chiave Enable Banking non leggibile ({cfg.get('key_path')}): {exc}") from exc
   iat = int(datetime.now(timezone.utc).timestamp())
   payload = {
     "iss": "enablebanking.com",
@@ -171,12 +177,18 @@ def make_jwt(*, ttl_sec: int = 3600) -> str:
     "iat": iat,
     "exp": iat + max(60, min(ttl_sec, 86400)),
   }
-  token = pyjwt.encode(
-    payload,
-    _load_private_key(),
-    algorithm="RS256",
-    headers={"kid": app_id, "typ": "JWT", "alg": "RS256"},
-  )
+  try:
+    token = pyjwt.encode(
+      payload,
+      private_key,
+      algorithm="RS256",
+      headers={"kid": app_id, "typ": "JWT", "alg": "RS256"},
+    )
+  except Exception as exc:
+    raise RuntimeError(
+      f"Firma JWT Enable Banking fallita (app {app_id}). "
+      f"Verifica che il file .pem corrisponda all'App ID. Dettaglio: {exc}"
+    ) from exc
   if isinstance(token, bytes):
     return token.decode("ascii")
   return str(token)
@@ -489,7 +501,8 @@ def complete_enable_banking_callback(
     if iban and not row.iban:
       row.iban = iban[:34]
     bank_label = (row.eb_aspsp_name or row.bank_name or "Banca").strip()
-    if row.bank_name.strip().lower() in {"banca", "conto principale"} and row.eb_aspsp_name:
+    current_bank = (row.bank_name or "").strip().lower()
+    if current_bank in {"banca", "conto principale", ""} and row.eb_aspsp_name:
       row.bank_name = row.eb_aspsp_name[:160]
 
     try:

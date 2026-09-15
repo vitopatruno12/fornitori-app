@@ -130,6 +130,11 @@ def banca_enable_banking_auth(
     raise HTTPException(status_code=400, detail=str(e)) from e
   except RuntimeError as e:
     raise HTTPException(status_code=502, detail=str(e)) from e
+  except Exception as e:
+    raise HTTPException(
+      status_code=502,
+      detail=f"Enable Banking auth fallita: {type(e).__name__}: {e}",
+    ) from e
 
 
 @router.get("/callback")

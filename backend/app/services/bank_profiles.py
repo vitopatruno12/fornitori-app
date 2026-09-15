@@ -156,13 +156,14 @@ def _global_env_profile() -> BankProfile:
 
 
 def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> BankProfile:
-  """Trova profilo per IBAN, id profilo o società; fallback su BANK_* .env.
+  """Trova profilo per IBAN, id profilo, banca o società; fallback su BANK_* .env.
 
-  Priorità: profile_id → IBAN esatto → società (match univoco) → .env / primo con credenziali.
+  Priorità: profile_id → IBAN esatto → società+nome banca → società (match univoco) → .env.
   """
   acct = account or {}
   iban = _normalize_iban(acct.get("iban"))
   company = str(acct.get("company") or "").strip().lower()
+  bank_name = str(acct.get("bank_name") or "").strip().lower()
   profile_id = str(acct.get("bank_profile_id") or acct.get("credentials_profile_id") or "").strip().lower()
 
   profiles = load_profiles()
@@ -175,8 +176,32 @@ def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> Ban
     if iban and prof.iban and prof.iban == iban:
       return prof
 
+  def _bank_hint_match(a: str, b: str) -> bool:
+    if not a or not b:
+      return False
+    if "otranto" in a or ("bcc" in a and "terra" in a):
+      return "otranto" in b or ("bcc" in b and "terra" in b) or "bcc" in b and "otranto" in b
+    if "bppb" in a or "puglia" in a or "basilicata" in a:
+      return "bppb" in b or "puglia" in b or "basilicata" in b
+    return False
+
   if company:
     company_matches = [p for p in profiles if p.company and p.company == company]
+    if bank_name and company_matches:
+      for prof in company_matches:
+        if _bank_hint_match(bank_name, (prof.bank_name or "").lower()) or _bank_hint_match(
+          (prof.bank_name or "").lower(), bank_name
+        ):
+          return prof
+      # Match su id profilo (es. bcc_via_lattea)
+      for prof in company_matches:
+        pid = (prof.id or "").lower()
+        if "bcc" in bank_name or "otranto" in bank_name:
+          if "bcc" in pid:
+            return prof
+        if "bppb" in bank_name or "puglia" in bank_name:
+          if "bppb" in pid:
+            return prof
     if len(company_matches) == 1:
       return company_matches[0]
     # Più conti stessa società: preferisci quello con credenziali / EB se IBAN non c'è
