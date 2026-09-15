@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
@@ -43,6 +44,7 @@ function workbookFromApi(data) {
 }
 
 export default function PagamentiPage() {
+  const navigate = useNavigate()
   const [workbook, setWorkbook] = useState(() => recalculateWorkbook(seedWorkbook))
   const [activeSheet, setActiveSheet] = useState(seedWorkbook.sheets[0]?.name || 'GENNAIO')
   const [loading, setLoading] = useState(true)
@@ -58,6 +60,14 @@ export default function PagamentiPage() {
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false)
   const uploadInputRef = useRef(null)
   const highlightMenuRef = useRef(null)
+
+  function handleBack() {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1)
+      return
+    }
+    navigate('/fatture')
+  }
 
   const refreshWorkbook = useCallback(async () => {
     setLoading(true)
@@ -336,6 +346,9 @@ export default function PagamentiPage() {
             {dirty ? <span className="pagamenti-workbook-dirty">Modifiche non salvate</span> : null}
           </div>
           <div className="pagamenti-workbook-actions">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleBack}>
+              ← Torna indietro
+            </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"

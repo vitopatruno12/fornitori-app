@@ -810,22 +810,6 @@ export default function MastriniContabiliPage() {
             <button type="button" className="btn btn-primary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
               {loading ? 'Aggiorno…' : 'Aggiorna'}
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={exportListExcel}
-              disabled={!filteredAccounts.length || !companyId}
-            >
-              Elenco Excel
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => schedaAccount && printMastro(schedaAccount, periodLabel)}
-              disabled={!schedaAccount || viewMode === 'selezione' || !companyId}
-            >
-              Stampa scheda
-            </button>
           </div>
         </aside>
       }
@@ -897,6 +881,14 @@ export default function MastriniContabiliPage() {
             onClick={() => setViewMode('partitario')}
           >
             Partitario PN/banca
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={exportListExcel}
+            disabled={!filteredAccounts.length || !companyId}
+          >
+            Elenco Excel
           </button>
         </div>
       </section>
