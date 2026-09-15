@@ -75,14 +75,41 @@ function resolveEnableBankingPayload(account) {
 
 function isBccTerraOtrantoAccount(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
-  const label = `${bank} ${String(account?.account_name || '').toLowerCase()}`
+  const label = `${bank} ${String(account?.account_name || '').toLowerCase()} ${String(account?.notes || '').toLowerCase()}`
   return (
     bank.includes('terra')
     || bank.includes("d'otranto")
     || bank.includes('dotranto')
-    || (bank.includes('bcc') && (label.includes('otranto') || label.includes('carmiano')))
+    || bank.includes('bcc')
+    || label.includes('otranto')
+    || label.includes('carmiano')
+    || (String(account?.iban || '').replace(/\s/g, '').toUpperCase().startsWith('IT')
+      && ['IT37M0844516000000000967252', 'IT06B0844516000000000972450'].includes(
+        String(account?.iban || '').replace(/\s/g, '').toUpperCase(),
+      ))
   )
 }
+
+const BCC_SEED_ACCOUNTS = [
+  {
+    bank_name: "BCC Terra d'Otranto",
+    account_name: "Via Lattea · BCC Terra d'Otranto",
+    iban: 'IT37M0844516000000000967252',
+    company: 'via_lattea',
+    ledger_code: '1100',
+    notes:
+      "LA VIA LATTEA · BCC Terra d'Otranto S.C. · IBAN IT37M0844516000000000967252 · BIC ICRAITRRCD0",
+  },
+  {
+    bank_name: "BCC Terra d'Otranto",
+    account_name: "Mediazione · BCC Terra d'Otranto",
+    iban: 'IT06B0844516000000000972450',
+    company: 'mediazione_a',
+    ledger_code: '1100',
+    notes:
+      "MEDIAZIONE · BCC Terra d'Otranto S.C. · IBAN IT06B0844516000000000972450 · BIC ICRAITRRCD0 · Carmiano (LE)",
+  },
+]
 
 function isBppbAccount(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
@@ -618,9 +645,34 @@ export function BancaContiPage() {
   }
 
   async function syncAllBccAccounts() {
-    const bcc = items.filter(isBccTerraOtrantoAccount)
+    let bcc = items.filter(isBccTerraOtrantoAccount)
     if (!bcc.length) {
-      setError("Nessun conto BCC Terra d'Otranto in elenco. Crea prima i conti BCC.")
+      setBusyId(-1)
+      setError('')
+      setSuccess('')
+      try {
+        const existingIbans = new Set(
+          items.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
+        )
+        for (const seed of BCC_SEED_ACCOUNTS) {
+          const iban = seed.iban.replace(/\s/g, '').toUpperCase()
+          if (existingIbans.has(iban)) continue
+          await createBancaAccount(seed)
+        }
+        const res = await fetchBancaAccounts()
+        const next = Array.isArray(res?.items) ? res.items : []
+        setItems(next)
+        bcc = next.filter(isBccTerraOtrantoAccount)
+      } catch (err) {
+        setError(err?.message || 'Impossibile creare i conti BCC')
+        setBusyId(null)
+        return
+      } finally {
+        setBusyId(null)
+      }
+    }
+    if (!bcc.length) {
+      setError("Nessun conto BCC Terra d'Otranto in elenco.")
       return
     }
     const connected = bcc.filter((a) => a.enable_banking_connected)
@@ -831,38 +883,36 @@ export function BancaContiPage() {
         </section>
       ) : null}
 
-      {items.some(isBccTerraOtrantoAccount) ? (
-        <section className="card fatture-panel">
-          <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
-          <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-            Scarica saldi e movimenti da BCC Terra d&apos;Otranto e li mostra in Atlas
-            (Conti + Movimenti banca).
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
+        <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+          Scarica saldi e movimenti da BCC Terra d&apos;Otranto e li mostra in Atlas
+          (Conti + Movimenti banca). Se i conti non ci sono, li crea automaticamente.
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+            onClick={syncAllBccAccounts}
+            title="Collega o sincronizza i conti BCC via Enable Banking"
+          >
+            {busyId != null && (busyId === -1 || items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a)))
+              ? 'Sincronizzo…'
+              : items.some((a) => isBccTerraOtrantoAccount(a) && a.enable_banking_connected)
+                ? 'Sincronizza conti BCC'
+                : 'Collega e sincronizza BCC'}
+          </button>
+          <Link className="btn btn-secondary" to="/banca/movimenti">
+            Vedi movimenti
+          </Link>
+        </div>
+        {!connectProfile?.enable_banking?.configured ? (
+          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+            Enable Banking non configurato sul server.
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-              onClick={syncAllBccAccounts}
-              title="Collega o sincronizza i conti BCC via Enable Banking"
-            >
-              {busyId != null && items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a))
-                ? 'Sincronizzo…'
-                : items.some((a) => isBccTerraOtrantoAccount(a) && a.enable_banking_connected)
-                  ? 'Sincronizza conti BCC'
-                  : 'Collega e sincronizza BCC'}
-            </button>
-            <Link className="btn btn-secondary" to="/banca/movimenti">
-              Vedi movimenti
-            </Link>
-          </div>
-          {!connectProfile?.enable_banking?.configured ? (
-            <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-              Enable Banking non configurato sul server.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
+        ) : null}
+      </section>
 
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Collega conto</h2>
