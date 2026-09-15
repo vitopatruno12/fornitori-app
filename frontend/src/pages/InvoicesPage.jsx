@@ -824,22 +824,6 @@ export default function InvoicesPage() {
               setDateFrom('')
               setDateTo('')
               setShowIgnored(false)
-              setSearchParams({}, { replace: true })
-            }}
-            title="Mostra di nuovo tutto lo storico senza filtro fornitore"
-          >
-            ← Torna all&apos;elenco
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              setSupplierId('')
-              setDueFilter('')
-              setMonthFilter('')
-              setDateFrom('')
-              setDateTo('')
-              setShowIgnored(false)
             }}
           >
             Reset filtri
