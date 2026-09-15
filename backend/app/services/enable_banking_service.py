@@ -280,14 +280,18 @@ def start_authorization(
   country = (aspsp_country or cfg["aspsp_country"] or "FI").strip().upper()
   valid_until = (datetime.now(timezone.utc) + timedelta(days=int(cfg["consent_days"]))).isoformat()
   state = build_state(account_id)
-  access: Dict[str, Any] = {
-    "valid_until": valid_until,
-    "balances": True,
-    "transactions": True,
-  }
-  iban = (prefer_iban or "").replace(" ", "").upper()
-  if iban:
-    access["accounts"] = [{"iban": iban}]
+  # Access minimo: BCC Terra d'Otranto (beta) spesso risponde server_error se si
+  # forzano accounts/balances/transactions nel consenso.
+  access: Dict[str, Any] = {"valid_until": valid_until}
+  # Per banche stabili (es. BPPB) si può richiedere l'IBAN; per BCC/beta no.
+  bank_l = name.lower()
+  is_bcc_beta = "bcc" in bank_l or "otranto" in bank_l
+  if not is_bcc_beta:
+    access["balances"] = True
+    access["transactions"] = True
+    iban = (prefer_iban or "").replace(" ", "").upper()
+    if iban:
+      access["accounts"] = [{"iban": iban}]
   body = {
     "access": access,
     "aspsp": {"name": name, "country": country},
@@ -306,6 +310,7 @@ def start_authorization(
     "aspsp_name": name,
     "aspsp_country": country,
     "redirect_url": cfg["redirect_url"],
+    "psu_type": body["psu_type"],
     "message": f"Apri il link per autenticarti su {name} ({country}).",
   }
 

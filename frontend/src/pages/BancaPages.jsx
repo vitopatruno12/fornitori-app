@@ -471,7 +471,13 @@ export function BancaContiPage() {
           : 'Enable Banking collegato correttamente.',
       )
     } else if (eb === 'error') {
-      setError(params.get('msg') || 'Collegamento Enable Banking non riuscito')
+      const raw = params.get('msg') || 'Collegamento Enable Banking non riuscito'
+      const low = raw.toLowerCase()
+      setError(
+        low.includes('server_error')
+          ? "BCC/Enable Banking: errore lato banca (server_error). Riprova con l'altro canale (privato↔impresa). Se persiste, controlla i log ASPSP nel Control Panel Enable Banking (app 4625919e…)."
+          : raw,
+      )
     }
     params.delete('eb')
     params.delete('msg')
