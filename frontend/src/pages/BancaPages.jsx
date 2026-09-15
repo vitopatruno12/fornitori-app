@@ -65,10 +65,23 @@ function resolveEnableBankingPayload(account) {
     return {
       aspsp_name: "BCC Terra d'Otranto",
       aspsp_country: 'IT',
-      psu_type: 'business',
+      // Di default privato: il token fisico RelaxBanking spesso è su canale personal.
+      // Se l'OTP resta in loop, riprovare con business dal dialogo di collegamento.
+      psu_type: 'personal',
     }
   }
   return { psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal' }
+}
+
+function isBccTerraOtrantoAccount(account) {
+  const bank = String(account?.bank_name || '').toLowerCase()
+  const label = `${bank} ${String(account?.account_name || '').toLowerCase()}`
+  return (
+    bank.includes('terra')
+    || bank.includes("d'otranto")
+    || bank.includes('dotranto')
+    || (bank.includes('bcc') && (label.includes('otranto') || label.includes('carmiano')))
+  )
 }
 
 function isBppbAccount(account) {
@@ -523,7 +536,17 @@ export function BancaContiPage() {
     setSuccess('')
     try {
       const account = items.find((x) => x.id === accountId)
-      const payload = resolveEnableBankingPayload(account)
+      let payload = resolveEnableBankingPayload(account)
+      if (isBccTerraOtrantoAccount(account) || payload.aspsp_name === "BCC Terra d'Otranto") {
+        const useBusiness = window.confirm(
+          "BCC Terra d'Otranto su Enable Banking è in beta.\n\n" +
+            'Se il token fisico resta sulla stessa pagina OTP, spesso il canale è sbagliato.\n\n' +
+            'OK = accesso IMPRESA (business)\n' +
+            'Annulla = accesso PRIVATO (personal)\n\n' +
+            'Prova prima PRIVATO (Annulla); se non va, ripeti con IMPRESA (OK).',
+        )
+        payload = { ...payload, psu_type: useBusiness ? 'business' : 'personal' }
+      }
       const res = await startEnableBankingAuth(accountId, payload)
       if (res?.url) {
         setSuccess(res.message || 'Reindirizzamento alla banca…')
