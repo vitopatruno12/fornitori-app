@@ -1269,6 +1269,10 @@ export function FatturePagatePage() {
     setSelectedSupplierKey('')
   }
 
+  function backToSupplierList() {
+    resetFilters()
+  }
+
   function openSupplierDetail(row) {
     const name = String(row?.supplier_name || '').trim()
     setSelectedSupplierKey(row.id)
@@ -1394,12 +1398,23 @@ export function FatturePagatePage() {
 
           {!selectedSupplier ? (
             <>
-              <h2 className="fatture-panel-title">Per fornitore</h2>
-              <p className="fatture-note">
-                {filterSubtitle
-                  ? `Filtro attivo: ${filterSubtitle}. Clicca un fornitore per l'elenco fatture.`
-                  : "Premi Aggiorna dopo aver scelto il periodo. Poi clicca un fornitore per l'elenco fatture."}
-              </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                    Per fornitore
+                  </h2>
+                  <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                    {filterSubtitle
+                      ? `Filtro attivo: ${filterSubtitle}. Clicca un fornitore per l'elenco fatture.`
+                      : "Premi Aggiorna dopo aver scelto il periodo. Poi clicca un fornitore per l'elenco fatture."}
+                  </p>
+                </div>
+                {appliedSupplier || appliedDateFrom || appliedDateTo ? (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={backToSupplierList}>
+                    ← Torna all&apos;elenco
+                  </button>
+                ) : null}
+              </div>
               <VneWorkbookGrid
                 title="Fornitori — fatture pagate"
                 sheetLabel={`${suppliers.length} fornitori`}
@@ -1511,8 +1526,8 @@ export function FatturePagatePage() {
                   >
                     Scarica CSV
                   </button>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelectedSupplierKey('')}>
-                    Torna all&apos;elenco
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={backToSupplierList}>
+                    ← Torna all&apos;elenco
                   </button>
                 </div>
               </div>

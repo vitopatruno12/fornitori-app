@@ -4,7 +4,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureLink, FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
@@ -814,9 +814,22 @@ export default function InvoicesPage() {
             </label>
           </div>
           <button type="submit" className="btn btn-primary">Aggiorna</button>
-          <FattureLink className="btn btn-secondary" to="/fatture/da-registrare">
-            ← Torna all'elenco
-          </FattureLink>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setSupplierId('')
+              setDueFilter('')
+              setMonthFilter('')
+              setDateFrom('')
+              setDateTo('')
+              setShowIgnored(false)
+              setSearchParams({}, { replace: true })
+            }}
+            title="Mostra di nuovo tutto lo storico senza filtro fornitore"
+          >
+            ← Torna all&apos;elenco
+          </button>
           <button
             type="button"
             className="btn btn-secondary"
