@@ -1251,10 +1251,12 @@ export function FatturePagatePage() {
   }, [companyId])
 
   function applyFilters() {
-    setAppliedSupplier(draftSupplier)
+    const name = String(draftSupplier || '').trim()
+    setAppliedSupplier(name)
     setAppliedDateFrom(draftDateFrom)
     setAppliedDateTo(draftDateTo)
-    setSelectedSupplierKey('')
+    // Se scelgo un fornitore nel menu, apro subito la sua scheda
+    setSelectedSupplierKey(name ? supplierPartyKey(name) : '')
   }
 
   function resetFilters() {
@@ -1265,6 +1267,15 @@ export function FatturePagatePage() {
     setAppliedDateFrom('')
     setAppliedDateTo('')
     setSelectedSupplierKey('')
+  }
+
+  function openSupplierDetail(row) {
+    const name = String(row?.supplier_name || '').trim()
+    setSelectedSupplierKey(row.id)
+    if (name) {
+      setDraftSupplier(name)
+      setAppliedSupplier(name)
+    }
   }
 
   const filteredPaidRows = useMemo(
@@ -1403,7 +1414,7 @@ export function FatturePagatePage() {
                 totals={suppliers.length ? supplierTotals : null}
                 totalsLabel={moneyTotalsLabel}
                 emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati. Premi Aggiorna dopo aver impostato il periodo."
-                onRowClick={(row) => setSelectedSupplierKey(row.id)}
+                onRowClick={(row) => openSupplierDetail(row)}
                 rowClickTitle="Apri elenco fatture pagate del fornitore"
                 actionsHeader="Azioni"
                 renderActions={(row) => (
@@ -1412,7 +1423,7 @@ export function FatturePagatePage() {
                     className="btn btn-secondary btn-sm"
                     onClick={(e) => {
                       e.stopPropagation()
-                      setSelectedSupplierKey(row.id)
+                      openSupplierDetail(row)
                     }}
                   >
                     Scheda

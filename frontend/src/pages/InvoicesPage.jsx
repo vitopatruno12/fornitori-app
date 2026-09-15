@@ -4,7 +4,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { FattureLink, FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
@@ -43,6 +43,7 @@ export default function InvoicesPage() {
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const [searchParams, setSearchParams] = useSearchParams()
   const focusHandledRef = useRef('')
+  const urlFilterAppliedRef = useRef('')
   const [focusInvoiceId, setFocusInvoiceId] = useState('')
   const [scopeMode, setScopeMode] = useState(() => {
     try {
@@ -234,6 +235,11 @@ export default function InvoicesPage() {
 
     // Deep-link solo filtro fornitore (es. Da registrare → Apri storico della riga)
     if (!qId && !qNum) {
+      if (!qCompany && !qSupplier && !qSupplierName) return
+
+      const filterKey = `c:${qCompany}|s:${qSupplier}|n:${qSupplierName}`
+      if (urlFilterAppliedRef.current === filterKey) return
+
       if (qCompany && gestionaleMode) {
         changeScopeMode('company')
         if (companyId !== qCompany) setCompanyId(qCompany)
@@ -243,6 +249,14 @@ export default function InvoicesPage() {
       } else if (qSupplierName) {
         setPendingSupplierLabel(qSupplierName)
       }
+
+      // Rimuovi company/supplier dall'URL: altrimenti restano "appiccicati" e bloccano il cambio società.
+      urlFilterAppliedRef.current = filterKey
+      const cleaned = new URLSearchParams(searchParams)
+      cleaned.delete('company')
+      cleaned.delete('supplier_id')
+      cleaned.delete('supplier')
+      setSearchParams(cleaned, { replace: true })
       return
     }
 
@@ -800,6 +814,9 @@ export default function InvoicesPage() {
             </label>
           </div>
           <button type="submit" className="btn btn-primary">Aggiorna</button>
+          <FattureLink className="btn btn-secondary" to="/fatture/da-registrare">
+            ← Torna all'elenco
+          </FattureLink>
           <button
             type="button"
             className="btn btn-secondary"
