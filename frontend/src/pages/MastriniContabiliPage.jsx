@@ -487,8 +487,14 @@ export default function MastriniContabiliPage() {
   }
 
   React.useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Cambio società: non ricaricare subito — serve Aggiorna esplicito.
+    setData(null)
+    setWarnings([])
+    setError('')
+    setSelectedCode('')
+    setSelectedPartyKey('')
+    setSelectedFornitoreKey('')
+    setFornitoreDetailOpen(false)
   }, [companyId])
 
   const periodLabel = useMemo(() => {
@@ -756,7 +762,7 @@ export default function MastriniContabiliPage() {
 
   const accountOptionsForSelect = accountOptions.length ? accountOptions : ACCOUNT_PLAN
 
-  async function openScheda(e) {
+  function openScheda(e) {
     e?.preventDefault?.()
     if (!companyId) {
       setError('Seleziona una società dal menu nel banner verde.')
@@ -766,8 +772,13 @@ export default function MastriniContabiliPage() {
       setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
       return
     }
-    await load()
+    // Solo apre la vista: i dati si aggiornano con Aggiorna.
     openContoScheda(accountCode)
+    if (!data) {
+      setError('Premi Aggiorna nel banner per caricare i movimenti della scheda.')
+    } else {
+      setError('')
+    }
   }
 
   function exportListExcel() {
@@ -796,7 +807,7 @@ export default function MastriniContabiliPage() {
             loading={loadingCompanies}
           />
           <div className="mastrini-hero-tools-btns">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
               {loading ? 'Aggiorno…' : 'Aggiorna'}
             </button>
             <button
@@ -864,6 +875,11 @@ export default function MastriniContabiliPage() {
                 ? String(preferred.ledger_code || GENERAL_ACCOUNTS.banca.code).trim()
                 : selectedCode || accountCode || GENERAL_ACCOUNTS.banca.code
               openContoScheda(code)
+              if (!data) {
+                setError('Premi Aggiorna nel banner per caricare i movimenti della scheda.')
+              } else {
+                setError('')
+              }
             }}
           >
             Scheda contabile
@@ -1187,6 +1203,14 @@ export default function MastriniContabiliPage() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => void load()}
+                disabled={loading || !companyId}
+              >
+                {loading ? 'Aggiorno…' : 'Aggiorna'}
+              </button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setViewMode('selezione')}>
                 Selezioni scheda
               </button>
@@ -1199,7 +1223,7 @@ export default function MastriniContabiliPage() {
               </button>
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-secondary btn-sm"
                 onClick={() => printMastro(schedaAccount, periodLabel)}
               >
                 Stampa scheda
@@ -1282,14 +1306,19 @@ export default function MastriniContabiliPage() {
 
       {companyId && viewMode === 'scheda' && !schedaAccount ? (
         <section className="card fatture-panel">
-          <p className="fatture-note">Nessuna scheda aperta. Scegli il conto banca oppure vai alla selezione.</p>
+          <p className="fatture-note">
+            Nessuna scheda aperta o dati non caricati. Premi <strong>Aggiorna</strong>, poi scegli il conto.
+          </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-primary" onClick={() => void load()} disabled={loading || !companyId}>
+              {loading ? 'Aggiorno…' : 'Aggiorna'}
+            </button>
             {linkedBankAccounts.length ? (
               linkedBankAccounts.map((a) => {
                 const code = String(a.ledger_code || GENERAL_ACCOUNTS.banca.code).trim()
                 const label = [a.bank_name, a.account_name].filter(Boolean).join(' · ') || `c/c ${code}`
                 return (
-                  <button key={a.id || code} type="button" className="btn btn-primary" onClick={() => openContoScheda(code)}>
+                  <button key={a.id || code} type="button" className="btn btn-secondary" onClick={() => openContoScheda(code)}>
                     {label} ({code})
                   </button>
                 )
@@ -1297,7 +1326,7 @@ export default function MastriniContabiliPage() {
             ) : (
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-secondary"
                 onClick={() => openContoScheda(GENERAL_ACCOUNTS.banca.code)}
               >
                 Apri Banca c/c 1100
