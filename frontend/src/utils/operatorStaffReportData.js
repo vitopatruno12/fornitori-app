@@ -151,12 +151,14 @@ export function filterShiftsForOperatorLocale(shifts, { memberIds = [], packName
 }
 
 async function fetchShiftsForOperatorMembers(from, to, memberIds, packNameKeys) {
-  if (!memberIds.length) return []
-  if (memberIds.length <= MAX_MEMBER_IDS_IN_QUERY) {
-    const shiftsRaw = await fetchStaffShifts(from, to, { memberIds })
+  const hasNames = packNameKeys instanceof Set && packNameKeys.size > 0
+  if (!memberIds.length && !hasNames) return []
+  // Con nomi pack: carica tutto il periodo e filtra per id O nome (recupera turni se l'id dipendente è diverso).
+  if (hasNames || memberIds.length > MAX_MEMBER_IDS_IN_QUERY) {
+    const shiftsRaw = await fetchStaffShifts(from, to)
     return filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
   }
-  const shiftsRaw = await fetchStaffShifts(from, to)
+  const shiftsRaw = await fetchStaffShifts(from, to, { memberIds })
   return filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
 }
 

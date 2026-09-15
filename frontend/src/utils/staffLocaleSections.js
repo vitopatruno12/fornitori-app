@@ -26,10 +26,10 @@ export function defaultSectionsForLocale(localeName) {
     .replace(/[\s_\-]+/g, '')
   if (!key) return ['Generale']
   if (key.includes('zanardelli')) {
-    return ['Mediazione', 'Banco', 'Cucina', 'Forno', 'Pulizie']
+    return ['Banco', 'Cucina', 'Forno', 'Mediazione', 'Pulizie']
   }
   if (key.includes('abba')) {
-    return ['Mediazione', 'Banco', 'Cucina', 'Forno', 'Pulizie']
+    return ['Banco', 'Cucina', 'Forno', 'Mediazione', 'Pulizie']
   }
   return ['Banco', 'Cucina', 'Forno', 'Pulizie']
 }

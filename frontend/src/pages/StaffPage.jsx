@@ -60,6 +60,7 @@ import {
 import { validateLocalePackUniqueness } from '../utils/staffLocaleUniqueness.js'
 import {
   CORE_PLANNING_SECTIONS,
+  canonicalSectionName,
   defaultSectionsForLocale,
   isPlanningSectionHidden,
   mergeHiddenPlanningSections,
@@ -78,6 +79,7 @@ import { DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS } from '../utils/primaNotaStaffLo
 import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug, operatorStationLocaleNameMatches } from '../utils/operatorStationLocale.js'
 import {
   findLocalePackInStore,
+  memberNameKey,
   membersFromPackAndDb,
   writeOperatorLocalePackMembers,
 } from '../utils/operatorLocalePack.js'
@@ -96,6 +98,7 @@ import {
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   fetchOperatorStationShifts,
+  filterShiftsForOperatorLocale,
   invalidateOperatorStationMembersCache,
 } from '../utils/operatorStaffReportData.js'
 import { isOnline } from '../offline/offlineStatus'
@@ -302,11 +305,30 @@ function groupShiftsByDate(shiftList) {
   return m
 }
 
+function resolveMemberForShift(shift, members) {
+  const list = Array.isArray(members) ? members : []
+  const sid = Number(shift?.staff_member_id)
+  if (Number.isFinite(sid)) {
+    const byId = list.find((m) => Number(m.id) === sid)
+    if (byId) return byId
+  }
+  const key = memberNameKey(shift?.staff_member_name)
+  if (!key) return null
+  return list.find((m) => memberNameKey(m.name) === key) || null
+}
+
 function shiftBelongsToSection(shift, sectionName, members, sectionsList) {
   if (!sectionName) return true
-  const member = (members || []).find((m) => Number(m.id) === Number(shift?.staff_member_id))
-  if (member) return memberMatchesSection(member, sectionName, sectionsList)
-  return false
+  const member = resolveMemberForShift(shift, members)
+  if (!member) return false
+  const current = sectionCompareKey(canonicalSectionName(member?.section))
+  if (current) return memberMatchesSection(member, sectionName, sectionsList)
+  // Sezione vuota: non assegnare a Mediazione/Pulizie nascoste — usa la prima sezione visibile.
+  if (isPlanningSectionHidden(sectionName, [], HIDDEN_PLANNING_SECTIONS)) return false
+  const firstVisible =
+    (sectionsList || []).find((s) => !isPlanningSectionHidden(s, [], HIDDEN_PLANNING_SECTIONS)) ||
+    (sectionsList || [])[0]
+  return sectionCompareKey(firstVisible) === sectionCompareKey(sectionName)
 }
 
 function StaffCheckboxDropdown({
@@ -1843,10 +1865,16 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const from = toYMD(startDate)
     const to = toYMD(endDate)
     const memberList = Array.isArray(membersOverride) ? membersOverride : members
-    const sh =
+    let sh =
       operatorMode && operatorStationId
         ? await fetchOperatorStationShifts(operatorStationId, from, to)
         : await fetchStaffShifts(from, to)
+    // Gestionale: tieni i turni del locale anche se l'id dipendente postazione ≠ id Accedi (match per nome).
+    if (!(operatorMode && operatorStationId) && memberList.length) {
+      const memberIds = memberList.map((m) => m.id).filter((id) => id != null)
+      const packNameKeys = new Set(memberList.map((m) => memberNameKey(m.name)).filter(Boolean))
+      sh = filterShiftsForOperatorLocale(sh, { memberIds, packNameKeys })
+    }
     setShifts(normalizeShiftRows(sh, memberList))
   }, [members, operatorMode, operatorStationId])
 
@@ -2870,6 +2898,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
   function memberSnapshotFromRow(m) {
     return {
+      id: m.id != null ? Number(m.id) : null,
       name: m.name || '',
       first_name: m.first_name || null,
       last_name: m.last_name || null,
@@ -3746,9 +3775,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
     for (const [, pm] of packByKey) {
       const key = String(pm.name || '').trim().toLocaleLowerCase('it')
-      const hit = existingList.find(
-        (m) => String(m.name || '').trim().toLocaleLowerCase('it') === key,
-      )
+      const packId = pm.id != null && pm.id !== '' ? Number(pm.id) : null
+      const hit =
+        (Number.isFinite(packId)
+          ? existingList.find((m) => Number(m.id) === packId)
+          : null) ||
+        existingList.find((m) => String(m.name || '').trim().toLocaleLowerCase('it') === key)
       const body = {
         name: String(pm.name || '').trim() || 'Dipendente',
         first_name: pm.first_name || null,

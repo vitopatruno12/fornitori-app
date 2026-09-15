@@ -25,10 +25,25 @@ export function findLocalePackInStore(store, localeName, activitySlug = '') {
 export function membersFromPackAndDb(packMembers, dbMembers) {
   const packRows = Array.isArray(packMembers) ? packMembers : []
   const packNameKeys = new Set(packRows.map((m) => memberNameKey(m.name)).filter(Boolean))
+  const packIdByName = new Map()
+  for (const pm of packRows) {
+    const key = memberNameKey(pm.name)
+    if (!key) continue
+    const id = pm.id != null && pm.id !== '' ? Number(pm.id) : null
+    if (Number.isFinite(id)) packIdByName.set(key, id)
+  }
   const all = Array.isArray(dbMembers) ? dbMembers : []
   if (!packNameKeys.size) return []
   const seen = new Set()
   const out = []
+  // Preferisci l'id salvato nel pack (stesso usato dalle postazioni), poi il primo match per nome.
+  for (const [key, preferredId] of packIdByName) {
+    const hit = all.find((m) => Number(m.id) === preferredId)
+    if (hit && !seen.has(key)) {
+      seen.add(key)
+      out.push(hit)
+    }
+  }
   for (const m of all) {
     const key = memberNameKey(m.name)
     if (!key || !packNameKeys.has(key) || seen.has(key)) continue
