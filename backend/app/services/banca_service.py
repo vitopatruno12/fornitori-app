@@ -36,6 +36,31 @@ def _dec(v) -> Decimal:
   return Decimal(str(v or 0)).quantize(Decimal("0.01"))
 
 
+def _account_display_label(account: Optional[BankAccount]) -> Optional[str]:
+  if not account:
+    return None
+  bank = (account.bank_name or "Banca").strip() or "Banca"
+  company = (getattr(account, "company", None) or "").strip()
+  name = (account.account_name or "").strip()
+  iban = (account.iban or "").replace(" ", "").upper()
+  company_labels = {
+    "via_lattea": "Via Lattea",
+    "mediazione_a": "Mediazione A",
+    "mediazione_z": "Mediazione Z",
+    "risacca": "Risacca",
+    "pg": "PG",
+  }
+  bits = [bank]
+  if company:
+    bits.append(company_labels.get(company, company))
+  elif name:
+    bits.append(name)
+  if iban:
+    short = f"{iban[:4]}…{iban[-6:]}" if len(iban) > 8 else iban
+    bits.append(short)
+  return " · ".join(bits)
+
+
 def _account_out(row: BankAccount) -> Dict[str, Any]:
   company = (getattr(row, "company", None) or "").strip() or None
   ledger_code = (getattr(row, "ledger_code", None) or "1100").strip() or "1100"
@@ -46,6 +71,7 @@ def _account_out(row: BankAccount) -> Dict[str, Any]:
     "iban": row.iban,
     "company": company,
     "ledger_code": ledger_code,
+    "label": _account_display_label(row),
     "saldo_disponibile": float(_dec(row.saldo_disponibile)),
     "saldo_contabile": float(_dec(row.saldo_contabile)),
     "connection_status": row.connection_status,
@@ -69,9 +95,7 @@ def _movement_out(
   out = {
     "id": row.id,
     "bank_account_id": row.bank_account_id,
-    "account_label": (
-      f"{account.bank_name} · {account.account_name}" if account else None
-    ),
+    "account_label": _account_display_label(account),
     "account_company": (getattr(account, "company", None) or None) if account else None,
     "ledger_code": (
       (getattr(account, "ledger_code", None) or "1100").strip() or "1100"

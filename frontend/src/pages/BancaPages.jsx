@@ -122,6 +122,21 @@ function isBppbAccount(account) {
   )
 }
 
+/** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
+function formatBankAccountOptionLabel(account) {
+  if (account?.label) return String(account.label)
+  const bank = String(account?.bank_name || 'Banca').trim() || 'Banca'
+  const company = account?.company ? companyLabel(account.company) : ''
+  const name = String(account?.account_name || '').trim()
+  const iban = String(account?.iban || '').replace(/\s/g, '').toUpperCase()
+  const ibanShort = iban.length > 8 ? `${iban.slice(0, 4)}…${iban.slice(-6)}` : iban
+  const bits = [bank]
+  if (company) bits.push(company)
+  else if (name && !name.toLowerCase().includes(bank.toLowerCase().slice(0, 8))) bits.push(name)
+  if (ibanShort) bits.push(ibanShort)
+  return bits.join(' · ')
+}
+
 const BPPB_SEED_ACCOUNTS = [
   {
     bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
@@ -1247,7 +1262,7 @@ export function BancaMovimentiPage() {
               <option value="">Tutti</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.bank_name}
+                  {formatBankAccountOptionLabel(a)}
                 </option>
               ))}
             </select>
