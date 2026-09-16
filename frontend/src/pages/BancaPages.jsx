@@ -1028,11 +1028,6 @@ export function BancaContiPage() {
 
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
-        <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-          Scarica saldi e movimenti da Banca Popolare di Puglia e Basilicata (Via Lattea
-          IT25D0538516000CC1410004514 · app Enable Banking b88c128a…) e li mostra in Atlas.
-          Se i conti non ci sono, li crea automaticamente.
-        </p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
@@ -1060,10 +1055,6 @@ export function BancaContiPage() {
 
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
-        <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-          Scarica saldi e movimenti da BCC Terra d&apos;Otranto e li mostra in Atlas
-          (Conti + Movimenti banca). Se i conti non ci sono, li crea automaticamente.
-        </p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
