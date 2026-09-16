@@ -157,6 +157,10 @@ export function getIssuedInvoiceFileUrl(id) {
   return apiUrl(`/invoices/emesse/${id}/file`)
 }
 
+export function getIssuedInvoicePdfUrl(id) {
+  return apiUrl(`/invoices/emesse/${id}/pdf`)
+}
+
 export async function deleteIssuedInvoice(id) {
   const response = await fetch(apiUrl(`/invoices/emesse/${id}`), { method: 'DELETE' })
   if (!response.ok && response.status !== 204) {

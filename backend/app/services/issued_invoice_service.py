@@ -639,6 +639,30 @@ def resolve_issued_file(db: Session, invoice_id: int) -> Tuple[Path, IssuedInvoi
   return path, row
 
 
+def pdf_bytes_for_issued_invoice(db: Session, invoice_id: int) -> Tuple[Optional[bytes], str, Optional[str]]:
+  """PDF per fattura emessa: file PDF caricato, oppure generato da XML FatturaPA."""
+  path, row = resolve_issued_file(db, invoice_id)
+  kind = (row.file_kind or "").lower()
+  suffix = path.suffix.lower()
+  if kind == "pdf" or suffix == ".pdf":
+    return path.read_bytes(), "file", None
+  if kind == "xml" or suffix in {".xml", ".p7m"}:
+    from .fatturapa_pdf import build_fatturapa_pdf_bytes, unwrap_p7m_to_xml_text
+
+    raw = path.read_bytes()
+    xml_text = unwrap_p7m_to_xml_text(raw)
+    if not xml_text:
+      return None, "", "File XML FatturaPA non valido"
+    try:
+      pdf, source = build_fatturapa_pdf_bytes(xml_text)
+      return pdf, source, None
+    except ValueError as exc:
+      return None, "", str(exc)
+    except Exception as exc:
+      return None, "", f"Errore generazione PDF: {exc}"
+  return None, "", "Anteprima PDF disponibile per documenti XML o PDF"
+
+
 def delete_issued_invoice(db: Session, invoice_id: int) -> bool:
   row = get_issued_invoice(db, invoice_id)
   if not row:

@@ -29,6 +29,7 @@ import {
   fetchIssuedInvoices,
   uploadIssuedInvoice,
   getIssuedInvoiceFileUrl,
+  getIssuedInvoicePdfUrl,
   deleteIssuedInvoice,
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
@@ -956,28 +957,42 @@ export function FattureEmessePage() {
             emptyMessage={`Nessuna fattura emessa per ${companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal banner.`}
             actionsHeader="Azioni"
             actionsColWidth="8.75rem"
-            renderActions={(row) => (
-              <FattureActionsMenu
-                primary={
-                  <a
-                    className="btn btn-primary btn-sm"
-                    href={getIssuedInvoiceFileUrl(row.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Apri
-                  </a>
-                }
-                items={[
-                  {
-                    key: 'delete',
-                    label: 'Elimina',
-                    danger: true,
-                    onClick: () => void handleDelete(row.id),
-                  },
-                ]}
-              />
-            )}
+            renderActions={(row) => {
+              const isXml = String(row.file_kind || '').toLowerCase() === 'xml'
+              const openUrl = isXml ? getIssuedInvoicePdfUrl(row.id) : getIssuedInvoiceFileUrl(row.id)
+              return (
+                <FattureActionsMenu
+                  primary={
+                    <a
+                      className="btn btn-primary btn-sm"
+                      href={openUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={isXml ? 'Genera e apri anteprima PDF da XML FatturaPA' : 'Apri documento'}
+                    >
+                      {isXml ? 'Apri PDF' : 'Apri'}
+                    </a>
+                  }
+                  items={[
+                    ...(isXml
+                      ? [
+                          {
+                            key: 'xml',
+                            label: 'Scarica XML',
+                            href: getIssuedInvoiceFileUrl(row.id),
+                          },
+                        ]
+                      : []),
+                    {
+                      key: 'delete',
+                      label: 'Elimina',
+                      danger: true,
+                      onClick: () => void handleDelete(row.id),
+                    },
+                  ]}
+                />
+              )
+            }}
           />
         </section>
       )}

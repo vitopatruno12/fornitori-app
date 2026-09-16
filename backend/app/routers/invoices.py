@@ -1,4 +1,5 @@
 import io
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -96,6 +97,25 @@ async def upload_issued_invoice(
     invoice_date=invoice_date,
     total_amount=total_amount,
     note=note,
+  )
+
+
+@router.get("/emesse/{invoice_id}/pdf")
+def download_issued_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
+  """Anteprima PDF emessa: file PDF caricato o generato da XML FatturaPA."""
+  from fastapi.responses import Response
+
+  pdf, _source, err = issued_invoice_service.pdf_bytes_for_issued_invoice(db, invoice_id)
+  if err or not pdf:
+    raise HTTPException(status_code=404 if err == "Fattura emessa non trovata" else 400, detail=err or "PDF non disponibile")
+  row = issued_invoice_service.get_issued_invoice(db, invoice_id)
+  num = (row.invoice_number if row else None) or str(invoice_id)
+  safe_num = re.sub(r"[^\w.\-]+", "_", str(num))[:80] or str(invoice_id)
+  filename = f"fattura-emessa-{safe_num}.pdf"
+  return Response(
+    content=pdf,
+    media_type="application/pdf",
+    headers={"Content-Disposition": f'inline; filename="{filename}"'},
   )
 
 
