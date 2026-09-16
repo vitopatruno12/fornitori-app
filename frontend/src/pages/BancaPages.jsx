@@ -1207,7 +1207,9 @@ export function BancaMovimentiPage() {
   const [category, setCategory] = useState('')
   const [counterparty, setCounterparty] = useState('')
   const [loading, setLoading] = useState(true)
+  const [syncBusy, setSyncBusy] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   async function load() {
     setLoading(true)
@@ -1232,6 +1234,51 @@ export function BancaMovimentiPage() {
     }
   }
 
+  async function aggiornaMovimenti() {
+    setSyncBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      const selected = accountId
+        ? accounts.find((a) => String(a.id) === String(accountId))
+        : null
+      const targets = selected
+        ? selected.enable_banking_connected
+          ? [selected]
+          : []
+        : accounts.filter((a) => a.enable_banking_connected)
+
+      if (!targets.length) {
+        if (selected && !selected.enable_banking_connected) {
+          setError(
+            `Il conto «${formatBankAccountOptionLabel(selected)}» non è collegato a Enable Banking. Collegalo da Conti correnti.`,
+          )
+        } else {
+          setError('Nessun conto Enable Banking collegato. Usa Collega/Sincronizza in Conti correnti.')
+        }
+        await load()
+        return
+      }
+
+      let totalImported = 0
+      for (const acc of targets) {
+        const res = await syncEnableBankingAccount(acc.id)
+        totalImported += Number(res?.imported || 0)
+      }
+      setSuccess(
+        targets.length === 1
+          ? `Aggiornato ${formatBankAccountOptionLabel(targets[0])}: ${totalImported} nuovi movimenti.`
+          : `Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti.`,
+      )
+      await load()
+    } catch (e) {
+      setError(e?.message || 'Aggiornamento movimenti fallito')
+      await load()
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1240,6 +1287,7 @@ export function BancaMovimentiPage() {
   return (
     <BancaPageShell title="Movimenti bancari" lead="Estratto movimenti con filtri e stato di riconciliazione.">
       {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
       <section className="card fatture-panel">
         <form
           onSubmit={(e) => {
@@ -1275,15 +1323,32 @@ export function BancaMovimentiPage() {
             Cliente/Fornitore
             <input className="form-control" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
           </label>
-          <button type="submit" className="btn btn-primary">
+          <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
             Filtra
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={loading || syncBusy}
+            onClick={() => void aggiornaMovimenti()}
+            title={
+              accountId
+                ? 'Scarica saldi/movimenti dal conto selezionato via Enable Banking e aggiorna l’elenco'
+                : 'Scarica saldi/movimenti da tutti i conti Enable Banking collegati e aggiorna l’elenco'
+            }
+          >
+            {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
           </button>
         </form>
       </section>
 
       <section className="card fatture-panel banca-fit-panel">
-        {loading ? (
-          <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />
+        {loading || syncBusy ? (
+          <AnalisiLoadingBar
+            active
+            label={syncBusy ? 'Sincronizzazione movimenti banca' : 'Caricamento banca'}
+            variant="subtle"
+          />
         ) : (
           <WorkbookGrid
             title="Movimenti bancari"
@@ -1291,7 +1356,7 @@ export function BancaMovimentiPage() {
             columns={BANK_MOVEMENTS_COLUMNS}
             rows={items}
             cellValue={bankMovementsCellValue}
-            emptyMessage="Nessun movimento nel filtro. Usa Sincronizza in Conti correnti."
+            emptyMessage="Nessun movimento nel filtro. Usa Aggiorna qui sopra oppure Sincronizza in Conti correnti."
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
             totals={{
