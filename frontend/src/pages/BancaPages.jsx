@@ -1730,8 +1730,15 @@ export function BancaRiconciliazionePage() {
             <div className="ui-kpi-card">
               <div className="ui-kpi-card-label">Conti usati</div>
               <div className="ui-kpi-card-value" style={{ fontSize: '0.95rem' }}>
-                {(data?.accounts_used || []).map((a) => a.label).filter(Boolean).join(' · ') || '—'}
+                {(data?.accounts_used || []).map((a) => a.label).filter(Boolean).join(' · ')
+                  || (data?.expected_banks || []).join(' · ')
+                  || '—'}
               </div>
+              {(data?.expected_banks || []).length > 0 ? (
+                <div className="dashboard-kpi-sub" style={{ marginTop: '0.35rem' }}>
+                  Attesi: {(data.expected_banks || []).join(' + ')}
+                </div>
+              ) : null}
             </div>
           </div>
 

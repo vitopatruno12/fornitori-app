@@ -11,6 +11,12 @@ from ..models.bank_movement import BankMovement
 from ..models.cash_entry import CashEntry
 from ..models.invoice import Invoice
 from ..models.supplier import Supplier
+from ..constants.company_banks import (
+  IBAN_TO_COMPANY,
+  account_matches_company,
+  expected_banks_for_company,
+  normalize_iban,
+)
 from .cash_service import NON_FISCALE_CONTO
 from .invoice_service import list_invoices, payment_status_label
 
@@ -192,17 +198,66 @@ def update_account(db: Session, account_id: int, payload: Dict[str, Any]) -> Dic
   return _account_out(row)
 
 
+def ensure_known_account_companies(db: Session) -> int:
+  """Allinea company sui conti con IBAN noti (Mediazione / Via Lattea / Risacca)."""
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).all()
+  changed = 0
+  for row in rows:
+    iban_n = normalize_iban(row.iban)
+    target = IBAN_TO_COMPANY.get(iban_n)
+    if not target:
+      # Intesa senza IBAN completo ma nome chiaro → Risacca
+      blob = f"{row.bank_name or ''} {row.account_name or ''} {row.notes or ''}".lower()
+      if "intesa" in blob and ("risacca" in blob or "momento" in blob or "business insieme" in blob):
+        target = "risacca"
+      else:
+        continue
+    current = (getattr(row, "company", None) or "").strip().lower()
+    if current == target:
+      continue
+    # Non sovrascrivere pg se qualcuno ha già taggato a mano un IBAN non in mappa
+    if current == "pg" and target != "pg":
+      continue
+    row.company = target
+    # Nomi più chiari
+    if target == "risacca" and (not row.account_name or "intesa" in (row.account_name or "").lower()):
+      if "risacca" not in (row.account_name or "").lower():
+        row.account_name = "Risacca · Bar Momento · Intesa"
+    if target == "via_lattea" and iban_n in {
+      normalize_iban("IT25D0538516000CC1410004514"),
+      normalize_iban("IT25D0538516000CC410004514"),
+    }:
+      row.account_name = "Via Lattea · CC1410004514"
+    if target == "mediazione_a" and iban_n == normalize_iban("IT55B0538516000CC1410004512"):
+      row.account_name = "Mediazione · CC1410004512"
+    changed += 1
+  if changed:
+    db.commit()
+  return changed
+
+
 def accounts_for_company(db: Session, company: Optional[str] = None) -> List[Dict[str, Any]]:
-  """Conti per mastrini: priorità company match, altrimenti conti condivisi (company vuota)."""
+  """Conti per società: IBAN/tag noti — niente fallback su tutti i conti condivisi."""
+  ensure_default_account(db)
+  ensure_known_account_companies(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   company_id = (company or "").strip()
   if not company_id:
     return [_account_out(r) for r in rows]
-  linked = [r for r in rows if (getattr(r, "company", None) or "").strip() == company_id]
-  if linked:
-    return [_account_out(r) for r in linked]
-  shared = [r for r in rows if not (getattr(r, "company", None) or "").strip()]
-  return [_account_out(r) for r in shared]
+
+  matched = [
+    r
+    for r in rows
+    if account_matches_company(
+      company_id=company_id,
+      account_company=getattr(r, "company", None),
+      bank_name=r.bank_name,
+      account_name=r.account_name,
+      iban=r.iban,
+      notes=getattr(r, "notes", None),
+    )
+  ]
+  return [_account_out(r) for r in matched]
 
 
 def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any]:
@@ -852,11 +907,14 @@ def reconciliation_preview(
     "accounts_used": [
       {
         "id": a.get("id"),
-        "label": f"{a.get('bank_name')} · {a.get('account_name')}",
+        "label": a.get("label") or f"{a.get('bank_name')} · {a.get('account_name')}",
         "company": a.get("company"),
+        "bank_name": a.get("bank_name"),
+        "iban": a.get("iban"),
       }
       for a in account_items
     ],
+    "expected_banks": expected_banks_for_company(company_id),
   }
 
 

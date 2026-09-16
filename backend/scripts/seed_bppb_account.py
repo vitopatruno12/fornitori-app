@@ -110,8 +110,10 @@ try:
     ensure(
         db,
         bank_name="Intesa Sanpaolo",
-        account_name="RISACCA S.R.L. · Business Insieme",
+        account_name="Risacca · Bar Momento · Intesa",
         iban="IT88N0306979822100000008926",
+        company="risacca",
+        ledger_code="1100",
         notes="RISACCA S.R.L. · Filiale Nardò · BIC BCITITMM · Conto Business Insieme · CC 66494/1000/00008926",
     )
     ensure(

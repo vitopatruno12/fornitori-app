@@ -2,9 +2,7 @@
   {
     "id": "bppb_mediazione",
     "label": "BPPB — conto Mediazione",
-    "company": "",
-    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
-    "iban": "IT55B0538516000CC1410004512",
+    "company": "mediazione_a",
     "account_number": "CC1410004512",
     "username": "",
     "password": "",
