@@ -25,12 +25,16 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import (
+  MEDIAZIONE_COMPANY_IDS,
   SDI_COMPANY_LABELS,
   SDI_COMPANY_ORDER,
+  company_from_vat,
   company_label,
+  is_mediazione_vat,
   list_companies,
   normalize_company_section,
   pick_company,
+  resolve_list_company,
   valid_assign_sections,
 )
 from ..database import get_db
@@ -107,7 +111,12 @@ def _row_to_item(row: SdiInvoice, manual: Dict[str, str]) -> Dict[str, Any]:
   auto_company = _auto_company(row)
   key = str(row.id)
   manual_raw = manual.get(key)
-  company = normalize_company_section(manual_raw) if manual_raw else auto_company
+  manual_company = normalize_company_section(manual_raw) if manual_raw else None
+  company = resolve_list_company(
+    receiver_vat=row.receiver_vat,
+    auto_company=auto_company,
+    manual_company=manual_company,
+  )
   return {
     "id": row.id,
     "filename": Path(row.storage_path or "").name or f"sdi-{row.id}.xml",
@@ -124,8 +133,8 @@ def _row_to_item(row: SdiInvoice, manual: Dict[str, str]) -> Dict[str, Any]:
     "section": company,
     "auto_section": auto_company,
     "auto_company": auto_company,
-    "manual_section": normalize_company_section(manual_raw) if manual_raw else None,
-    "manual_company": normalize_company_section(manual_raw) if manual_raw else None,
+    "manual_section": manual_company,
+    "manual_company": manual_company,
     "source": row.source or "push",
     "sdi_message_id": row.sdi_message_id,
     "pipeline_status": row.pipeline_status,
@@ -318,6 +327,80 @@ def assign_sdi_invoice_section(
     data[str(invoice_id)] = company
     _write_manual_assignments(data)
   return {"ok": True, "id": invoice_id, "section": company, "company": company}
+
+
+@router.post("/invoices/reclassify")
+def reclassify_sdi_received_invoices(
+  clear_conflicting_manual: bool = Query(
+    default=True,
+    description="Rimuove assign manuali/AdE in conflitto con la P.IVA cessionario",
+  ),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """
+  Riallinea le fatture ricevute alle società corrette via P.IVA cessionario
+  (Mediazione / Via Lattea / Risacca / PG) e pulisce assign errati da sync AdE.
+  """
+  from ..integrations.sdi.xml_parser import parse_fatturapa
+
+  rows = db.query(SdiInvoice).order_by(SdiInvoice.id.asc()).all()
+  fixed_vat = 0
+  cleared = 0
+  sample: List[Dict[str, Any]] = []
+  with _ASSIGN_LOCK:
+    manual = _read_manual_assignments()
+    for row in rows:
+      if not row.receiver_vat and row.storage_path:
+        try:
+          path = _resolve_storage_path(row.storage_path)
+          text = path.read_bytes().decode("utf-8", errors="replace")
+          parsed = parse_fatturapa(text)
+          rv = (parsed or {}).get("receiver_vat") or ""
+          if rv:
+            row.receiver_vat = rv
+            fixed_vat += 1
+        except Exception:
+          pass
+
+      auto = pick_company(
+        receiver_vat=row.receiver_vat,
+        ade_profile_id=row.ade_profile_id,
+        legacy_destination_section=_legacy_destination_section(row.destination or ""),
+      )
+      key = str(row.id)
+      man = normalize_company_section(manual.get(key)) if key in manual else None
+      if clear_conflicting_manual and man and man != "non_classificata":
+        vat_known = bool(company_from_vat(row.receiver_vat) or is_mediazione_vat(row.receiver_vat))
+        conflict = False
+        if vat_known and is_mediazione_vat(row.receiver_vat):
+          # Su Mediazione tieni solo A/Z; togli via_lattea/risacca/pg forzati
+          conflict = man not in MEDIAZIONE_COMPANY_IDS
+        elif vat_known and company_from_vat(row.receiver_vat):
+          conflict = man != auto
+        if conflict:
+          del manual[key]
+          cleared += 1
+          if len(sample) < 25:
+            sample.append(
+              {
+                "id": row.id,
+                "receiver_vat": row.receiver_vat or "",
+                "removed_manual": man,
+                "auto_company": auto,
+              }
+            )
+    if clear_conflicting_manual:
+      _write_manual_assignments(manual)
+    if fixed_vat:
+      db.commit()
+
+  return {
+    "ok": True,
+    "receiver_vat_backfilled": fixed_vat,
+    "manual_cleared": cleared,
+    "sample": sample,
+    "companies": list_companies(),
+  }
 
 
 @router.get("/invoices/{invoice_id}/download")

@@ -1,4 +1,11 @@
-"""Società destinatario fatture passive SDI (classificazione per P.IVA + sede Mediazione A/Z)."""
+"""Società destinatario fatture passive SDI (classificazione per P.IVA + sede Mediazione A/Z).
+
+P.IVA da visure Camera di Commercio (gen–feb 2026):
+- LA MEDIAZIONE SRL 04945600759 → locali Mani in Pasta (Abba / Zanardelli)
+- LA VIA LATTEA SOCIETA' AGRICOLA A R.L. 04886500752 → Mucche Volanti
+- RISACCA S.R.L. 05186540752 → Bar Momento (Nardò / Santa Caterina)
+- PG S.R.L. 05440050754 → Gazza Ladra (Lecce / Arco di Trionfo)
+"""
 from __future__ import annotations
 
 import os
@@ -13,12 +20,13 @@ SDI_COMPANY_ORDER: tuple[str, ...] = (
   "pg",
 )
 
+# Etichette: società legale · locale operativo
 SDI_COMPANY_LABELS: Dict[str, str] = {
-  "mediazione_a": "Mediazione A",
-  "mediazione_z": "Mediazione Z",
-  "via_lattea": "Via Lattea",
-  "risacca": "Risacca",
-  "pg": "PG",
+  "mediazione_a": "Mediazione A · Mani in Pasta Abba",
+  "mediazione_z": "Mediazione Z · Mani in Pasta Zanardelli",
+  "via_lattea": "Via Lattea · Mucche Volanti",
+  "risacca": "Risacca · Bar Momento",
+  "pg": "PG · Gazza Ladra",
 }
 
 # Sezioni legacy (indirizzo XML / alias) → società
@@ -31,9 +39,17 @@ LEGACY_SECTION_TO_COMPANY: Dict[str, str] = {
   "mediazione_z": "mediazione_z",
   # Vecchio id unico → da riassegnare manualmente a A o Z
   "mediazione": "non_classificata",
+  "mani_in_pasta": "non_classificata",
+  "mani_in_pasta_abba": "mediazione_a",
+  "mani_in_pasta_zanardelli": "mediazione_z",
+  "mucche_volanti": "via_lattea",
+  "bar_momento": "risacca",
+  "momento": "risacca",
+  "gazza_ladra": "pg",
+  "gazza": "pg",
 }
 
-# Profili AdE / sedi Atlas → società (quando non serve euristica indirizzo)
+# Profili AdE / sedi Atlas → società (solo se manca P.IVA cessionario)
 PROFILE_TO_COMPANY: Dict[str, str] = {
   "via_abba": "mediazione_a",
   "mediazione_a": "mediazione_a",
@@ -50,7 +66,7 @@ DEFAULT_COMPANY_PIVAS: Dict[str, List[str]] = {
   "mediazione_z": list(MEDIAZIONE_SHARED_PIVAS),
   "via_lattea": ["04886500752"],  # LA VIA LATTEA SOCIETA' AGRICOLA A R.L.
   "risacca": ["05186540752"],  # RISACCA S.R.L. (visura 13/02/2026)
-  "pg": ["05440050754"],  # PG S.R.L. (visura 23/01/2026)
+  "pg": ["05440050754"],  # PG S.R.L. (visura 23/01/2026) — locale Gazza Ladra
 }
 
 ENV_PIVA_KEYS: Dict[str, str] = {
@@ -61,8 +77,12 @@ ENV_PIVA_KEYS: Dict[str, str] = {
   "pg": "SDI_COMPANY_PG_PIVA",
 }
 
-_DEFAULT_ABBA_KEYWORDS = "abba,via abba"
-_DEFAULT_ZAN_KEYWORDS = "zanardelli,via zanardelli"
+_DEFAULT_ABBA_KEYWORDS = (
+  "abba,via abba,cesare abba,mani in pasta abba,le mani in pasta"
+)
+_DEFAULT_ZAN_KEYWORDS = (
+  "zanardelli,via zanardelli,oberdan,guglielmo oberdan,mani in pasta zanardelli"
+)
 
 
 def _env(name: str, default: str = "") -> str:
@@ -235,36 +255,60 @@ def pick_company(
   legacy_destination_section: Optional[str] = None,
 ) -> str:
   """
-  Classificazione automatica:
+  Classificazione automatica (P.IVA cessionario ha sempre priorità sul profilo AdE):
   1) Mediazione (stessa P.IVA) → A/Z da indirizzo o profilo sede (via_abba / via_zanardelli)
-  2) Altre società da P.IVA cessionario
-  3) Profilo AdE
-  4) Euristiche legacy indirizzo
+  2) Altre società da P.IVA cessionario (Via Lattea / Risacca / PG)
+  3) Solo se manca P.IVA: profilo AdE o euristiche indirizzo
   """
   legacy = normalize_company_section(legacy_destination_section)
   pid = (ade_profile_id or "").strip().lower()
 
-  mediazione_context = (
-    is_mediazione_vat(receiver_vat)
-    or pid in ("mediazione", *PROFILE_TO_COMPANY.keys())
-    or legacy in MEDIAZIONE_COMPANY_IDS
-  )
-  if mediazione_context:
+  # 1) P.IVA cessionario nota → non lasciare che il profilo AdE sbagli società
+  if is_mediazione_vat(receiver_vat):
     if legacy in MEDIAZIONE_COMPANY_IDS:
       return legacy
     if pid in PROFILE_TO_COMPANY:
       return PROFILE_TO_COMPANY[pid]
-    # P.IVA Mediazione senza sede riconoscibile → da assegnare a A o Z
     return "non_classificata"
 
   by_vat = company_from_vat(receiver_vat)
   if by_vat:
     return by_vat
 
+  # 2) Senza P.IVA (o P.IVA sconosciuta): fallback profilo / indirizzo
+  if pid in PROFILE_TO_COMPANY:
+    return PROFILE_TO_COMPANY[pid]
   if pid in SDI_COMPANY_LABELS:
     return pid
-
   if legacy != "non_classificata":
     return legacy
 
   return "non_classificata"
+
+
+def resolve_list_company(
+  *,
+  receiver_vat: Optional[str],
+  auto_company: str,
+  manual_company: Optional[str],
+) -> str:
+  """
+  Società mostrata in elenco fatture ricevute.
+  Se c'è P.IVA cessionario mappata, ignora assign manuali/AdE errati
+  (es. Gazza Ladra scaricata nel profilo Risacca).
+  Eccezione: Mediazione A/Z resta assegnabile a mano sulla stessa P.IVA.
+  """
+  manual = normalize_company_section(manual_company) if manual_company else None
+  auto = normalize_company_section(auto_company)
+
+  if is_mediazione_vat(receiver_vat):
+    if manual in MEDIAZIONE_COMPANY_IDS:
+      return manual
+    return auto if auto != "non_classificata" else (manual or "non_classificata")
+
+  if company_from_vat(receiver_vat):
+    return auto
+
+  if manual and manual != "non_classificata":
+    return manual
+  return auto

@@ -14,7 +14,7 @@ os.environ.setdefault("ATLAS_API_BASE", "https://www.atlass.it/api")
 
 def main() -> int:
   from app.integrations.ade.sync import _unwrap_p7m_bytes
-  from app.integrations.ade.push_to_atlas import assign_sdi_section, push_xml_bytes
+  from app.integrations.ade.push_to_atlas import push_xml_bytes
   from app.integrations.ade.state import (
     default_state_path,
     load_state,
@@ -75,9 +75,7 @@ def main() -> int:
       mark_sent(state, "via_lattea", digest)
       already.add(digest)
       res = push.get("result") or {}
-      inv_id = res.get("id")
-      if inv_id:
-        assign_sdi_section(int(inv_id), "via_lattea")
+      # Classificazione da P.IVA XML — non forzare via_lattea con assign
       if res.get("duplicate"):
         dup += 1
       else:

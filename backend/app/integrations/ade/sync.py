@@ -220,11 +220,19 @@ def sync_profile(profile: AdeProfile, state: Dict[str, Any]) -> Tuple[AdeSyncRes
       already.add(item.sha256)
       res = push.get("result") or {}
       inv_id = res.get("id")
-      if inv_id and profile.sdi_section:
+      # Non forzare via_lattea/risacca/pg dal profilo AdE: la P.IVA cessionario
+      # nell'XML decide la società (evita Gazza Ladra sotto Risacca, ecc.).
+      # Solo Mediazione A/Z può usare assign di sede quando non è auto_section.
+      if inv_id and profile.sdi_section in ("mediazione_a", "mediazione_z"):
         assign = assign_sdi_section(int(inv_id), profile.sdi_section)
         entry["assign"] = assign
-      elif inv_id and profile.auto_section:
-        entry["assign"] = {"ok": True, "skipped": True, "reason": "auto_section_from_xml"}
+      elif inv_id:
+        entry["assign"] = {
+          "ok": True,
+          "skipped": True,
+          "reason": "vat_based_classification",
+          "profile_sdi_section": profile.sdi_section,
+        }
       if res.get("duplicate"):
         duplicates += 1
       else:

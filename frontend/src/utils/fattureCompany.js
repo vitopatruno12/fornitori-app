@@ -12,11 +12,11 @@ const STORAGE_KEY = 'atlasFattureCompany:v1'
 export const FATTURE_COMPANY_ORDER = ['mediazione_a', 'mediazione_z', 'via_lattea', 'risacca', 'pg']
 
 export const FATTURE_COMPANY_LABELS = {
-  mediazione_a: 'Mediazione A',
-  mediazione_z: 'Mediazione Z',
-  via_lattea: 'Via Lattea',
-  risacca: 'Risacca',
-  pg: 'PG',
+  mediazione_a: 'Mediazione A · Mani in Pasta Abba',
+  mediazione_z: 'Mediazione Z · Mani in Pasta Zanardelli',
+  via_lattea: 'Via Lattea · Mucche Volanti',
+  risacca: 'Risacca · Bar Momento',
+  pg: 'PG · Gazza Ladra',
 }
 
 /** Slug attività postazione → società SDI (registro fatture locale). */
@@ -41,12 +41,12 @@ export const COMPANY_TO_ACTIVITIES = {
 }
 
 export const ACTIVITY_LABELS = {
-  via_abba: 'Via Abba',
-  via_zanardelli: 'Via Zanardelli',
+  via_abba: 'Mani in Pasta Abba',
+  via_zanardelli: 'Mani in Pasta Zanardelli',
   mediazione: 'Mediazione',
-  via_lattea: 'Via Lattea',
-  risacca: 'Risacca',
-  pg: 'PG',
+  via_lattea: 'Mucche Volanti',
+  risacca: 'Bar Momento',
+  pg: 'Gazza Ladra',
 }
 
 export function isGestionaleFattureContext(fattureBase = '/fatture') {
