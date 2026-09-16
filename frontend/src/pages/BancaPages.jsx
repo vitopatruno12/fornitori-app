@@ -42,7 +42,7 @@ function resolveEnableBankingPayload(account) {
   if (bank.includes('bbva')) {
     return { aspsp_name: 'BBVA', aspsp_country: 'IT', psu_type: 'personal' }
   }
-  if (bank.includes('bppb') || bank.includes('puglia') || bank.includes('basilicata')) && !bank.includes('bcc') {
+  if ((bank.includes('bppb') || bank.includes('puglia') || bank.includes('basilicata')) && !bank.includes('bcc')) {
     return {
       aspsp_name: 'Banca Popolare di Puglia e Basilicata',
       aspsp_country: 'IT',
