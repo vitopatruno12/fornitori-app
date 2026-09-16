@@ -1,7 +1,7 @@
-[
+﻿[
   {
     "id": "via_abba",
-    "label": "Mediazione · Mani in Pasta Abba",
+    "label": "Mediazione Â· Mani in Pasta Abba",
     "sede": "via_abba",
     "codice_fiscale": "",
     "partita_iva": "",
@@ -12,7 +12,7 @@
   },
   {
     "id": "via_lattea",
-    "label": "La Via Lattea · Mucche Volanti",
+    "label": "La Via Lattea Â· Mucche Volanti",
     "sede": "via_lattea",
     "codice_fiscale": "",
     "partita_iva": "04886500752",
@@ -23,7 +23,7 @@
   },
   {
     "id": "risacca",
-    "label": "Risacca S.R.L. · Bar Momento",
+    "label": "Risacca S.R.L. Â· Bar Momento",
     "sede": "risacca",
     "codice_fiscale": "05186540752",
     "partita_iva": "05186540752",
@@ -34,7 +34,7 @@
   },
   {
     "id": "pg",
-    "label": "PG S.R.L.",
+    "label": "PG S.R.L. · Gazza Ladra",
     "sede": "pg",
     "codice_fiscale": "05440050754",
     "partita_iva": "05440050754",
@@ -45,7 +45,7 @@
   },
   {
     "id": "via_zanardelli",
-    "label": "Mediazione Via Zanardelli",
+    "label": "Mediazione · Mani in Pasta Zanardelli",
     "sede": "via_zanardelli",
     "codice_fiscale": "",
     "partita_iva": "04945600759",
