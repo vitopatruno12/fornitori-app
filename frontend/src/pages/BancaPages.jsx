@@ -113,8 +113,34 @@ const BCC_SEED_ACCOUNTS = [
 
 function isBppbAccount(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
-  return bank.includes('bppb') || bank.includes('puglia') || bank.includes('basilicata')
+  const iban = String(account?.iban || '').replace(/\s/g, '').toUpperCase()
+  return (
+    bank.includes('bppb')
+    || bank.includes('puglia')
+    || bank.includes('basilicata')
+    || ['IT25D0538516000CC1410004514', 'IT55B0538516000CC1410004512', 'IT25D0538516000CC410004514'].includes(iban)
+  )
 }
+
+const BPPB_SEED_ACCOUNTS = [
+  {
+    bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
+    account_name: 'Via Lattea · CC1410004514',
+    iban: 'IT25D0538516000CC1410004514',
+    company: 'via_lattea',
+    ledger_code: '1100',
+    notes:
+      "LA VIA LATTEA · BPPB · IBAN IT25D0538516000CC1410004514 · Enable Banking b88c128a-68e1-4b2e-b999-e87cc80c13b8",
+  },
+  {
+    bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
+    account_name: 'CC1410004512',
+    iban: 'IT55B0538516000CC1410004512',
+    company: '',
+    ledger_code: '1100',
+    notes: 'Conto BPPB Mediazione (ABI 05385). Collegare via Enable Banking in produzione.',
+  },
+]
 
 const BANK_LAST_MOVEMENTS_COLUMNS = [
   { id: 'date', label: 'Data', width: 14, fluid: true },
@@ -615,16 +641,58 @@ export function BancaContiPage() {
   }
 
   async function syncAllBppbAccounts() {
-    const bppb = items.filter(isBppbAccount)
+    let bppb = items.filter(isBppbAccount)
     if (!bppb.length) {
-      setError('Nessun conto BPPB in elenco. Crea prima il conto BPPB.')
+      setBusyId(-2)
+      setError('')
+      setSuccess('')
+      try {
+        const existingIbans = new Set(
+          items.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
+        )
+        // Aggiorna eventuale IBAN Via Lattea precedente
+        const oldVl = items.find(
+          (a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC410004514',
+        )
+        if (oldVl?.id) {
+          await updateBancaAccount(oldVl.id, {
+            iban: 'IT25D0538516000CC1410004514',
+            account_name: 'Via Lattea · CC1410004514',
+            bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
+            company: 'via_lattea',
+            ledger_code: '1100',
+          })
+          existingIbans.delete('IT25D0538516000CC410004514')
+          existingIbans.add('IT25D0538516000CC1410004514')
+        }
+        for (const seed of BPPB_SEED_ACCOUNTS) {
+          const iban = seed.iban.replace(/\s/g, '').toUpperCase()
+          if (existingIbans.has(iban)) continue
+          await createBancaAccount(seed)
+        }
+        const res = await fetchBancaAccounts()
+        const next = Array.isArray(res?.items) ? res.items : []
+        setItems(next)
+        bppb = next.filter(isBppbAccount)
+      } catch (err) {
+        setError(err?.message || 'Impossibile creare i conti BPPB')
+        setBusyId(null)
+        return
+      } finally {
+        setBusyId(null)
+      }
+    }
+    if (!bppb.length) {
+      setError('Nessun conto BPPB in elenco.')
       return
     }
     const connected = bppb.filter((a) => a.enable_banking_connected)
     if (!connected.length) {
-      // Preferisci Via Lattea se presente, altrimenti il primo BPPB
+      // Preferisci Via Lattea (app b88c128a…) se presente
       const prefer =
-        bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea') || bppb[0]
+        bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+        || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
+        || bppb[0]
       await startEnableBanking(prefer.id)
       return
     }
@@ -856,38 +924,37 @@ export function BancaContiPage() {
         </section>
       )}
 
-      {items.some(isBppbAccount) ? (
-        <section className="card fatture-panel">
-          <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
-          <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-            Scarica saldi e movimenti da Banca Popolare di Puglia e Basilicata e li mostra in Atlas
-            (Conti + Movimenti banca).
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
+        <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+          Scarica saldi e movimenti da Banca Popolare di Puglia e Basilicata (Via Lattea
+          IT25D0538516000CC1410004514 · app Enable Banking b88c128a…) e li mostra in Atlas.
+          Se i conti non ci sono, li crea automaticamente.
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+            onClick={syncAllBppbAccounts}
+            title="Collega o sincronizza i conti BPPB via Enable Banking"
+          >
+            {busyId != null && (busyId === -2 || items.some((a) => a.id === busyId && isBppbAccount(a)))
+              ? 'Sincronizzo…'
+              : items.some((a) => isBppbAccount(a) && a.enable_banking_connected)
+                ? 'Sincronizza conti BPPB'
+                : 'Collega e sincronizza BPPB'}
+          </button>
+          <Link className="btn btn-secondary" to="/banca/movimenti">
+            Vedi movimenti
+          </Link>
+        </div>
+        {!connectProfile?.enable_banking?.configured ? (
+          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+            Enable Banking non configurato sul server.
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-              onClick={syncAllBppbAccounts}
-              title="Collega o sincronizza i conti BPPB via Enable Banking"
-            >
-              {busyId != null && items.some((a) => a.id === busyId && isBppbAccount(a))
-                ? 'Sincronizzo…'
-                : items.some((a) => isBppbAccount(a) && a.enable_banking_connected)
-                  ? 'Sincronizza conti BPPB'
-                  : 'Collega e sincronizza BPPB'}
-            </button>
-            <Link className="btn btn-secondary" to="/banca/movimenti">
-              Vedi movimenti
-            </Link>
-          </div>
-          {!connectProfile?.enable_banking?.configured ? (
-            <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-              Enable Banking non configurato sul server.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
+        ) : null}
+      </section>
 
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>

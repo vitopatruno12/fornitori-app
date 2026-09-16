@@ -66,14 +66,39 @@ try:
         iban="IT55B0538516000CC1410004512",
         notes="Conto BPPB Mediazione (ABI 05385). Collegare via Enable Banking in produzione.",
     )
+    # Migra eventuale IBAN precedente Via Lattea → IBAN Enable Banking attivo
+    old_vl = "IT25D0538516000CC410004514"
+    new_vl = "IT25D0538516000CC1410004514"
+    for a in banca_service.list_accounts(db):
+        if (a.get("iban") or "").replace(" ", "").upper() == old_vl:
+            banca_service.update_account(
+                db,
+                a["id"],
+                {
+                    "iban": new_vl,
+                    "account_name": "Via Lattea · CC1410004514",
+                    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+                    "company": "via_lattea",
+                    "ledger_code": "1100",
+                    "notes": (
+                        "LA VIA LATTEA SOCIETA' AGRICOLA A R.L. · BPPB ABI 05385 CAB 16000 · "
+                        "CC1410004514 · Enable Banking app b88c128a-68e1-4b2e-b999-e87cc80c13b8"
+                    ),
+                },
+            )
+            print("migrated via_lattea IBAN", old_vl, "->", new_vl)
+            break
     ensure(
         db,
         bank_name="BPPB - Banca Popolare di Puglia e Basilicata",
-        account_name="Via Lattea · CC410004514",
-        iban="IT25D0538516000CC410004514",
+        account_name="Via Lattea · CC1410004514",
+        iban=new_vl,
         company="via_lattea",
         ledger_code="1100",
-        notes="LA VIA LATTEA SOCIETA' AGRICOLA A R.L. · BPPB ABI 05385 CAB 16000 · CC410004514",
+        notes=(
+            "LA VIA LATTEA SOCIETA' AGRICOLA A R.L. · BPPB ABI 05385 CAB 16000 · "
+            "CC1410004514 · Enable Banking app b88c128a-68e1-4b2e-b999-e87cc80c13b8"
+        ),
     )
     ensure(
         db,
