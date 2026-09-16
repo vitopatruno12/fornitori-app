@@ -49,6 +49,15 @@ export function ConnectionBadge({ status }) {
   return <span style={{ ...base, background: '#e5e7eb', color: '#4b5563' }}>Disconnesso</span>
 }
 
+export function reconciliationStatusLabel(status) {
+  const key = String(status || '').trim().toLowerCase()
+  if (key === 'matched') return 'Riconciliato'
+  if (key === 'difference') return 'Differenza'
+  if (key === 'unmatched' || key === 'unreconciled') return 'Da riconciliare'
+  if (!key) return '—'
+  return String(status)
+}
+
 export function ReconBadge({ status }) {
   const base = {
     padding: '0.15rem 0.5rem',
@@ -57,13 +66,14 @@ export function ReconBadge({ status }) {
     fontWeight: 600,
     whiteSpace: 'nowrap',
   }
+  const label = reconciliationStatusLabel(status)
   if (status === 'matched') {
-    return <span style={{ ...base, background: '#d1fae5', color: '#059669' }}>Riconciliato</span>
+    return <span style={{ ...base, background: '#d1fae5', color: '#059669' }}>{label}</span>
   }
   if (status === 'difference') {
-    return <span style={{ ...base, background: '#fef3c7', color: '#b45309' }}>Differenza</span>
+    return <span style={{ ...base, background: '#fef3c7', color: '#b45309' }}>{label}</span>
   }
-  return <span style={{ ...base, background: '#fee2e2', color: '#dc2626' }}>Da riconciliare</span>
+  return <span style={{ ...base, background: '#fee2e2', color: '#dc2626' }}>{label}</span>
 }
 
 export function AmministrazioneSubnav() {

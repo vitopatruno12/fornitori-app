@@ -5,6 +5,7 @@ import {
   BancaPageShell,
   eur,
   formatDate,
+  reconciliationStatusLabel,
 } from '../components/BancaShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
@@ -171,7 +172,7 @@ function bankLastMovementsCellValue(row, col) {
   if (col.id === 'description') return row?.description || '—'
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
-  if (col.id === 'status') return row?.reconciliation_status || '—'
+  if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
   return ''
 }
 
@@ -229,7 +230,7 @@ function bankMovementsCellValue(row, col) {
       .filter(Boolean)
     return bits.length ? bits.join(' · ') : '—'
   }
-  if (col.id === 'status') return row?.reconciliation_status || '—'
+  if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
   return ''
 }
 
@@ -263,7 +264,7 @@ function bankReconCellValue(row, col) {
     return `${inv.supplier_name || '—'} · n. ${inv.invoice_number || '—'} · Residuo ${eur(inv.residuo)} (${quality})`
   }
   if (col.id === 'difference') return row?.suggested_invoice ? eur(row.suggested_invoice.difference) : '—'
-  if (col.id === 'status') return row?.status || '—'
+  if (col.id === 'status') return reconciliationStatusLabel(row?.status)
   return ''
 }
 
@@ -1630,7 +1631,7 @@ export function BancaRiconciliazionePage() {
       if (auto && n > 0) {
         setSuccess(`Riconciliati automaticamente ${n} movimenti (n. documento o importo esatto).`)
       } else if (auto) {
-        setSuccess('Nessun nuovo match sicuro da applicare. Restano difference e unmatched da controllare.')
+        setSuccess('Nessun nuovo match sicuro da applicare. Restano differenze e movimenti da riconciliare.')
       }
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
@@ -1676,7 +1677,7 @@ export function BancaRiconciliazionePage() {
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName}: i match sicuri (n. documento o importo uguale) si applicano da soli. Controlla solo difference e unmatched.`
+          ? `Fatture ${companyName}: i match sicuri (n. documento o importo uguale) si applicano da soli. Controlla solo differenze e movimenti da riconciliare.`
           : 'Scegli la società nel banner verde: Atlas riconcilia automaticamente i match sicuri.'
       }
       actions={
@@ -1801,10 +1802,10 @@ export function BancaRiconciliazionePage() {
               </section>
 
               <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Da controllare (difference / unmatched)</h2>
-                <p className="fatture-note" style={{ marginTop: 0 }}>
-                  I match sicuri sono già salvati in automatico. Qui restano solo importi diversi (
-                  <strong>difference</strong>) o senza fattura (<strong>unmatched</strong>) — conferma a mano se serve.
+                <h2 className="fatture-panel-title">Da controllare (differenze / da riconciliare)</h2>
+                <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+                  Movimenti con importo diverso dalla fattura proposta (<strong>differenza</strong>) o
+                  senza fattura (<strong>da riconciliare</strong>) — conferma a mano se serve.
                 </p>
                 <WorkbookGrid
                   title="Residui da controllare"
