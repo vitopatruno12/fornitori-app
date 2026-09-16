@@ -535,8 +535,14 @@ def begin_enable_banking_connect(
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
     raise ValueError("Conto non trovato")
-  bank_l = f"{row.bank_name or ''} {row.account_name or ''}".lower()
-  is_bcc = "bcc" in bank_l or "otranto" in bank_l or "terra" in bank_l
+  bank_l = f"{row.bank_name or ''} {row.account_name or ''} {row.iban or ''}".lower()
+  iban_n = (row.iban or "").replace(" ", "").upper()
+  is_bcc = (
+    "bcc" in bank_l
+    or "otranto" in bank_l
+    or "terra" in bank_l
+    or iban_n in {"IT37M0844516000000000967252", "IT06B0844516000000000972450"}
+  )
   with enable_banking_for_account(_account_dict(row)):
     cfg = get_enable_banking_config()
     app_id = str(cfg.get("app_id") or "").strip()
@@ -548,10 +554,16 @@ def begin_enable_banking_connect(
         "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
         "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
       )
+    # BCC Terra d'Otranto: non lasciare che il frontend/profilo usi per errore BPPB.
+    auth_aspsp = aspsp_name or None
+    auth_country = aspsp_country or None
+    if is_bcc:
+      auth_aspsp = "BCC Terra d'Otranto"
+      auth_country = "IT"
     auth = start_authorization(
       account_id=account_id,
-      aspsp_name=aspsp_name or None,
-      aspsp_country=aspsp_country or None,
+      aspsp_name=auth_aspsp,
+      aspsp_country=auth_country,
       psu_type=psu_type,
       prefer_iban=row.iban,
     )

@@ -42,7 +42,7 @@ function resolveEnableBankingPayload(account) {
   if (bank.includes('bbva')) {
     return { aspsp_name: 'BBVA', aspsp_country: 'IT', psu_type: 'personal' }
   }
-  if (bank.includes('bppb') || bank.includes('puglia')) {
+  if (bank.includes('bppb') || bank.includes('puglia') || bank.includes('basilicata')) && !bank.includes('bcc') {
     return {
       aspsp_name: 'Banca Popolare di Puglia e Basilicata',
       aspsp_country: 'IT',
@@ -60,13 +60,13 @@ function resolveEnableBankingPayload(account) {
     bank.includes('terra')
     || bank.includes("d'otranto")
     || bank.includes('dotranto')
-    || (bank.includes('bcc') && (label.includes('otranto') || label.includes('carmiano')))
+    || bank.includes('bcc')
+    || label.includes('otranto')
+    || label.includes('carmiano')
   ) {
     return {
       aspsp_name: "BCC Terra d'Otranto",
       aspsp_country: 'IT',
-      // Di default privato: il token fisico RelaxBanking spesso è su canale personal.
-      // Se l'OTP resta in loop, riprovare con business dal dialogo di collegamento.
       psu_type: 'personal',
     }
   }
@@ -514,11 +514,31 @@ export function BancaContiPage() {
     } else if (eb === 'error') {
       const raw = params.get('msg') || 'Collegamento Enable Banking non riuscito'
       const low = raw.toLowerCase()
-      setError(
-        low.includes('server_error')
-          ? "BCC/Enable Banking: errore lato banca (server_error). Riprova con l'altro canale (privato↔impresa). Se persiste, controlla i log ASPSP nel Control Panel Enable Banking (app 4625919e…)."
-          : raw,
-      )
+      let pending = null
+      try {
+        pending = JSON.parse(sessionStorage.getItem('atlasEbPendingAuth') || 'null')
+      } catch {
+        pending = null
+      }
+      try {
+        sessionStorage.removeItem('atlasEbPendingAuth')
+      } catch {
+        /* ignore */
+      }
+      const aspsp = String(pending?.aspsp_name || '')
+      const isBcc = aspsp.toLowerCase().includes('bcc') || aspsp.toLowerCase().includes('otranto')
+      if (low.includes('server_error')) {
+        setError(
+          isBcc
+            ? "BCC Terra d'Otranto (Enable Banking beta): errore lato banca (server_error). "
+              + 'Non è un problema di Atlas: BPPB «Sincronizza» funziona perché quel conto è già collegato. '
+              + 'Riprova Collega BCC con l’altro canale (privato↔impresa). '
+              + 'Se persiste, apri Control Panel Enable Banking → app 4625919e… → Requests.'
+            : `Enable Banking: errore lato banca (server_error) su ${aspsp || 'ASPSP'}. Riprova Collega; se persiste controlla i log ASPSP nel Control Panel.`,
+        )
+      } else {
+        setError(raw)
+      }
     }
     params.delete('eb')
     params.delete('msg')
@@ -612,18 +632,54 @@ export function BancaContiPage() {
       const account = items.find((x) => x.id === accountId)
       let payload = resolveEnableBankingPayload(account)
       if (isBccTerraOtrantoAccount(account) || payload.aspsp_name === "BCC Terra d'Otranto") {
+        let lastPsu = ''
+        try {
+          lastPsu = String(sessionStorage.getItem('atlasEbBccLastPsu') || '')
+        } catch {
+          lastPsu = ''
+        }
+        const suggestBusiness = lastPsu === 'personal'
         const useBusiness = window.confirm(
-          "BCC Terra d'Otranto su Enable Banking è in beta.\n\n" +
-            'Se il token fisico resta sulla stessa pagina OTP, spesso il canale è sbagliato.\n\n' +
-            'OK = accesso IMPRESA (business)\n' +
-            'Annulla = accesso PRIVATO (personal)\n\n' +
-            'Prova prima PRIVATO (Annulla); se non va, ripeti con IMPRESA (OK).',
+          "BCC Terra d'Otranto su Enable Banking è in beta (diverso da BPPB).\n\n" +
+            'Sincronizza BPPB funziona solo se il conto BPPB è già collegato.\n'
+            + 'Qui stai collegando BCC: serve un nuovo login RelaxBanking.\n\n'
+            + (suggestBusiness
+              ? 'Ultimo tentativo era PRIVATO e ha fallito → consigliato IMPRESA.\n\n'
+              : 'Prova prima PRIVATO; se torna server_error, ripeti con IMPRESA.\n\n')
+            + 'OK = accesso IMPRESA (business)\n'
+            + 'Annulla = accesso PRIVATO (personal)',
         )
-        payload = { ...payload, psu_type: useBusiness ? 'business' : 'personal' }
+        payload = {
+          ...payload,
+          aspsp_name: "BCC Terra d'Otranto",
+          aspsp_country: 'IT',
+          psu_type: useBusiness ? 'business' : 'personal',
+        }
+        try {
+          sessionStorage.setItem('atlasEbBccLastPsu', payload.psu_type)
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        sessionStorage.setItem(
+          'atlasEbPendingAuth',
+          JSON.stringify({
+            accountId,
+            aspsp_name: payload.aspsp_name || '',
+            psu_type: payload.psu_type || '',
+            at: Date.now(),
+          }),
+        )
+      } catch {
+        /* ignore */
       }
       const res = await startEnableBankingAuth(accountId, payload)
       if (res?.url) {
-        setSuccess(res.message || 'Reindirizzamento alla banca…')
+        setSuccess(
+          `${res.message || 'Reindirizzamento alla banca…'}`
+            + (res.enable_banking_app_id ? ` · app ${res.enable_banking_app_id}` : ''),
+        )
         window.location.assign(res.url)
         return
       }
