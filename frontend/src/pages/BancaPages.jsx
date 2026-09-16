@@ -26,6 +26,7 @@ import {
   startEnableBankingAuth,
   syncBancaAccount,
   syncEnableBankingAccount,
+  unsyncBancaAccount,
   updateBancaAccount,
 } from '../services/bancaService'
 import { SeriesBars } from '../components/FattureShared.jsx'
@@ -149,11 +150,11 @@ const BPPB_SEED_ACCOUNTS = [
   },
   {
     bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
-    account_name: 'CC1410004512',
+    account_name: 'Mediazione · CC1410004512',
     iban: 'IT55B0538516000CC1410004512',
-    company: '',
+    company: 'mediazione_a',
     ledger_code: '1100',
-    notes: 'Conto BPPB Mediazione (ABI 05385). Collegare via Enable Banking in produzione.',
+    notes: 'MEDIAZIONE · BPPB · IBAN IT55B0538516000CC1410004512 · ABI 05385. Collegare via Enable Banking.',
   },
 ]
 
@@ -484,6 +485,7 @@ export function BancaContiPage() {
   const [otpValue, setOtpValue] = useState('')
   const [otpHint, setOtpHint] = useState('')
   const [otpBusy, setOtpBusy] = useState(false)
+  const [bppbSelectedId, setBppbSelectedId] = useState('')
   const banInputRef = useRef(null)
   const banImportAccountRef = useRef(null)
   const banImportInputRef = useRef(null)
@@ -505,6 +507,18 @@ export function BancaContiPage() {
   useEffect(() => {
     reload()
   }, [])
+
+  useEffect(() => {
+    const bppb = items.filter(isBppbAccount)
+    if (!bppb.length) return
+    const stillValid = bppb.some((a) => String(a.id) === String(bppbSelectedId))
+    if (stillValid) return
+    const prefer =
+      bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+      || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
+      || bppb[0]
+    setBppbSelectedId(String(prefer.id))
+  }, [items, bppbSelectedId])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search || '')
@@ -742,82 +756,141 @@ export function BancaContiPage() {
     }
   }
 
-  async function syncAllBppbAccounts() {
-    let bppb = items.filter(isBppbAccount)
-    if (!bppb.length) {
-      setBusyId(-2)
-      setError('')
-      setSuccess('')
-      try {
-        const existingIbans = new Set(
-          items.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
-        )
-        // Aggiorna eventuale IBAN Via Lattea precedente
-        const oldVl = items.find(
-          (a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC410004514',
-        )
-        if (oldVl?.id) {
-          await updateBancaAccount(oldVl.id, {
-            iban: 'IT25D0538516000CC1410004514',
-            account_name: 'Via Lattea · CC1410004514',
-            bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
-            company: 'via_lattea',
-            ledger_code: '1100',
-          })
-          existingIbans.delete('IT25D0538516000CC410004514')
-          existingIbans.add('IT25D0538516000CC1410004514')
-        }
-        for (const seed of BPPB_SEED_ACCOUNTS) {
-          const iban = seed.iban.replace(/\s/g, '').toUpperCase()
-          if (existingIbans.has(iban)) continue
-          await createBancaAccount(seed)
-        }
-        const res = await fetchBancaAccounts()
-        const next = Array.isArray(res?.items) ? res.items : []
-        setItems(next)
-        bppb = next.filter(isBppbAccount)
-      } catch (err) {
-        setError(err?.message || 'Impossibile creare i conti BPPB')
-        setBusyId(null)
-        return
-      } finally {
-        setBusyId(null)
+  async function ensureBppbAccounts() {
+    setBusyId(-2)
+    setError('')
+    setSuccess('')
+    try {
+      let list = items
+      const existingIbans = new Set(
+        list.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
+      )
+      // Aggiorna eventuale IBAN Via Lattea precedente
+      const oldVl = list.find(
+        (a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC410004514',
+      )
+      if (oldVl?.id) {
+        await updateBancaAccount(oldVl.id, {
+          iban: 'IT25D0538516000CC1410004514',
+          account_name: 'Via Lattea · CC1410004514',
+          bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
+          company: 'via_lattea',
+          ledger_code: '1100',
+        })
+        existingIbans.delete('IT25D0538516000CC410004514')
+        existingIbans.add('IT25D0538516000CC1410004514')
       }
+      // Allinea società/nome se il conto Via Lattea è ancora su Mediazione
+      const viaLattea = list.find(
+        (a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514',
+      )
+      if (viaLattea?.id && String(viaLattea.company || '').toLowerCase() !== 'via_lattea') {
+        await updateBancaAccount(viaLattea.id, {
+          account_name: 'Via Lattea · CC1410004514',
+          company: 'via_lattea',
+          bank_name: 'BPPB - Banca Popolare di Puglia e Basilicata',
+        })
+      }
+      let created = false
+      for (const seed of BPPB_SEED_ACCOUNTS) {
+        const iban = seed.iban.replace(/\s/g, '').toUpperCase()
+        if (existingIbans.has(iban)) continue
+        await createBancaAccount(seed)
+        created = true
+      }
+      if (created || oldVl?.id || (viaLattea?.id && String(viaLattea.company || '').toLowerCase() !== 'via_lattea')) {
+        const res = await fetchBancaAccounts()
+        list = Array.isArray(res?.items) ? res.items : []
+        setItems(list)
+      }
+      return list.filter(isBppbAccount)
+    } catch (err) {
+      setError(err?.message || 'Impossibile creare i conti BPPB')
+      return items.filter(isBppbAccount)
+    } finally {
+      setBusyId(null)
     }
+  }
+
+  async function syncSelectedBppbAccount() {
+    let bppb = await ensureBppbAccounts()
     if (!bppb.length) {
       setError('Nessun conto BPPB in elenco.')
       return
     }
-    const connected = bppb.filter((a) => a.enable_banking_connected)
-    if (!connected.length) {
-      // Preferisci Via Lattea (app b88c128a…) se presente
-      const prefer =
-        bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
-        || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
-        || bppb[0]
-      await startEnableBanking(prefer.id)
+    let selected =
+      bppb.find((a) => String(a.id) === String(bppbSelectedId))
+      || bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+      || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
+      || bppb[0]
+    setBppbSelectedId(String(selected.id))
+
+    // Allinea etichette/società se il seed Mediazione esiste ma è senza company
+    if (
+      String(selected.iban || '').replace(/\s/g, '').toUpperCase() === 'IT55B0538516000CC1410004512'
+      && !selected.company
+    ) {
+      try {
+        await updateBancaAccount(selected.id, {
+          account_name: 'Mediazione · CC1410004512',
+          company: 'mediazione_a',
+        })
+        selected = {
+          ...selected,
+          account_name: 'Mediazione · CC1410004512',
+          company: 'mediazione_a',
+        }
+      } catch {
+        /* ignore label fix errors */
+      }
+    }
+
+    if (!selected.enable_banking_connected) {
+      await startEnableBanking(selected.id)
       return
     }
     setError('')
     setSuccess('')
-    let totalImported = 0
-    for (const acc of connected) {
-      setBusyId(acc.id)
-      try {
-        const res = await syncEnableBankingAccount(acc.id)
-        totalImported += Number(res?.imported || 0)
-      } catch (err) {
-        setError(err?.message || `Sync fallito per ${acc.bank_name}`)
-        setBusyId(null)
-        await reload()
-        return
-      }
+    setBusyId(selected.id)
+    try {
+      const res = await syncEnableBankingAccount(selected.id)
+      const imported = Number(res?.imported || 0)
+      const label = formatBankAccountOptionLabel(selected)
+      setSuccess(
+        `BPPB «${label}» sincronizzato: ${imported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+      )
+    } catch (err) {
+      setError(err?.message || `Sync fallito per ${formatBankAccountOptionLabel(selected)}`)
+    } finally {
+      setBusyId(null)
+      await reload()
     }
-    setBusyId(null)
-    setSuccess(
-      `BPPB sincronizzato: ${connected.length} conti, ${totalImported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+  }
+
+  async function unsyncSelectedBppbAccount() {
+    const bppb = items.filter(isBppbAccount)
+    const selected = bppb.find((a) => String(a.id) === String(bppbSelectedId)) || bppb[0]
+    if (!selected?.id) {
+      setError('Seleziona un conto BPPB da scollegare.')
+      return
+    }
+    const label = formatBankAccountOptionLabel(selected)
+    const ok = window.confirm(
+      `Scollegare «${label}» e cancellare i movimenti importati?\nIl conto resta in elenco: potrai ricollegarlo e reimportare.`,
     )
-    await reload()
+    if (!ok) return
+    setError('')
+    setSuccess('')
+    setBusyId(selected.id)
+    try {
+      const res = await unsyncBancaAccount(selected.id)
+      setSuccess(res?.message || `Conto «${label}» scollegato.`)
+    } catch (err) {
+      setError(err?.message || `Scollegamento fallito per ${label}`)
+    } finally {
+      setBusyId(null)
+      await reload()
+    }
   }
 
   async function syncAllBccAccounts() {
@@ -1029,18 +1102,48 @@ export function BancaContiPage() {
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            className="form-control"
+            style={{ minWidth: 260, maxWidth: 420 }}
+            value={bppbSelectedId}
+            disabled={busyId != null}
+            onChange={(e) => setBppbSelectedId(e.target.value)}
+            title="Scegli quale conto BPPB importare"
+          >
+            {items.filter(isBppbAccount).length === 0 ? (
+              <option value="">Via Lattea / Mediazione (crea al sync)</option>
+            ) : (
+              items.filter(isBppbAccount).map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {formatBankAccountOptionLabel(a)}
+                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
+                </option>
+              ))
+            )}
+          </select>
           <button
             type="button"
             className="btn btn-primary"
             disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncAllBppbAccounts}
-            title="Collega o sincronizza i conti BPPB via Enable Banking"
+            onClick={syncSelectedBppbAccount}
+            title="Collega o sincronizza solo il conto BPPB selezionato"
           >
             {busyId != null && (busyId === -2 || items.some((a) => a.id === busyId && isBppbAccount(a)))
               ? 'Sincronizzo…'
-              : items.some((a) => isBppbAccount(a) && a.enable_banking_connected)
-                ? 'Sincronizza conti BPPB'
-                : 'Collega e sincronizza BPPB'}
+              : (() => {
+                  const sel = items.find((a) => String(a.id) === String(bppbSelectedId) && isBppbAccount(a))
+                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
+                  return 'Collega e sincronizza'
+                })()}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busyId != null || !bppbSelectedId}
+            onClick={unsyncSelectedBppbAccount}
+            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
+          >
+            Scollega / svuota movimenti
           </button>
           <Link className="btn btn-secondary" to="/banca/movimenti">
             Vedi movimenti

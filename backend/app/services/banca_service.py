@@ -219,6 +219,36 @@ def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any
   return _account_out(row)
 
 
+def unsync_account(db: Session, account_id: int) -> Dict[str, Any]:
+  """Scollega Enable Banking e rimuove i movimenti importati del conto (resta in elenco)."""
+  row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
+  if not row:
+    raise ValueError("Conto non trovato")
+  deleted_movements = (
+    db.query(BankMovement)
+    .filter(BankMovement.bank_account_id == account_id)
+    .delete(synchronize_session=False)
+  )
+  row.connection_status = "disconnected"
+  row.last_sync_at = None
+  row.eb_session_id = None
+  row.eb_account_uid = None
+  row.saldo_disponibile = 0
+  row.saldo_contabile = 0
+  db.commit()
+  db.refresh(row)
+  label = f"{row.bank_name} · {row.account_name}".strip(" ·")
+  return {
+    "ok": True,
+    "account": _account_out(row),
+    "deleted_movements": int(deleted_movements or 0),
+    "message": (
+      f"Conto «{label}» scollegato: {int(deleted_movements or 0)} movimenti rimossi. "
+      "Puoi ricollegarlo e reimportare."
+    ),
+  }
+
+
 def begin_bank_login(db: Session, account_id: int) -> Dict[str, Any]:
   """Avvia login banca con credenziali .env e invia OTP."""
   from .bank_connect_otp_service import request_bank_connect_otp

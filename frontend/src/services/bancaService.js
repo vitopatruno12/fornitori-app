@@ -69,6 +69,10 @@ export async function disconnectBancaAccount(id) {
   return apiFetch(`/banca/accounts/${id}/disconnect`, { method: 'POST' })
 }
 
+export async function unsyncBancaAccount(id) {
+  return apiFetch(`/banca/accounts/${id}/unsync`, { method: 'POST' })
+}
+
 export async function deleteBancaAccount(id) {
   return apiFetch(`/banca/accounts/${id}/delete`, { method: 'POST' })
 }

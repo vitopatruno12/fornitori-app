@@ -305,6 +305,15 @@ def banca_disconnect(account_id: int, db: Session = Depends(get_db)) -> Dict[str
     raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+@router.post("/accounts/{account_id}/unsync")
+def banca_unsync(account_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+  """Scollega Enable Banking e cancella i movimenti del conto (senza eliminare il conto)."""
+  try:
+    return banca_service.unsync_account(db, account_id)
+  except ValueError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
+
+
 @router.delete("/accounts/{account_id}")
 def banca_delete_account(account_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
   try:
