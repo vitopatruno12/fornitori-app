@@ -204,7 +204,7 @@ const BANK_MOVEMENTS_COLUMNS = [
   { id: 'causale', label: 'Causale', width: 14, fluid: true },
   { id: 'type', label: 'Entrata/Uscita', width: 9, fluid: true },
   { id: 'amount', label: 'Importo', width: 11, fluid: true, numeric: true },
-  { id: 'account', label: 'Conto', width: 11, fluid: true },
+  { id: 'account', label: 'Conto', width: 18, fluid: true },
   { id: 'status', label: 'Riconciliazione', width: 8, fluid: true },
 ]
 
@@ -221,7 +221,13 @@ function bankMovementsCellValue(row, col) {
   if (col.id === 'causale') return row?.causale || '—'
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
-  if (col.id === 'account') return row?.account_label || '—'
+  if (col.id === 'account') {
+    if (row?.account_label) return row.account_label
+    const bits = [row?.account_bank_name || row?.bank_name, row?.account_name, row?.account_company]
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+    return bits.length ? bits.join(' · ') : '—'
+  }
   if (col.id === 'status') return row?.reconciliation_status || '—'
   return ''
 }
@@ -1291,6 +1297,25 @@ export function BancaMovimentiPage() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [lastSyncedLabel, setLastSyncedLabel] = useState('')
+
+  const selectedAccount = accountId
+    ? accounts.find((a) => String(a.id) === String(accountId)) || null
+    : null
+
+  const viewAccountLabel = selectedAccount
+    ? formatBankAccountOptionLabel(selectedAccount)
+    : lastSyncedLabel || 'Tutti i conti'
+
+  const pageTitle = selectedAccount
+    ? `Movimenti bancari · ${selectedAccount.bank_name || 'Banca'}`
+    : 'Movimenti bancari'
+
+  const pageLead = selectedAccount
+    ? `Conto: ${formatBankAccountOptionLabel(selectedAccount)}`
+    : lastSyncedLabel
+      ? `Ultimo aggiornamento: ${lastSyncedLabel}. Seleziona un conto nel filtro per vedere solo quello.`
+      : 'Seleziona banca/conto nel filtro, poi Filtra o Aggiorna. Nella colonna Conto vedi banca · società · IBAN.'
 
   async function load() {
     setLoading(true)
@@ -1346,11 +1371,16 @@ export function BancaMovimentiPage() {
         const res = await syncEnableBankingAccount(acc.id)
         totalImported += Number(res?.imported || 0)
       }
-      setSuccess(
-        targets.length === 1
-          ? `Aggiornato ${formatBankAccountOptionLabel(targets[0])}: ${totalImported} nuovi movimenti.`
-          : `Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti.`,
-      )
+      if (targets.length === 1) {
+        const label = formatBankAccountOptionLabel(targets[0])
+        setLastSyncedLabel(label)
+        // Resta sul conto aggiornato così titolo ed elenco coincidono
+        setAccountId(String(targets[0].id))
+        setSuccess(`Aggiornato ${label}: ${totalImported} nuovi movimenti.`)
+      } else {
+        setLastSyncedLabel(`${targets.length} conti sincronizzati`)
+        setSuccess(`Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti.`)
+      }
       await load()
     } catch (e) {
       setError(e?.message || 'Aggiornamento movimenti fallito')
@@ -1361,12 +1391,12 @@ export function BancaMovimentiPage() {
   }
 
   useEffect(() => {
-    load()
+    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [accountId])
 
   return (
-    <BancaPageShell title="Movimenti bancari" lead="Estratto movimenti con filtri e stato di riconciliazione.">
+    <BancaPageShell title={pageTitle} lead={pageLead}>
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
       <section className="card fatture-panel">
@@ -1385,10 +1415,15 @@ export function BancaMovimentiPage() {
             a
             <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </label>
-          <label>
-            Conto
-            <select className="form-control" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-              <option value="">Tutti</option>
+          <label style={{ minWidth: 280, flex: '1 1 280px' }}>
+            Banca / conto
+            <select
+              className="form-control"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              title="Scegli quale banca e conto stai guardando"
+            >
+              <option value="">Tutti i conti</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {formatBankAccountOptionLabel(a)}
@@ -1414,30 +1449,41 @@ export function BancaMovimentiPage() {
             onClick={() => void aggiornaMovimenti()}
             title={
               accountId
-                ? 'Scarica saldi/movimenti dal conto selezionato via Enable Banking e aggiorna l’elenco'
-                : 'Scarica saldi/movimenti da tutti i conti Enable Banking collegati e aggiorna l’elenco'
+                ? `Aggiorna solo: ${viewAccountLabel}`
+                : 'Aggiorna tutti i conti Enable Banking collegati'
             }
           >
             {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
           </button>
         </form>
+        <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+          Stai vedendo:{' '}
+          <strong>{viewAccountLabel}</strong>
+          {selectedAccount?.company ? (
+            <> · società mastrini: <strong>{companyLabel(selectedAccount.company)}</strong></>
+          ) : null}
+        </p>
       </section>
 
       <section className="card fatture-panel banca-fit-panel">
         {loading || syncBusy ? (
           <AnalisiLoadingBar
             active
-            label={syncBusy ? 'Sincronizzazione movimenti banca' : 'Caricamento banca'}
+            label={
+              syncBusy
+                ? `Sincronizzazione · ${viewAccountLabel}`
+                : `Caricamento · ${viewAccountLabel}`
+            }
             variant="subtle"
           />
         ) : (
           <WorkbookGrid
-            title="Movimenti bancari"
+            title={`Movimenti bancari · ${viewAccountLabel}`}
             sheetLabel={`${items.length} movimenti`}
             columns={BANK_MOVEMENTS_COLUMNS}
             rows={items}
             cellValue={bankMovementsCellValue}
-            emptyMessage="Nessun movimento nel filtro. Usa Aggiorna qui sopra oppure Sincronizza in Conti correnti."
+            emptyMessage={`Nessun movimento per «${viewAccountLabel}». Usa Aggiorna oppure Sincronizza in Conti correnti.`}
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
             totals={{
