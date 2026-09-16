@@ -319,8 +319,15 @@ function resolveMemberForShift(shift, members) {
 
 function shiftBelongsToSection(shift, sectionName, members, sectionsList) {
   if (!sectionName) return true
-  const member = resolveMemberForShift(shift, members)
-  if (!member) return false
+  const list = Array.isArray(members) ? members : []
+  const member = resolveMemberForShift(shift, list)
+  if (!member) {
+    // Turno senza anagrafica collegata: mostralo nel primo piano visibile (non sparire all'apertura locale).
+    const firstVisible =
+      (sectionsList || []).find((s) => !isPlanningSectionHidden(s, [], HIDDEN_PLANNING_SECTIONS)) ||
+      (sectionsList || [])[0]
+    return sectionCompareKey(firstVisible) === sectionCompareKey(sectionName)
+  }
   const current = sectionCompareKey(canonicalSectionName(member?.section))
   if (current) return memberMatchesSection(member, sectionName, sectionsList)
   // Sezione vuota: non assegnare a Mediazione/Pulizie nascoste — usa la prima sezione visibile.
@@ -1839,6 +1846,17 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   const planningWeekBlocks = useMemo(() => {
     const sections = planningSection ? [planningSection] : planningGridSectionOptions
     if (!sections.length) return []
+    // All'apertura locale l'anagrafica può arrivare dopo i turni: mostra subito la griglia.
+    if (!members.length && shifts.length > 0) {
+      const section = planningSection || sections[0] || 'Turni'
+      return [
+        {
+          section,
+          sectionLabel: section,
+          shiftsByDate: groupShiftsByDate(shifts),
+        },
+      ]
+    }
     return sections.map((section) => ({
       section,
       sectionLabel: section,
@@ -2794,12 +2812,25 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     ? isOperatorStationStaffSessionOpen(operatorStationId, localeStaffName || stationStaffLocaleName)
     : isStaffLocaleSessionOpen(localeStaffName)
 
-  // Con locale aperto: ricarica i turni a ogni cambio settimana/giorno/periodo (restano sempre visibili).
+  // Con locale aperto: carica dipendenti (se mancano) e ricarica turni a ogni cambio settimana/giorno/periodo.
   useEffect(() => {
     if (!activeLocaleSessionOpen) return
     let cancelled = false
     ;(async () => {
       try {
+        const localeName = normalizeLocaleName(localeStaffName || stationStaffLocaleName)
+        if (!operatorMode && localeName && members.length === 0) {
+          const stored = await readStoredLocaleAccessCode(localeName)
+          const code = isValidLocaleAccessCode(stored)
+            ? stored
+            : isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))
+              ? normalizeLocaleAccessCode(localeAccessCode)
+              : undefined
+          const mem = await loadMembersFromLocalePackSilently(localeName, code)
+          if (cancelled) return
+          await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
+          return
+        }
         await reloadPlanning()
       } catch {
         if (!cancelled) {
@@ -2811,7 +2842,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLocaleSessionOpen, planView, weekAnchor, dayFocus, periodFrom, periodTo])
+  }, [activeLocaleSessionOpen, planView, weekAnchor, dayFocus, periodFrom, periodTo, localeStaffName, members.length])
 
   function findLocaleStoreKey(store, localeName) {
     const names = Object.keys(store || {})
@@ -3533,9 +3564,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       if (isValidLocaleAccessCode(code)) {
         setLocaleAccessCode(code)
       }
-      await loadMembersFromLocalePackSilently(linked, code)
+      const mem = await loadMembersFromLocalePackSilently(linked, code)
+      await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
     })()
-  }, [operatorMode, operatorStationId, savedLocaleNames, clearStaffDataFromMemory])
+  }, [operatorMode, operatorStationId, savedLocaleNames, clearStaffDataFromMemory, reloadPlanning])
 
   useEffect(() => {
     const onServerDataRefresh = () => {
@@ -3842,11 +3874,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       return []
     }
     if (!pack || !Array.isArray(pack.members) || pack.members.length === 0) {
-      if (operatorMode) {
-        setMembers([])
-        return []
-      }
-      clearStaffDataFromMemory()
+      setMembers([])
       return []
     }
     const mem = await syncMembersFromLocalePack(
