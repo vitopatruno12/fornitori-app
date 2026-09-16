@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..models.bank_account import BankAccount
 from ..services import banca_service
 
 router = APIRouter(prefix="/banca", tags=["banca"])
@@ -153,12 +154,71 @@ def banca_enable_banking_callback(
 
   if error:
     msg = error_description or error or "Autorizzazione annullata"
-    return RedirectResponse(url=frontend_error_redirect(str(msg)), status_code=302)
+    bank_kind = ""
+    aspsp_name = ""
+    app_id = ""
+    try:
+      from ..services.enable_banking_service import (
+        _bank_kind_from_account,
+        get_enable_banking_config,
+        parse_state,
+      )
+      from ..services.enable_banking_service import enable_banking_for_account, _account_dict
+
+      account_id = parse_state(state)
+      if account_id:
+        row = db.query(BankAccount).filter(BankAccount.id == account_id).first()
+        bank_kind = _bank_kind_from_account(row)
+        aspsp_name = (getattr(row, "eb_aspsp_name", None) or "") if row else ""
+        if row:
+          with enable_banking_for_account(_account_dict(row)):
+            app_id = str(get_enable_banking_config().get("app_id") or "")
+          if not aspsp_name:
+            if bank_kind == "bcc":
+              aspsp_name = "BCC Terra d'Otranto"
+            elif bank_kind == "bppb":
+              aspsp_name = "Banca Popolare di Puglia e Basilicata"
+    except Exception:
+      pass
+    return RedirectResponse(
+      url=frontend_error_redirect(str(msg), aspsp=aspsp_name or None, bank=bank_kind or None, app_id=app_id or None),
+      status_code=302,
+    )
   try:
     result = complete_enable_banking_callback(db, code=code or "", state=state)
     return RedirectResponse(url=result["redirect_to"], status_code=302)
   except (ValueError, RuntimeError) as e:
-    return RedirectResponse(url=frontend_error_redirect(str(e)), status_code=302)
+    bank_kind = ""
+    aspsp_name = ""
+    app_id = ""
+    try:
+      from ..services.enable_banking_service import (
+        _bank_kind_from_account,
+        get_enable_banking_config,
+        parse_state,
+        enable_banking_for_account,
+        _account_dict,
+      )
+
+      account_id = parse_state(state)
+      if account_id:
+        row = db.query(BankAccount).filter(BankAccount.id == account_id).first()
+        bank_kind = _bank_kind_from_account(row)
+        aspsp_name = (getattr(row, "eb_aspsp_name", None) or "") if row else ""
+        if row:
+          with enable_banking_for_account(_account_dict(row)):
+            app_id = str(get_enable_banking_config().get("app_id") or "")
+          if not aspsp_name:
+            if bank_kind == "bcc":
+              aspsp_name = "BCC Terra d'Otranto"
+            elif bank_kind == "bppb":
+              aspsp_name = "Banca Popolare di Puglia e Basilicata"
+    except Exception:
+      pass
+    return RedirectResponse(
+      url=frontend_error_redirect(str(e), aspsp=aspsp_name or None, bank=bank_kind or None, app_id=app_id or None),
+      status_code=302,
+    )
   except Exception as e:
     return RedirectResponse(url=frontend_error_redirect(f"Errore inatteso: {e}"), status_code=302)
 

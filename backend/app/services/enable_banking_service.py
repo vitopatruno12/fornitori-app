@@ -543,6 +543,15 @@ def begin_enable_banking_connect(
     or "terra" in bank_l
     or iban_n in {"IT37M0844516000000000967252", "IT06B0844516000000000972450"}
   )
+  is_bppb = (
+    not is_bcc
+    and (
+      "bppb" in bank_l
+      or "puglia" in bank_l
+      or "basilicata" in bank_l
+      or iban_n in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+    )
+  )
   with enable_banking_for_account(_account_dict(row)):
     cfg = get_enable_banking_config()
     app_id = str(cfg.get("app_id") or "").strip()
@@ -554,11 +563,23 @@ def begin_enable_banking_connect(
         "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
         "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
       )
-    # BCC Terra d'Otranto: non lasciare che il frontend/profilo usi per errore BPPB.
+    if is_bppb and app_id and app_id != "b88c128a-68e1-4b2e-b999-e87cc80c13b8":
+      # Via Lattea BPPB non deve finire sull'app BCC 4625919e…
+      if app_id == "4625919e-22a1-4d40-8267-7587ff2360c0":
+        raise RuntimeError(
+          "Profilo Enable Banking sbagliato per BPPB Via Lattea: Atlas userebbe l'app BCC "
+          f"({app_id}, profilo {cfg.get('profile_id')}). "
+          "Serve l'app b88c128a-68e1-4b2e-b999-e87cc80c13b8 in bank_profiles.json "
+          "(id bppb_via_lattea) e IBAN IT25D0538516000CC1410004514."
+        )
+    # Non lasciare che il frontend/profilo usi per errore l'ASPSP sbagliato.
     auth_aspsp = aspsp_name or None
     auth_country = aspsp_country or None
     if is_bcc:
       auth_aspsp = "BCC Terra d'Otranto"
+      auth_country = "IT"
+    elif is_bppb:
+      auth_aspsp = "Banca Popolare di Puglia e Basilicata"
       auth_country = "IT"
     auth = start_authorization(
       account_id=account_id,
@@ -739,7 +760,41 @@ def _import_transactions(db: Session, account: BankAccount, account_uid: str) ->
   return created
 
 
-def frontend_error_redirect(message: str) -> str:
+def frontend_error_redirect(
+  message: str,
+  *,
+  aspsp: Optional[str] = None,
+  bank: Optional[str] = None,
+  app_id: Optional[str] = None,
+) -> str:
   frontend = get_enable_banking_config()["frontend_url"]
-  qs = urlencode({"eb": "error", "msg": (message or "Errore Enable Banking")[:200]})
+  params: Dict[str, str] = {"eb": "error", "msg": (message or "Errore Enable Banking")[:200]}
+  if aspsp:
+    params["aspsp"] = str(aspsp)[:120]
+  if bank:
+    params["bank"] = str(bank)[:32]
+  if app_id:
+    params["app"] = str(app_id)[:64]
+  qs = urlencode(params)
   return f"{frontend}/banca/conti?{qs}"
+
+
+def _bank_kind_from_account(row: Optional[BankAccount]) -> str:
+  if not row:
+    return ""
+  text = f"{row.bank_name or ''} {row.account_name or ''} {row.iban or ''}".lower()
+  iban = (row.iban or "").replace(" ", "").upper()
+  if (
+    "bcc" in text
+    or "otranto" in text
+    or iban in {"IT37M0844516000000000967252", "IT06B0844516000000000972450"}
+  ):
+    return "bcc"
+  if (
+    "bppb" in text
+    or "puglia" in text
+    or "basilicata" in text
+    or iban in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+  ):
+    return "bppb"
+  return ""

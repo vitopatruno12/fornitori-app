@@ -185,6 +185,7 @@ def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> Ban
       return "bppb" in b or "puglia" in b or "basilicata" in b
     return False
 
+  # Preferisci match banca+società prima dell'app EB generica (evita Via Lattea BPPB → profilo BCC).
   if company:
     company_matches = [p for p in profiles if p.company and p.company == company]
     if bank_name and company_matches:
@@ -193,18 +194,25 @@ def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> Ban
           (prof.bank_name or "").lower(), bank_name
         ):
           return prof
-      # Match su id profilo (es. bcc_via_lattea)
+      # Match su id profilo (es. bcc_via_lattea / bppb_via_lattea)
       for prof in company_matches:
         pid = (prof.id or "").lower()
         if "bcc" in bank_name or "otranto" in bank_name:
           if "bcc" in pid:
             return prof
-        if "bppb" in bank_name or "puglia" in bank_name:
+        if "bppb" in bank_name or "puglia" in bank_name or "basilicata" in bank_name:
           if "bppb" in pid:
             return prof
     if len(company_matches) == 1:
       return company_matches[0]
-    # Più conti stessa società: preferisci quello con credenziali / EB se IBAN non c'è
+    # Più conti stessa società: preferisci match IBAN già fatto sopra; poi banca da id profilo.
+    if bank_name:
+      for prof in company_matches:
+        pid = (prof.id or "").lower()
+        if ("bppb" in bank_name or "puglia" in bank_name) and "bppb" in pid:
+          return prof
+        if ("bcc" in bank_name or "otranto" in bank_name) and "bcc" in pid:
+          return prof
     for prof in company_matches:
       if prof.username and prof.password:
         return prof

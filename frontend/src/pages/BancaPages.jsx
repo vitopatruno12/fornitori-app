@@ -514,6 +514,9 @@ export function BancaContiPage() {
     } else if (eb === 'error') {
       const raw = params.get('msg') || 'Collegamento Enable Banking non riuscito'
       const low = raw.toLowerCase()
+      const aspspQ = String(params.get('aspsp') || '')
+      const bankQ = String(params.get('bank') || '').toLowerCase()
+      const appQ = String(params.get('app') || '')
       let pending = null
       try {
         pending = JSON.parse(sessionStorage.getItem('atlasEbPendingAuth') || 'null')
@@ -525,17 +528,39 @@ export function BancaContiPage() {
       } catch {
         /* ignore */
       }
-      const aspsp = String(pending?.aspsp_name || '')
-      const isBcc = aspsp.toLowerCase().includes('bcc') || aspsp.toLowerCase().includes('otranto')
+      const aspsp = aspspQ || String(pending?.aspsp_name || '')
+      const aspspL = aspsp.toLowerCase()
+      const isBcc =
+        bankQ === 'bcc'
+        || aspspL.includes('bcc')
+        || aspspL.includes('otranto')
+        || appQ === '4625919e-22a1-4d40-8267-7587ff2360c0'
+      const isBppb =
+        bankQ === 'bppb'
+        || aspspL.includes('puglia')
+        || aspspL.includes('basilicata')
+        || aspspL.includes('bppb')
+        || appQ === 'b88c128a-68e1-4b2e-b999-e87cc80c13b8'
       if (low.includes('server_error')) {
-        setError(
-          isBcc
-            ? "BCC Terra d'Otranto (Enable Banking beta): errore lato banca (server_error). "
-              + 'Non è un problema di Atlas: BPPB «Sincronizza» funziona perché quel conto è già collegato. '
+        if (isBppb && !isBcc) {
+          setError(
+            'BPPB Via Lattea (Enable Banking): errore lato banca (server_error) durante Collega. '
+              + 'Non è BCC: stai collegando Banca Popolare di Puglia e Basilicata'
+              + (appQ ? ` (app ${appQ})` : ' (app b88c128a…)')
+              + '. Riprova Collega BPPB; se «Sincronizza conti BPPB» funziona, quel conto è già collegato e puoi usare solo Sincronizza.',
+          )
+        } else if (isBcc) {
+          setError(
+            "BCC Terra d'Otranto (Enable Banking beta): errore lato banca (server_error). "
               + 'Riprova Collega BCC con l’altro canale (privato↔impresa). '
-              + 'Se persiste, apri Control Panel Enable Banking → app 4625919e… → Requests.'
-            : `Enable Banking: errore lato banca (server_error) su ${aspsp || 'ASPSP'}. Riprova Collega; se persiste controlla i log ASPSP nel Control Panel.`,
-        )
+              + 'Se persiste, Control Panel → app 4625919e… → Requests.',
+          )
+        } else {
+          setError(
+            `Enable Banking: errore lato banca (server_error)${aspsp ? ` su ${aspsp}` : ''}. `
+              + 'Riprova Collega; se persiste controlla i log ASPSP nel Control Panel.',
+          )
+        }
       } else {
         setError(raw)
       }
