@@ -115,6 +115,18 @@ def reclassify_issued_invoices(
   return issued_invoice_service.reclassify_issued_invoices(db, dry_run=dry_run)
 
 
+@router.post("/cleanup-misrouted-emesse")
+def cleanup_misrouted_emesse(
+  dry_run: bool = Query(default=False, description="Solo anteprima se true"),
+  db: Session = Depends(get_db),
+):
+  """
+  Nasconde da ricevute/da-registrare le fatture che sono emesse nostre verso clienti
+  (es. Mediazione→Vergari finite sotto Via Lattea o Gazza Ladra).
+  """
+  return invoice_service.ignore_misrouted_our_emesse(db, dry_run=dry_run)
+
+
 @router.get("/emesse/{invoice_id}/pdf")
 def download_issued_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
   """Anteprima PDF emessa: file PDF caricato o generato da XML FatturaPA."""

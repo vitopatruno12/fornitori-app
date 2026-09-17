@@ -23,10 +23,28 @@ def _vat_digits(value: str) -> str:
   return re.sub(r"\D+", "", value or "")
 
 
-def detect_invoice_direction(xml_bytes: bytes, our_vat: str) -> str:
-  """Ritorna 'emessa' se Cedente ≈ nostra P.IVA, altrimenti 'ricevuta'."""
-  our = _vat_digits(our_vat)
-  if not our or len(our) < 11:
+def detect_invoice_direction(xml_bytes: bytes, our_vat: str = "") -> str:
+  """
+  Ritorna 'emessa' se il Cedente è una nostra P.IVA (qualsiasi società Atlas),
+  non solo quella del profilo AdE in download.
+  Evita che una fattura Mediazione→cliente scaricata nel profilo Via Lattea
+  finisca come ricevuta Mucche Volanti.
+  """
+  try:
+    from ...constants.sdi_companies import all_our_company_vats
+  except Exception:
+    all_our_company_vats = None  # type: ignore
+
+  ours = set()
+  if all_our_company_vats:
+    try:
+      ours = set(all_our_company_vats())
+    except Exception:
+      ours = set()
+  single = _vat_digits(our_vat)
+  if single and len(single) >= 11:
+    ours.add(single)
+  if not ours:
     return "ricevuta"
   try:
     text = xml_bytes.decode("utf-8", errors="replace")
@@ -38,8 +56,11 @@ def detect_invoice_direction(xml_bytes: bytes, our_vat: str) -> str:
     re.I,
   )
   cedente = _vat_digits(m.group(1) if m else "")
-  if cedente and (cedente == our or cedente.endswith(our) or our.endswith(cedente)):
-    return "emessa"
+  if not cedente:
+    return "ricevuta"
+  for our in ours:
+    if cedente == our or cedente.endswith(our) or our.endswith(cedente):
+      return "emessa"
   return "ricevuta"
 
 

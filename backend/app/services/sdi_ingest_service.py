@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -12,10 +13,16 @@ from typing import Any, Dict, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..constants.sdi_companies import (
+  is_our_issued_to_external,
+  pick_issued_company,
+)
 from ..integrations.sdi.storage import save_sdi_xml
 from ..integrations.sdi.xml_parser import parse_fatturapa
 from ..models.sdi_invoice import SdiInvoice
 from .invoice_import_service import InvoiceImportService
+
+logger = logging.getLogger(__name__)
 
 
 def extract_invoice_xml_bytes(payload: bytes) -> bytes:
@@ -31,6 +38,51 @@ def extract_invoice_xml_bytes(payload: bytes) -> bytes:
   return payload
 
 
+def _redirect_our_emessa(
+  db: Session,
+  row: SdiInvoice,
+  xml_bytes: bytes,
+  *,
+  filename: Optional[str] = None,
+) -> Dict[str, Any]:
+  """
+  Cedente = nostra società, cessionario = cliente esterno:
+  salva come fattura emessa, non creare ricevuta Atlas.
+  """
+  from . import issued_invoice_service
+
+  company = pick_issued_company(
+    seller_vat=row.supplier_vat,
+    ade_profile_id=row.ade_profile_id,
+    seller_destination=row.destination,
+  )
+  if company == "non_classificata":
+    # Mediazione senza sede: prova da numero (es. 673/Z/2026)
+    num = (row.invoice_number or "").upper()
+    if "/Z/" in num or num.endswith("/Z") or "\\Z\\" in num:
+      company = "mediazione_z"
+    elif "/A/" in num or num.endswith("/A") or "\\A\\" in num:
+      company = "mediazione_a"
+
+  stored = issued_invoice_service.store_issued_xml_bytes(
+    db,
+    xml_bytes,
+    filename=filename or Path(row.storage_path or "").name or "emessa.xml",
+    company=company if company != "non_classificata" else "mediazione_a",
+    ade_profile_id=row.ade_profile_id,
+  )
+  row.pipeline_status = "emessa_redirect"
+  row.error_message = None
+  db.commit()
+  db.refresh(row)
+  return {
+    "linked": False,
+    "redirected_emessa": True,
+    "issued_invoice_id": stored.get("id"),
+    "company": stored.get("company"),
+  }
+
+
 def link_sdi_to_electronic(
   db: Session,
   row: SdiInvoice,
@@ -44,6 +96,22 @@ def link_sdi_to_electronic(
       "already_linked": True,
       "electronic_invoice_id": row.electronic_invoice_id,
     }
+
+  # Emessa nostra verso cliente: non creare ricevuta (bug Mucche Volanti / 673/Z)
+  if is_our_issued_to_external(seller_vat=row.supplier_vat, receiver_vat=row.receiver_vat):
+    try:
+      return _redirect_our_emessa(
+        db,
+        row,
+        xml_text.encode("utf-8"),
+        filename=filename,
+      )
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.warning("redirect emessa failed id=%s: %s", row.id, exc)
+      row.pipeline_status = "emessa_redirect_error"
+      row.error_message = str(exc)[:2000]
+      db.commit()
+      return {"linked": False, "redirected_emessa": False, "error": str(exc)}
 
   try:
     result = InvoiceImportService(db).import_xml(

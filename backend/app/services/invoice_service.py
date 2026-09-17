@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import (
   destination_to_legacy_section,
+  is_our_issued_to_external,
   normalize_company_section,
   pick_company,
 )
@@ -59,6 +60,7 @@ def resolve_invoice_company(
   *,
   customer_vat: Optional[str] = None,
   receiver_vat: Optional[str] = None,
+  seller_vat: Optional[str] = None,
   ade_profile_id: Optional[str] = None,
   cash_activity: Optional[str] = None,
   destination: Optional[str] = None,
@@ -73,6 +75,7 @@ def resolve_invoice_company(
     receiver_vat=receiver_vat or customer_vat,
     ade_profile_id=ade_profile_id,
     legacy_destination_section=legacy,
+    seller_vat=seller_vat,
   )
   if by_sdi != "non_classificata":
     return by_sdi
@@ -92,6 +95,7 @@ def list_invoices(
       Invoice,
       Supplier.name,
       ElectronicInvoice.customer_vat,
+      ElectronicInvoice.supplier_vat,
       SdiInvoice.receiver_vat,
       SdiInvoice.ade_profile_id,
       SdiInvoice.destination,
@@ -133,7 +137,24 @@ def list_invoices(
   week_end = today_start + timedelta(days=7)
 
   out: List[InvoiceListOut] = []
-  for inv, supplier_name, customer_vat, receiver_vat, ade_profile_id, destination, cash_activity in rows:
+  for (
+    inv,
+    supplier_name,
+    customer_vat,
+    seller_vat,
+    receiver_vat,
+    ade_profile_id,
+    destination,
+    cash_activity,
+  ) in rows:
+    # Emessa nostra → cliente esterno: non va in ricevute / da registrare
+    # (es. Mediazione 673/Z verso Vergari finita sotto Via Lattea / PG)
+    if is_our_issued_to_external(
+      seller_vat=seller_vat,
+      receiver_vat=receiver_vat or customer_vat,
+    ):
+      continue
+
     ps = payment_status_label(inv)
     dd = _aware(inv.due_date)
     if due_filter == "overdue":
@@ -146,6 +167,7 @@ def list_invoices(
     inv_company = resolve_invoice_company(
       customer_vat=customer_vat,
       receiver_vat=receiver_vat,
+      seller_vat=seller_vat,
       ade_profile_id=ade_profile_id,
       cash_activity=cash_activity,
       destination=destination,
@@ -323,6 +345,69 @@ def set_invoice_ignored(db: Session, invoice_id: int, ignored: bool) -> Optional
   db.commit()
   db.refresh(inv)
   return inv
+
+
+def ignore_misrouted_our_emesse(db: Session, *, dry_run: bool = False) -> dict:
+  """
+  Marca ignored le fatture Atlas che sono in realtà emesse nostre verso clienti
+  (cedente = P.IVA Atlas, cessionario esterno). Restano in Emesse, non in Da registrare.
+  """
+  rows = (
+    db.query(Invoice, ElectronicInvoice.supplier_vat, ElectronicInvoice.customer_vat, Invoice.invoice_number)
+    .outerjoin(IncomingInvoice, IncomingInvoice.atlas_invoice_id == Invoice.id)
+    .outerjoin(ElectronicInvoice, ElectronicInvoice.id == IncomingInvoice.electronic_invoice_id)
+    .filter(Invoice.ignored.is_(False))
+    .all()
+  )
+  # Fallback: anche join via Sdi per receiver se manca customer_vat
+  sdi_by_ei: dict = {}
+  for sid, eid, rv in (
+    db.query(SdiInvoice.id, SdiInvoice.electronic_invoice_id, SdiInvoice.receiver_vat)
+    .filter(SdiInvoice.electronic_invoice_id.isnot(None))
+    .all()
+  ):
+    if eid:
+      sdi_by_ei[int(eid)] = rv
+
+  marked = 0
+  sample: List[dict] = []
+  for inv, seller_vat, customer_vat, inv_num in rows:
+    recv = customer_vat
+    if not recv:
+      # prova da Incoming → electronic → sdi
+      incoming = (
+        db.query(IncomingInvoice)
+        .filter(IncomingInvoice.atlas_invoice_id == inv.id)
+        .first()
+      )
+      if incoming and incoming.electronic_invoice_id:
+        recv = sdi_by_ei.get(int(incoming.electronic_invoice_id)) or recv
+    if not is_our_issued_to_external(seller_vat=seller_vat, receiver_vat=recv):
+      continue
+    marked += 1
+    if len(sample) < 40:
+      sample.append(
+        {
+          "id": inv.id,
+          "invoice_number": inv_num,
+          "seller_vat": seller_vat,
+          "customer_vat": recv,
+        }
+      )
+    if not dry_run:
+      inv.ignored = True
+      note = (inv.note or "").strip()
+      tag = "Emessa nostra verso cliente (esclusa da ricevute)"
+      if tag not in note:
+        inv.note = f"{note} · {tag}".strip(" ·") if note else tag
+  if not dry_run and marked:
+    db.commit()
+  return {
+    "ok": True,
+    "dry_run": dry_run,
+    "ignored": marked,
+    "sample": sample,
+  }
 
 
 def get_invoices_for_export(db: Session, supplier_id: Optional[int] = None) -> List[dict]:

@@ -126,6 +126,38 @@ def is_mediazione_vat(raw: Optional[str]) -> bool:
   return bool(norm) and norm in set(mediazione_shared_pivas())
 
 
+def all_our_company_vats() -> Set[str]:
+  """Tutte le P.IVA delle società Atlas (Mediazione + Via Lattea + Risacca + PG)."""
+  out: Set[str] = set(mediazione_shared_pivas())
+  for cid in SDI_COMPANY_ORDER:
+    if cid in MEDIAZIONE_COMPANY_IDS:
+      continue
+    out.update(company_pivas(cid))
+  return {v for v in out if v}
+
+
+def is_our_company_vat(raw: Optional[str]) -> bool:
+  norm = normalize_vat(raw)
+  return bool(norm) and norm in all_our_company_vats()
+
+
+def is_our_issued_to_external(
+  *,
+  seller_vat: Optional[str] = None,
+  receiver_vat: Optional[str] = None,
+) -> bool:
+  """
+  True se il cedente è una nostra società e il cessionario NO:
+  fattura emessa verso cliente esterno (non va in ricevute / da registrare).
+  """
+  if not is_our_company_vat(seller_vat):
+    return False
+  if is_our_company_vat(receiver_vat) or is_mediazione_vat(receiver_vat):
+    return False
+  # Cessionario assente o P.IVA esterna
+  return True
+
+
 def company_pivas(company_id: str) -> List[str]:
   cid = (company_id or "").strip().lower()
   if not cid:
@@ -253,15 +285,21 @@ def pick_company(
   receiver_vat: Optional[str] = None,
   ade_profile_id: Optional[str] = None,
   legacy_destination_section: Optional[str] = None,
+  seller_vat: Optional[str] = None,
 ) -> str:
   """
   Classificazione automatica fatture ricevute (P.IVA cessionario ha priorità):
-  1) Mediazione (stessa P.IVA) → A/Z da indirizzo o profilo sede
-  2) Altre società da P.IVA cessionario (Via Lattea / Risacca / PG)
-  3) Solo se manca P.IVA: profilo AdE o euristiche indirizzo
+  1) Emessa nostra verso cliente esterno → non_classificata (non è ricevuta)
+  2) Mediazione (stessa P.IVA) → A/Z da indirizzo o profilo sede
+  3) Altre società da P.IVA cessionario (Via Lattea / Risacca / PG)
+  4) Solo se manca P.IVA cessionario: profilo AdE o euristiche indirizzo
+     (P.IVA presente ma sconosciuta ≠ fallback profilo: evita Vergari sotto Via Lattea)
   """
   legacy = normalize_company_section(legacy_destination_section)
   pid = (ade_profile_id or "").strip().lower()
+
+  if is_our_issued_to_external(seller_vat=seller_vat, receiver_vat=receiver_vat):
+    return "non_classificata"
 
   # 1) P.IVA cessionario nota → non lasciare che il profilo AdE sbagli società
   if is_mediazione_vat(receiver_vat):
@@ -275,13 +313,14 @@ def pick_company(
   if by_vat:
     return by_vat
 
-  # 2) Senza P.IVA (o P.IVA sconosciuta): fallback profilo / indirizzo
-  if pid in PROFILE_TO_COMPANY:
-    return PROFILE_TO_COMPANY[pid]
-  if pid in SDI_COMPANY_LABELS:
-    return pid
-  if legacy != "non_classificata":
-    return legacy
+  # 2) Solo senza P.IVA cessionario: fallback profilo / indirizzo
+  if not normalize_vat(receiver_vat):
+    if pid in PROFILE_TO_COMPANY:
+      return PROFILE_TO_COMPANY[pid]
+    if pid in SDI_COMPANY_LABELS:
+      return pid
+    if legacy != "non_classificata":
+      return legacy
 
   return "non_classificata"
 

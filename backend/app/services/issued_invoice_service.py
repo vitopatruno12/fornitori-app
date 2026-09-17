@@ -487,6 +487,93 @@ def _row_out(row: IssuedInvoice, extra: Optional[Dict[str, Any]] = None) -> Dict
   return data
 
 
+def store_issued_xml_bytes(
+  db: Session,
+  raw: bytes,
+  *,
+  filename: str = "emessa.xml",
+  company: str = "non_classificata",
+  ade_profile_id: Optional[str] = None,
+) -> Dict[str, Any]:
+  """
+  Salva XML emessa (sync, senza UploadFile). Dedup per società+numero+P.IVA cliente.
+  Usato quando un download AdE 'ricevute' contiene in realtà una nostra emessa.
+  """
+  if not raw:
+    raise ValueError("XML vuoto")
+
+  extracted = extract_issued_invoice_fields(raw, filename=filename, file_kind="xml")
+  company_id = pick_issued_company(
+    seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
+    seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
+    ade_profile_id=ade_profile_id,
+    form_company=company,
+  )
+  if company_id == "non_classificata":
+    company_id = normalize_company_section(company)
+  if company_id == "non_classificata":
+    company_id = "mediazione_a"
+
+  final_number = (str(extracted.get("invoice_number") or "").strip() or None)
+  final_amount = extracted.get("total_amount")
+  if final_amount is not None and not isinstance(final_amount, Decimal):
+    final_amount = _amount_to_decimal(final_amount)
+  final_date = extracted.get("invoice_date")
+  if isinstance(final_date, date) and not isinstance(final_date, datetime):
+    final_date = datetime(final_date.year, final_date.month, final_date.day, tzinfo=timezone.utc)
+  customer_name = (str(extracted.get("customer_name") or "").strip() or None)
+  customer_vat = (str(extracted.get("customer_vat") or "").strip() or None)
+
+  def _find_dup() -> Optional[IssuedInvoice]:
+    q = db.query(IssuedInvoice).filter(IssuedInvoice.company == company_id)
+    if final_number:
+      q = q.filter(IssuedInvoice.invoice_number == final_number)
+    if customer_vat:
+      q = q.filter(IssuedInvoice.customer_vat == customer_vat)
+    if final_number:
+      return q.order_by(IssuedInvoice.id.desc()).first()
+    return None
+
+  existing = _with_issued_invoices_table(db, _find_dup)
+  if existing:
+    return _row_out(existing, extra={"duplicate": True})
+
+  company_dir = UPLOAD_ROOT / company_id
+  company_dir.mkdir(parents=True, exist_ok=True)
+  stored_name = (
+    f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_"
+    f"{uuid.uuid4().hex[:8]}_{_safe_name(filename or 'emessa.xml')}"
+  )
+  if not Path(stored_name).suffix:
+    stored_name = f"{stored_name}.xml"
+  dest = company_dir / stored_name
+  dest.write_bytes(raw)
+  rel = str(dest.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
+
+  def _persist() -> IssuedInvoice:
+    row = IssuedInvoice(
+      company=company_id,
+      activity=None,
+      file_kind="xml",
+      file_path=rel,
+      original_filename=filename or stored_name,
+      invoice_number=final_number,
+      invoice_date=final_date,
+      total_amount=final_amount,
+      customer_name=customer_name,
+      customer_vat=customer_vat,
+      status="caricata",
+      note="Import da AdE (redirect emessa, non ricevuta)",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+  row = _with_issued_invoices_table(db, _persist)
+  return _row_out(row, extra={"duplicate": False})
+
+
 async def upload_issued_invoice(
   db: Session,
   *,

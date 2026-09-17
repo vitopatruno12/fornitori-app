@@ -104,19 +104,26 @@ def _auto_company(row: SdiInvoice) -> str:
     receiver_vat=row.receiver_vat,
     ade_profile_id=row.ade_profile_id,
     legacy_destination_section=legacy,
+    seller_vat=row.supplier_vat,
   )
 
 
 def _row_to_item(row: SdiInvoice, manual: Dict[str, str]) -> Dict[str, Any]:
+  from ..constants.sdi_companies import is_our_issued_to_external
+
   auto_company = _auto_company(row)
   key = str(row.id)
   manual_raw = manual.get(key)
   manual_company = normalize_company_section(manual_raw) if manual_raw else None
-  company = resolve_list_company(
-    receiver_vat=row.receiver_vat,
-    auto_company=auto_company,
-    manual_company=manual_company,
-  )
+  # Emessa nostra verso cliente: non mostrare nelle ricevute società
+  if is_our_issued_to_external(seller_vat=row.supplier_vat, receiver_vat=row.receiver_vat):
+    company = "non_classificata"
+  else:
+    company = resolve_list_company(
+      receiver_vat=row.receiver_vat,
+      auto_company=auto_company,
+      manual_company=manual_company,
+    )
   return {
     "id": row.id,
     "filename": Path(row.storage_path or "").name or f"sdi-{row.id}.xml",
@@ -280,6 +287,11 @@ def list_sdi_received_invoices(
       continue
 
     item = _row_to_item(row, manual)
+    # Nascondi emesse nostre verso clienti dall'elenco ricevute
+    from ..constants.sdi_companies import is_our_issued_to_external
+
+    if is_our_issued_to_external(seller_vat=row.supplier_vat, receiver_vat=row.receiver_vat):
+      continue
     cid = item["company"]
     if cid in buckets:
       buckets[cid].append(item)
@@ -366,6 +378,7 @@ def reclassify_sdi_received_invoices(
         receiver_vat=row.receiver_vat,
         ade_profile_id=row.ade_profile_id,
         legacy_destination_section=_legacy_destination_section(row.destination or ""),
+        seller_vat=row.supplier_vat,
       )
       key = str(row.id)
       man = normalize_company_section(manual.get(key)) if key in manual else None
