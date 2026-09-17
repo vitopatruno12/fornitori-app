@@ -8962,6 +8962,28 @@ select.form-control {
   padding: 0.55rem 0.85rem;
   border-radius: 4px;
   font-size: 0.95rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.scheda-contabile-conto-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.15rem;
+}
+
+.scheda-contabile-back {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.scheda-contabile-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
 }
 
 .fatture-scope-mode-btns .btn-primary {

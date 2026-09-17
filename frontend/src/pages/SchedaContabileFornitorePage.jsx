@@ -255,14 +255,20 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
                 <strong>Dal:</strong> {formatDate(dateFrom)} <strong>al</strong> {formatDate(dateTo)}
               </div>
             </div>
-            <div className="scheda-contabile-conto">
-              Conto: {selected.code ? `001.${String(selected.code).padStart(5, '0')} ` : ''}
-              {selected.name}
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelectedKey('')}>
-                Torna all&apos;elenco
+            <div className="scheda-contabile-conto-row">
+              <div className="scheda-contabile-conto">
+                Conto: {selected.code ? `001.${String(selected.code).padStart(5, '0')} ` : ''}
+                {selected.name}
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm scheda-contabile-back"
+                onClick={() => setSelectedKey('')}
+              >
+                ← Torna all&apos;elenco
               </button>
+            </div>
+            <div className="scheda-contabile-actions">
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
