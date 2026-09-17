@@ -24,6 +24,7 @@ import {
   FattureScadenziarioPage,
   FattureSincronizzazionePage,
 } from './pages/FatturePages.jsx'
+import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import {
   getOperatorDeliveryRouterPath,
   getOperatorDeliveryView,
