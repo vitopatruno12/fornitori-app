@@ -96,3 +96,34 @@ def upsert_workbook(db: Session, payload: SupplierPaymentsWorkbookUpsert) -> Sup
   db.commit()
   db.refresh(row)
   return workbook_to_read(row)
+
+
+def delete_workbook(
+  db: Session,
+  workbook_key: str = DEFAULT_WORKBOOK_KEY,
+  *,
+  reseed: bool = True,
+) -> Dict[str, Any]:
+  """Elimina il file/registro pagamenti dal database. Opzionale: reinizializza dal template."""
+  key = _normalize_workbook_key(workbook_key)
+  row = db.query(SupplierPaymentsWorkbook).filter(SupplierPaymentsWorkbook.workbook_key == key).first()
+  deleted = False
+  if row:
+    db.delete(row)
+    db.commit()
+    deleted = True
+  if reseed:
+    seeded = get_workbook(db, key)
+    return {
+      "ok": True,
+      "deleted": deleted,
+      "reseeded": True,
+      "workbook": seeded,
+      "message": "File eliminato e registro reinizializzato dal template.",
+    }
+  return {
+    "ok": True,
+    "deleted": deleted,
+    "reseeded": False,
+    "message": "File eliminato dal database." if deleted else "Nessun file da eliminare.",
+  }

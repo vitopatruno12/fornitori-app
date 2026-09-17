@@ -5,6 +5,7 @@ import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   fetchSupplierPaymentsWorkbook,
   saveSupplierPaymentsWorkbook,
+  deleteSupplierPaymentsWorkbook,
 } from '../services/supplierPaymentsService.js'
 import {
   MONTHLY_HEADERS,
@@ -303,8 +304,17 @@ export default function PagamentiPage() {
 
   function handleDeleteSheet(sheetName) {
     const name = sheetName || activeSheet
-    if (!canDeleteWorkbookSheet(name)) return
-    if (!window.confirm(`Eliminare il foglio "${name}"? L'operazione si applica al registro corrente.`)) return
+    if (!canDeleteWorkbookSheet(name)) {
+      setError(`Il foglio "${name}" è protetto (TOTALI / deleghe) e non può essere eliminato.`)
+      return
+    }
+    if (
+      !window.confirm(
+        `Eliminare il foglio "${name}" dal registro?\nI dati di questo foglio andranno persi. Clicca Salva dopo per confermare sul database.`,
+      )
+    ) {
+      return
+    }
     setError('')
     try {
       const next = removeWorkbookSheet(workbook, name)
@@ -319,6 +329,45 @@ export default function PagamentiPage() {
       setSuccess(`Foglio "${name}" eliminato. Clicca Salva per aggiornare il database.`)
     } catch (err) {
       setError(err?.message || 'Eliminazione foglio non riuscita')
+    }
+  }
+
+  async function handleDeleteFile() {
+    const title = workbook?.title || 'registro corrente'
+    if (
+      !window.confirm(
+        `Eliminare tutto il file "${title}" dal database?\nVerrà ricreato un registro vuoto dal template di partenza.`,
+      )
+    ) {
+      return
+    }
+    if (
+      !window.confirm(
+        'Conferma definitiva: tutti i fogli e i dati salvati di questo file verranno cancellati.',
+      )
+    ) {
+      return
+    }
+    setError('')
+    setSuccess('')
+    setSaving(true)
+    try {
+      const res = await deleteSupplierPaymentsWorkbook({ reseed: true })
+      const wb = res?.workbook
+      if (wb) {
+        const next = recalculateWorkbook(workbookFromApi(wb))
+        setWorkbook(next)
+        setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
+        setUpdatedAt(wb.updated_at || '')
+      } else {
+        await refreshWorkbook()
+      }
+      setDirty(false)
+      setSuccess(res?.message || 'File eliminato e registro reinizializzato.')
+    } catch (err) {
+      setError(err?.message || 'Eliminazione file non riuscita')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -361,12 +410,31 @@ export default function PagamentiPage() {
               <button
                 type="button"
                 className="btn btn-outline-danger btn-sm"
-                disabled={loading || importing}
+                disabled={loading || importing || saving}
                 onClick={() => handleDeleteSheet(activeSheet)}
+                title={`Elimina il foglio ${activeSheet}`}
               >
                 Elimina foglio
               </button>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                disabled
+                title="Questo foglio è protetto (TOTALI / deleghe)"
+              >
+                Elimina foglio
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm"
+              disabled={loading || importing || saving}
+              onClick={() => void handleDeleteFile()}
+              title="Elimina tutto il file/registro dal database e reinizializza"
+            >
+              {saving ? 'Elimino…' : 'Elimina file'}
+            </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"

@@ -17,4 +17,12 @@ export async function saveSupplierPaymentsWorkbook(payload) {
   })
 }
 
+export async function deleteSupplierPaymentsWorkbook({ reseed = true } = {}) {
+  const q = new URLSearchParams({
+    workbook_key: WORKBOOK_KEY,
+    reseed: reseed ? 'true' : 'false',
+  })
+  return apiFetch(`/supplier-payments/workbook/delete?${q}`, { method: 'POST' })
+}
+
 export { WORKBOOK_KEY }

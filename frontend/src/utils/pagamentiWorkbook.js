@@ -554,8 +554,8 @@ export function addWorkbookSheet(workbook, sheetName) {
 export function canDeleteWorkbookSheet(sheetName) {
   const name = normalizeSheetName(sheetName)
   if (!name) return false
+  // Solo fogli speciali (TOTALI, DELEGHE F24, …) restano protetti
   if (isSpecialSheet(name)) return false
-  if (DEFAULT_WORKBOOK_SHEET_NAMES.has(name)) return false
   return true
 }
 
@@ -567,6 +567,9 @@ export function removeWorkbookSheet(workbook, sheetName) {
   const sheets = (workbook.sheets || []).filter((sheet) => normalizeSheetName(sheet.name) !== name)
   if (sheets.length === (workbook.sheets || []).length) {
     throw new Error('Foglio non trovato')
+  }
+  if (!sheets.length) {
+    throw new Error('Non puoi eliminare l\'ultimo foglio del registro')
   }
   return recalculateWorkbook({ ...workbook, sheets })
 }
