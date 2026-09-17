@@ -8916,6 +8916,54 @@ select.form-control {
   grid-column: 1 / -1;
 }
 
+.mastrini-hero-tools-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.mastrini-hero-tools-dates .form-control {
+  min-width: 9.5rem;
+}
+
+.scheda-contabile-panel {
+  overflow: hidden;
+}
+
+.scheda-contabile-head {
+  margin-bottom: 0.5rem;
+}
+
+.scheda-contabile-title {
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.75rem;
+  color: #0f172a;
+}
+
+.scheda-contabile-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.35rem 1rem;
+  font-size: 0.9rem;
+  color: #334155;
+  margin-bottom: 0.65rem;
+}
+
+.scheda-contabile-conto {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
 .fatture-scope-mode-btns .btn-primary {
   grid-column: auto;
 }

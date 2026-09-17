@@ -59,6 +59,7 @@ import {
   FattureScadenziarioPage,
   FattureSincronizzazionePage,
 } from './pages/FatturePages.jsx'
+import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import AdeAgentOverlay from './components/AdeAgentOverlay.jsx'
@@ -982,6 +983,7 @@ function App() {
           <Route path="/fatture/emesse" element={<FattureEmessePage />} />
           <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
           <Route path="/fatture/pagate" element={<FatturePagatePage />} />
+          <Route path="/fatture/scheda-contabile" element={<SchedaContabileFornitorePage />} />
           <Route path="/fatture/registrate" element={<InvoicesPage />} />
           <Route path="/fatture/scadenziario" element={<FattureScadenziarioPage />} />
           <Route path="/fatture/sincronizzazione" element={<FattureSincronizzazionePage />} />
