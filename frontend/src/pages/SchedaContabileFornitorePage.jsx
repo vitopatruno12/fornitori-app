@@ -210,6 +210,7 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
             <WorkbookGrid
               title="Elenco fornitori"
               sheetLabel={`${parties.length} fornitori`}
+              gridClassName="fatture-excel-grid"
               columns={LIST_COLUMNS}
               rows={parties}
               cellValue={listCellValue}
@@ -320,6 +321,7 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
           <WorkbookGrid
             title={`Movimenti · ${selected.name}`}
             sheetLabel={`${selected.movements?.length || 0} righe`}
+            gridClassName="fatture-excel-grid"
             columns={DETAIL_COLUMNS}
             rows={selected.movements || []}
             cellValue={detailCellValue}

@@ -8986,6 +8986,31 @@ select.form-control {
   margin-top: 0.75rem;
 }
 
+.scheda-contabile-panel,
+.scheda-contabile-panel .workbook-card-nested,
+.scheda-contabile-panel .workbook-grid-wrap {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.scheda-contabile-panel .workbook-grid {
+  min-width: 0 !important;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.scheda-contabile-panel .workbook-grid th,
+.scheda-contabile-panel .workbook-grid td {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.scheda-contabile-panel .workbook-grid .excel-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .fatture-scope-mode-btns .btn-primary {
   grid-column: auto;
 }
