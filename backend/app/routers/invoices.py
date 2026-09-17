@@ -100,6 +100,21 @@ async def upload_issued_invoice(
   )
 
 
+@router.post("/emesse/reclassify")
+def reclassify_issued_invoices(
+  dry_run: bool = Query(
+    default=False,
+    description="Se true: solo anteprima, nessuna modifica su DB/file",
+  ),
+  db: Session = Depends(get_db),
+):
+  """
+  Riallinea le fatture emesse già in archivio: società da P.IVA cedente
+  (Via Lattea / Risacca / PG / Mediazione), non dal profilo AdE usato in download.
+  """
+  return issued_invoice_service.reclassify_issued_invoices(db, dry_run=dry_run)
+
+
 @router.get("/emesse/{invoice_id}/pdf")
 def download_issued_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
   """Anteprima PDF emessa: file PDF caricato o generato da XML FatturaPA."""

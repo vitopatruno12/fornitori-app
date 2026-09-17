@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..constants.sdi_companies import normalize_company_section
+from ..constants.sdi_companies import normalize_company_section, pick_issued_company
 from ..database import engine
 from ..models.issued_invoice import IssuedInvoice
 
@@ -301,6 +301,7 @@ def _extract_from_xml(content: bytes) -> Dict[str, Any]:
   parsed = parse_fatturapa_document(text)
   doc = parsed.get("document") or {}
   customer = parsed.get("customer") or {}
+  supplier = parsed.get("supplier") or {}
   out: Dict[str, Any] = {"source": "xml", "warnings": []}
   if doc.get("number"):
     out["invoice_number"] = str(doc["number"]).strip()
@@ -318,6 +319,20 @@ def _extract_from_xml(content: bytes) -> Dict[str, Any]:
     out["customer_name"] = str(customer["name"]).strip()
   if customer.get("vat"):
     out["customer_vat"] = str(customer["vat"]).strip()
+  if supplier.get("name"):
+    out["seller_name"] = str(supplier["name"]).strip()
+  if supplier.get("vat"):
+    out["seller_vat"] = str(supplier["vat"]).strip()
+  # Indirizzo sede cedente (per Mediazione A/Z)
+  try:
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(text)
+    indirizzo = (root.findtext(".//{*}CedentePrestatore/{*}Sede/{*}Indirizzo") or "").strip()
+    comune = (root.findtext(".//{*}CedentePrestatore/{*}Sede/{*}Comune") or "").strip()
+    out["seller_destination"] = " ".join(p for p in (indirizzo, comune) if p)
+  except Exception:
+    out["seller_destination"] = ""
   if not out.get("invoice_number"):
     out["warnings"].append("Numero assente nell'XML")
   if out.get("total_amount") is None:
@@ -505,6 +520,20 @@ async def upload_issued_invoice(
   extracted = extract_issued_invoice_fields(raw, filename=file.filename or "", file_kind=kind)
   warnings = list(extracted.get("warnings") or [])
 
+  # P.IVA cedente (chi emette) ha priorità sul form UI / profilo AdE
+  auto_company = pick_issued_company(
+    seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
+    seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
+    form_company=company_id,
+  )
+  if auto_company != "non_classificata" and auto_company != company_id:
+    warnings.append(
+      f"Società riallineata da P.IVA cedente: {company_id} → {auto_company}"
+    )
+    company_id = auto_company
+  elif auto_company != "non_classificata":
+    company_id = auto_company
+
   final_number = (invoice_number or "").strip() or (extracted.get("invoice_number") or None)
   if total_amount not in (None, ""):
     final_amount = _parse_optional_amount(total_amount)
@@ -675,3 +704,101 @@ def delete_issued_invoice(db: Session, invoice_id: int) -> bool:
   db.delete(row)
   db.commit()
   return True
+
+
+def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[str, Any]:
+  """
+  Riallinea le fatture emesse già caricate: società = P.IVA cedente nell'XML
+  (Via Lattea / Risacca / PG / Mediazione A-Z). Sposta anche i file se serve.
+  """
+
+  def _run() -> Dict[str, Any]:
+    rows = db.query(IssuedInvoice).order_by(IssuedInvoice.id.asc()).all()
+    moved = 0
+    unchanged = 0
+    skipped = 0
+    sample: List[Dict[str, Any]] = []
+    by_company: Dict[str, int] = {}
+
+    for row in rows:
+      kind = (row.file_kind or "").lower()
+      if kind not in ("xml", "") and not str(row.file_path or "").lower().endswith((".xml", ".p7m")):
+        skipped += 1
+        continue
+      try:
+        path, _ = resolve_issued_file(db, int(row.id))
+        raw = path.read_bytes()
+      except Exception:
+        skipped += 1
+        continue
+
+      extracted = extract_issued_invoice_fields(
+        raw,
+        filename=row.original_filename or path.name,
+        file_kind="xml",
+      )
+      seller_vat = str(extracted.get("seller_vat") or "").strip() or None
+      seller_dest = str(extracted.get("seller_destination") or "").strip() or None
+      old = normalize_company_section(row.company)
+      new = pick_issued_company(
+        seller_vat=seller_vat,
+        seller_destination=seller_dest,
+        form_company=old,
+      )
+      if new == "non_classificata" or new == old:
+        unchanged += 1
+        by_company[old] = by_company.get(old, 0) + 1
+        continue
+
+      if len(sample) < 40:
+        sample.append(
+          {
+            "id": row.id,
+            "invoice_number": row.invoice_number,
+            "seller_vat": seller_vat or "",
+            "from": old,
+            "to": new,
+          }
+        )
+
+      if dry_run:
+        moved += 1
+        by_company[new] = by_company.get(new, 0) + 1
+        continue
+
+      # Sposta file sotto la cartella società corretta
+      try:
+        new_dir = UPLOAD_ROOT / new
+        new_dir.mkdir(parents=True, exist_ok=True)
+        new_path = new_dir / path.name
+        if new_path.resolve() != path.resolve():
+          if new_path.exists():
+            new_path = new_dir / f"{path.stem}_{uuid.uuid4().hex[:6]}{path.suffix}"
+          path.rename(new_path)
+          row.file_path = str(new_path.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
+      except Exception as exc:
+        logger.warning("reclassify emessa %s: move file failed: %s", row.id, exc)
+
+      row.company = new
+      if extracted.get("customer_name") and not (row.customer_name or "").strip():
+        row.customer_name = str(extracted["customer_name"]).strip()
+      if extracted.get("customer_vat") and not (row.customer_vat or "").strip():
+        row.customer_vat = str(extracted["customer_vat"]).strip()
+      moved += 1
+      by_company[new] = by_company.get(new, 0) + 1
+
+    if not dry_run and moved:
+      db.commit()
+
+    return {
+      "ok": True,
+      "dry_run": dry_run,
+      "total": len(rows),
+      "reclassified": moved,
+      "unchanged": unchanged,
+      "skipped_non_xml": skipped,
+      "by_company": by_company,
+      "sample": sample,
+    }
+
+  return _with_issued_invoices_table(db, _run)

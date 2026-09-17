@@ -50,22 +50,55 @@ def issued_company_for_profile(
   auto_section: bool,
   xml_bytes: bytes,
 ) -> str:
-  if sdi_section:
-    return sdi_section
-  pid = (profile_id or "").strip().lower()
-  if pid in ("via_lattea", "risacca", "pg"):
-    return pid
+  """Società fattura emessa: priorità P.IVA cedente, poi profilo AdE."""
+  from ...constants.sdi_companies import pick_issued_company
+
+  seller_vat = ""
+  seller_dest = ""
   try:
-    low = xml_bytes.decode("utf-8", errors="replace").lower()
+    text = xml_bytes.decode("utf-8", errors="replace")
   except Exception:
-    low = ""
-  if "zanardelli" in low:
-    return "mediazione_z"
-  if "abba" in low:
-    return "mediazione_a"
-  if auto_section or pid == "mediazione":
-    return "mediazione_a"
-  return pid or "mediazione_a"
+    text = ""
+  if text:
+    m = re.search(
+      r"<CedentePrestatore>[\s\S]*?<IdFiscaleIVA>[\s\S]*?<IdCodice>\s*([^<]+)\s*</IdCodice>",
+      text,
+      re.I,
+    )
+    seller_vat = _vat_digits(m.group(1) if m else "")
+    # Sede cedente per split Mediazione A/Z
+    m2 = re.search(
+      r"<CedentePrestatore>[\s\S]*?<Sede>[\s\S]*?<Indirizzo>\s*([^<]+)\s*</Indirizzo>",
+      text,
+      re.I,
+    )
+    m3 = re.search(
+      r"<CedentePrestatore>[\s\S]*?<Sede>[\s\S]*?<Comune>\s*([^<]+)\s*</Comune>",
+      text,
+      re.I,
+    )
+    seller_dest = " ".join(
+      p.strip() for p in ((m2.group(1) if m2 else ""), (m3.group(1) if m3 else "")) if p and p.strip()
+    )
+    if not seller_dest:
+      # fallback: parole chiave Abba/Zanardelli nel XML
+      low = text.lower()
+      if "zanardelli" in low:
+        seller_dest = "via zanardelli"
+      elif "abba" in low:
+        seller_dest = "via abba"
+
+  pid = (profile_id or "").strip().lower()
+  form_fallback = sdi_section or (pid if pid in ("via_lattea", "risacca", "pg", "mediazione_a", "mediazione_z") else None)
+  if not form_fallback and (auto_section or pid == "mediazione"):
+    form_fallback = "mediazione_a"
+
+  return pick_issued_company(
+    seller_vat=seller_vat or None,
+    ade_profile_id=pid or None,
+    seller_destination=seller_dest or None,
+    form_company=form_fallback,
+  )
 
 
 def push_xml_bytes(

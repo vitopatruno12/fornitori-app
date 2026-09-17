@@ -255,8 +255,8 @@ def pick_company(
   legacy_destination_section: Optional[str] = None,
 ) -> str:
   """
-  Classificazione automatica (P.IVA cessionario ha sempre priorità sul profilo AdE):
-  1) Mediazione (stessa P.IVA) → A/Z da indirizzo o profilo sede (via_abba / via_zanardelli)
+  Classificazione automatica fatture ricevute (P.IVA cessionario ha priorità):
+  1) Mediazione (stessa P.IVA) → A/Z da indirizzo o profilo sede
   2) Altre società da P.IVA cessionario (Via Lattea / Risacca / PG)
   3) Solo se manca P.IVA: profilo AdE o euristiche indirizzo
   """
@@ -283,6 +283,46 @@ def pick_company(
   if legacy != "non_classificata":
     return legacy
 
+  return "non_classificata"
+
+
+def pick_issued_company(
+  *,
+  seller_vat: Optional[str] = None,
+  ade_profile_id: Optional[str] = None,
+  seller_destination: Optional[str] = None,
+  form_company: Optional[str] = None,
+) -> str:
+  """
+  Classificazione fatture emesse: P.IVA del cedente (chi emette) decide la società.
+  Via Lattea 04886500752 · Risacca 05186540752 · PG 05440050754 · Mediazione 04945600759.
+  Il profilo AdE / form UI è solo fallback se la P.IVA non è mappata.
+  """
+  legacy = normalize_company_section(destination_to_legacy_section(seller_destination))
+  pid = (ade_profile_id or "").strip().lower()
+  form = normalize_company_section(form_company) if form_company else "non_classificata"
+
+  if is_mediazione_vat(seller_vat):
+    if legacy in MEDIAZIONE_COMPANY_IDS:
+      return legacy
+    if pid in PROFILE_TO_COMPANY:
+      return PROFILE_TO_COMPANY[pid]
+    if form in MEDIAZIONE_COMPANY_IDS:
+      return form
+    return "non_classificata"
+
+  by_vat = company_from_vat(seller_vat)
+  if by_vat:
+    return by_vat
+
+  if pid in PROFILE_TO_COMPANY:
+    return PROFILE_TO_COMPANY[pid]
+  if pid in SDI_COMPANY_LABELS:
+    return pid
+  if form != "non_classificata":
+    return form
+  if legacy != "non_classificata":
+    return legacy
   return "non_classificata"
 
 
