@@ -67,6 +67,10 @@ function DeliveryFattureRoutes() {
         <Route path="passive" element={<FatturePassivePage />} />
         <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
         <Route path="pagate" element={<FatturePagatePage />} />
+        <Route
+          path="scheda-contabile"
+          element={<SchedaContabileFornitorePage fattureBase={OPERATOR_DELIVERY_FATTURE_PATH} />}
+        />
         <Route path="registrate" element={<InvoicesPage />} />
         <Route path="scadenziario" element={<FattureScadenziarioPage />} />
         <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
