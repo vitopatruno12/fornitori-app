@@ -34,6 +34,7 @@ import { SeriesBars } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { parseBanFile } from '../utils/banFileParser'
 import { companyLabel, FATTURE_COMPANY_ORDER, FATTURE_COMPANY_LABELS } from '../utils/fattureCompany.js'
+import { printVneTable } from '../utils/vneTableExport.js'
 
 function resolveEnableBankingPayload(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
@@ -1895,6 +1896,55 @@ export function BancaMovimentiPage() {
           >
             {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={loading || syncBusy || !items.length}
+            title="Apre la stampa: da lì puoi salvare come PDF"
+            onClick={() => {
+              try {
+                const totals = {
+                  amountEntrate: items.reduce(
+                    (acc, m) =>
+                      acc + (String(m?.movement_type || '').toLowerCase() === 'entrata' ? Number(m?.amount) || 0 : 0),
+                    0,
+                  ),
+                  amountUscite: items.reduce(
+                    (acc, m) =>
+                      acc + (String(m?.movement_type || '').toLowerCase() !== 'entrata' ? Number(m?.amount) || 0 : 0),
+                    0,
+                  ),
+                }
+                printVneTable({
+                  title: `Scheda movimenti · ${viewAccountLabel}`,
+                  subtitle: [
+                    dateFrom || dateTo ? `Periodo ${dateFrom || '…'} → ${dateTo || '…'}` : null,
+                    category ? `Categoria: ${category}` : null,
+                    counterparty ? `Controparte: ${counterparty}` : null,
+                    `${items.length} movimenti`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
+                  columns: BANK_MOVEMENTS_COLUMNS,
+                  rows: items,
+                  cellValue: bankMovementsCellValue,
+                  totals,
+                  totalsLabel: (colId, t) => {
+                    const netto = (Number(t?.amountEntrate) || 0) - (Number(t?.amountUscite) || 0)
+                    if (colId === 'description') return `TOTALI · Netto ${eur(netto)}`
+                    if (colId === 'amount') {
+                      return `E ${eur(t?.amountEntrate)} / U ${eur(t?.amountUscite)}`
+                    }
+                    return ''
+                  },
+                })
+              } catch (err) {
+                window.alert(err?.message || 'Stampa non riuscita')
+              }
+            }}
+          >
+            Stampa scheda PDF
+          </button>
         </form>
         <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
           Stai vedendo:{' '}
@@ -2016,6 +2066,62 @@ export function BancaRiconciliazionePage() {
   const unpaidRows = data?.da_pagare || []
   const companyName = companyId ? companyLabel(companyId) : ''
   const pendingSuggestions = (data?.suggestions || []).filter((s) => s?.status !== 'matched')
+  const schedaRows = [...unpaidRows, ...paidRows]
+
+  function stampaSchedaRiconciliazione() {
+    try {
+      if (!schedaRows.length && !pendingSuggestions.length) {
+        window.alert('Nessun dato da stampare per questa società.')
+        return
+      }
+      if (schedaRows.length) {
+        printVneTable({
+          title: `Scheda riconciliazione · ${companyName}`,
+          subtitle: [
+            `Pagate/trovate ${data?.paid_count ?? paidRows.length}`,
+            `Da pagare ${data?.open_invoices_count ?? unpaidRows.length}`,
+            `Uscite da riconciliare ${data?.unmatched_movements ?? pendingSuggestions.length}`,
+          ].join(' · '),
+          columns: BANK_INVOICE_STATUS_COLUMNS,
+          rows: schedaRows,
+          cellValue: bankInvoiceStatusCellValue,
+          totals: {
+            total: schedaRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+            residuo: schedaRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
+          },
+          totalsLabel: (colId, totals) => {
+            if (colId === 'supplier_name') return 'TOTALI'
+            if (colId === 'total') return eur(totals?.total)
+            if (colId === 'residuo') return eur(totals?.residuo)
+            return ''
+          },
+        })
+        return
+      }
+      printVneTable({
+        title: `Scheda riconciliazione · Da controllare · ${companyName}`,
+        subtitle: `${pendingSuggestions.length} movimenti`,
+        columns: BANK_RECON_COLUMNS,
+        rows: pendingSuggestions,
+        cellValue: bankReconCellValue,
+        totals: {
+          amount: pendingSuggestions.reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),
+          difference: pendingSuggestions.reduce(
+            (acc, row) => acc + (Number(row?.suggested_invoice?.difference) || 0),
+            0,
+          ),
+        },
+        totalsLabel: (colId, totals) => {
+          if (colId === 'movement') return 'TOTALI'
+          if (colId === 'amount') return eur(totals?.amount)
+          if (colId === 'difference') return eur(totals?.difference)
+          return ''
+        },
+      })
+    } catch (err) {
+      window.alert(err?.message || 'Stampa non riuscita')
+    }
+  }
 
   return (
     <BancaPageShell
@@ -2045,6 +2151,15 @@ export function BancaRiconciliazionePage() {
               disabled={loading || !companyId}
             >
               {loading ? 'Riconcilio…' : 'Aggiorna e riconcilia'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loading || !companyId || (!schedaRows.length && !pendingSuggestions.length)}
+              title="Apre la stampa: da lì puoi salvare come PDF"
+              onClick={stampaSchedaRiconciliazione}
+            >
+              Stampa scheda PDF
             </button>
           </div>
         </aside>
