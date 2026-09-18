@@ -124,7 +124,7 @@ function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
         <Route path="passive" element={<FatturePassivePage />} />
         <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
         <Route path="pagate" element={<FatturePagatePage />} />
-        <Route path="scheda-contabile" element={<SchedaContabileFornitorePage fattureBase={fattureBase} />} />
+        <Route path="scheda-contabile" element={<SchedaContabileFornitorePage fattureBase={fattureBase} shell="fatture" />} />
         <Route path="registrate" element={<InvoicesPage />} />
         <Route path="scadenziario" element={<FattureScadenziarioPage />} />
         <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />

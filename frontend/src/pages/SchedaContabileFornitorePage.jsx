@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
+import { AmministrazionePageShell } from '../components/BancaShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import { FatturePageShell, eur, formatDate } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
@@ -73,7 +74,11 @@ function detailCellValue(row, col) {
   return ''
 }
 
-export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) {
+export function SchedaContabileFornitorePage({
+  fattureBase = '/fatture',
+  /** amministrazione = sotto Mastrini; fatture = postazioni operative */
+  shell = 'amministrazione',
+} = {}) {
   const bounds = useMemo(() => monthBounds(), [])
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
   const [dateFrom, setDateFrom] = useState(bounds.from)
@@ -126,10 +131,12 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
 
   const periodLabel = `Dal ${formatDate(dateFrom)} al ${formatDate(dateTo)}`
   const companyName = data?.companyLabel || (companyId ? companyLabel(companyId) : '')
+  const Shell = shell === 'fatture' ? FatturePageShell : AmministrazionePageShell
+  const shellExtra = shell === 'fatture' ? { fattureBase } : {}
 
   return (
-    <FatturePageShell
-      fattureBase={fattureBase}
+    <Shell
+      {...shellExtra}
       title="Scheda contabile fornitori"
       lead={
         companyId
@@ -157,6 +164,11 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
             <input type="date" className="form-control" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </label>
           <div className="mastrini-hero-tools-btns">
+            {shell === 'amministrazione' ? (
+              <Link className="btn btn-secondary btn-sm" to="/amministrazione/mastrini">
+                ← Mastrini
+              </Link>
+            ) : null}
             <button type="button" className="btn btn-primary btn-sm" disabled={!companyId || loading} onClick={reload}>
               {loading ? 'Carico…' : 'Aggiorna'}
             </button>
@@ -346,7 +358,7 @@ export function SchedaContabileFornitorePage({ fattureBase = '/fatture' } = {}) 
           </p>
         </section>
       ) : null}
-    </FatturePageShell>
+    </Shell>
   )
 }
 

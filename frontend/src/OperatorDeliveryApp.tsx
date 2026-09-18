@@ -69,7 +69,7 @@ function DeliveryFattureRoutes() {
         <Route path="pagate" element={<FatturePagatePage />} />
         <Route
           path="scheda-contabile"
-          element={<SchedaContabileFornitorePage fattureBase={OPERATOR_DELIVERY_FATTURE_PATH} />}
+          element={<SchedaContabileFornitorePage fattureBase={OPERATOR_DELIVERY_FATTURE_PATH} shell="fatture" />}
         />
         <Route path="registrate" element={<InvoicesPage />} />
         <Route path="scadenziario" element={<FattureScadenziarioPage />} />

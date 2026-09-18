@@ -972,6 +972,10 @@ function App() {
           <Route path="/gestione-locali/gazza-ladra" element={<GazzaLadraSalaPage />} />
           <Route path="/amministrazione" element={<AmministrazioneDashboardPage />} />
           <Route path="/amministrazione/mastrini" element={<MastriniContabiliPage />} />
+          <Route
+            path="/amministrazione/mastrini/scheda-fornitori"
+            element={<SchedaContabileFornitorePage shell="amministrazione" />}
+          />
           <Route path="/amministrazione/impostazioni" element={<AmministrazioneImpostazioniPage />} />
           <Route path="/banca" element={<BancaDashboardPage />} />
           <Route path="/banca/conti" element={<BancaContiPage />} />
@@ -983,7 +987,10 @@ function App() {
           <Route path="/fatture/emesse" element={<FattureEmessePage />} />
           <Route path="/fatture/da-registrare" element={<FattureDaRegistrarePage />} />
           <Route path="/fatture/pagate" element={<FatturePagatePage />} />
-          <Route path="/fatture/scheda-contabile" element={<SchedaContabileFornitorePage />} />
+          <Route
+            path="/fatture/scheda-contabile"
+            element={<Navigate to="/amministrazione/mastrini/scheda-fornitori" replace />}
+          />
           <Route path="/fatture/registrate" element={<InvoicesPage />} />
           <Route path="/fatture/scadenziario" element={<FattureScadenziarioPage />} />
           <Route path="/fatture/sincronizzazione" element={<FattureSincronizzazionePage />} />

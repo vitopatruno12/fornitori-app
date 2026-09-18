@@ -921,8 +921,11 @@ export default function MastriniContabiliPage() {
               }
             }}
           >
-            Scheda contabile
+            Scheda conto
           </button>
+          <Link className="btn btn-sm btn-secondary" to="/amministrazione/mastrini/scheda-fornitori">
+            Scheda fornitori
+          </Link>
           <button
             type="button"
             className={`btn btn-sm ${viewMode === 'elenco' ? 'btn-primary' : 'btn-secondary'}`}

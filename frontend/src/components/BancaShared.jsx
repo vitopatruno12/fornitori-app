@@ -85,7 +85,9 @@ export function AmministrazioneSubnav() {
       {AMMINISTRAZIONE_NAV_ITEMS.map((item) => {
         let active = false
         if (item.to === '/amministrazione' && item.end) active = path === '/amministrazione'
-        else if (item.to === '/amministrazione/mastrini') active = path === '/amministrazione/mastrini'
+        else if (item.to === '/amministrazione/mastrini') {
+          active = path === '/amministrazione/mastrini' || path.startsWith('/amministrazione/mastrini/')
+        }
         else if (item.to === '/amministrazione/impostazioni') active = path === '/amministrazione/impostazioni'
         else if (item.to === '/banca') active = path === '/banca' || path.startsWith('/banca/')
         else if (item.to === '/fatture') active = path.startsWith('/fatture') || path === '/pagamenti'

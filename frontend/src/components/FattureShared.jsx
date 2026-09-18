@@ -7,7 +7,6 @@ export const FATTURE_NAV_ITEMS = [
   { to: '/fatture/emesse', label: 'Fatture emesse' },
   { to: '/fatture/da-registrare', label: 'Da registrare' },
   { to: '/fatture/pagate', label: 'Fatture pagate' },
-  { to: '/fatture/scheda-contabile', label: 'Scheda contabile' },
   { to: '/fatture/registrate', label: 'Storico fatture' },
   { to: '/fatture/scadenziario', label: 'Scadenziario' },
   { to: '/fatture/conservazione', label: 'Conservazione' },
@@ -88,7 +87,14 @@ export function PaymentBadge({ status, ignored }) {
 export function FattureSubnav() {
   const base = React.useContext(FattureNavBaseContext)
   const embedded = base !== '/fatture'
-  const items = FATTURE_NAV_ITEMS.filter((item) => !(embedded && item.to === '/pagamenti')).map((item) => {
+  const sourceItems = [...FATTURE_NAV_ITEMS]
+  // Postazioni: scheda fornitori resta sotto fatture locali
+  if (embedded) {
+    const pagateIdx = sourceItems.findIndex((i) => i.to === '/fatture/pagate')
+    const insertAt = pagateIdx >= 0 ? pagateIdx + 1 : sourceItems.length
+    sourceItems.splice(insertAt, 0, { to: '/fatture/scheda-contabile', label: 'Scheda contabile' })
+  }
+  const items = sourceItems.filter((item) => !(embedded && item.to === '/pagamenti')).map((item) => {
     if (item.to === '/pagamenti') return item
     if (item.to === '/fatture') return { ...item, to: base }
     return { ...item, to: `${base}/${item.to.slice('/fatture/'.length)}` }
