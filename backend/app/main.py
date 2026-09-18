@@ -240,6 +240,18 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
             "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/release-safe.sh "
             "(se l'API è in /opt/fornitori-app usa anche quel APP_DIR per lo script ensure)."
         )
+    elif "staff_documents" in err_text:
+        detail = (
+            "Tabella staff_documents assente. "
+            "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-staff-documents-table.sh "
+            "poi sudo bash deploy/aggiorna-tutto.sh"
+        )
+    elif "conservation_packages" in err_text or "conservation_package_items" in err_text:
+        detail = (
+            "Tabelle conservazione assenti. "
+            "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh "
+            "poi sudo bash deploy/aggiorna-tutto.sh"
+        )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (
             "Tabella o colonna mancante nel database"

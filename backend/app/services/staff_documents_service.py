@@ -1,19 +1,33 @@
 """CRUD documenti PDF personale (contratti, buste, documenti anagrafici)."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from ..database import engine
 from ..models.staff_document import StaffDocument
 from ..models.staff_member import StaffMember
 
+logger = logging.getLogger(__name__)
+
 MAX_DOC_UPLOAD_BYTES = 15 * 1024 * 1024
 DOC_UPLOAD_SUBDIR = "staff_documents"
+_T = TypeVar("_T")
+_table_ready = False
+
+STAFF_DOCUMENTS_ENSURE_HINT = (
+  "Tabella staff_documents assente. Sul server esegui: "
+  "sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-staff-documents-table.sh "
+  "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/aggiorna-tutto.sh"
+)
 
 VALID_CATEGORIES = frozenset({"contratto", "busta_paga", "documento_personale"})
 VALID_DOC_TYPES = frozenset(
@@ -53,6 +67,91 @@ def _doc_out(row: StaffDocument) -> Dict[str, Any]:
   }
 
 
+def _verify_staff_documents_table() -> bool:
+  try:
+    with engine.connect() as conn:
+      conn.execute(text("SELECT 1 FROM staff_documents LIMIT 1"))
+    return True
+  except SQLAlchemyError as exc:
+    logger.warning("staff_documents non accessibile: %s", exc)
+    return False
+
+
+def ensure_staff_documents_schema(*, force: bool = False) -> bool:
+  """Crea staff_documents se manca (DDL idempotente)."""
+  global _table_ready
+  if _table_ready and not force and _verify_staff_documents_table():
+    return True
+  if not force and _verify_staff_documents_table():
+    _table_ready = True
+    return True
+  try:
+    with engine.begin() as conn:
+      conn.execute(
+        text(
+          """
+          CREATE TABLE IF NOT EXISTS staff_documents (
+            id SERIAL PRIMARY KEY,
+            category VARCHAR(40) NOT NULL,
+            doc_type VARCHAR(40) NOT NULL DEFAULT 'altro',
+            locale_name VARCHAR(120) NULL,
+            year_month VARCHAR(7) NULL,
+            staff_member_id INTEGER NULL,
+            first_name VARCHAR(120) NULL,
+            last_name VARCHAR(120) NULL,
+            birth_date DATE NULL,
+            email VARCHAR(255) NULL,
+            phone VARCHAR(64) NULL,
+            ruolo VARCHAR(120) NULL,
+            document_number VARCHAR(80) NULL,
+            storage_path VARCHAR(512) NOT NULL,
+            original_name VARCHAR(255) NULL,
+            mime_type VARCHAR(120) NULL,
+            notes TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+          """
+        )
+      )
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_staff_documents_category ON staff_documents (category)"))
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_staff_documents_locale ON staff_documents (locale_name)"))
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_staff_documents_year_month ON staff_documents (year_month)"))
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_staff_documents_member ON staff_documents (staff_member_id)"))
+    _table_ready = _verify_staff_documents_table()
+    return _table_ready
+  except Exception as exc:
+    logger.warning("Creazione staff_documents fallita: %s", exc)
+    _table_ready = False
+    return False
+
+
+def _rollback_db(db: Session) -> None:
+  try:
+    db.rollback()
+  except Exception:
+    pass
+
+
+def _with_staff_documents_table(db: Session, fn: Callable[[], _T]) -> _T:
+  try:
+    return fn()
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "staff_documents" not in err:
+      raise
+    _rollback_db(db)
+    global _table_ready
+    _table_ready = False
+    if not ensure_staff_documents_schema(force=True):
+      raise HTTPException(status_code=503, detail=STAFF_DOCUMENTS_ENSURE_HINT) from exc
+    try:
+      return fn()
+    except ProgrammingError as retry_exc:
+      _rollback_db(db)
+      raise HTTPException(status_code=503, detail=STAFF_DOCUMENTS_ENSURE_HINT) from retry_exc
+
+
 def list_documents(
   db: Session,
   *,
@@ -60,19 +159,25 @@ def list_documents(
   locale_name: Optional[str] = None,
   year_month: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-  q = db.query(StaffDocument)
-  if category:
-    q = q.filter(StaffDocument.category == category.strip().lower())
-  if locale_name:
-    q = q.filter(StaffDocument.locale_name == locale_name.strip())
-  if year_month:
-    q = q.filter(StaffDocument.year_month == year_month.strip())
-  rows = q.order_by(StaffDocument.id.desc()).all()
-  return [_doc_out(r) for r in rows]
+  def _run() -> List[Dict[str, Any]]:
+    q = db.query(StaffDocument)
+    if category:
+      q = q.filter(StaffDocument.category == category.strip().lower())
+    if locale_name:
+      q = q.filter(StaffDocument.locale_name == locale_name.strip())
+    if year_month:
+      q = q.filter(StaffDocument.year_month == year_month.strip())
+    rows = q.order_by(StaffDocument.id.desc()).all()
+    return [_doc_out(r) for r in rows]
+
+  return _with_staff_documents_table(db, _run)
 
 
 def get_document(db: Session, doc_id: int) -> Optional[StaffDocument]:
-  return db.query(StaffDocument).filter(StaffDocument.id == doc_id).first()
+  return _with_staff_documents_table(
+    db,
+    lambda: db.query(StaffDocument).filter(StaffDocument.id == doc_id).first(),
+  )
 
 
 def save_document(
@@ -108,103 +213,113 @@ def save_document(
   if mime != "application/pdf" and not fname_lower.endswith(".pdf"):
     raise ValueError("Formato non supportato: carica un file PDF")
 
-  if staff_member_id is not None:
-    member = db.query(StaffMember).filter(StaffMember.id == staff_member_id).first()
-    if not member:
-      raise ValueError("Dipendente non trovato")
-    if not first_name and member.first_name:
-      first_name = member.first_name
-    if not last_name and member.last_name:
-      last_name = member.last_name
-    if not first_name and not last_name and member.name:
-      parts = str(member.name).strip().split(None, 1)
-      first_name = parts[0] if parts else None
-      last_name = parts[1] if len(parts) > 1 else None
-    if not email and member.email:
-      email = member.email
-    if not phone and member.phone:
-      phone = member.phone
-    if not birth_date and member.birth_date:
-      birth_date = member.birth_date
+  def _persist() -> Dict[str, Any]:
+    nonlocal first_name, last_name, email, phone, birth_date
+    if staff_member_id is not None:
+      member = db.query(StaffMember).filter(StaffMember.id == staff_member_id).first()
+      if not member:
+        raise ValueError("Dipendente non trovato")
+      if not first_name and member.first_name:
+        first_name = member.first_name
+      if not last_name and member.last_name:
+        last_name = member.last_name
+      if not first_name and not last_name and member.name:
+        parts = str(member.name).strip().split(None, 1)
+        first_name = parts[0] if parts else None
+        last_name = parts[1] if len(parts) > 1 else None
+      if not email and member.email:
+        email = member.email
+      if not phone and member.phone:
+        phone = member.phone
+      if not birth_date and member.birth_date:
+        birth_date = member.birth_date
 
-  dest_dir = upload_root / DOC_UPLOAD_SUBDIR
-  dest_dir.mkdir(parents=True, exist_ok=True)
-  stored = f"{uuid.uuid4().hex}.pdf"
-  (dest_dir / stored).write_bytes(raw_bytes)
-  rel_path = f"{DOC_UPLOAD_SUBDIR}/{stored}"
+    dest_dir = upload_root / DOC_UPLOAD_SUBDIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stored = f"{uuid.uuid4().hex}.pdf"
+    (dest_dir / stored).write_bytes(raw_bytes)
+    rel_path = f"{DOC_UPLOAD_SUBDIR}/{stored}"
 
-  ym = (year_month or "").strip() or None
-  if ym and len(ym) != 7:
-    raise ValueError("Mese non valido (usa YYYY-MM)")
+    ym = (year_month or "").strip() or None
+    if ym and len(ym) != 7:
+      raise ValueError("Mese non valido (usa YYYY-MM)")
 
-  row = StaffDocument(
-    category=cat,
-    doc_type=dtype if cat != "contratto" else "contratto",
-    locale_name=(locale_name or "").strip() or None,
-    year_month=ym if cat == "busta_paga" else (ym if ym else None),
-    staff_member_id=staff_member_id,
-    first_name=(first_name or "").strip() or None,
-    last_name=(last_name or "").strip() or None,
-    birth_date=birth_date,
-    email=(email or "").strip() or None,
-    phone=(phone or "").strip() or None,
-    ruolo=(ruolo or "").strip() or None,
-    document_number=(document_number or "").strip() or None,
-    storage_path=rel_path,
-    original_name=(file.filename or None)[:255] if file.filename else None,
-    mime_type=mime or "application/pdf",
-    notes=(notes or "").strip() or None,
-  )
-  if cat == "busta_paga":
-    row.doc_type = "busta_paga"
-  db.add(row)
-  db.commit()
-  db.refresh(row)
-  return _doc_out(row)
+    row = StaffDocument(
+      category=cat,
+      doc_type=dtype if cat != "contratto" else "contratto",
+      locale_name=(locale_name or "").strip() or None,
+      year_month=ym if cat == "busta_paga" else (ym if ym else None),
+      staff_member_id=staff_member_id,
+      first_name=(first_name or "").strip() or None,
+      last_name=(last_name or "").strip() or None,
+      birth_date=birth_date,
+      email=(email or "").strip() or None,
+      phone=(phone or "").strip() or None,
+      ruolo=(ruolo or "").strip() or None,
+      document_number=(document_number or "").strip() or None,
+      storage_path=rel_path,
+      original_name=(file.filename or None)[:255] if file.filename else None,
+      mime_type=mime or "application/pdf",
+      notes=(notes or "").strip() or None,
+    )
+    if cat == "busta_paga":
+      row.doc_type = "busta_paga"
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _doc_out(row)
+
+  return _with_staff_documents_table(db, _persist)
 
 
 def update_document(db: Session, doc_id: int, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-  row = get_document(db, doc_id)
-  if not row:
-    return None
-  for key in (
-    "first_name",
-    "last_name",
-    "email",
-    "phone",
-    "ruolo",
-    "document_number",
-    "locale_name",
-    "year_month",
-    "doc_type",
-    "notes",
-  ):
-    if key in payload and payload[key] is not None:
-      val = payload[key]
-      if isinstance(val, str):
-        val = val.strip() or None
-      setattr(row, key, val)
-  if "birth_date" in payload:
-    row.birth_date = payload.get("birth_date")
-  if "staff_member_id" in payload:
-    row.staff_member_id = payload.get("staff_member_id")
-  db.commit()
-  db.refresh(row)
-  return _doc_out(row)
+  def _run() -> Optional[Dict[str, Any]]:
+    row = db.query(StaffDocument).filter(StaffDocument.id == doc_id).first()
+    if not row:
+      return None
+    for key in (
+      "first_name",
+      "last_name",
+      "email",
+      "phone",
+      "ruolo",
+      "document_number",
+      "locale_name",
+      "year_month",
+      "doc_type",
+      "notes",
+    ):
+      if key in payload and payload[key] is not None:
+        val = payload[key]
+        if isinstance(val, str):
+          val = val.strip() or None
+        setattr(row, key, val)
+    if "birth_date" in payload:
+      row.birth_date = payload.get("birth_date")
+    if "staff_member_id" in payload:
+      row.staff_member_id = payload.get("staff_member_id")
+    db.commit()
+    db.refresh(row)
+    return _doc_out(row)
+
+  return _with_staff_documents_table(db, _run)
 
 
 def delete_document(db: Session, upload_root: Path, doc_id: int) -> bool:
-  row = get_document(db, doc_id)
-  if not row:
-    return False
-  rel = (row.storage_path or "").lstrip("/").replace("\\", "/")
-  if rel and ".." not in rel:
-    path = upload_root / rel
-    if path.is_file():
-      try:
-        path.unlink()
-      except OSError:
-        pass
-  db.delete(row)
-  db.commit()
-  return True
+  def _run() -> bool:
+    row = db.query(StaffDocument).filter(StaffDocument.id == doc_id).first()
+    if not row:
+      return False
+    rel = (row.storage_path or "").lstrip("/").replace("\\", "/")
+    if rel and ".." not in rel:
+      path = upload_root / rel
+      if path.is_file():
+        try:
+          path.unlink()
+        except OSError:
+          pass
+    db.delete(row)
+    db.commit()
+    return True
+
+  return _with_staff_documents_table(db, _run)

@@ -108,7 +108,9 @@ for mig in \
   20260902_sdi_receiver_vat.sql \
   20260816_pos_receipts.sql \
   20260828_pos_receipts_payment_split.sql \
-  20260909_issued_invoices.sql
+  20260909_issued_invoices.sql \
+  20260915_conservation_packages.sql \
+  20260918_staff_documents.sql
 do
   _apply_sql_file "$mig"
 done
@@ -140,6 +142,7 @@ for table in \
   staff_payroll_months \
   staff_locale_packs \
   staff_backups \
+  staff_documents \
   bank_accounts \
   bank_movements \
   carriers \
@@ -152,7 +155,9 @@ for table in \
   sdi_invoices \
   pos_receipts \
   prima_nota_locale_packs \
-  issued_invoices
+  issued_invoices \
+  conservation_packages \
+  conservation_package_items
 do
   if sudo -u postgres psql -tAc \
     "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table'" \
