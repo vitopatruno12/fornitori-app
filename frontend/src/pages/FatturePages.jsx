@@ -983,10 +983,6 @@ export function FattureEmessePage() {
       ) : (
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
-          <p className="fatture-note">
-            Al caricamento Atlas prova a leggere automaticamente <strong>numero</strong> e{' '}
-            <strong>importo</strong> (XML completo; PDF da testo; foto con AI se configurata).
-          </p>
           <WorkbookGrid
             title={`Emesse · ${companyLabel(companyId)}`}
             sheetLabel={`${items.length} documenti`}
