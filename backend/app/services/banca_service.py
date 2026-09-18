@@ -744,8 +744,8 @@ def reconciliation_preview(
   company_id = (company or "").strip() or None
 
   invoices = list_invoices(db, company=company_id, include_ignored=False)
-  # Limite pratico per UI
-  invoices = invoices[:500]
+  # Ampio set: storico ricevute + bonifici sui conti collegati
+  invoices = invoices[:5000]
 
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -754,7 +754,7 @@ def reconciliation_preview(
   if account_ids:
     mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
   # Ampio set per matching per numero (non solo unmatched)
-  movements = mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(800).all()
+  movements = mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(5000).all()
 
   # Precompute blobs
   mov_meta: List[Dict[str, Any]] = []
@@ -767,6 +767,13 @@ def reconciliation_preview(
         "out": _movement_out(mov, acc),
       }
     )
+
+  from . import supplier_payments_service
+
+  try:
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(db)
+  except Exception:
+    paid_file_rows = []
 
   paid_by_bank: List[Dict[str, Any]] = []
   da_pagare: List[Dict[str, Any]] = []
@@ -789,9 +796,21 @@ def reconciliation_preview(
     found = already
     if not found and num:
       for m in mov_meta:
+        # Solo uscite (bonifici) sui conti collegati
+        if m["mov"].movement_type != "uscita":
+          continue
         if _invoice_number_in_text(num, m["blob"]):
           found = m
           break
+
+    file_hit = None
+    if not found and paid_file_rows:
+      file_hit = supplier_payments_service.find_paid_row_for_invoice(
+        paid_file_rows,
+        invoice_number=num,
+        supplier_name=getattr(inv, "supplier_name", None),
+        supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
+      )
 
     if found:
       paid_by_bank.append(
@@ -799,6 +818,20 @@ def reconciliation_preview(
           inv,
           match_movement=found["out"],
           reason="matched" if found["mov"].matched_invoice_id == inv_id else "numero_in_movimento",
+        )
+      )
+    elif file_hit:
+      paid_by_bank.append(
+        _invoice_row_out(
+          inv,
+          reason="file_pagamenti",
+          match_movement={
+            "movement_date": (file_hit.get("payment_date") or "")[:10] or None,
+            "description": f"File Pagamenti · {file_hit.get('sheet') or ''}".strip(" ·"),
+            "causale": "PAGATO",
+            "amount": file_hit.get("amount_paid"),
+            "id": None,
+          },
         )
       )
     elif status == "paid" or residuo <= Decimal("0.009"):
@@ -903,6 +936,7 @@ def reconciliation_preview(
     "da_pagare": da_pagare,
     "open_invoices_count": len(da_pagare),
     "paid_count": len(paid_by_bank),
+    "pagamenti_paid_rows": len(paid_file_rows),
     "unmatched_movements": len([s for s in suggestions if s["status"] == "unmatched"]),
     "accounts_used": [
       {
@@ -923,10 +957,13 @@ def sync_payment_status_from_bank(
   company: Optional[str] = None,
 ) -> Dict[str, Any]:
   """
-  Aggiorna lo stato pagamento fatture in base ai movimenti banca:
-  - n. documento trovato in banca → segna pagata
-  - non trovato → lascia da pagare (non modifica le già pagate)
+  Aggiorna lo stato pagamento fatture ricevute in base a:
+  - bonifici in uscita sui conti collegati (n. documento in causale)
+  - file Pagamenti (colonne PAGATO / DATA PAGAMENTO)
+  Non riapre le già pagate se non trovate.
   """
+  from . import supplier_payments_service
+
   company_id = (company or "").strip() or None
   listed = list_invoices(db, company=company_id, include_ignored=False)
   unpaid = [
@@ -941,31 +978,52 @@ def sync_payment_status_from_bank(
   if account_ids:
     mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
   movements = (
-    mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(800).all()
+    mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(5000).all()
   )
   mov_meta = [{"mov": m, "blob": _movement_search_blob(m)} for m in movements]
 
+  try:
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(db)
+  except Exception:
+    paid_file_rows = []
+
   marked: List[Dict[str, Any]] = []
+  marked_from_file = 0
   changed = False
   for inv_dto in unpaid:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if not num:
-      continue
+    supplier_name = str(getattr(inv_dto, "supplier_name", None) or "").strip()
+    supplier_vat = str(
+      getattr(inv_dto, "supplier_vat", None)
+      or getattr(inv_dto, "vat_number", None)
+      or ""
+    ).strip()
 
-    found = None
-    for meta in mov_meta:
-      if not _invoice_number_in_text(num, meta["blob"]):
-        continue
-      mov = meta["mov"]
-      if found is None or (
-        mov.movement_type == "uscita" and found.movement_type != "uscita"
-      ):
+    found = next(
+      (meta["mov"] for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
+      None,
+    )
+    if not found and num:
+      for meta in mov_meta:
+        mov = meta["mov"]
+        if mov.movement_type != "uscita":
+          continue
+        if not _invoice_number_in_text(num, meta["blob"]):
+          continue
         found = mov
-      if mov.movement_type == "uscita":
         break
 
-    if not found:
+    file_hit = None
+    if not found and paid_file_rows:
+      file_hit = supplier_payments_service.find_paid_row_for_invoice(
+        paid_file_rows,
+        invoice_number=num,
+        supplier_name=supplier_name,
+        supplier_vat=supplier_vat,
+      )
+
+    if not found and not file_hit:
       continue
 
     row = db.query(Invoice).filter(Invoice.id == inv_id).first()
@@ -973,31 +1031,46 @@ def sync_payment_status_from_bank(
       continue
     row.amount_paid = _dec(row.total)
     row.is_paid = True
-    if (
-      found.reconciliation_status == "unmatched"
-      and found.movement_type == "uscita"
-      and not found.matched_invoice_id
-    ):
-      found.reconciliation_status = "matched"
-      found.matched_invoice_id = inv_id
-      found.difference_amount = None
+    reason = "file_pagamenti"
+    movement_id = None
+    if found:
+      reason = "numero_in_movimento" if num else "matched"
+      movement_id = int(found.id)
+      if (
+        found.reconciliation_status == "unmatched"
+        and found.movement_type == "uscita"
+        and not found.matched_invoice_id
+      ):
+        found.reconciliation_status = "matched"
+        found.matched_invoice_id = inv_id
+        found.difference_amount = None
+    else:
+      marked_from_file += 1
     changed = True
-    marked.append(
-      {
-        "invoice_id": inv_id,
-        "invoice_number": num,
-        "movement_id": int(found.id),
-        "reason": "numero_in_movimento",
-      }
-    )
+    item = {
+      "invoice_id": inv_id,
+      "invoice_number": num,
+      "reason": reason,
+    }
+    if movement_id is not None:
+      item["movement_id"] = movement_id
+    if file_hit:
+      item["pagamenti_sheet"] = file_hit.get("sheet")
+      item["pagamenti_payment_date"] = file_hit.get("payment_date")
+    marked.append(item)
 
   if changed:
     db.commit()
 
+  da_pagare_count = max(0, len(unpaid) - len(marked))
   return {
     "ok": True,
     "company": company_id or "",
     "marked_paid": len(marked),
+    "marked_from_pagamenti": marked_from_file,
+    "da_pagare": da_pagare_count,
+    "accounts_checked": len(account_ids),
+    "pagamenti_paid_rows": len(paid_file_rows),
     "items": marked,
   }
 

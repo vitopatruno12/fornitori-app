@@ -124,6 +124,28 @@ function isBppbAccount(account) {
   )
 }
 
+function isIntesaAccount(account) {
+  if (isBppbAccount(account) || isBccTerraOtrantoAccount(account)) return false
+  const bank = String(account?.bank_name || '').toLowerCase()
+  const label = `${bank} ${String(account?.account_name || '').toLowerCase()} ${String(account?.notes || '').toLowerCase()}`
+  const iban = String(account?.iban || '').replace(/\s/g, '').toUpperCase()
+  return (
+    bank.includes('intesa')
+    || bank.includes('sanpaolo')
+    || label.includes('intesa')
+    || label.includes('sanpaolo')
+    || iban === 'IT88N0306979822100000008926'
+  )
+}
+
+function isUnicreditAccount(account) {
+  if (isBppbAccount(account) || isBccTerraOtrantoAccount(account) || isIntesaAccount(account)) return false
+  const bank = String(account?.bank_name || '').toLowerCase()
+  const label = `${bank} ${String(account?.account_name || '').toLowerCase()} ${String(account?.notes || '').toLowerCase()}`
+  const iban = String(account?.iban || '').replace(/\s/g, '').toUpperCase()
+  return bank.includes('unicredit') || label.includes('unicredit') || iban === 'IT48Q0200816005000105294153'
+}
+
 /** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
 function formatBankAccountOptionLabel(account) {
   if (account?.label) return String(account.label)
@@ -156,6 +178,28 @@ const BPPB_SEED_ACCOUNTS = [
     company: 'mediazione_a',
     ledger_code: '1100',
     notes: 'MEDIAZIONE · BPPB · IBAN IT55B0538516000CC1410004512 · ABI 05385. Collegare via Enable Banking.',
+  },
+]
+
+const INTESA_SEED_ACCOUNTS = [
+  {
+    bank_name: 'Intesa Sanpaolo',
+    account_name: 'Risacca · Bar Momento · Intesa',
+    iban: 'IT88N0306979822100000008926',
+    company: 'risacca',
+    ledger_code: '1100',
+    notes:
+      'RISACCA S.R.L. · Filiale Nardò · BIC BCITITMM · Conto Business Insieme · CC 66494/1000/00008926',
+  },
+]
+
+const UNICREDIT_SEED_ACCOUNTS = [
+  {
+    bank_name: 'UniCredit',
+    account_name: 'Conto corrente Lecce Foscarini',
+    iban: 'IT48Q0200816005000105294153',
+    ledger_code: '1100',
+    notes: 'UniCredit LECCE FOSCARINI · BIC UNCRITM1L32 · Enable Banking',
   },
 ]
 
@@ -487,6 +531,9 @@ export function BancaContiPage() {
   const [otpHint, setOtpHint] = useState('')
   const [otpBusy, setOtpBusy] = useState(false)
   const [bppbSelectedId, setBppbSelectedId] = useState('')
+  const [bccSelectedId, setBccSelectedId] = useState('')
+  const [intesaSelectedId, setIntesaSelectedId] = useState('')
+  const [unicreditSelectedId, setUnicreditSelectedId] = useState('')
   const banInputRef = useRef(null)
   const banImportAccountRef = useRef(null)
   const banImportInputRef = useRef(null)
@@ -520,6 +567,31 @@ export function BancaContiPage() {
       || bppb[0]
     setBppbSelectedId(String(prefer.id))
   }, [items, bppbSelectedId])
+
+  useEffect(() => {
+    const bcc = items.filter(isBccTerraOtrantoAccount)
+    if (!bcc.length) return
+    if (bcc.some((a) => String(a.id) === String(bccSelectedId))) return
+    const prefer =
+      bcc.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+      || bcc.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT37M0844516000000000967252')
+      || bcc[0]
+    setBccSelectedId(String(prefer.id))
+  }, [items, bccSelectedId])
+
+  useEffect(() => {
+    const intesa = items.filter(isIntesaAccount)
+    if (!intesa.length) return
+    if (intesa.some((a) => String(a.id) === String(intesaSelectedId))) return
+    setIntesaSelectedId(String(intesa[0].id))
+  }, [items, intesaSelectedId])
+
+  useEffect(() => {
+    const unicredit = items.filter(isUnicreditAccount)
+    if (!unicredit.length) return
+    if (unicredit.some((a) => String(a.id) === String(unicreditSelectedId))) return
+    setUnicreditSelectedId(String(unicredit[0].id))
+  }, [items, unicreditSelectedId])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search || '')
@@ -894,64 +966,166 @@ export function BancaContiPage() {
     }
   }
 
-  async function syncAllBccAccounts() {
-    let bcc = items.filter(isBccTerraOtrantoAccount)
-    if (!bcc.length) {
-      setBusyId(-1)
-      setError('')
-      setSuccess('')
-      try {
-        const existingIbans = new Set(
-          items.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
-        )
-        for (const seed of BCC_SEED_ACCOUNTS) {
-          const iban = seed.iban.replace(/\s/g, '').toUpperCase()
-          if (existingIbans.has(iban)) continue
-          await createBancaAccount(seed)
-        }
-        const res = await fetchBancaAccounts()
-        const next = Array.isArray(res?.items) ? res.items : []
-        setItems(next)
-        bcc = next.filter(isBccTerraOtrantoAccount)
-      } catch (err) {
-        setError(err?.message || 'Impossibile creare i conti BCC')
-        setBusyId(null)
-        return
-      } finally {
-        setBusyId(null)
+  async function ensureSeedAccounts(seeds, filterFn, busyMarker, errLabel) {
+    setBusyId(busyMarker)
+    setError('')
+    setSuccess('')
+    try {
+      let list = items
+      const existingIbans = new Set(
+        list.map((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase()).filter(Boolean),
+      )
+      let created = false
+      for (const seed of seeds) {
+        const seedIban = seed.iban.replace(/\s/g, '').toUpperCase()
+        if (existingIbans.has(seedIban)) continue
+        await createBancaAccount(seed)
+        created = true
       }
+      if (created) {
+        const res = await fetchBancaAccounts()
+        list = Array.isArray(res?.items) ? res.items : []
+        setItems(list)
+      }
+      return list.filter(filterFn)
+    } catch (err) {
+      setError(err?.message || `Impossibile creare i conti ${errLabel}`)
+      return items.filter(filterFn)
+    } finally {
+      setBusyId(null)
     }
-    if (!bcc.length) {
-      setError("Nessun conto BCC Terra d'Otranto in elenco.")
+  }
+
+  async function ensureBccAccounts() {
+    return ensureSeedAccounts(BCC_SEED_ACCOUNTS, isBccTerraOtrantoAccount, -1, 'BCC')
+  }
+
+  async function ensureIntesaAccounts() {
+    return ensureSeedAccounts(INTESA_SEED_ACCOUNTS, isIntesaAccount, -3, 'Intesa')
+  }
+
+  async function ensureUnicreditAccounts() {
+    return ensureSeedAccounts(UNICREDIT_SEED_ACCOUNTS, isUnicreditAccount, -4, 'UniCredit')
+  }
+
+  async function syncSelectedBankAccount({
+    ensureFn,
+    selectedId,
+    setSelectedId,
+    preferFn,
+    bankLabel,
+  }) {
+    let list = await ensureFn()
+    if (!list.length) {
+      setError(`Nessun conto ${bankLabel} in elenco.`)
       return
     }
-    const connected = bcc.filter((a) => a.enable_banking_connected)
-    if (!connected.length) {
-      const prefer =
-        bcc.find((a) => String(a.company || '').toLowerCase() === 'via_lattea') || bcc[0]
-      await startEnableBanking(prefer.id)
+    let selected =
+      list.find((a) => String(a.id) === String(selectedId))
+      || (preferFn ? preferFn(list) : null)
+      || list[0]
+    setSelectedId(String(selected.id))
+
+    if (!selected.enable_banking_connected) {
+      await startEnableBanking(selected.id)
       return
     }
     setError('')
     setSuccess('')
-    let totalImported = 0
-    for (const acc of connected) {
-      setBusyId(acc.id)
-      try {
-        const res = await syncEnableBankingAccount(acc.id)
-        totalImported += Number(res?.imported || 0)
-      } catch (err) {
-        setError(err?.message || `Sync fallito per ${acc.bank_name}`)
-        setBusyId(null)
-        await reload()
-        return
-      }
+    setBusyId(selected.id)
+    try {
+      const res = await syncEnableBankingAccount(selected.id)
+      const imported = Number(res?.imported || 0)
+      const label = formatBankAccountOptionLabel(selected)
+      setSuccess(
+        `${bankLabel} «${label}» sincronizzato: ${imported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+      )
+    } catch (err) {
+      setError(err?.message || `Sync fallito per ${formatBankAccountOptionLabel(selected)}`)
+    } finally {
+      setBusyId(null)
+      await reload()
     }
-    setBusyId(null)
-    setSuccess(
-      `BCC sincronizzato: ${connected.length} conti, ${totalImported} nuovi movimenti. Apri Movimenti banca per visualizzarli.`,
+  }
+
+  async function unsyncSelectedBankAccount({ filterFn, selectedId, bankLabel }) {
+    const list = items.filter(filterFn)
+    const selected = list.find((a) => String(a.id) === String(selectedId)) || list[0]
+    if (!selected?.id) {
+      setError(`Seleziona un conto ${bankLabel} da scollegare.`)
+      return
+    }
+    const label = formatBankAccountOptionLabel(selected)
+    const ok = window.confirm(
+      `Scollegare «${label}» e cancellare i movimenti importati?\nIl conto resta in elenco: potrai ricollegarlo e reimportare.`,
     )
-    await reload()
+    if (!ok) return
+    setError('')
+    setSuccess('')
+    setBusyId(selected.id)
+    try {
+      const res = await unsyncBancaAccount(selected.id)
+      setSuccess(res?.message || `Conto «${label}» scollegato.`)
+    } catch (err) {
+      setError(err?.message || `Scollegamento fallito per ${label}`)
+    } finally {
+      setBusyId(null)
+      await reload()
+    }
+  }
+
+  async function syncSelectedBccAccount() {
+    await syncSelectedBankAccount({
+      ensureFn: ensureBccAccounts,
+      selectedId: bccSelectedId,
+      setSelectedId: setBccSelectedId,
+      preferFn: (list) =>
+        list.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+        || list.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT37M0844516000000000967252'),
+      bankLabel: 'BCC',
+    })
+  }
+
+  async function unsyncSelectedBccAccount() {
+    await unsyncSelectedBankAccount({
+      filterFn: isBccTerraOtrantoAccount,
+      selectedId: bccSelectedId,
+      bankLabel: 'BCC',
+    })
+  }
+
+  async function syncSelectedIntesaAccount() {
+    await syncSelectedBankAccount({
+      ensureFn: ensureIntesaAccounts,
+      selectedId: intesaSelectedId,
+      setSelectedId: setIntesaSelectedId,
+      bankLabel: 'Intesa Sanpaolo',
+    })
+  }
+
+  async function unsyncSelectedIntesaAccount() {
+    await unsyncSelectedBankAccount({
+      filterFn: isIntesaAccount,
+      selectedId: intesaSelectedId,
+      bankLabel: 'Intesa Sanpaolo',
+    })
+  }
+
+  async function syncSelectedUnicreditAccount() {
+    await syncSelectedBankAccount({
+      ensureFn: ensureUnicreditAccounts,
+      selectedId: unicreditSelectedId,
+      setSelectedId: setUnicreditSelectedId,
+      bankLabel: 'UniCredit',
+    })
+  }
+
+  async function unsyncSelectedUnicreditAccount() {
+    await unsyncSelectedBankAccount({
+      filterFn: isUnicreditAccount,
+      selectedId: unicreditSelectedId,
+      bankLabel: 'UniCredit',
+    })
   }
 
   async function startConnect(accountId) {
@@ -1160,18 +1334,162 @@ export function BancaContiPage() {
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            className="form-control"
+            style={{ minWidth: 260, maxWidth: 420 }}
+            value={bccSelectedId}
+            disabled={busyId != null}
+            onChange={(e) => setBccSelectedId(e.target.value)}
+            title="Scegli quale conto BCC importare"
+          >
+            {items.filter(isBccTerraOtrantoAccount).length === 0 ? (
+              <option value="">Via Lattea / Mediazione (crea al sync)</option>
+            ) : (
+              items.filter(isBccTerraOtrantoAccount).map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {formatBankAccountOptionLabel(a)}
+                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
+                </option>
+              ))
+            )}
+          </select>
           <button
             type="button"
             className="btn btn-primary"
             disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncAllBccAccounts}
-            title="Collega o sincronizza i conti BCC via Enable Banking"
+            onClick={syncSelectedBccAccount}
+            title="Collega o sincronizza solo il conto BCC selezionato"
           >
             {busyId != null && (busyId === -1 || items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a)))
               ? 'Sincronizzo…'
-              : items.some((a) => isBccTerraOtrantoAccount(a) && a.enable_banking_connected)
-                ? 'Sincronizza conti BCC'
-                : 'Collega e sincronizza BCC'}
+              : (() => {
+                  const sel = items.find((a) => String(a.id) === String(bccSelectedId) && isBccTerraOtrantoAccount(a))
+                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
+                  return 'Collega e sincronizza'
+                })()}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busyId != null || !bccSelectedId}
+            onClick={unsyncSelectedBccAccount}
+            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
+          >
+            Scollega / svuota movimenti
+          </button>
+          <Link className="btn btn-secondary" to="/banca/movimenti">
+            Vedi movimenti
+          </Link>
+        </div>
+        {!connectProfile?.enable_banking?.configured ? (
+          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+            Enable Banking non configurato sul server.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">Intesa Sanpaolo — Sincronizza conti</h2>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            className="form-control"
+            style={{ minWidth: 260, maxWidth: 420 }}
+            value={intesaSelectedId}
+            disabled={busyId != null}
+            onChange={(e) => setIntesaSelectedId(e.target.value)}
+            title="Scegli quale conto Intesa Sanpaolo importare"
+          >
+            {items.filter(isIntesaAccount).length === 0 ? (
+              <option value="">Risacca (crea al sync)</option>
+            ) : (
+              items.filter(isIntesaAccount).map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {formatBankAccountOptionLabel(a)}
+                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
+                </option>
+              ))
+            )}
+          </select>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+            onClick={syncSelectedIntesaAccount}
+            title="Collega o sincronizza solo il conto Intesa selezionato"
+          >
+            {busyId != null && (busyId === -3 || items.some((a) => a.id === busyId && isIntesaAccount(a)))
+              ? 'Sincronizzo…'
+              : (() => {
+                  const sel = items.find((a) => String(a.id) === String(intesaSelectedId) && isIntesaAccount(a))
+                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
+                  return 'Collega e sincronizza'
+                })()}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busyId != null || !intesaSelectedId}
+            onClick={unsyncSelectedIntesaAccount}
+            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
+          >
+            Scollega / svuota movimenti
+          </button>
+          <Link className="btn btn-secondary" to="/banca/movimenti">
+            Vedi movimenti
+          </Link>
+        </div>
+        {!connectProfile?.enable_banking?.configured ? (
+          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
+            Enable Banking non configurato sul server.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="card fatture-panel">
+        <h2 className="fatture-panel-title">UniCredit — Sincronizza conti</h2>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            className="form-control"
+            style={{ minWidth: 260, maxWidth: 420 }}
+            value={unicreditSelectedId}
+            disabled={busyId != null}
+            onChange={(e) => setUnicreditSelectedId(e.target.value)}
+            title="Scegli quale conto UniCredit importare"
+          >
+            {items.filter(isUnicreditAccount).length === 0 ? (
+              <option value="">Lecce Foscarini (crea al sync)</option>
+            ) : (
+              items.filter(isUnicreditAccount).map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {formatBankAccountOptionLabel(a)}
+                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
+                </option>
+              ))
+            )}
+          </select>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
+            onClick={syncSelectedUnicreditAccount}
+            title="Collega o sincronizza solo il conto UniCredit selezionato"
+          >
+            {busyId != null && (busyId === -4 || items.some((a) => a.id === busyId && isUnicreditAccount(a)))
+              ? 'Sincronizzo…'
+              : (() => {
+                  const sel = items.find((a) => String(a.id) === String(unicreditSelectedId) && isUnicreditAccount(a))
+                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
+                  return 'Collega e sincronizza'
+                })()}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busyId != null || !unicreditSelectedId}
+            onClick={unsyncSelectedUnicreditAccount}
+            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
+          >
+            Scollega / svuota movimenti
           </button>
           <Link className="btn btn-secondary" to="/banca/movimenti">
             Vedi movimenti

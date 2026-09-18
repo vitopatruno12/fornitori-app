@@ -1128,9 +1128,6 @@ export default function MastriniContabiliPage() {
       {companyId && viewMode === 'selezione' ? (
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Selezione scheda contabile</h2>
-          <p className="fatture-note" style={{ marginTop: 0 }}>
-            Come in Passcom: ogni locale Prima Nota ha codici conto dedicati (es. 1003 Cassa Via Abba, 4103 Ricavi).
-          </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
             <button
               type="button"
@@ -1174,12 +1171,7 @@ export default function MastriniContabiliPage() {
                 )
               })}
             </div>
-          ) : (
-            <p className="fatture-note">
-              Nessun c/c collegato. Vai in Banca → Conti e lascia la Popolare Puglia come conto condiviso (società vuota)
-              oppure assegnala a questa società.
-            </p>
-          )}
+          ) : null}
           <form
             onSubmit={openScheda}
             style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}

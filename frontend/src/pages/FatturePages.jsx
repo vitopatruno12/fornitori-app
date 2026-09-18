@@ -91,9 +91,11 @@ const DA_REGISTRARE_COLUMNS = [
 ]
 
 const PAGATE_FORNITORI_COLUMNS = [
-  { id: 'supplier_name', label: 'Fornitore', width: 36, fluid: true, emphasis: true },
-  { id: 'invoice_count', label: 'Fatture', width: 10, fluid: true, numeric: true },
-  { id: 'total_paid', label: 'Totale pagato', width: 16, fluid: true, numeric: true, emphasis: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 30, fluid: true, emphasis: true },
+  { id: 'pagate_count', label: 'Pagate', width: 10, fluid: true, numeric: true },
+  { id: 'da_pagare_count', label: 'Da pagare', width: 10, fluid: true, numeric: true },
+  { id: 'total_paid', label: 'Totale pagato', width: 14, fluid: true, numeric: true },
+  { id: 'total_open', label: 'Residuo', width: 14, fluid: true, numeric: true, emphasis: true },
   { id: 'last_date', label: 'Ultima data', width: 12, fluid: true },
 ]
 
@@ -102,7 +104,8 @@ const PAGATE_INVOICE_COLUMNS = [
   { id: 'invoice_number', label: 'Numero', width: 12, fluid: true, emphasis: true },
   { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true },
   { id: 'amount_paid', label: 'Pagato', width: 12, fluid: true, numeric: true },
-  { id: 'bank_hit', label: 'Movimento banca', width: 28, fluid: true },
+  { id: 'payment_label', label: 'Stato', width: 12, fluid: true },
+  { id: 'bank_hit', label: 'Movimento banca', width: 24, fluid: true },
   { id: 'reason', label: 'Esito', width: 14, fluid: true },
 ]
 
@@ -131,10 +134,20 @@ function moneyTotalsLabel(colId, totals) {
   if (colId === 'supplier_name' || colId === 'file_kind' || colId === 'original_filename') {
     return totals?.count != null ? `${totals.count} doc.` : ''
   }
-  if (colId === 'invoice_count') return totals?.count != null ? `${totals.count} forn.` : ''
+  if (colId === 'pagate_count' || colId === 'da_pagare_count' || colId === 'invoice_count') {
+    return totals?.count != null ? `${totals.count} forn.` : ''
+  }
   if (colId === 'imponibile') return eur(totals?.imponibile)
   if (colId === 'vat_amount') return eur(totals?.vat_amount)
-  if (colId === 'total' || colId === 'total_amount' || colId === 'total_paid' || colId === 'amount_paid') {
+  if (
+    colId === 'total'
+    || colId === 'total_amount'
+    || colId === 'total_paid'
+    || colId === 'total_open'
+    || colId === 'amount_paid'
+  ) {
+    if (colId === 'total_paid') return eur(totals?.total_paid ?? totals?.total)
+    if (colId === 'total_open') return eur(totals?.total_open)
     return eur(totals?.total)
   }
   return ''
@@ -143,8 +156,10 @@ function moneyTotalsLabel(colId, totals) {
 function matchReasonLabel(reason) {
   if (reason === 'numero_in_movimento') return 'N. in banca'
   if (reason === 'matched') return 'Riconciliata'
-  if (reason === 'gia_pagata_in_atlas') return 'Pagata'
-  return reason || 'Pagata'
+  if (reason === 'gia_pagata_in_atlas') return 'Pagata Atlas'
+  if (reason === 'file_pagamenti') return 'File Pagamenti'
+  if (reason === 'da_pagare') return 'Da pagare'
+  return reason || '—'
 }
 
 function supplierPartyKey(name) {
@@ -154,9 +169,31 @@ function supplierPartyKey(name) {
     .replace(/\s+/g, ' ')
 }
 
-function buildPaidSuppliers(paidRows) {
+function invoiceIsPaidRow(row) {
+  const reason = String(row?.match_reason || '')
+  if (reason === 'da_pagare') return false
+  if (
+    reason === 'numero_in_movimento'
+    || reason === 'matched'
+    || reason === 'gia_pagata_in_atlas'
+    || reason === 'file_pagamenti'
+  ) {
+    return true
+  }
+  const status = String(row?.payment_status || '').toLowerCase()
+  if (status === 'paid') return true
+  const residuo = Number(row?.residuo)
+  if (Number.isFinite(residuo)) return residuo <= 0.009
+  return Number(row?.amount_paid || 0) >= Number(row?.total || 0) - 0.009
+}
+
+function buildBankVerifySuppliers(paidRows, openRows) {
   const map = new Map()
-  for (const row of Array.isArray(paidRows) ? paidRows : []) {
+  const all = [
+    ...(Array.isArray(paidRows) ? paidRows : []).map((r) => ({ ...r, _bucket: 'paid' })),
+    ...(Array.isArray(openRows) ? openRows : []).map((r) => ({ ...r, _bucket: 'open', match_reason: r.match_reason || 'da_pagare' })),
+  ]
+  for (const row of all) {
     const name = String(row?.supplier_name || '').trim() || 'Senza fornitore'
     const key = supplierPartyKey(name)
     let party = map.get(key)
@@ -166,18 +203,36 @@ function buildPaidSuppliers(paidRows) {
         supplier_name: name,
         invoices: [],
         invoice_count: 0,
+        pagate_count: 0,
+        da_pagare_count: 0,
         total_paid: 0,
+        total_open: 0,
         last_date: '',
       }
       map.set(key, party)
     }
-    party.invoices.push(row)
+    const paid = row._bucket === 'paid' || invoiceIsPaidRow(row)
+    party.invoices.push({
+      ...row,
+      payment_label: paid ? 'Pagata' : 'Da pagare',
+    })
     party.invoice_count += 1
-    party.total_paid += Number(row?.amount_paid ?? row?.total) || 0
+    if (paid) {
+      party.pagate_count += 1
+      party.total_paid += Number(row?.amount_paid ?? row?.total) || 0
+    } else {
+      party.da_pagare_count += 1
+      party.total_open += Number(row?.residuo ?? row?.total) || 0
+    }
     const d = String(row?.invoice_date || '').slice(0, 10)
     if (d && (!party.last_date || d > party.last_date)) party.last_date = d
   }
-  return Array.from(map.values()).sort((a, b) => a.supplier_name.localeCompare(b.supplier_name, 'it'))
+  return Array.from(map.values()).sort((a, b) => {
+    if ((b.da_pagare_count || 0) !== (a.da_pagare_count || 0)) {
+      return (b.da_pagare_count || 0) - (a.da_pagare_count || 0)
+    }
+    return a.supplier_name.localeCompare(b.supplier_name, 'it')
+  })
 }
 
 function pushSyncLog(entry) {
@@ -1224,6 +1279,8 @@ export function FattureDaRegistrarePage() {
 export function FatturePagatePage() {
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
   const [paidRows, setPaidRows] = useState([])
+  const [openRows, setOpenRows] = useState([])
+  const [verifySummary, setVerifySummary] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [draftSupplier, setDraftSupplier] = useState('')
@@ -1237,24 +1294,43 @@ export function FatturePagatePage() {
   async function reload(nextCompany = companyId) {
     if (!nextCompany) {
       setPaidRows([])
+      setOpenRows([])
+      setVerifySummary('')
       setSelectedSupplierKey('')
       setLoading(false)
       return
     }
     setLoading(true)
     setError('')
+    setVerifySummary('')
     try {
       const res = await postBancaRiconciliazioneAuto(nextCompany)
-      const rows = Array.isArray(res?.paid_by_bank) ? res.paid_by_bank : []
-      setPaidRows(rows)
+      const paid = Array.isArray(res?.paid_by_bank) ? res.paid_by_bank : []
+      const open = Array.isArray(res?.da_pagare) ? res.da_pagare : []
+      setPaidRows(paid)
+      setOpenRows(open)
+      const marked = Number(res?.bank_sync?.marked_paid ?? res?.auto_applied) || 0
+      const fromFile = Number(res?.bank_sync?.marked_from_pagamenti) || 0
+      const fileRows = Number(res?.bank_sync?.pagamenti_paid_rows) || 0
+      const accounts = Number(
+        res?.bank_sync?.accounts_checked
+        ?? res?.accounts_used?.length
+        ?? res?.accounts?.length,
+      ) || 0
+      setVerifySummary(
+        `Verifica: ${accounts || '—'} c/c · file Pagamenti ${fileRows} righe pagate · ${paid.length} pagate · ${open.length} da pagare`
+        + (marked ? ` · ${marked} aggiornate ora` : '')
+        + (fromFile ? ` (di cui ${fromFile} da file Pagamenti)` : ''),
+      )
       setSelectedSupplierKey((prev) => {
         if (!prev) return ''
-        const still = buildPaidSuppliers(rows).some((s) => s.id === prev)
+        const still = buildBankVerifySuppliers(paid, open).some((s) => s.id === prev)
         return still ? prev : ''
       })
     } catch (e) {
-      setError(e?.message || 'Errore caricamento fatture pagate')
+      setError(e?.message || 'Errore verifica pagamenti da banca')
       setPaidRows([])
+      setOpenRows([])
     } finally {
       setLoading(false)
     }
@@ -1307,8 +1383,24 @@ export function FatturePagatePage() {
     [paidRows, appliedSupplier, appliedDateFrom, appliedDateTo],
   )
 
-  const supplierOptions = useMemo(() => supplierOptionsFromInvoices(paidRows), [paidRows])
-  const suppliers = useMemo(() => buildPaidSuppliers(filteredPaidRows), [filteredPaidRows])
+  const filteredOpenRows = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(openRows, {
+        supplierName: appliedSupplier,
+        dateFrom: appliedDateFrom,
+        dateTo: appliedDateTo,
+      }),
+    [openRows, appliedSupplier, appliedDateFrom, appliedDateTo],
+  )
+
+  const supplierOptions = useMemo(
+    () => supplierOptionsFromInvoices([...paidRows, ...openRows]),
+    [paidRows, openRows],
+  )
+  const suppliers = useMemo(
+    () => buildBankVerifySuppliers(filteredPaidRows, filteredOpenRows),
+    [filteredPaidRows, filteredOpenRows],
+  )
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierKey) || null,
     [suppliers, selectedSupplierKey],
@@ -1317,7 +1409,9 @@ export function FatturePagatePage() {
   const supplierTotals = useMemo(
     () => ({
       count: suppliers.length,
-      total: suppliers.reduce((acc, s) => acc + (Number(s.total_paid) || 0), 0),
+      total_paid: suppliers.reduce((acc, s) => acc + (Number(s.total_paid) || 0), 0),
+      total_open: suppliers.reduce((acc, s) => acc + (Number(s.total_open) || 0), 0),
+      total: suppliers.reduce((acc, s) => acc + (Number(s.total_paid) || 0) + (Number(s.total_open) || 0), 0),
     }),
     [suppliers],
   )
@@ -1326,14 +1420,21 @@ export function FatturePagatePage() {
     const rows = selectedSupplier?.invoices || []
     return {
       count: rows.length,
-      total: rows.reduce((acc, r) => acc + (Number(r.amount_paid ?? r.total) || 0), 0),
+      total: rows.reduce((acc, r) => acc + (Number(r.total) || 0), 0),
+      total_paid: rows.reduce(
+        (acc, r) => acc + (Number(r.amount_paid ?? (invoiceIsPaidRow(r) ? r.total : 0)) || 0),
+        0,
+      ),
     }
   }, [selectedSupplier])
 
   function supplierCellValue(row, col) {
     if (col.id === 'supplier_name') return row.supplier_name || '—'
+    if (col.id === 'pagate_count') return String(row.pagate_count || 0)
+    if (col.id === 'da_pagare_count') return String(row.da_pagare_count || 0)
     if (col.id === 'invoice_count') return String(row.invoice_count || 0)
     if (col.id === 'total_paid') return eur(row.total_paid)
+    if (col.id === 'total_open') return eur(row.total_open)
     if (col.id === 'last_date') return formatDate(row.last_date)
     return ''
   }
@@ -1343,10 +1444,11 @@ export function FatturePagatePage() {
     if (col.id === 'invoice_number') return row.invoice_number || '—'
     if (col.id === 'supplier_name') return row.supplier_name || '—'
     if (col.id === 'total') return eur(row.total)
-    if (col.id === 'amount_paid') return eur(row.amount_paid ?? row.total)
+    if (col.id === 'amount_paid') return eur(row.amount_paid ?? (invoiceIsPaidRow(row) ? row.total : 0))
+    if (col.id === 'payment_label') return row.payment_label || (invoiceIsPaidRow(row) ? 'Pagata' : 'Da pagare')
     if (col.id === 'bank_hit') {
       const m = row.matched_movement
-      if (!m) return '—'
+      if (!m) return invoiceIsPaidRow(row) ? '—' : 'Nessun bonifico'
       return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
     }
     if (col.id === 'reason') return matchReasonLabel(row.match_reason)
@@ -1366,8 +1468,8 @@ export function FatturePagatePage() {
       title="Fatture pagate"
       lead={
         companyId
-          ? `Fatture pagate da riconciliazione · ${companyName}. Imposta periodo/fornitore e premi Aggiorna per l'elenco fornitori.`
-          : 'Scegli la società nel banner per vedere le fatture pagate dalla riconciliazione banca.'
+          ? `Verifica bonifici sui conti collegati e file Pagamenti · ${companyName}. Segna pagata se n. fattura in banca o in PAGATO/DATA PAGAMENTO.`
+          : 'Scegli la società nel banner per verificare le fatture ricevute su conti e file Pagamenti.'
       }
       actions={
         <div className="mastrini-hero-tools" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1381,19 +1483,20 @@ export function FatturePagatePage() {
           />
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="btn btn-primary btn-sm"
             onClick={() => reload(companyId)}
             disabled={loading || !companyId}
           >
-            Aggiorna da banca
+            {loading ? 'Verifico…' : 'Verifica con banca'}
           </button>
         </div>
       }
     >
       {!companyId ? (
-        <div className="alert alert-info">Seleziona una società per caricare le fatture pagate.</div>
+        <div className="alert alert-info">Seleziona una società per verificare i pagamenti da banca.</div>
       ) : null}
       {error ? <div className="alert alert-danger">{error}</div> : null}
+      {verifySummary && !error ? <div className="alert alert-info">{verifySummary}</div> : null}
 
       {companyId ? (
         <section className="card fatture-panel">
@@ -1421,7 +1524,7 @@ export function FatturePagatePage() {
                   <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
                     {filterSubtitle
                       ? `Filtro attivo: ${filterSubtitle}. Clicca un fornitore per l'elenco fatture.`
-                      : "Premi Aggiorna dopo aver scelto il periodo. Poi clicca un fornitore per l'elenco fatture."}
+                      : 'Dopo la verifica: pagate (bonifico o file Pagamenti) e da pagare (nessun match).'}
                   </p>
                 </div>
                 {appliedSupplier || appliedDateFrom || appliedDateTo ? (
@@ -1431,11 +1534,11 @@ export function FatturePagatePage() {
                 ) : null}
               </div>
               <VneWorkbookGrid
-                title="Fornitori — fatture pagate"
+                title="Fornitori — verifica banca"
                 sheetLabel={`${suppliers.length} fornitori`}
                 exportSubtitle={[companyName, filterSubtitle || 'Tutti i periodi'].filter(Boolean).join(' · ')}
                 loading={loading}
-                loadingLabel="Caricamento fornitori"
+                loadingLabel="Verifica bonifici sui conti collegati"
                 gridClassName="fatture-excel-grid"
                 columns={PAGATE_FORNITORI_COLUMNS}
                 rows={suppliers}
@@ -1443,9 +1546,9 @@ export function FatturePagatePage() {
                 cellValue={supplierCellValue}
                 totals={suppliers.length ? supplierTotals : null}
                 totalsLabel={moneyTotalsLabel}
-                emptyMessage="Nessun fornitore con fatture pagate per i filtri selezionati. Premi Aggiorna dopo aver impostato il periodo."
+                emptyMessage="Nessuna fattura ricevuta per i filtri. Premi Verifica con banca dopo aver sincronizzato i conti."
                 onRowClick={(row) => openSupplierDetail(row)}
-                rowClickTitle="Apri elenco fatture pagate del fornitore"
+                rowClickTitle="Apri fatture del fornitore (pagate e da pagare)"
                 actionsHeader="Azioni"
                 renderActions={(row) => (
                   <button
@@ -1469,7 +1572,9 @@ export function FatturePagatePage() {
                     {selectedSupplier.supplier_name}
                   </h2>
                   <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
-                    {selectedSupplier.invoice_count} fatture pagate · Totale {eur(selectedSupplier.total_paid)}
+                    {selectedSupplier.pagate_count || 0} pagate · {selectedSupplier.da_pagare_count || 0} da pagare
+                    {' · '}Totale pagato {eur(selectedSupplier.total_paid)}
+                    {' · '}Residuo {eur(selectedSupplier.total_open)}
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1481,7 +1586,7 @@ export function FatturePagatePage() {
                     onClick={() => {
                       try {
                         printVneTable({
-                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          title: `Verifica pagamenti — ${selectedSupplier.supplier_name}`,
                           subtitle: [companyName, selectedSupplier.supplier_name, filterSubtitle]
                             .filter(Boolean)
                             .join(' · '),
@@ -1505,13 +1610,13 @@ export function FatturePagatePage() {
                     onClick={() => {
                       try {
                         downloadVneTableExcel({
-                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          title: `Verifica pagamenti — ${selectedSupplier.supplier_name}`,
                           columns: PAGATE_INVOICE_COLUMNS,
                           rows: selectedSupplier.invoices,
                           cellValue: invoiceCellValue,
                           totalsLabel: moneyTotalsLabel,
                           totals: selectedSupplier.invoices.length ? invoiceTotals : null,
-                          sheetName: 'Fatture pagate',
+                          sheetName: 'Verifica pagamenti',
                         })
                       } catch (err) {
                         window.alert(err?.message || 'Export Excel non riuscito')
@@ -1527,7 +1632,7 @@ export function FatturePagatePage() {
                     onClick={() => {
                       try {
                         downloadVneTableCsv({
-                          title: `Fatture pagate — ${selectedSupplier.supplier_name}`,
+                          title: `Verifica pagamenti — ${selectedSupplier.supplier_name}`,
                           columns: PAGATE_INVOICE_COLUMNS,
                           rows: selectedSupplier.invoices,
                           cellValue: invoiceCellValue,
@@ -1547,7 +1652,7 @@ export function FatturePagatePage() {
                 </div>
               </div>
               <VneWorkbookGrid
-                title={`Fatture pagate — ${selectedSupplier.supplier_name}`}
+                title={`Verifica pagamenti — ${selectedSupplier.supplier_name}`}
                 sheetLabel={`${selectedSupplier.invoices.length} documenti`}
                 exportSubtitle={[companyName, selectedSupplier.supplier_name, filterSubtitle].filter(Boolean).join(' · ')}
                 exportEnabled
@@ -1560,7 +1665,7 @@ export function FatturePagatePage() {
                 cellValue={invoiceCellValue}
                 totals={selectedSupplier.invoices.length ? invoiceTotals : null}
                 totalsLabel={moneyTotalsLabel}
-                emptyMessage="Nessuna fattura pagata per questo fornitore."
+                emptyMessage="Nessuna fattura per questo fornitore."
               />
             </>
           )}

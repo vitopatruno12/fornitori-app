@@ -127,3 +127,121 @@ def delete_workbook(
     "reseeded": False,
     "message": "File eliminato dal database." if deleted else "Nessun file da eliminare.",
   }
+
+
+_SPECIAL_SHEETS = frozenset({"TOTALI", "DELEGHE F24", "VERSAMENTO CONTANTI"})
+
+
+def _strip_excel_quotes(value: Any) -> str:
+  text = str(value or "").strip()
+  if len(text) >= 2 and text.startswith("'") and text.endswith("'"):
+    return text[1:-1].strip()
+  return text
+
+
+def _num_cell(value: Any) -> float:
+  if value is None or value == "":
+    return 0.0
+  if isinstance(value, (int, float)):
+    return float(value)
+  text = str(value).strip().replace(".", "").replace(",", ".")
+  try:
+    return float(text)
+  except ValueError:
+    return 0.0
+
+
+def _normalize_doc(value: Any) -> str:
+  return "".join(ch for ch in _strip_excel_quotes(value).upper() if ch.isalnum())
+
+
+def _normalize_party(value: Any) -> str:
+  return " ".join(_strip_excel_quotes(value).lower().split())
+
+
+def list_paid_document_rows(
+  db: Session,
+  workbook_key: str = DEFAULT_WORKBOOK_KEY,
+) -> List[Dict[str, Any]]:
+  """
+  Righe del file Pagamenti con pagamento registrato
+  (col. PAGATO / DATA PAGAMENTO) sui fogli mensili.
+  """
+  wb = get_workbook(db, workbook_key)
+  paid: List[Dict[str, Any]] = []
+  for sheet in wb.sheets or []:
+    name = str(getattr(sheet, "name", "") or "").strip().upper()
+    if not name or name in _SPECIAL_SHEETS:
+      continue
+    rows = getattr(sheet, "rows", None) or []
+    for idx, raw in enumerate(rows):
+      if idx == 0 or not isinstance(raw, list):
+        continue
+      cells = list(raw) + [None] * max(0, 12 - len(raw))
+      # Subtotali / footer: hanno TOTALE FORNITORE senza numero fattura
+      invoice_number = _strip_excel_quotes(cells[1])
+      supplier_name = _strip_excel_quotes(cells[4])
+      if not invoice_number and not supplier_name:
+        continue
+      if str(cells[6] or "").strip().upper() == "TOTALE":
+        continue
+      pagato = _num_cell(cells[8])
+      data_pag = cells[10]
+      has_pay_date = bool(str(data_pag or "").strip())
+      if pagato <= 0.009 and not has_pay_date:
+        continue
+      doc_norm = _normalize_doc(invoice_number)
+      if not doc_norm and not _normalize_party(supplier_name):
+        continue
+      paid.append(
+        {
+          "sheet": str(getattr(sheet, "name", "") or ""),
+          "invoice_number": invoice_number,
+          "invoice_number_norm": doc_norm,
+          "supplier_vat": _strip_excel_quotes(cells[3]),
+          "supplier_name": supplier_name,
+          "supplier_name_norm": _normalize_party(supplier_name),
+          "amount_paid": pagato if pagato > 0.009 else _num_cell(cells[7]),
+          "payment_date": str(data_pag).strip() if has_pay_date else None,
+          "row_index": idx,
+        }
+      )
+  return paid
+
+
+def find_paid_row_for_invoice(
+  paid_rows: List[Dict[str, Any]],
+  *,
+  invoice_number: Optional[str] = None,
+  supplier_name: Optional[str] = None,
+  supplier_vat: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+  """Abbina una fattura Atlas a una riga pagata del file Pagamenti."""
+  num_norm = _normalize_doc(invoice_number)
+  name_norm = _normalize_party(supplier_name)
+  vat_norm = _normalize_doc(supplier_vat)
+  if not num_norm and not name_norm and not vat_norm:
+    return None
+
+  best = None
+  for row in paid_rows:
+    score = 0
+    if num_norm and row.get("invoice_number_norm") == num_norm:
+      score += 3
+    elif num_norm:
+      continue
+    if vat_norm and _normalize_doc(row.get("supplier_vat")) == vat_norm:
+      score += 2
+    if name_norm and row.get("supplier_name_norm"):
+      a = name_norm
+      b = str(row["supplier_name_norm"])
+      if a == b or a in b or b in a:
+        score += 1
+    if score <= 0:
+      continue
+    if best is None or score > best[0]:
+      best = (score, row)
+  # Con solo il numero documento (score 3) è sufficiente
+  if best and best[0] >= 3:
+    return best[1]
+  return None

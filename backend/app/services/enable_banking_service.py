@@ -683,9 +683,26 @@ def sync_enable_banking_account(db: Session, account_id: int) -> Dict[str, Any]:
     row.last_sync_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
+
+  bank_sync = None
+  company = (getattr(row, "company", None) or "").strip() or None
+  if company or imported:
+    try:
+      from . import banca_service
+
+      bank_sync = banca_service.sync_payment_status_from_bank(db, company=company)
+    except Exception:
+      logger.warning("Sync stato pagamenti da banca fallito account %s", account_id, exc_info=True)
+
+  marked = int((bank_sync or {}).get("marked_paid") or 0)
+  msg = f"Sync Enable Banking: {imported} nuovi movimenti."
+  if marked:
+    msg += f" Segnate pagate {marked} fatture (n. documento in bonifico)."
+
   return {
     "ok": True,
     "imported": imported,
+    "bank_sync": bank_sync,
     "account": {
       "id": row.id,
       "iban": row.iban,
@@ -696,7 +713,7 @@ def sync_enable_banking_account(db: Session, account_id: int) -> Dict[str, Any]:
       "eb_session_id": row.eb_session_id,
       "eb_account_uid": row.eb_account_uid,
     },
-    "message": f"Sync Enable Banking: {imported} nuovi movimenti.",
+    "message": msg,
   }
 
 

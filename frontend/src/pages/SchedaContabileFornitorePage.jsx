@@ -296,12 +296,6 @@ export function SchedaContabileFornitorePage({
               >
                 Stampa scheda
               </button>
-              <Link className="btn btn-secondary btn-sm" to={`${fattureBase}/registrate`}>
-                Storico fatture
-              </Link>
-              <Link className="btn btn-secondary btn-sm" to={`${fattureBase}/pagate`}>
-                Fatture pagate
-              </Link>
             </div>
           </div>
 
