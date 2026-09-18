@@ -146,11 +146,35 @@ function isUnicreditAccount(account) {
   return bank.includes('unicredit') || label.includes('unicredit') || iban === 'IT48Q0200816005000105294153'
 }
 
-/** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
-function formatBankAccountOptionLabel(account) {
+function bankAccountSortKey(account) {
+  const company = String(account?.company || '').toLowerCase()
+  if (company === 'via_lattea') return '0'
+  if (company.startsWith('mediazione')) return '1'
+  if (company === 'risacca') return '2'
+  if (company === 'pg') return '3'
+  return `9${company}`
+}
+
+function sortBankAccounts(list) {
+  return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+    const ka = bankAccountSortKey(a)
+    const kb = bankAccountSortKey(b)
+    if (ka !== kb) return ka.localeCompare(kb)
+    return String(a?.account_name || '').localeCompare(String(b?.account_name || ''), 'it')
+  })
+}
   if (account?.label) return String(account.label)
   const bank = String(account?.bank_name || 'Banca').trim() || 'Banca'
-  const company = account?.company ? companyLabel(account.company) : ''
+  const companyId = String(account?.company || '').trim().toLowerCase()
+  const shortCompany = {
+    via_lattea: 'Via Lattea',
+    mediazione_a: 'Mediazione A',
+    mediazione_z: 'Mediazione Z',
+    mediazione: 'Mediazione',
+    risacca: 'Risacca',
+    pg: 'PG',
+  }
+  const company = shortCompany[companyId] || (companyId ? companyLabel(account.company) : '')
   const name = String(account?.account_name || '').trim()
   const iban = String(account?.iban || '').replace(/\s/g, '').toUpperCase()
   const ibanShort = iban.length > 8 ? `${iban.slice(0, 4)}…${iban.slice(-6)}` : iban
@@ -1288,7 +1312,7 @@ export function BancaContiPage() {
             {items.filter(isBppbAccount).length === 0 ? (
               <option value="">Via Lattea / Mediazione (crea al sync)</option>
             ) : (
-              items.filter(isBppbAccount).map((a) => (
+              sortBankAccounts(items.filter(isBppbAccount)).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
@@ -1345,7 +1369,7 @@ export function BancaContiPage() {
             {items.filter(isBccTerraOtrantoAccount).length === 0 ? (
               <option value="">Via Lattea / Mediazione (crea al sync)</option>
             ) : (
-              items.filter(isBccTerraOtrantoAccount).map((a) => (
+              sortBankAccounts(items.filter(isBccTerraOtrantoAccount)).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}

@@ -153,6 +153,8 @@ def ensure_default_account(db: Session) -> BankAccount:
 
 def list_accounts(db: Session) -> List[Dict[str, Any]]:
   ensure_default_account(db)
+  ensure_canonical_bank_accounts(db)
+  ensure_known_account_companies(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   return [_account_out(r) for r in rows]
 
@@ -213,32 +215,123 @@ def ensure_known_account_companies(db: Session) -> int:
       else:
         continue
     current = (getattr(row, "company", None) or "").strip().lower()
-    if current == target:
-      continue
-    # Non sovrascrivere pg se qualcuno ha già taggato a mano un IBAN non in mappa
-    if current == "pg" and target != "pg":
-      continue
-    row.company = target
-    # Nomi più chiari
-    if target == "risacca" and (not row.account_name or "intesa" in (row.account_name or "").lower()):
-      if "risacca" not in (row.account_name or "").lower():
-        row.account_name = "Risacca · Bar Momento · Intesa"
+    name_l = (row.account_name or "").lower()
+    need_rename = False
     if target == "via_lattea" and iban_n in {
       normalize_iban("IT25D0538516000CC1410004514"),
       normalize_iban("IT25D0538516000CC410004514"),
     }:
-      row.account_name = "Via Lattea · CC1410004514"
+      if "via lattea" not in name_l:
+        row.account_name = "Via Lattea · CC1410004514"
+        need_rename = True
+    if target == "via_lattea" and iban_n == normalize_iban("IT37M0844516000000000967252"):
+      if "via lattea" not in name_l:
+        row.account_name = "Via Lattea · BCC Terra d'Otranto"
+        need_rename = True
     if target == "mediazione_a" and iban_n == normalize_iban("IT55B0538516000CC1410004512"):
-      row.account_name = "Mediazione · CC1410004512"
+      if "mediazione" not in name_l:
+        row.account_name = "Mediazione · CC1410004512"
+        need_rename = True
+    if target == "mediazione_a" and iban_n == normalize_iban("IT06B0844516000000000972450"):
+      if "mediazione" not in name_l:
+        row.account_name = "Mediazione · BCC Terra d'Otranto"
+        need_rename = True
+    if target == "risacca" and (not row.account_name or "intesa" in name_l):
+      if "risacca" not in name_l:
+        row.account_name = "Risacca · Bar Momento · Intesa"
+        need_rename = True
+    if current == target and not need_rename:
+      continue
+    # Non sovrascrivere pg se qualcuno ha già taggato a mano un IBAN non in mappa
+    if current == "pg" and target != "pg":
+      continue
+    if current != target:
+      row.company = target
     changed += 1
   if changed:
     db.commit()
   return changed
 
 
+# Conti canonici da creare se mancano (IBAN noti Atlas)
+_CANONICAL_BANK_SEEDS: List[Dict[str, Any]] = [
+  {
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "account_name": "Via Lattea · CC1410004514",
+    "iban": "IT25D0538516000CC1410004514",
+    "company": "via_lattea",
+    "ledger_code": "1100",
+    "notes": "LA VIA LATTEA · BPPB · IBAN IT25D0538516000CC1410004514",
+  },
+  {
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "account_name": "Mediazione · CC1410004512",
+    "iban": "IT55B0538516000CC1410004512",
+    "company": "mediazione_a",
+    "ledger_code": "1100",
+    "notes": "MEDIAZIONE · BPPB · IBAN IT55B0538516000CC1410004512",
+  },
+  {
+    "bank_name": "BCC Terra d'Otranto",
+    "account_name": "Via Lattea · BCC Terra d'Otranto",
+    "iban": "IT37M0844516000000000967252",
+    "company": "via_lattea",
+    "ledger_code": "1100",
+    "notes": "LA VIA LATTEA · BCC Terra d'Otranto · IBAN IT37M0844516000000000967252",
+  },
+  {
+    "bank_name": "BCC Terra d'Otranto",
+    "account_name": "Mediazione · BCC Terra d'Otranto",
+    "iban": "IT06B0844516000000000972450",
+    "company": "mediazione_a",
+    "ledger_code": "1100",
+    "notes": "MEDIAZIONE · BCC Terra d'Otranto · IBAN IT06B0844516000000000972450",
+  },
+  {
+    "bank_name": "Intesa Sanpaolo",
+    "account_name": "Risacca · Bar Momento · Intesa",
+    "iban": "IT88N0306979822100000008926",
+    "company": "risacca",
+    "ledger_code": "1100",
+    "notes": "RISACCA · Intesa Sanpaolo · IBAN IT88N0306979822100000008926",
+  },
+]
+
+
+def ensure_canonical_bank_accounts(db: Session) -> int:
+  """Crea i conti canonici (Via Lattea BPPB/BCC, Mediazione, Risacca) se l'IBAN non esiste."""
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).all()
+  existing = {normalize_iban(r.iban) for r in rows if r.iban}
+  created = 0
+  for seed in _CANONICAL_BANK_SEEDS:
+    iban_n = normalize_iban(seed["iban"])
+    if not iban_n or iban_n in existing:
+      continue
+    db.add(
+      BankAccount(
+        bank_name=seed["bank_name"],
+        account_name=seed["account_name"],
+        iban=iban_n,
+        company=seed.get("company"),
+        ledger_code=seed.get("ledger_code") or "1100",
+        notes=seed.get("notes"),
+        connection_status="disconnected",
+        is_active=True,
+        saldo_disponibile=Decimal("0"),
+        saldo_contabile=Decimal("0"),
+      )
+    )
+    existing.add(iban_n)
+    created += 1
+  if created:
+    db.commit()
+  return created
+
+
 def accounts_for_company(db: Session, company: Optional[str] = None) -> List[Dict[str, Any]]:
   """Conti per società: IBAN/tag noti — niente fallback su tutti i conti condivisi."""
   ensure_default_account(db)
+  ensure_canonical_bank_accounts(db)
   ensure_known_account_companies(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   company_id = (company or "").strip()
