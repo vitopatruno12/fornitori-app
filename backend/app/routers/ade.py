@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field
 
 from .. import config as _config  # noqa: F401 — carica .env (ADE_PROFILES_PATH)
 from ..integrations.ade.agent_status import default_status, read_status, write_status
-from ..integrations.ade.profiles import profiles_public_list, update_fisconline_credentials
+from ..integrations.ade.profiles import (
+  ensure_profiles_file,
+  profiles_public_list,
+  resolve_profiles_path,
+  update_fisconline_credentials,
+)
 
 router = APIRouter(prefix="/ade", tags=["ade"])
 
@@ -55,10 +60,19 @@ def _optional_bearer(expected: Optional[str], authorization: Optional[str]) -> N
 def list_ade_profiles() -> Dict[str, Any]:
   """Elenco profili AdE senza segreti in chiaro."""
   try:
-    items = profiles_public_list()
+    path = ensure_profiles_file()
+    items = profiles_public_list(path)
   except Exception as e:
     raise HTTPException(status_code=500, detail=f"Errore lettura profili: {e}") from e
-  return {"items": items, "count": len(items)}
+  resolved = resolve_profiles_path()
+  return {
+    "items": items,
+    "count": len(items),
+    "profiles_path": str(path),
+    "profiles_path_exists": path.is_file(),
+    "ade_profiles_path_env": (os.getenv("ADE_PROFILES_PATH") or "").strip() or None,
+    "resolved_path": str(resolved),
+  }
 
 
 @router.put("/profiles/{profile_id}/credentials")

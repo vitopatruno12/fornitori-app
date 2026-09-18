@@ -2381,6 +2381,7 @@ export function FattureLogPage() {
 
 export function FattureImpostazioniPage() {
   const [profiles, setProfiles] = useState([])
+  const [profilesPath, setProfilesPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -2394,6 +2395,7 @@ export function FattureImpostazioniPage() {
       const res = await fetchAdeProfiles()
       const items = Array.isArray(res?.items) ? res.items : []
       setProfiles(items)
+      setProfilesPath(String(res?.profiles_path || res?.resolved_path || ''))
       setDrafts((prev) => {
         const next = { ...prev }
         for (const p of items) {
@@ -2521,9 +2523,24 @@ export function FattureImpostazioniPage() {
             )
           })}
           {!loading && profiles.length === 0 ? (
-            <p className="empty-state">Nessun profilo AdE trovato (controlla ADE_PROFILES_PATH / profiles.json).</p>
+            <p className="empty-state">
+              Nessun profilo AdE trovato.
+              {profilesPath ? (
+                <>
+                  {' '}
+                  Path: <code>{profilesPath}</code>
+                </>
+              ) : (
+                <> Controlla ADE_PROFILES_PATH o crea <code>backend/uploads/ade/profiles.json</code>.</>
+              )}
+            </p>
           ) : null}
         </div>
+        {profilesPath && profiles.length > 0 ? (
+          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+            File profili: <code>{profilesPath}</code>
+          </p>
+        ) : null}
       </section>
 
       <section className="card fatture-panel">
@@ -2532,6 +2549,7 @@ export function FattureImpostazioniPage() {
           <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
           <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received · PUT /ade/profiles/…/credentials</li>
           <li>Agent: backend/scripts/ade_sync_agent.py</li>
+          {profilesPath ? <li>ADE profiles: {profilesPath}</li> : null}
         </ul>
       </section>
     </FatturePageShell>

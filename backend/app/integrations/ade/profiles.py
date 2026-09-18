@@ -55,32 +55,134 @@ def _env(name: str, default: str = "") -> str:
   return (os.getenv(name, default) or default).strip()
 
 
-def default_profiles_path() -> Path:
-  raw = _env("ADE_PROFILES_PATH")
-  if raw:
-    return Path(raw)
+def _backend_root() -> Path:
+  # .../backend/app/integrations/ade/profiles.py → backend/
+  return Path(__file__).resolve().parents[2]
+
+
+def _uploads_profiles_path() -> Path:
+  return _backend_root() / "uploads" / "ade" / "profiles.json"
+
+
+def _example_profiles_path() -> Path:
   return Path(__file__).resolve().parent / "profiles.example.json"
+
+
+def _default_seed_profiles() -> List[dict]:
+  """Profili UI/agent senza segreti (password da impostare da Impostazioni)."""
+  return [
+    {
+      "id": "mediazione",
+      "label": "La Mediazione S.R.L. · Mani in Pasta",
+      "sede": "mediazione",
+      "codice_fiscale": "",
+      "partita_iva": "04945600759",
+      "utenza_mode": "incaricato",
+      "auth_mode": "fisconline",
+      "auto_section": True,
+      "enabled": True,
+    },
+    {
+      "id": "via_lattea",
+      "label": "La Via Lattea · Mucche Volanti",
+      "sede": "via_lattea",
+      "codice_fiscale": "",
+      "partita_iva": "04886500752",
+      "utenza_mode": "incaricato",
+      "auth_mode": "fisconline",
+      "enabled": True,
+    },
+    {
+      "id": "risacca",
+      "label": "Risacca S.R.L. · Bar Momento",
+      "sede": "risacca",
+      "codice_fiscale": "",
+      "partita_iva": "05186540752",
+      "utenza_mode": "incaricato",
+      "auth_mode": "fisconline",
+      "enabled": True,
+    },
+    {
+      "id": "pg",
+      "label": "PG S.R.L. · Gazza Ladra",
+      "sede": "pg",
+      "codice_fiscale": "",
+      "partita_iva": "05440050754",
+      "utenza_mode": "incaricato",
+      "auth_mode": "fisconline",
+      "enabled": True,
+    },
+  ]
+
+
+def resolve_profiles_path() -> Path:
+  """
+  Path file profili:
+  1) ADE_PROFILES_PATH se impostato e il file esiste
+  2) altrimenti backend/uploads/ade/profiles.json (scrivibile)
+  3) se ADE_PROFILES_PATH è impostato ma assente → usa quel path come destinazione create
+  """
+  raw = _env("ADE_PROFILES_PATH")
+  uploads = _uploads_profiles_path()
+  if raw:
+    p = Path(raw)
+    if p.is_file():
+      return p
+    if uploads.is_file():
+      return uploads
+    return p
+  if uploads.is_file():
+    return uploads
+  return uploads
+
+
+def default_profiles_path() -> Path:
+  """Compat: path usato da sync/agent (con ensure)."""
+  return ensure_profiles_file()
+
+
+def ensure_profiles_file(path: Optional[Path] = None) -> Path:
+  """Garantisce un profiles.json scrivibile; se manca lo crea da example/seed."""
+  p = path or resolve_profiles_path()
+  if p.is_file():
+    return p
+
+  example = _example_profiles_path()
+  seed: List[dict]
+  if example.is_file():
+    try:
+      raw = json.loads(example.read_text(encoding="utf-8"))
+      seed = [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+    except Exception:
+      seed = []
+  else:
+    seed = []
+
+  if not seed:
+    seed = _default_seed_profiles()
+  else:
+    # Abilita i profili fisconline in UI anche se l'example li aveva disabled
+    for item in seed:
+      pid = str(item.get("id") or "").strip().lower()
+      if pid in {"mediazione", "via_lattea", "risacca", "pg", "via_abba", "via_zanardelli"}:
+        item.setdefault("auth_mode", "fisconline")
+        item["enabled"] = True
+        # Non copiare password dall'example (non devono esserci)
+        item.pop("fisconline_password", None)
+        item.pop("fisconline_pin", None)
+
+  p.parent.mkdir(parents=True, exist_ok=True)
+  tmp = p.with_suffix(p.suffix + ".tmp")
+  tmp.write_text(json.dumps(seed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+  tmp.replace(p)
+  return p
 
 
 def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
   """
-  Carica profili da JSON (ADE_PROFILES_PATH) oppure da env ADE_PROFILE_<n>_*.
-
-  JSON esempio:
-  [
-    {
-      "id": "via_abba",
-      "label": "Mediazione Via Abba",
-      "sede": "via_abba",
-      "codice_fiscale": "",
-      "partita_iva": "",
-      "auth_mode": "cns",
-      "drop_dir": "C:/AtlasSync/ade/via_abba",
-      "enabled": true
-    }
-  ]
+  Carica profili da JSON (ADE_PROFILES_PATH / uploads/ade) oppure da env ADE_PROFILE_<n>_*.
   """
-  p = path or default_profiles_path()
+  p = path or ensure_profiles_file()
   profiles: List[AdeProfile] = []
 
   if p.is_file():
@@ -153,17 +255,17 @@ def load_profiles(path: Optional[Path] = None) -> List[AdeProfile]:
       )
 
   only = _env("ADE_ONLY_PROFILE")
-  out = [p for p in profiles if p.enabled]
+  out = [pr for pr in profiles if pr.enabled]
   if only:
     ids = {x.strip().lower() for x in only.split(",") if x.strip()}
     # ADE_ONLY_PROFILE include anche profili disabled (es. prova via_lattea)
-    out = [p for p in profiles if p.id.lower() in ids]
+    out = [pr for pr in profiles if pr.id.lower() in ids]
   return out
 
 
 def load_profiles_raw(path: Optional[Path] = None) -> List[dict]:
   """Lista dict grezzi dal JSON profili (tutti, anche disabled)."""
-  p = path or default_profiles_path()
+  p = path or ensure_profiles_file()
   if not p.is_file():
     return []
   try:
@@ -175,13 +277,28 @@ def load_profiles_raw(path: Optional[Path] = None) -> List[dict]:
   return [item for item in raw if isinstance(item, dict) and str(item.get("id") or "").strip()]
 
 
+def _password_configured(item: dict, pid: str) -> bool:
+  if str(item.get("fisconline_password") or "").strip():
+    return True
+  if _env(f"ADE_PROFILE_{pid.upper()}_FISCONLINE_PASSWORD") or _env("ADE_FISCONLINE_PASSWORD"):
+    return True
+  return False
+
+
+def _pin_configured(item: dict, pid: str) -> bool:
+  if str(item.get("fisconline_pin") or "").strip():
+    return True
+  if _env(f"ADE_PROFILE_{pid.upper()}_FISCONLINE_PIN") or _env("ADE_FISCONLINE_PIN"):
+    return True
+  return False
+
+
 def profiles_public_list(path: Optional[Path] = None) -> List[dict]:
   """Profili per UI: mai password/PIN in chiaro."""
+  p = path or ensure_profiles_file()
   out: List[dict] = []
-  for item in load_profiles_raw(path):
+  for item in load_profiles_raw(p):
     pid = str(item.get("id") or "").strip()
-    pwd = str(item.get("fisconline_password") or "").strip()
-    pin = str(item.get("fisconline_pin") or "").strip()
     out.append(
       {
         "id": pid,
@@ -192,8 +309,8 @@ def profiles_public_list(path: Optional[Path] = None) -> List[dict]:
         "auth_mode": str(item.get("auth_mode") or "cns").strip().lower() or "cns",
         "utenza_mode": str(item.get("utenza_mode") or "auto").strip().lower() or "auto",
         "enabled": bool(item.get("enabled", True)),
-        "password_set": bool(pwd),
-        "pin_set": bool(pin),
+        "password_set": _password_configured(item, pid),
+        "pin_set": _pin_configured(item, pid),
       }
     )
   return out
@@ -210,9 +327,7 @@ def update_fisconline_credentials(
   Aggiorna password/PIN Fisconline nel JSON profili.
   Campi None = non modificare; stringa (anche vuota) = sovrascrivere.
   """
-  p = path or default_profiles_path()
-  if not p.is_file():
-    raise FileNotFoundError(f"File profili AdE non trovato: {p}")
+  p = ensure_profiles_file(path)
 
   raw = json.loads(p.read_text(encoding="utf-8"))
   if not isinstance(raw, list):
@@ -238,6 +353,7 @@ def update_fisconline_credentials(
     mode = str(found.get("auth_mode") or "").strip().lower()
     if mode in ("", "cns"):
       found["auth_mode"] = "fisconline"
+    found["enabled"] = True
 
   tmp = p.with_suffix(p.suffix + ".tmp")
   tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -251,5 +367,6 @@ def update_fisconline_credentials(
     "auth_mode": str(found.get("auth_mode") or "").strip(),
     "password_set": bool(pwd),
     "pin_set": bool(pin_v),
+    "profiles_path": str(p),
     "updated": True,
   }
