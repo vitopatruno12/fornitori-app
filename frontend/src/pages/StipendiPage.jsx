@@ -551,7 +551,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           <p className="staff-page-lead" style={{ marginTop: '0.35rem' }}>
             {operatorMode
               ? 'Archivio buste paga della sede di questa postazione operativa.'
-              : 'Archivio buste paga per locale: apri il negozio con il codice e vedi solo i dipendenti di quella sede.'}
+              : 'Scegli società/locale dal menu (come in Personale): buste, contratti e documenti sono divisi per sede.'}
           </p>
         </div>
       </div>

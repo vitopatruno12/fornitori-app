@@ -207,8 +207,8 @@ export default function GestionaleStaffLocaleGate({
           {title}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem' }}>
-          Scegli il <strong>locale</strong>, inserisci il <strong>codice a 6 cifre</strong> e clicca <strong>Accedi</strong>.
-          Senza accesso i dati del personale restano nascosti (come sulle postazioni operative).
+          Scegli la <strong>società / locale</strong> (come in Personale), inserisci il <strong>codice a 6 cifre</strong> e
+          clicca <strong>Accedi</strong>. Buste paga, contratti e documenti restano divisi per sede.
         </p>
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {success ? <div className="alert alert-info">{success}</div> : null}

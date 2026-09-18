@@ -6,6 +6,7 @@ import {
   updateStaffDocument,
   uploadStaffDocument,
 } from '../services/staffService.js'
+import { formatStaffLocaleOptionLabel } from '../utils/staffLocaleCompanyLabels.js'
 
 const DOC_TYPES = [
   { id: 'carta_identita', label: 'Carta d’identità' },
@@ -221,6 +222,11 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth }) {
 
   return (
     <section className="card pagamenti-workbook-card stipendi-docs-card">
+      <p className="muted" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
+        Società / locale attivo:{' '}
+        <strong>{formatStaffLocaleOptionLabel(locale)}</strong>
+        {' · '}contratti, buste e documenti restano separati per questa sede (stessi locali di Personale).
+      </p>
       <div className="stipendi-docs-tabs" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         {TABS.map((t) => (
           <button
