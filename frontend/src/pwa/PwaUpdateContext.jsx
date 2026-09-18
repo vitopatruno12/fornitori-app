@@ -11,24 +11,44 @@ import {
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 const VERIFIED_COOLDOWN_MS = 10 * 60 * 1000
 const PENDING_INSTALL_KEY = 'atlasPwaPendingInstall:v3'
-const PENDING_UPDATES_KEY = 'atlasPwaPendingUpdates:v1'
-const APPLY_FAILSAFE_MS = 4000
+const PENDING_UPDATES_KEY = 'atlasPwaPendingUpdates:v2'
+const APPLY_FAILSAFE_MS = 6000
 
 const PwaUpdateContext = createContext(null)
 
 function readPendingUpdatesMeta() {
-  if (typeof window === 'undefined') return { count: 0, builds: [] }
+  if (typeof window === 'undefined') return { count: 0, latestBuild: '' }
   try {
     const raw = localStorage.getItem(PENDING_UPDATES_KEY)
-    if (!raw) return { count: 0, builds: [] }
+    if (!raw) {
+      // Migrazione da v1 (lista build) → un solo pacchetto cumulativo
+      const legacy = localStorage.getItem('atlasPwaPendingUpdates:v1')
+      if (legacy) {
+        try {
+          const data = JSON.parse(legacy)
+          const builds = Array.isArray(data?.builds)
+            ? data.builds.map((b) => String(b || '').trim()).filter(Boolean)
+            : []
+          const count = Math.max(0, Number(data?.count) || builds.length || 0)
+          const latestBuild = builds.length ? builds[builds.length - 1] : ''
+          localStorage.removeItem('atlasPwaPendingUpdates:v1')
+          if (count > 0) {
+            const meta = { count, latestBuild }
+            localStorage.setItem(PENDING_UPDATES_KEY, JSON.stringify(meta))
+            return meta
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return { count: 0, latestBuild: '' }
+    }
     const data = JSON.parse(raw)
-    const builds = Array.isArray(data?.builds)
-      ? data.builds.map((b) => String(b || '').trim()).filter(Boolean)
-      : []
-    const count = Math.max(0, Number(data?.count) || builds.length || 0)
-    return { count, builds }
+    const latestBuild = String(data?.latestBuild || '').trim()
+    const count = Math.max(0, Number(data?.count) || (latestBuild ? 1 : 0))
+    return { count, latestBuild }
   } catch {
-    return { count: 0, builds: [] }
+    return { count: 0, latestBuild: '' }
   }
 }
 
@@ -45,19 +65,25 @@ function clearPendingUpdatesMeta() {
   if (typeof window === 'undefined') return
   try {
     localStorage.removeItem(PENDING_UPDATES_KEY)
+    localStorage.removeItem('atlasPwaPendingUpdates:v1')
   } catch {
     // ignore
   }
 }
 
-/** Conta deploy distinti non ancora installati (badge 1, 2, 3…). */
+/**
+ * Registra un deploy in attesa. Più deploy → un solo pacchetto cumulativo:
+ * il contatore cresce, ma un click installa sempre l’ultima build (tutti gli aggiornamenti).
+ */
 function registerPendingUpdate(buildId, setUpdateReady, setUpdateCount) {
   const build = String(buildId || '').trim()
   let meta = readPendingUpdatesMeta()
   if (meta.count < 1) {
-    meta = { count: 1, builds: build ? [build] : [] }
-  } else if (build && !meta.builds.includes(build)) {
-    meta = { count: meta.count + 1, builds: [...meta.builds, build] }
+    meta = { count: 1, latestBuild: build }
+  } else if (build && build !== meta.latestBuild) {
+    meta = { count: meta.count + 1, latestBuild: build }
+  } else if (build && !meta.latestBuild) {
+    meta = { ...meta, latestBuild: build }
   }
   writePendingUpdatesMeta(meta)
   setUpdateCount(meta.count)
@@ -385,6 +411,7 @@ export function PwaUpdateProvider({ children }) {
       return
     }
 
+    // Un click = pacchetto unico: azzera il contatore e installa l’ultima build (tutti i deploy).
     setApplying(true)
     clearPendingUpdateState(setUpdateReady, setUpdateCount)
 
@@ -399,26 +426,26 @@ export function PwaUpdateProvider({ children }) {
     }
 
     try {
+      await markVersionsInstalled()
+
       const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration())
       registrationRef.current = reg || null
 
       if (reg) {
         await reg.update()
-        await waitForWaitingWorker(reg)
+        await waitForWaitingWorker(reg, 3500)
       }
 
       const fn = updateSWRef.current
       if (reg?.waiting && typeof fn === 'function') {
-        fn(true)
-        window.setTimeout(() => {
-          window.clearTimeout(failsafeId)
-          hardReloadPage()
-        }, 400)
-        return
+        try {
+          fn(true)
+        } catch {
+          // ignore
+        }
       }
 
       await clearWorkboxCaches()
-      await markVersionsInstalled()
       verifiedAtRef.current = Date.now()
       window.clearTimeout(failsafeId)
       hardReloadPage()

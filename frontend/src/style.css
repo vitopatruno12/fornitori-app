@@ -465,6 +465,12 @@ a:hover {
   box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25);
 }
 
+.atlas-update-btn--package.has-update {
+  border-color: #dc2626;
+  background: #fee2e2;
+  font-weight: 600;
+}
+
 .atlas-update-btn--nav {
   border: 1px solid rgba(255, 255, 255, 0.45);
   background: rgba(15, 23, 42, 0.28);
