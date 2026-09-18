@@ -518,7 +518,7 @@ export function FattureDashboardPage() {
                 Fatture ricevute
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
-                Da registrare
+                Fatture da registrare
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/pagate">
                 Fatture pagate
@@ -1170,7 +1170,7 @@ export function FattureDaRegistrarePage() {
 
   return (
     <FatturePageShell
-      title="Da registrare"
+      title="Fatture da registrare"
       lead="Fatture senza movimento di Prima Nota. Imposta fornitore/periodo e premi Aggiorna; poi stampa o esporta."
       actions={
         gestionaleMode ? (
@@ -1211,7 +1211,7 @@ export function FattureDaRegistrarePage() {
           />
         ) : null}
         <VneWorkbookGrid
-          title="Da registrare"
+          title="Fatture da registrare"
           sheetLabel={`${filteredInvoices.length} documenti`}
           exportSubtitle={
             [

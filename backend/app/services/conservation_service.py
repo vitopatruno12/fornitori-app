@@ -119,6 +119,42 @@ def _item_out(it: ConservationPackageItem) -> Dict[str, Any]:
   }
 
 
+def _as_dict(row: Any) -> Dict[str, Any]:
+  if isinstance(row, dict):
+    return row
+  if hasattr(row, "model_dump"):
+    return row.model_dump()
+  if hasattr(row, "dict"):
+    return row.dict()
+  return dict(row)
+
+
+def _parse_any_dt(raw: Any) -> Optional[datetime]:
+  if raw is None:
+    return None
+  if isinstance(raw, datetime):
+    return _aware(raw)
+  if isinstance(raw, date) and not isinstance(raw, datetime):
+    return datetime(raw.year, raw.month, raw.day, tzinfo=timezone.utc)
+  if isinstance(raw, str) and raw.strip():
+    try:
+      return datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+      return None
+  return None
+
+
+def _iso_or_none(raw: Any) -> Optional[str]:
+  if raw is None:
+    return None
+  if isinstance(raw, datetime):
+    return raw.isoformat()
+  if isinstance(raw, date):
+    return raw.isoformat()
+  s = str(raw).strip()
+  return s or None
+
+
 def list_candidates(
   db: Session,
   *,
@@ -135,44 +171,37 @@ def list_candidates(
   end = _parse_day(period_to)
   atlas = invoice_service.list_invoices(db, company=company_id, include_ignored=False)
   docs: List[Dict[str, Any]] = []
-  for inv in atlas:
+  for raw_inv in atlas:
+    inv = _as_dict(raw_inv)
     inv_date = inv.get("invoice_date")
-    dt = None
-    if isinstance(inv_date, str) and inv_date:
-      try:
-        dt = datetime.fromisoformat(inv_date.replace("Z", "+00:00"))
-      except ValueError:
-        dt = None
+    dt = _parse_any_dt(inv_date)
     if not _in_period(dt, start, end):
       continue
+    inv_id = int(inv["id"])
     has_file = bool(inv.get("file_path"))
-    xml_text, pdf_bytes, _err = invoice_pdf_service.load_xml_text_for_atlas_invoice(db, int(inv["id"]))
+    xml_text, pdf_bytes, _err = invoice_pdf_service.load_xml_text_for_atlas_invoice(db, inv_id)
     if not has_file and not xml_text and not pdf_bytes:
       continue
     docs.append(
       {
         "source_kind": "atlas",
-        "source_id": inv["id"],
+        "source_id": inv_id,
         "invoice_number": inv.get("invoice_number"),
-        "invoice_date": inv.get("invoice_date"),
+        "invoice_date": _iso_or_none(inv_date),
         "supplier_name": inv.get("supplier_name"),
-        "total_amount": inv.get("total"),
+        "total_amount": float(inv["total"]) if inv.get("total") is not None else None,
         "has_xml": bool(xml_text),
         "has_pdf": bool(pdf_bytes) or (str(inv.get("file_path") or "").lower().endswith(".pdf")),
-        "selected_key": f"atlas:{inv['id']}",
+        "selected_key": f"atlas:{inv_id}",
       }
     )
 
   if include_issued:
     issued = issued_invoice_service.list_issued_invoices(db, company=company_id, limit=500)
-    for row in issued:
+    for raw_row in issued:
+      row = _as_dict(raw_row)
       inv_date = row.get("invoice_date") or row.get("created_at")
-      dt = None
-      if isinstance(inv_date, str) and inv_date:
-        try:
-          dt = datetime.fromisoformat(inv_date.replace("Z", "+00:00"))
-        except ValueError:
-          dt = None
+      dt = _parse_any_dt(inv_date)
       if not _in_period(dt, start, end):
         continue
       kind = (row.get("file_kind") or "").lower()
@@ -181,9 +210,9 @@ def list_candidates(
           "source_kind": "issued",
           "source_id": row["id"],
           "invoice_number": row.get("invoice_number") or row.get("original_filename"),
-          "invoice_date": inv_date,
+          "invoice_date": _iso_or_none(inv_date),
           "supplier_name": row.get("customer_name") or "Cliente",
-          "total_amount": row.get("total_amount"),
+          "total_amount": float(row["total_amount"]) if row.get("total_amount") is not None else None,
           "has_xml": kind == "xml",
           "has_pdf": kind == "pdf",
           "selected_key": f"issued:{row['id']}",
