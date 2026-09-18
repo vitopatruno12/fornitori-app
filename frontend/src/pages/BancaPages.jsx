@@ -163,6 +163,9 @@ function sortBankAccounts(list) {
     return String(a?.account_name || '').localeCompare(String(b?.account_name || ''), 'it')
   })
 }
+
+/** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
+function formatBankAccountOptionLabel(account) {
   if (account?.label) return String(account.label)
   const bank = String(account?.bank_name || 'Banca').trim() || 'Banca'
   const companyId = String(account?.company || '').trim().toLowerCase()
