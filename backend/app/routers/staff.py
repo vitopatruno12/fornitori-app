@@ -325,3 +325,103 @@ def upsert_backup(payload: staff_schema.StaffBackupUpsert, db: Session = Depends
         return staff_service.upsert_backup(db, payload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- Documenti PDF (contratti / buste / documenti personale) ---
+
+from pathlib import Path
+
+from fastapi import File, Form, UploadFile
+
+from ..services import staff_documents_service
+
+
+def _staff_upload_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "uploads"
+
+
+@router.get("/documents")
+def list_staff_documents(
+    category: Optional[str] = Query(None),
+    locale: Optional[str] = Query(None, alias="locale"),
+    year_month: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return {
+        "items": staff_documents_service.list_documents(
+            db,
+            category=category,
+            locale_name=locale,
+            year_month=year_month,
+        )
+    }
+
+
+@router.post("/documents", status_code=status.HTTP_201_CREATED)
+async def upload_staff_document(
+    file: UploadFile = File(...),
+    category: str = Form(...),
+    doc_type: str = Form("altro"),
+    locale_name: Optional[str] = Form(None),
+    year_month: Optional[str] = Form(None),
+    staff_member_id: Optional[int] = Form(None),
+    first_name: Optional[str] = Form(None),
+    last_name: Optional[str] = Form(None),
+    birth_date: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    ruolo: Optional[str] = Form(None),
+    document_number: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    raw = await file.read()
+    bd = None
+    if birth_date and str(birth_date).strip():
+        try:
+            bd = date.fromisoformat(str(birth_date).strip()[:10])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Data di nascita non valida") from e
+    try:
+        return staff_documents_service.save_document(
+            db,
+            _staff_upload_root(),
+            file,
+            raw,
+            category=category,
+            doc_type=doc_type,
+            locale_name=locale_name,
+            year_month=year_month,
+            staff_member_id=staff_member_id,
+            first_name=first_name,
+            last_name=last_name,
+            birth_date=bd,
+            email=email,
+            phone=phone,
+            ruolo=ruolo,
+            document_number=document_number,
+            notes=notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.put("/documents/{doc_id}")
+def update_staff_document(
+    doc_id: int,
+    payload: staff_schema.StaffDocumentUpdate,
+    db: Session = Depends(get_db),
+):
+    data = payload.model_dump(exclude_unset=True)
+    row = staff_documents_service.update_document(db, doc_id, data)
+    if not row:
+        raise HTTPException(status_code=404, detail="Documento non trovato")
+    return row
+
+
+@router.delete("/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_staff_document(doc_id: int, db: Session = Depends(get_db)):
+    ok = staff_documents_service.delete_document(db, _staff_upload_root(), doc_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Documento non trovato")
+    return None

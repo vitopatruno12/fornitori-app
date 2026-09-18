@@ -19,6 +19,7 @@ from .staff_member import StaffMember  # noqa: F401
 from .staff_shift_entry import StaffShiftEntry  # noqa: F401
 from .staff_payroll_month import StaffPayrollMonth  # noqa: F401
 from .staff_stipendi_month import StaffStipendiMonth  # noqa: F401
+from .staff_document import StaffDocument  # noqa: F401
 from .staff_locale_pack import StaffLocalePack  # noqa: F401
 from .prima_nota_locale_pack import PrimaNotaLocalePack  # noqa: F401
 from .staff_backup import StaffBackup  # noqa: F401

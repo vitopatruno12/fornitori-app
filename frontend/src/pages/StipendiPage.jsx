@@ -9,6 +9,7 @@ import {
   fetchStaffStipendiMonths,
   updateStaffStipendiMonth,
 } from '../services/staffService.js'
+import StipendiDocumentsPanel from '../components/StipendiDocumentsPanel.jsx'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
 import { resolveGestionaleLocaleMembers } from '../utils/gestionaleStaffLocale.js'
@@ -177,6 +178,13 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       amount: busta + fuori - tfr,
     }
   }, [lines])
+
+  const documentsLocale = useMemo(() => {
+    if (operatorMode) {
+      return String(getOperatorStationStaffLocaleName(operatorStationId, []) || '').trim()
+    }
+    return String(gestionaleLocale || '').trim()
+  }, [operatorMode, operatorStationId, gestionaleLocale])
 
   const resetDraft = useCallback(() => {
     setDraft(emptyLine())
@@ -597,6 +605,11 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           </div>
         )}
       </section>
+
+      <StipendiDocumentsPanel
+        localeName={documentsLocale}
+        yearMonth={yearMonth}
+      />
 
       {loading ? (
         <AnalisiLoadingBar active label="Caricamento stipendi" variant="subtle" />

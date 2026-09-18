@@ -348,3 +348,55 @@ class AccessCodeLookupHit(BaseModel):
 class AccessCodeLookupOut(BaseModel):
     query: str
     hits: List[AccessCodeLookupHit] = Field(default_factory=list)
+
+
+StaffDocumentCategory = Literal["contratto", "busta_paga", "documento_personale"]
+StaffDocumentType = Literal[
+    "carta_identita",
+    "codice_fiscale",
+    "patente",
+    "permesso_soggiorno",
+    "contratto",
+    "busta_paga",
+    "altro",
+]
+
+
+class StaffDocumentRead(BaseModel):
+    id: int
+    category: str
+    doc_type: str
+    locale_name: Optional[str] = None
+    year_month: Optional[str] = None
+    staff_member_id: Optional[int] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    birth_date: Optional[date] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    ruolo: Optional[str] = None
+    document_number: Optional[str] = None
+    storage_path: str
+    original_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    notes: Optional[str] = None
+    file_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class StaffDocumentUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=120)
+    last_name: Optional[str] = Field(None, max_length=120)
+    birth_date: Optional[date] = None
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=64)
+    ruolo: Optional[str] = Field(None, max_length=120)
+    document_number: Optional[str] = Field(None, max_length=80)
+    locale_name: Optional[str] = Field(None, max_length=120)
+    year_month: Optional[str] = Field(None, max_length=7)
+    doc_type: Optional[str] = Field(None, max_length=40)
+    notes: Optional[str] = None
+    staff_member_id: Optional[int] = None
+

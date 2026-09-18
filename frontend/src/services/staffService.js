@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl, asArray } from './api'
+﻿import { apiFetch, apiUrl, asArray } from './api'
 import { formatApiError, parseApiJson } from '../offline/offlineApiHelpers'
 import { getCachedResponse, isCacheableGetPath, setCachedResponse } from '../offline/offlineCache'
 import { isOnline } from '../offline/offlineStatus'
@@ -135,6 +135,62 @@ export function deleteStaffStipendiMonth(id) {
   return apiFetch(`/staff/stipendi-months/${id}`, { method: 'DELETE' })
 }
 
+export function fetchStaffDocuments({ category, locale, yearMonth } = {}) {
+  const q = new URLSearchParams()
+  if (category) q.set('category', category)
+  if (locale) q.set('locale', locale)
+  if (yearMonth) q.set('year_month', yearMonth)
+  const suffix = q.toString() ? `?${q}` : ''
+  return apiFetch(`/staff/documents${suffix}`)
+}
+
+export async function uploadStaffDocument(formData) {
+  const { assertOnlineForUpload } = await import('../offline/offlineGuards')
+  assertOnlineForUpload()
+  const response = await fetch(apiUrl('/staff/documents'), {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) {
+    const textBody = await response.text().catch(() => '')
+    let msg = textBody || ('Errore ' + response.status)
+    try {
+      const j = JSON.parse(textBody)
+      if (typeof j.detail === 'string') msg = j.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  if (response.status === 204) return null
+  return response.json()
+}
+
+export function updateStaffDocument(id, data) {
+  return apiFetch(`/staff/documents/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export async function deleteStaffDocument(id) {
+  const response = await fetch(apiUrl(`/staff/documents/${id}`), { method: 'DELETE' })
+  if (!response.ok) {
+    const textBody = await response.text().catch(() => '')
+    let msg = textBody || ('Errore ' + response.status)
+    try {
+      const j = JSON.parse(textBody)
+      if (typeof j.detail === 'string') msg = j.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  return true
+}
+
+export function staffDocumentFileUrl(doc) {
+  const path = doc?.file_url || (doc?.storage_path ? `/uploads/${String(doc.storage_path).replace(/^\/+/, '')}` : '')
+  return path ? apiUrl(path) : ''
+}
+
 export async function fetchStaffLocalePacks() {
   const data = await apiFetch('/staff/locale-packs', SYNC_FETCH)
   return asArray(data, 'staff/locale-packs')
@@ -205,7 +261,7 @@ export async function fetchStaffBackups(section) {
   return asArray(data, 'staff/backups')
 }
 
-/** Solo metadati (saved_at) senza GET /detail — evita 404 in console se il backup non c'è. */
+/** Solo metadati (saved_at) senza GET /detail â€” evita 404 in console se il backup non c'Ã¨. */
 export async function fetchStaffBackupSavedAt(section, key) {
   const sec = String(section || '').trim()
   const k = String(key || '').trim()
@@ -225,7 +281,7 @@ export async function fetchStaffBackupSavedAt(section, key) {
   }
 }
 
-/** Backup assente sul server → null (404 atteso, non è un errore). */
+/** Backup assente sul server â†’ null (404 atteso, non Ã¨ un errore). */
 export async function fetchStaffBackupDetail(section, key) {
   const sec = String(section || '').trim()
   const k = String(key || '').trim()
@@ -282,7 +338,7 @@ export function upsertStaffBackup(section, key, payload) {
   }).then((result) => {
     invalidateStaffBackupSummaries(section)
     if (result?.__offline) {
-      throw new Error('Sei offline: il backup verrà inviato al server quando torna la connessione.')
+      throw new Error('Sei offline: il backup verrÃ  inviato al server quando torna la connessione.')
     }
     return result
   })
