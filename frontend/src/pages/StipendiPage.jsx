@@ -12,7 +12,7 @@ import {
 import StipendiDocumentsPanel from '../components/StipendiDocumentsPanel.jsx'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
-import { resolveGestionaleLocaleMembers } from '../utils/gestionaleStaffLocale.js'
+import { resolveGestionaleLocaleMembers, readGestionaleStaffLocale } from '../utils/gestionaleStaffLocale.js'
 import { memberNameKey } from '../utils/operatorLocalePack.js'
 import { resolveOperatorStationMembers } from '../utils/operatorStaffReportData.js'
 import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaffSession.js'
@@ -197,7 +197,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     if (operatorMode) {
       return String(getOperatorStationStaffLocaleName(operatorStationId, []) || '').trim()
     }
-    return String(gestionaleLocale || '').trim()
+    return String(gestionaleLocale || readGestionaleStaffLocale() || '').trim()
   }, [operatorMode, operatorStationId, gestionaleLocale])
 
   const resetDraft = useCallback(() => {

@@ -141,6 +141,23 @@ export default function GestionaleStaffLocaleGate({
     void refreshLocaleNames()
   }, [refreshLocaleNames])
 
+  // Se la sessione era già aperta (navigazione tra pagine), avvisa il parent con locale/codice.
+  useEffect(() => {
+    if (!sessionOpen || !localeName) return
+    let cancelled = false
+    void (async () => {
+      const stored = await readStoredLocaleAccessCode(localeName)
+      if (cancelled) return
+      const code = isValidLocaleAccessCode(stored) ? stored : normalizeLocaleAccessCode(localeAccessCode)
+      onSessionChange?.(true, localeName, code || '')
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Solo al mount / cambio locale+sessione, non a ogni digitazione codice
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionOpen, localeName])
+
   useEffect(() => {
     if (!localeName) return
     void (async () => {

@@ -7,6 +7,7 @@ import {
   uploadStaffDocument,
 } from '../services/staffService.js'
 import { formatStaffLocaleOptionLabel } from '../utils/staffLocaleCompanyLabels.js'
+import { readGestionaleStaffLocale } from '../utils/gestionaleStaffLocale.js'
 
 const DOC_TYPES = [
   { id: 'carta_identita', label: 'Carta d’identità' },
@@ -68,12 +69,11 @@ const emptyForm = {
 }
 
 /**
- * Una sola voce documenti (contratto / buste / documenti), come un foglio del Report.
- * La scelta della sezione è nei tab esterni di StipendiPage.
+ * Foglio documenti (contratto / buste / documenti): form di inserimento + tabella.
  */
 export default function StipendiDocumentsPanel({ localeName, yearMonth, category }) {
-  const locale = String(localeName || '').trim()
   const panel = String(category || '').trim()
+  const locale = String(localeName || readGestionaleStaffLocale() || '').trim()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -81,7 +81,10 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   const [success, setSuccess] = useState('')
   const [form, setForm] = useState(emptyForm)
   const [editId, setEditId] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
   const fileRef = useRef(null)
+
+  const title = useMemo(() => CATEGORY_LABELS[panel] || panel || 'Documenti', [panel])
 
   const load = useCallback(async () => {
     if (!panel || !locale) {
@@ -108,6 +111,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   useEffect(() => {
     setForm(emptyForm)
     setEditId(null)
+    setSelectedId(null)
     setError('')
     setSuccess('')
     if (fileRef.current) fileRef.current.value = ''
@@ -121,15 +125,27 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   function resetForm() {
     setForm(emptyForm)
     setEditId(null)
+    setSelectedId(null)
     if (fileRef.current) fileRef.current.value = ''
   }
 
   async function handleUpload(e) {
-    e.preventDefault()
-    if (!panel || !locale) return
+    e?.preventDefault?.()
+    if (!panel) {
+      setError('Sezione non valida')
+      return
+    }
+    if (!locale) {
+      setError('Apri prima il locale con Accedi (banner sopra).')
+      return
+    }
     const file = fileRef.current?.files?.[0]
     if (!editId && !file) {
       setError('Seleziona un PDF da caricare')
+      return
+    }
+    if (!String(form.first_name || '').trim() && !String(form.last_name || '').trim()) {
+      setError('Inserisci almeno nome o cognome')
       return
     }
     setBusy(true)
@@ -170,7 +186,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
         if (form.document_number) fd.append('document_number', form.document_number)
         if (form.notes) fd.append('notes', form.notes)
         await uploadStaffDocument(fd)
-        setSuccess('PDF caricato')
+        setSuccess('PDF caricato e aggiunto in tabella')
       }
       resetForm()
       await load()
@@ -183,6 +199,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
 
   function startEdit(row) {
     setEditId(row.id)
+    setSelectedId(row.id)
     setForm({
       first_name: row.first_name || '',
       last_name: row.last_name || '',
@@ -194,17 +211,23 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
       doc_type: row.doc_type || 'carta_identita',
       notes: row.notes || '',
     })
+    setSuccess(`Modifica: ${[row.first_name, row.last_name].filter(Boolean).join(' ') || 'documento'}`)
   }
 
   async function handleDelete(row) {
-    const label = [row.first_name, row.last_name].filter(Boolean).join(' ') || row.original_name || `#${row.id}`
+    const target = row || items.find((r) => r.id === selectedId)
+    if (!target) {
+      setError('Seleziona una riga da eliminare')
+      return
+    }
+    const label = [target.first_name, target.last_name].filter(Boolean).join(' ') || target.original_name || `#${target.id}`
     if (!window.confirm(`Eliminare il documento di «${label}»?`)) return
     setBusy(true)
     setError('')
     try {
-      await deleteStaffDocument(row.id)
+      await deleteStaffDocument(target.id)
       setSuccess('Documento eliminato')
-      if (editId === row.id) resetForm()
+      if (editId === target.id) resetForm()
       await load()
     } catch (err) {
       setError(err?.message || 'Eliminazione fallita')
@@ -222,110 +245,159 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
-  const title = useMemo(() => CATEGORY_LABELS[panel] || panel, [panel])
-
-  if (!locale || !panel) return null
+  if (!panel) {
+    return (
+      <div className="stipendi-docs-panel" style={{ padding: '1rem' }}>
+        <p className="muted">Seleziona CONTRATTI, BUSTE o DOCUMENTI dal foglio in basso.</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="stipendi-docs-panel">
-      <div className="pagamenti-workbook-toolbar">
-        <div className="pagamenti-workbook-toolbar-left">
-          <span className="pagamenti-workbook-title">{title}</span>
-          <span className="pagamenti-workbook-sheet-label">
-            {formatStaffLocaleOptionLabel(locale)}
-            {panel === 'busta_paga' ? ` · ${ymLabel(yearMonth)}` : ''}
-          </span>
-        </div>
+    <div className="stipendi-docs-panel" style={{ padding: '0.75rem 1rem 1rem' }}>
+      <div className="stipendi-edit-card stipendi-edit-card--nested">
+        <h2 className="stipendi-section-title" style={{ marginTop: 0 }}>
+          {title}
+          {panel === 'busta_paga' ? ` · ${ymLabel(yearMonth)}` : ''}
+        </h2>
+        <p className="muted stipendi-edit-hint">
+          Locale: <strong>{formatStaffLocaleOptionLabel(locale) || '—'}</strong>
+          {' · '}Compila i campi, scegli il PDF e premi <strong>Carica</strong>. I documenti compaiono nella tabella sotto.
+        </p>
+
+        {!locale ? (
+          <div className="alert alert-warning">Apri il locale con Accedi nel banner sopra per caricare e vedere i documenti.</div>
+        ) : null}
+        {error ? <div className="alert alert-danger">{error}</div> : null}
+        {success ? <div className="alert alert-success">{success}</div> : null}
+
+        <form className="stipendi-docs-form" onSubmit={handleUpload}>
+          <div className="stipendi-edit-row stipendi-draft-row" style={{ alignItems: 'flex-end' }}>
+            <label className="stipendi-edit-field" style={{ minWidth: '8rem', flex: '1 1 8rem' }}>
+              <span>Nome</span>
+              <input
+                className="form-control"
+                value={form.first_name}
+                onChange={(e) => updateForm('first_name', e.target.value)}
+                placeholder="Nome"
+              />
+            </label>
+            <label className="stipendi-edit-field" style={{ minWidth: '8rem', flex: '1 1 8rem' }}>
+              <span>Cognome</span>
+              <input
+                className="form-control"
+                value={form.last_name}
+                onChange={(e) => updateForm('last_name', e.target.value)}
+                placeholder="Cognome"
+              />
+            </label>
+
+            {panel === 'busta_paga' ? (
+              <>
+                <label className="stipendi-edit-field">
+                  <span>N. documento</span>
+                  <input
+                    className="form-control"
+                    value={form.document_number}
+                    onChange={(e) => updateForm('document_number', e.target.value)}
+                  />
+                </label>
+                <label className="stipendi-edit-field">
+                  <span>Ruolo</span>
+                  <input className="form-control" value={form.ruolo} onChange={(e) => updateForm('ruolo', e.target.value)} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="stipendi-edit-field">
+                  <span>Data nascita</span>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={form.birth_date}
+                    onChange={(e) => updateForm('birth_date', e.target.value)}
+                  />
+                </label>
+                <label className="stipendi-edit-field" style={{ minWidth: '10rem', flex: '1 1 10rem' }}>
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    className="form-control"
+                    value={form.email}
+                    onChange={(e) => updateForm('email', e.target.value)}
+                  />
+                </label>
+                <label className="stipendi-edit-field">
+                  <span>Telefono</span>
+                  <input className="form-control" value={form.phone} onChange={(e) => updateForm('phone', e.target.value)} />
+                </label>
+              </>
+            )}
+
+            {panel === 'documento_personale' ? (
+              <label className="stipendi-edit-field" style={{ minWidth: '11rem' }}>
+                <span>Tipo documento</span>
+                <select className="form-control" value={form.doc_type} onChange={(e) => updateForm('doc_type', e.target.value)}>
+                  {DOC_TYPES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            {!editId ? (
+              <label className="stipendi-edit-field" style={{ minWidth: '12rem', flex: '1 1 12rem' }}>
+                <span>File PDF</span>
+                <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="form-control" />
+              </label>
+            ) : null}
+          </div>
+
+          <div className="stipendi-edit-footer" style={{ marginTop: '0.75rem' }}>
+            <div className="stipendi-row-actions">
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={resetForm}>
+                + Nuovo
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !locale}>
+                {busy ? 'Salvo…' : editId ? 'Aggiorna' : 'Carica PDF'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={busy || selectedId == null}
+                onClick={() => {
+                  const row = items.find((r) => r.id === selectedId)
+                  if (row) startEdit(row)
+                  else setError('Seleziona una riga nella tabella')
+                }}
+              >
+                Modifica
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                disabled={busy || selectedId == null}
+                onClick={() => void handleDelete()}
+              >
+                Elimina
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading || !locale} onClick={() => void load()}>
+                Aggiorna elenco
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
 
-      {error ? <div className="alert alert-danger">{error}</div> : null}
-      {success ? <div className="alert alert-success">{success}</div> : null}
-
-      <form className="stipendi-docs-form" onSubmit={handleUpload} style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label className="form-group" style={{ margin: 0 }}>
-            <span>Nome</span>
-            <input className="form-control" value={form.first_name} onChange={(e) => updateForm('first_name', e.target.value)} />
-          </label>
-          <label className="form-group" style={{ margin: 0 }}>
-            <span>Cognome</span>
-            <input className="form-control" value={form.last_name} onChange={(e) => updateForm('last_name', e.target.value)} />
-          </label>
-          {panel !== 'busta_paga' ? (
-            <>
-              <label className="form-group" style={{ margin: 0 }}>
-                <span>Data nascita</span>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={form.birth_date}
-                  onChange={(e) => updateForm('birth_date', e.target.value)}
-                />
-              </label>
-              <label className="form-group" style={{ margin: 0 }}>
-                <span>Email</span>
-                <input
-                  type="email"
-                  className="form-control"
-                  value={form.email}
-                  onChange={(e) => updateForm('email', e.target.value)}
-                />
-              </label>
-              <label className="form-group" style={{ margin: 0 }}>
-                <span>Telefono</span>
-                <input className="form-control" value={form.phone} onChange={(e) => updateForm('phone', e.target.value)} />
-              </label>
-            </>
-          ) : (
-            <>
-              <label className="form-group" style={{ margin: 0 }}>
-                <span>N. documento</span>
-                <input
-                  className="form-control"
-                  value={form.document_number}
-                  onChange={(e) => updateForm('document_number', e.target.value)}
-                />
-              </label>
-              <label className="form-group" style={{ margin: 0 }}>
-                <span>Ruolo</span>
-                <input className="form-control" value={form.ruolo} onChange={(e) => updateForm('ruolo', e.target.value)} />
-              </label>
-            </>
-          )}
-          {panel === 'documento_personale' ? (
-            <label className="form-group" style={{ margin: 0 }}>
-              <span>Tipo documento</span>
-              <select className="form-control" value={form.doc_type} onChange={(e) => updateForm('doc_type', e.target.value)}>
-                {DOC_TYPES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {!editId ? (
-            <label className="form-group" style={{ margin: 0 }}>
-              <span>PDF</span>
-              <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="form-control" />
-            </label>
-          ) : null}
-          <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
-            {busy ? 'Salvo…' : editId ? 'Salva modifiche' : 'Carica documento'}
-          </button>
-          {editId ? (
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={resetForm}>
-              Annulla
-            </button>
-          ) : null}
-        </div>
-      </form>
-
-      {loading ? (
-        <p className="muted">Caricamento…</p>
-      ) : (
+      <div style={{ marginTop: '1rem' }}>
+        <h3 className="stipendi-section-title" style={{ fontSize: '1rem' }}>
+          Tabella {title}
+          {loading ? ' · caricamento…' : ` · ${items.length} documenti`}
+        </h3>
         <div className="pagamenti-grid-wrap excel-wrap" style={{ overflowX: 'auto' }}>
-          <table className="app-table excel-table pagamenti-grid">
+          <table className="app-table excel-table pagamenti-grid stipendi-docs-table">
             <thead>
               <tr>
                 {panel === 'busta_paga' ? (
@@ -347,19 +419,27 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                     {panel === 'documento_personale' ? <th>Tipo</th> : null}
                   </>
                 )}
+                <th>File</th>
                 <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="muted">
-                    Nessun documento. Carica un PDF.
+                  <td colSpan={9} className="muted">
+                    {locale
+                      ? 'Nessun documento in tabella. Compila sopra e premi Carica PDF.'
+                      : 'Apri il locale per vedere e inserire documenti.'}
                   </td>
                 </tr>
               ) : (
                 items.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className={selectedId === row.id ? 'stipendi-excel-row-selected' : ''}
+                    onClick={() => setSelectedId(row.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     {panel === 'busta_paga' ? (
                       <>
                         <td>{row.document_number || '—'}</td>
@@ -379,7 +459,8 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                         {panel === 'documento_personale' ? <td>{docTypeLabel(row.doc_type)}</td> : null}
                       </>
                     )}
-                    <td>
+                    <td>{row.original_name || 'PDF'}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPdf(row)}>
                           Apri PDF
@@ -387,7 +468,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(row)}>
                           Modifica
                         </button>
-                        <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={() => handleDelete(row)}>
+                        <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={() => void handleDelete(row)}>
                           Elimina
                         </button>
                       </div>
@@ -398,7 +479,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
             </tbody>
           </table>
         </div>
-      )}
+      </div>
     </div>
   )
 }
