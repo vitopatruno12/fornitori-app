@@ -166,6 +166,37 @@ export async function uploadStaffDocument(formData) {
   return response.json()
 }
 
+async function postStaffBusteForm(path, formData) {
+  const { assertOnlineForUpload } = await import('../offline/offlineGuards')
+  assertOnlineForUpload()
+  const response = await fetch(apiUrl(path), {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) {
+    const textBody = await response.text().catch(() => '')
+    let msg = textBody || ('Errore ' + response.status)
+    try {
+      const j = JSON.parse(textBody)
+      if (typeof j.detail === 'string') msg = j.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  return response.json()
+}
+
+/** Anteprima estrazione nomi dalle buste Tigito (PDF multi-pagina). */
+export async function previewStaffBuste(formData) {
+  return postStaffBusteForm('/staff/documents/preview-buste', formData)
+}
+
+/** Importa PDF multi-pagina: una busta per dipendente con nome/cognome. */
+export async function importStaffBuste(formData) {
+  return postStaffBusteForm('/staff/documents/import-buste', formData)
+}
+
 export function updateStaffDocument(id, data) {
   return apiFetch(`/staff/documents/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }

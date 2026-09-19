@@ -161,12 +161,14 @@ def list_documents(
 ) -> List[Dict[str, Any]]:
   def _run() -> List[Dict[str, Any]]:
     q = db.query(StaffDocument)
-    if category:
-      q = q.filter(StaffDocument.category == category.strip().lower())
-    if locale_name:
-      q = q.filter(StaffDocument.locale_name == locale_name.strip())
+    cat = (category or "").strip().lower() or None
+    if cat:
+      q = q.filter(StaffDocument.category == cat)
+    # Buste: filtriamo per mese; la "società" è sul documento (dal PDF), non dal locale Accedi
     if year_month:
       q = q.filter(StaffDocument.year_month == year_month.strip())
+    if locale_name and cat != "busta_paga":
+      q = q.filter(StaffDocument.locale_name == locale_name.strip())
     rows = q.order_by(StaffDocument.id.desc()).all()
     return [_doc_out(r) for r in rows]
 
@@ -214,7 +216,13 @@ def save_document(
     raise ValueError("Formato non supportato: carica un file PDF")
 
   def _persist() -> Dict[str, Any]:
-    nonlocal first_name, last_name, email, phone, birth_date
+    nonlocal first_name, last_name, email, phone, birth_date, locale_name
+    if cat == "busta_paga":
+      from .tigito_buste_service import resolve_company_from_filename
+
+      company = resolve_company_from_filename(file.filename if file else None)
+      if company and company.get("short_label"):
+        locale_name = company["short_label"]
     if staff_member_id is not None:
       member = db.query(StaffMember).filter(StaffMember.id == staff_member_id).first()
       if not member:
@@ -323,3 +331,126 @@ def delete_document(db: Session, upload_root: Path, doc_id: int) -> bool:
     return True
 
   return _with_staff_documents_table(db, _run)
+
+
+MAX_BUSTE_IMPORT_BYTES = 40 * 1024 * 1024
+
+
+def preview_tigito_buste(raw: bytes, *, password: Optional[str] = None) -> Dict[str, Any]:
+  """Anteprima estrazione nomi/CF dalle pagine del PDF Tigito (senza salvare)."""
+  from .tigito_buste_service import extract_employees_from_tigito_pdf
+
+  if len(raw) > MAX_BUSTE_IMPORT_BYTES:
+    raise ValueError("File troppo grande (massimo 40 MB)")
+  employees = extract_employees_from_tigito_pdf(raw, password=password)
+  return {"count": len(employees), "employees": employees}
+
+
+def import_tigito_buste(
+  db: Session,
+  upload_root: Path,
+  raw: bytes,
+  *,
+  password: Optional[str] = None,
+  locale_name: Optional[str] = None,
+  year_month: Optional[str] = None,
+  source_filename: Optional[str] = None,
+) -> Dict[str, Any]:
+  """
+  Estrae ogni pagina cedolino e salva una busta paga con nome/cognome (e CF in note).
+  """
+  from .tigito_buste_service import (
+    export_single_page_pdf,
+    extract_employees_from_tigito_pdf,
+    parse_birth_it,
+    resolve_company_from_filename,
+    resolve_company_from_vat,
+  )
+
+  if len(raw) > MAX_BUSTE_IMPORT_BYTES:
+    raise ValueError("File troppo grande (massimo 40 MB)")
+
+  company = resolve_company_from_filename(source_filename)
+  if not company and password:
+    company = resolve_company_from_vat(password)
+  # Società dal PDF (PG0218=Mediazione, PG0216=Via Lattea); fallback al locale Accedi
+  societa = (company or {}).get("short_label") or (locale_name or "").strip() or None
+  if not societa:
+    raise ValueError(
+      "Società non riconosciuta dal PDF. Usa file PG0218… (Mediazione) o PG0216… (Via Lattea), "
+      "oppure apri Accedi sul locale."
+    )
+
+  pwd = (password or "").strip() or (company or {}).get("vat")
+  employees = extract_employees_from_tigito_pdf(raw, password=pwd)
+  if not employees:
+    raise ValueError(
+      "Nessun cedolino riconosciuto nel PDF. Verifica password (P.IVA) e formato TeamSystem/Tigito."
+    )
+
+  ym_fallback = (year_month or "").strip() or None
+  if ym_fallback and len(ym_fallback) != 7:
+    raise ValueError("Mese non valido (usa YYYY-MM)")
+
+  dest_dir = upload_root / DOC_UPLOAD_SUBDIR
+  dest_dir.mkdir(parents=True, exist_ok=True)
+  base_name = (source_filename or "buste.pdf").rsplit("/", 1)[-1]
+  created: List[Dict[str, Any]] = []
+
+  def _persist() -> Dict[str, Any]:
+    for emp in employees:
+      page_idx = int(emp["page_index"])
+      page_bytes = export_single_page_pdf(raw, page_idx, password=pwd)
+      stored = f"{uuid.uuid4().hex}.pdf"
+      (dest_dir / stored).write_bytes(page_bytes)
+      rel_path = f"{DOC_UPLOAD_SUBDIR}/{stored}"
+      ym = (ym_fallback or emp.get("year_month") or "").strip() or None
+      note_parts = []
+      note_parts.append(f"Società {societa}")
+      if (company or {}).get("vat"):
+        note_parts.append(f"P.IVA {company['vat']}")
+      if emp.get("codice_fiscale"):
+        note_parts.append(f"CF {emp['codice_fiscale']}")
+      if emp.get("netto") is not None:
+        note_parts.append(f"Netto {emp['netto']:.2f}")
+      pdf_ym = (emp.get("year_month") or "").strip() or None
+      if emp.get("month_label"):
+        note_parts.append(f"Cedolino {emp['month_label']}")
+      elif pdf_ym:
+        note_parts.append(f"Cedolino {pdf_ym}")
+      if ym_fallback and pdf_ym and pdf_ym != ym_fallback:
+        note_parts.append(f"archiviato come {ym_fallback}")
+      if emp.get("employee_code"):
+        note_parts.append(f"Matr. {emp['employee_code']}")
+      orig = f"{base_name} · p.{emp.get('page')}"
+      if emp.get("full_name"):
+        orig = f"{emp['full_name']} · {ym or pdf_ym or ''}".strip(" ·")
+      row = StaffDocument(
+        category="busta_paga",
+        doc_type="busta_paga",
+        locale_name=societa,
+        year_month=ym,
+        first_name=(emp.get("first_name") or "").strip() or None,
+        last_name=(emp.get("last_name") or "").strip() or None,
+        birth_date=parse_birth_it(emp.get("birth_date")),
+        ruolo=(emp.get("qualifica") or "").strip()[:120] or None,
+        document_number=(str(emp.get("employee_code") or "").strip() or None),
+        storage_path=rel_path,
+        original_name=orig[:255],
+        mime_type="application/pdf",
+        notes="; ".join(note_parts) if note_parts else None,
+      )
+      db.add(row)
+      db.flush()
+      created.append(_doc_out(row))
+    db.commit()
+    return {
+      "imported": len(created),
+      "items": created,
+      "locale_name": societa,
+      "societa": societa,
+      "company_vat": (company or {}).get("vat"),
+      "year_month": ym_fallback or (created[0].get("year_month") if created else None),
+    }
+
+  return _with_staff_documents_table(db, _persist)

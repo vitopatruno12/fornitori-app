@@ -357,6 +357,47 @@ def list_staff_documents(
     }
 
 
+@router.post("/documents/preview-buste")
+async def preview_staff_buste(
+    file: UploadFile = File(...),
+    password: Optional[str] = Form(None),
+):
+    """Anteprima: estrae nome/cognome/CF da ogni pagina del PDF Tigito (senza salvare)."""
+    raw = await file.read()
+    try:
+        return staff_documents_service.preview_tigito_buste(raw, password=password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@router.post("/documents/import-buste", status_code=status.HTTP_201_CREATED)
+async def import_staff_buste(
+    file: UploadFile = File(...),
+    password: Optional[str] = Form(None),
+    locale_name: Optional[str] = Form(None),
+    year_month: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Importa PDF multi-pagina: una busta paga per dipendente con nome/cognome estratti."""
+    raw = await file.read()
+    try:
+        return staff_documents_service.import_tigito_buste(
+            db,
+            _staff_upload_root(),
+            raw,
+            password=password,
+            locale_name=locale_name,
+            year_month=year_month,
+            source_filename=file.filename,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
 @router.post("/documents", status_code=status.HTTP_201_CREATED)
 async def upload_staff_document(
     file: UploadFile = File(...),

@@ -12,5 +12,6 @@ requests>=2.31.0
 PyJWT[crypto]>=2.8.0
 google-generativeai==0.8.5
 pypdf==5.9.0
+pymupdf>=1.24.0
 fdb>=2.0.2
 tzdata>=2024.1; platform_system == "Windows"

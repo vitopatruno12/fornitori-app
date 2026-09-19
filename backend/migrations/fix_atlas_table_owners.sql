@@ -13,6 +13,7 @@ BEGIN
     'staff_payroll_months',
     'staff_locale_packs',
     'staff_backups',
+    'staff_documents',
     'bank_accounts',
     'bank_movements',
     'carriers',

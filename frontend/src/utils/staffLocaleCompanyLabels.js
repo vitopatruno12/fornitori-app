@@ -26,6 +26,31 @@ export const TIGITO_COMPANY_BY_VAT = {
   },
 }
 
+/** Prefisso file Tigito (es. PG02180000826.PDF) → società + P.IVA. */
+export const TIGITO_FILE_PREFIX_COMPANY = [
+  { prefix: 'PG0218', shortLabel: 'Mediazione', vat: '04945600759' },
+  { prefix: 'PG0216', shortLabel: 'Via Lattea', vat: '04886500752' },
+]
+
+/**
+ * Riconosce società dal nome file buste.
+ * PG02180000826.PDF → Mediazione; PG02160000826.PDF → Via Lattea.
+ */
+export function resolveTigitoCompanyFromFilename(filename) {
+  const base = String(filename || '')
+    .trim()
+    .split(/[/\\]/)
+    .pop()
+  if (!base) return null
+  const up = base.toUpperCase().replace(/\s+/g, '')
+  for (const row of TIGITO_FILE_PREFIX_COMPANY) {
+    if (up.startsWith(row.prefix) || up.includes(row.prefix)) {
+      return { ...row, filename: base, source: 'filename' }
+    }
+  }
+  return null
+}
+
 /** Suggerimenti nome locale Personale da chiave confrontabile. */
 export const LOCALE_DISPLAY_HINTS = [
   {

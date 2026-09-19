@@ -246,6 +246,14 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
             "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-staff-documents-table.sh "
             "poi sudo bash deploy/aggiorna-tutto.sh"
         )
+    elif "staff_stipendi_months" in err_text or (
+        "locale_name" in err_text and "stipendi" in err_text
+    ):
+        detail = (
+            "Schema stipendi incompleto (manca colonna locale_name). "
+            "Applica backend/migrations/20260902_staff_stipendi_locale.sql "
+            "e fix_atlas_table_owners.sql come utente postgres, poi riavvia l'API."
+        )
     elif "conservation_packages" in err_text or "conservation_package_items" in err_text:
         detail = (
             "Tabelle conservazione assenti. "
