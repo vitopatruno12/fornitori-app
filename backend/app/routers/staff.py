@@ -361,11 +361,18 @@ def list_staff_documents(
 async def preview_staff_buste(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
+    locale_name: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
 ):
-    """Anteprima: estrae nome/cognome/CF da ogni pagina del PDF Tigito (senza salvare)."""
+    """Anteprima: estrae e divide i cedolini per sede (Abba / Zanardelli)."""
     raw = await file.read()
     try:
-        return staff_documents_service.preview_tigito_buste(raw, password=password)
+        return staff_documents_service.preview_tigito_buste(
+            raw,
+            password=password,
+            locale_name=locale_name,
+            db=db,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:

@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import text
@@ -352,14 +352,108 @@ def delete_document(db: Session, upload_root: Path, doc_id: int) -> bool:
 MAX_BUSTE_IMPORT_BYTES = 40 * 1024 * 1024
 
 
-def preview_tigito_buste(raw: bytes, *, password: Optional[str] = None) -> Dict[str, Any]:
-  """Anteprima estrazione nomi/CF dalle pagine del PDF Tigito (senza salvare)."""
-  from .tigito_buste_service import extract_employees_from_tigito_pdf
+def _pack_member_keys(db: Session, locale_name: str) -> Tuple[str, set]:
+  from . import staff_service
+  from .tigito_buste_service import person_name_keys
+
+  pack = staff_service._find_locale_pack_by_key(db, locale_name)
+  canonical = (pack.locale_name if pack else None) or locale_name
+  keys: set = set()
+  if pack:
+    for m in staff_service._locale_members_from_json(pack.members_json):
+      keys |= person_name_keys(m.name, m.first_name, m.last_name)
+      keys |= person_name_keys(m.last_name, m.first_name)
+  return canonical, keys
+
+
+def _employee_in_locale(emp: Dict[str, Any], *, shop: Optional[str], pack_keys: set) -> bool:
+  from .tigito_buste_service import enrich_shop_token, person_name_keys, shop_token_from_locale
+
+  enrich_shop_token(emp)
+  emp_shop = emp.get("shop_token") or shop_token_from_locale(emp.get("suggested_locale"))
+  if shop and emp_shop and emp_shop == shop:
+    return True
+  if pack_keys:
+    keys = person_name_keys(emp.get("full_name"), emp.get("first_name"), emp.get("last_name"))
+    keys |= person_name_keys(emp.get("last_name"), emp.get("first_name"))
+    if keys & pack_keys:
+      return True
+  if not shop:
+    return True
+  return False
+
+
+def _group_employees_by_shop(employees: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+  from .tigito_buste_service import enrich_shop_token, shop_label
+
+  groups: Dict[str, List[Dict[str, Any]]] = {
+    "zanardelli": [],
+    "abba": [],
+    "altro": [],
+  }
+  for emp in employees:
+    enrich_shop_token(emp)
+    emp["shop_label"] = shop_label(emp.get("shop_token"))
+    token = emp.get("shop_token") or "altro"
+    if token not in groups:
+      token = "altro"
+    groups[token].append(emp)
+  return groups
+
+
+def preview_tigito_buste(
+  raw: bytes,
+  *,
+  password: Optional[str] = None,
+  locale_name: Optional[str] = None,
+  db: Optional[Session] = None,
+) -> Dict[str, Any]:
+  """Anteprima: estrae cedolini e li divide per sede (Abba / Zanardelli)."""
+  from .tigito_buste_service import (
+    extract_employees_from_tigito_pdf,
+    shop_label,
+    shop_token_from_locale,
+  )
 
   if len(raw) > MAX_BUSTE_IMPORT_BYTES:
     raise ValueError("File troppo grande (massimo 40 MB)")
   employees = extract_employees_from_tigito_pdf(raw, password=password)
-  return {"count": len(employees), "employees": employees}
+  groups = _group_employees_by_shop(employees)
+
+  accedi = (locale_name or "").strip() or None
+  pack_canonical = accedi
+  filtered = employees
+  shop = None
+  if accedi and db is not None:
+    pack_canonical, pack_keys = _pack_member_keys(db, accedi)
+    shop = shop_token_from_locale(pack_canonical)
+    filtered = [e for e in employees if _employee_in_locale(e, shop=shop, pack_keys=pack_keys)]
+
+  return {
+    "count": len(filtered),
+    "total_pages": len(employees),
+    "locale_name": pack_canonical,
+    "shop_token": shop,
+    "shop_label": shop_label(shop) if shop else None,
+    "employees": filtered,
+    "by_locale": {
+      "zanardelli": {
+        "label": "Via Zanardelli",
+        "count": len(groups["zanardelli"]),
+        "employees": groups["zanardelli"],
+      },
+      "abba": {
+        "label": "Via Abba",
+        "count": len(groups["abba"]),
+        "employees": groups["abba"],
+      },
+      "altro": {
+        "label": "Altra sede",
+        "count": len(groups["altro"]),
+        "employees": groups["altro"],
+      },
+    },
+  }
 
 
 def import_tigito_buste(
@@ -376,12 +470,10 @@ def import_tigito_buste(
   Estrae cedolini e salva solo quelli del locale Accedi (es. Abba vs Zanardelli).
   Match: indirizzo sul PDF e/o dipendenti del pack locale (stazioni operative).
   """
-  from . import staff_service
   from .tigito_buste_service import (
     export_single_page_pdf,
     extract_employees_from_tigito_pdf,
     parse_birth_it,
-    person_name_keys,
     resolve_company_from_filename,
     resolve_company_from_vat,
     shop_token_from_locale,
@@ -409,33 +501,10 @@ def import_tigito_buste(
       "Nessun cedolino riconosciuto nel PDF. Verifica password (P.IVA) e formato TeamSystem/Tigito."
     )
 
-  # Dipendenti del pack locale (= stazione operativa)
-  pack_keys: set = set()
-  pack = staff_service._find_locale_pack_by_key(db, accedi)
-  pack_canonical = (pack.locale_name if pack else None) or accedi
-  if pack:
-    for m in staff_service._locale_members_from_json(pack.members_json):
-      pack_keys |= person_name_keys(m.name, m.first_name, m.last_name)
-      pack_keys |= person_name_keys(m.last_name, m.first_name)
-
+  pack_canonical, pack_keys = _pack_member_keys(db, accedi)
   shop = shop_token_from_locale(pack_canonical)
   total_pages = len(employees)
-
-  def _emp_in_locale(emp: Dict[str, Any]) -> bool:
-    emp_shop = emp.get("shop_token") or shop_token_from_locale(emp.get("suggested_locale"))
-    if shop and emp_shop and emp_shop == shop:
-      return True
-    if pack_keys:
-      keys = person_name_keys(emp.get("full_name"), emp.get("first_name"), emp.get("last_name"))
-      keys |= person_name_keys(emp.get("last_name"), emp.get("first_name"))
-      if keys & pack_keys:
-        return True
-    # Senza token sede (locale generico): tieni tutti
-    if not shop:
-      return True
-    return False
-
-  filtered = [e for e in employees if _emp_in_locale(e)]
+  filtered = [e for e in employees if _employee_in_locale(e, shop=shop, pack_keys=pack_keys)]
   if not filtered:
     raise ValueError(
       f"Nessun cedolino per «{pack_canonical}» tra le {total_pages} pagine del PDF. "

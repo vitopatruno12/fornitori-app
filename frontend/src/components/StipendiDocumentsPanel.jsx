@@ -93,6 +93,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   const [pdfPassword, setPdfPassword] = useState('')
   const [detectedSocieta, setDetectedSocieta] = useState('')
   const [previewRows, setPreviewRows] = useState([])
+  const [previewGroups, setPreviewGroups] = useState(null)
   const fileRef = useRef(null)
   const importFileRef = useRef(null)
 
@@ -165,6 +166,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
     setMonthHint('')
     setDetectedSocieta('')
     setPreviewRows([])
+    setPreviewGroups(null)
     if (fileRef.current) fileRef.current.value = ''
     if (importFileRef.current) importFileRef.current.value = ''
     void load()
@@ -250,6 +252,10 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   }
 
   async function handlePreviewExtract() {
+    if (!locale) {
+      setError('Apri Accedi sul locale (Via Abba o Via Zanardelli) per vedere solo i dipendenti di quella sede.')
+      return
+    }
     const file = importFileRef.current?.files?.[0]
     if (!file) {
       setError('Seleziona il PDF delle buste (TeamSystem / Tigito)')
@@ -264,19 +270,28 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
       fd.append('file', file)
       const pwd = pdfPassword.trim() || hit?.vat || ''
       if (pwd) fd.append('password', pwd)
+      fd.append('locale_name', locale)
       const res = await previewStaffBuste(fd)
       const rows = Array.isArray(res?.employees) ? res.employees : []
       setPreviewRows(rows)
+      setPreviewGroups(res?.by_locale || null)
       if (!rows.length) {
-        setError('Nessun cedolino riconosciuto. Controlla password (P.IVA società) e file.')
+        setError(
+          `Nessun cedolino per questo locale tra le ${res?.total_pages || 0} pagine. Controlla Accedi (Abba/Zanardelli) e password.`,
+        )
       } else {
-        const soc = hit?.shortLabel || detectedSocieta
+        const z = res?.by_locale?.zanardelli?.count ?? 0
+        const a = res?.by_locale?.abba?.count ?? 0
+        const locLabel = formatStaffLocaleOptionLabel(res?.locale_name || locale) || locale
         setSuccess(
-          `Trovati ${rows.length} dipendenti${soc ? ` · società ${soc}` : ''}. Controlla l’anteprima e premi Importa.`,
+          `Anteprima «${locLabel}»: ${rows.length} dipendenti` +
+            (res?.shop_label ? ` · sede ${res.shop_label}` : '') +
+            ` (PDF: Zanardelli ${z}, Abba ${a}). Premi Importa per salvare solo questi.`,
         )
       }
     } catch (err) {
       setPreviewRows([])
+      setPreviewGroups(null)
       setError(err?.message || 'Anteprima fallita')
     } finally {
       setBusy(false)
@@ -479,6 +494,11 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
             </div>
             {previewRows.length > 0 ? (
               <div style={{ marginTop: '0.75rem', overflowX: 'auto' }}>
+                <p className="muted" style={{ marginBottom: '0.35rem' }}>
+                  Solo dipendenti di questo locale ({previewRows.length}). Ripartizione PDF:{' '}
+                  Zanardelli {previewGroups?.zanardelli?.count ?? '—'} · Abba {previewGroups?.abba?.count ?? '—'}
+                  {(previewGroups?.altro?.count || 0) > 0 ? ` · altro ${previewGroups.altro.count}` : ''}.
+                </p>
                 <table className="app-table excel-table" style={{ fontSize: '0.85rem' }}>
                   <thead>
                     <tr>
@@ -486,6 +506,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                       <th>Cognome</th>
                       <th>Nome</th>
                       <th>CF</th>
+                      <th>Sede</th>
                       <th>Mese</th>
                       <th>Netto</th>
                     </tr>
@@ -497,6 +518,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                         <td>{r.last_name || '—'}</td>
                         <td>{r.first_name || '—'}</td>
                         <td>{r.codice_fiscale || '—'}</td>
+                        <td>{r.shop_label || r.suggested_locale || '—'}</td>
                         <td>{r.month_label || ymLabel(r.year_month)}</td>
                         <td>{r.netto != null ? Number(r.netto).toFixed(2) : '—'}</td>
                       </tr>

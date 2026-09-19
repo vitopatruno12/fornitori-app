@@ -155,10 +155,84 @@ def split_cognome_nome(full: str) -> Tuple[str, str]:
     return "", ""
   if len(parts) == 1:
     return "", parts[0]
-  # Ultimo token = nome; resto = cognome (es. DE ROBERTIS EMANUELA CHIARA → cognome DE ROBERTIS, nome EMANUELA CHIARA)
-  if len(parts) >= 3 and parts[0].upper() in {"DE", "DI", "DEL", "DELLA", "DEI", "DEGLI", "LA", "LO"}:
+  # DE ROBERTIS EMANUELA CHIARA → cognome DE ROBERTIS, nome EMANUELA CHIARA
+  if len(parts) >= 3 and parts[0].upper() in {"DE", "DI", "DEL", "DELLA", "DEI", "DEGLI"}:
+    return " ".join(parts[:2]), " ".join(parts[2:])
+  if len(parts) >= 3 and parts[0].upper() in {"LA", "LO"}:
     return " ".join(parts[:-1]), parts[-1]
   return parts[0], " ".join(parts[1:])
+
+
+# CF noti sede Zanardelli (Mediazione) — roster operativo
+MEDIAZIONE_ZANARDELLI_CF = frozenset(
+  {
+    "CPNFNC02T44E506Z",  # CAPONE FRANCESCA DESIREE'
+    "DRBMLC71C66F101N",  # DE ROBERTIS EMANUELA CHIARA
+    "DGRDVD98R23B506I",  # DE GIORGI DAVIDE
+    "MRTSRA02C67E506I",  # MARTANO SARA
+    "FSLGRT92E41E506G",  # FASIELLO GRETA
+    "BHTVND94M15Z222D",  # BHATI VINOD
+    "NGRMSM68S07E506Y",  # INGROSSO MASSIMILIANO
+    "CLPSMN90T19D862C",  # COLAPIETRO SIMONE
+    "KMRKLS96B02Z222T",  # KUMAR KAMLESH
+    "LNGLBT81T66E506T",  # LONGO ELISABETTA
+    "MHMWSA01D16Z236U",  # MUHAMMAD AWAIS
+    "PNWRHL05D30Z222H",  # PANWAR RAHUL
+  }
+)
+
+MEDIAZIONE_ZANARDELLI_NAME_KEYS = frozenset(
+  {
+    "caponefrancescadesiree",
+    "caponefrancesca",
+    "derobertisemanuelachiara",
+    "derobertisemanuela",
+    "degiorgidavide",
+    "martanosara",
+    "fasiellogreta",
+    "bhativinod",
+    "ingrossomassimiliano",
+    "colapietrosimone",
+    "kumarkamlesh",
+    "longoelisabetta",
+    "muhammadawais",
+    "panwarrahul",
+    "akonasraful",
+  }
+)
+
+
+def enrich_shop_token(emp: Dict[str, Any]) -> Optional[str]:
+  """Risolve sede: indirizzo PDF, poi CF/nome roster Zanardelli."""
+  token = emp.get("shop_token") or shop_token_from_address(
+    emp.get("address"), emp.get("suggested_locale")
+  )
+  if token:
+    emp["shop_token"] = token
+    return token
+  cf = str(emp.get("codice_fiscale") or "").strip().upper()
+  if cf in MEDIAZIONE_ZANARDELLI_CF:
+    emp["shop_token"] = "zanardelli"
+    emp["suggested_locale"] = emp.get("suggested_locale") or "La mediazione via zanardelli"
+    return "zanardelli"
+  keys = person_name_keys(emp.get("full_name"), emp.get("first_name"), emp.get("last_name"))
+  if keys & MEDIAZIONE_ZANARDELLI_NAME_KEYS:
+    emp["shop_token"] = "zanardelli"
+    emp["suggested_locale"] = emp.get("suggested_locale") or "La mediazione via zanardelli"
+    return "zanardelli"
+  return None
+
+
+def shop_label(token: Optional[str]) -> str:
+  if token == "zanardelli":
+    return "Via Zanardelli"
+  if token == "abba":
+    return "Via Abba"
+  if token == "mucche":
+    return "Mucche Volanti"
+  if token == "risacca":
+    return "Risacca"
+  return "Altra sede"
 
 
 def parse_birth_it(raw: Optional[str]) -> Optional[date]:
@@ -296,8 +370,7 @@ def extract_employees_from_tigito_pdf(
       last_name, first_name = split_cognome_nome(name)
       ym = f"{year}-{MONTHS.get(month, 0):02d}" if year and month else None
       suggested = resolve_suggested_locale_from_text(ditta=ditta, address=addr)
-      employees.append(
-        {
+      row = {
           "page_index": i,
           "page": i + 1,
           "full_name": name,
@@ -316,7 +389,9 @@ def extract_employees_from_tigito_pdf(
           "suggested_locale": suggested,
           "shop_token": shop_token_from_address(addr, suggested),
         }
-      )
+      enrich_shop_token(row)
+      row["shop_label"] = shop_label(row.get("shop_token"))
+      employees.append(row)
   finally:
     doc.close()
   return employees
