@@ -52,6 +52,67 @@ COMPANY_BY_VAT = {
   "05440050754": "PG",
 }
 
+# Indirizzo cedolino → locale Personale / Accedi (allineato a stazioni operative)
+ADDRESS_TO_LOCALE = (
+  ("ZANARDELLI", "La mediazione via zanardelli"),
+  ("ABBA", "Mediazione via abba"),
+  ("LATTEA", "Mucche Volanti"),
+  ("MUCHE", "Mucche Volanti"),  # typo guard
+  ("MUCCHE", "Mucche Volanti"),
+)
+
+
+def locale_name_key(value: Optional[str]) -> str:
+  return "".join(str(value or "").strip().lower().replace("-", " ").replace("_", " ").split())
+
+
+def shop_token_from_locale(locale_name: Optional[str]) -> Optional[str]:
+  """Token sede da Accedi / pack (abba, zanardelli, mucche, risacca)."""
+  key = locale_name_key(locale_name)
+  if not key:
+    return None
+  if "zanardelli" in key:
+    return "zanardelli"
+  if "abba" in key:
+    return "abba"
+  if "mucche" in key or "lattea" in key:
+    return "mucche"
+  if "risacca" in key or "momento" in key:
+    return "risacca"
+  return None
+
+
+def shop_token_from_address(address: Optional[str], suggested_locale: Optional[str] = None) -> Optional[str]:
+  return shop_token_from_locale(suggested_locale) or shop_token_from_locale(address)
+
+
+def resolve_suggested_locale_from_text(*, ditta: str = "", address: str = "") -> Optional[str]:
+  blob = f"{ditta} {address}".upper()
+  for token, locale in ADDRESS_TO_LOCALE:
+    if token in blob:
+      return locale
+  return None
+
+
+def person_name_keys(*parts: Optional[str]) -> set:
+  """Chiavi confronto nome (cognome nome / nome cognome)."""
+  keys: set = set()
+  joined = " ".join(str(p or "").strip() for p in parts if p and str(p).strip())
+  if not joined:
+    return keys
+  key = locale_name_key(joined)
+  if key:
+    keys.add(key)
+  tokens = [t for t in re.split(r"\s+", joined.strip()) if t]
+  if len(tokens) >= 2:
+    rev = locale_name_key(" ".join(reversed(tokens)))
+    if rev:
+      keys.add(rev)
+    # cognome + primo nome
+    keys.add(locale_name_key(f"{tokens[0]} {tokens[-1]}"))
+    keys.add(locale_name_key(f"{tokens[-1]} {tokens[0]}"))
+  return {k for k in keys if k}
+
 
 def resolve_company_from_filename(filename: Optional[str]) -> Optional[Dict[str, str]]:
   """
@@ -66,7 +127,6 @@ def resolve_company_from_filename(filename: Optional[str]) -> Optional[Dict[str,
   for prefix, short, vat in TIGITO_FILE_PREFIX_COMPANY:
     if up.startswith(prefix.upper()):
       return {"short_label": short, "vat": vat, "source": "filename", "filename": base}
-  # Match anche se il prefisso compare nel nome (es. copia "PG0218… (1).PDF")
   for prefix, short, vat in TIGITO_FILE_PREFIX_COMPANY:
     if prefix.upper() in up:
       return {"short_label": short, "vat": vat, "source": "filename", "filename": base}
@@ -172,7 +232,18 @@ def extract_employees_from_tigito_pdf(
       ordered = [(y, " ".join(t for _, t in sorted(rows))) for y, rows in sorted(lines.items())]
 
       name = cf = birth = month = year = codice = qualifica = None
+      ditta = ""
+      addr = ""
       for _, txt in ordered:
+        up = txt.upper()
+        if ("MEDIAZIONE" in up or "LATTEA" in up) and (
+          "S.R.L" in up or "SOCIETA" in up or "SOCIETÀ" in up or "AGRICOLA" in up
+        ):
+          ditta = txt.strip()
+        if "VIA " in up and (
+          "LECCE" in up or "ABBA" in up or "ZANARDELLI" in up or "LATTEA" in up
+        ) and "COD.FISCALE" not in up and "CODICE FISCALE" not in up:
+          addr = txt.strip()
         m = HEADER_RE.search(txt)
         if m:
           month, year, codice, name, _hire = (
@@ -224,6 +295,7 @@ def extract_employees_from_tigito_pdf(
 
       last_name, first_name = split_cognome_nome(name)
       ym = f"{year}-{MONTHS.get(month, 0):02d}" if year and month else None
+      suggested = resolve_suggested_locale_from_text(ditta=ditta, address=addr)
       employees.append(
         {
           "page_index": i,
@@ -239,6 +311,10 @@ def extract_employees_from_tigito_pdf(
           "netto": netto,
           "year_month": ym,
           "month_label": f"{month} {year}" if month else None,
+          "ditta": ditta or None,
+          "address": addr or None,
+          "suggested_locale": suggested,
+          "shop_token": shop_token_from_address(addr, suggested),
         }
       )
   finally:

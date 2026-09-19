@@ -160,15 +160,31 @@ def list_documents(
   year_month: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
   def _run() -> List[Dict[str, Any]]:
+    from .tigito_buste_service import locale_name_key, shop_token_from_locale
+
     q = db.query(StaffDocument)
     cat = (category or "").strip().lower() or None
     if cat:
       q = q.filter(StaffDocument.category == cat)
-    # Buste: filtriamo per mese; la "società" è sul documento (dal PDF), non dal locale Accedi
     if year_month:
       q = q.filter(StaffDocument.year_month == year_month.strip())
-    if locale_name and cat != "busta_paga":
-      q = q.filter(StaffDocument.locale_name == locale_name.strip())
+    loc = (locale_name or "").strip() or None
+    if loc:
+      if cat == "busta_paga":
+        # Match esatto o stessa sede (abba/zanardelli) — i pack usano grafie diverse
+        target_key = locale_name_key(loc)
+        shop = shop_token_from_locale(loc)
+        rows = q.order_by(StaffDocument.id.desc()).all()
+        out = []
+        for r in rows:
+          rk = locale_name_key(r.locale_name)
+          if rk == target_key:
+            out.append(_doc_out(r))
+            continue
+          if shop and shop_token_from_locale(r.locale_name) == shop:
+            out.append(_doc_out(r))
+        return out
+      q = q.filter(StaffDocument.locale_name == loc)
     rows = q.order_by(StaffDocument.id.desc()).all()
     return [_doc_out(r) for r in rows]
 
@@ -357,35 +373,74 @@ def import_tigito_buste(
   source_filename: Optional[str] = None,
 ) -> Dict[str, Any]:
   """
-  Estrae ogni pagina cedolino e salva una busta paga con nome/cognome (e CF in note).
+  Estrae cedolini e salva solo quelli del locale Accedi (es. Abba vs Zanardelli).
+  Match: indirizzo sul PDF e/o dipendenti del pack locale (stazioni operative).
   """
+  from . import staff_service
   from .tigito_buste_service import (
     export_single_page_pdf,
     extract_employees_from_tigito_pdf,
     parse_birth_it,
+    person_name_keys,
     resolve_company_from_filename,
     resolve_company_from_vat,
+    shop_token_from_locale,
   )
 
   if len(raw) > MAX_BUSTE_IMPORT_BYTES:
     raise ValueError("File troppo grande (massimo 40 MB)")
 
+  accedi = (locale_name or "").strip() or None
+  if not accedi:
+    raise ValueError(
+      "Apri Accedi sul locale (es. Mediazione via abba o La mediazione via zanardelli) "
+      "prima di importare: il PDF Mediazione contiene entrambe le sedi."
+    )
+
   company = resolve_company_from_filename(source_filename)
   if not company and password:
     company = resolve_company_from_vat(password)
-  # Società dal PDF (PG0218=Mediazione, PG0216=Via Lattea); fallback al locale Accedi
-  societa = (company or {}).get("short_label") or (locale_name or "").strip() or None
-  if not societa:
-    raise ValueError(
-      "Società non riconosciuta dal PDF. Usa file PG0218… (Mediazione) o PG0216… (Via Lattea), "
-      "oppure apri Accedi sul locale."
-    )
+  societa = (company or {}).get("short_label") or "Mediazione"
 
   pwd = (password or "").strip() or (company or {}).get("vat")
   employees = extract_employees_from_tigito_pdf(raw, password=pwd)
   if not employees:
     raise ValueError(
       "Nessun cedolino riconosciuto nel PDF. Verifica password (P.IVA) e formato TeamSystem/Tigito."
+    )
+
+  # Dipendenti del pack locale (= stazione operativa)
+  pack_keys: set = set()
+  pack = staff_service._find_locale_pack_by_key(db, accedi)
+  pack_canonical = (pack.locale_name if pack else None) or accedi
+  if pack:
+    for m in staff_service._locale_members_from_json(pack.members_json):
+      pack_keys |= person_name_keys(m.name, m.first_name, m.last_name)
+      pack_keys |= person_name_keys(m.last_name, m.first_name)
+
+  shop = shop_token_from_locale(pack_canonical)
+  total_pages = len(employees)
+
+  def _emp_in_locale(emp: Dict[str, Any]) -> bool:
+    emp_shop = emp.get("shop_token") or shop_token_from_locale(emp.get("suggested_locale"))
+    if shop and emp_shop and emp_shop == shop:
+      return True
+    if pack_keys:
+      keys = person_name_keys(emp.get("full_name"), emp.get("first_name"), emp.get("last_name"))
+      keys |= person_name_keys(emp.get("last_name"), emp.get("first_name"))
+      if keys & pack_keys:
+        return True
+    # Senza token sede (locale generico): tieni tutti
+    if not shop:
+      return True
+    return False
+
+  filtered = [e for e in employees if _emp_in_locale(e)]
+  if not filtered:
+    raise ValueError(
+      f"Nessun cedolino per «{pack_canonical}» tra le {total_pages} pagine del PDF. "
+      "Controlla che i dipendenti siano nel pack del locale (Personale / stazione operativa) "
+      "oppure che l’indirizzo sul cedolino sia Via Abba / Via Zanardelli."
     )
 
   ym_fallback = (year_month or "").strip() or None
@@ -398,15 +453,16 @@ def import_tigito_buste(
   created: List[Dict[str, Any]] = []
 
   def _persist() -> Dict[str, Any]:
-    for emp in employees:
+    for emp in filtered:
       page_idx = int(emp["page_index"])
       page_bytes = export_single_page_pdf(raw, page_idx, password=pwd)
       stored = f"{uuid.uuid4().hex}.pdf"
       (dest_dir / stored).write_bytes(page_bytes)
       rel_path = f"{DOC_UPLOAD_SUBDIR}/{stored}"
       ym = (ym_fallback or emp.get("year_month") or "").strip() or None
-      note_parts = []
-      note_parts.append(f"Società {societa}")
+      note_parts = [f"Società {societa}", f"Locale {pack_canonical}"]
+      if emp.get("address"):
+        note_parts.append(emp["address"])
       if (company or {}).get("vat"):
         note_parts.append(f"P.IVA {company['vat']}")
       if emp.get("codice_fiscale"):
@@ -428,7 +484,7 @@ def import_tigito_buste(
       row = StaffDocument(
         category="busta_paga",
         doc_type="busta_paga",
-        locale_name=societa,
+        locale_name=pack_canonical,
         year_month=ym,
         first_name=(emp.get("first_name") or "").strip() or None,
         last_name=(emp.get("last_name") or "").strip() or None,
@@ -446,8 +502,10 @@ def import_tigito_buste(
     db.commit()
     return {
       "imported": len(created),
+      "skipped": total_pages - len(created),
+      "total_pages": total_pages,
       "items": created,
-      "locale_name": societa,
+      "locale_name": pack_canonical,
       "societa": societa,
       "company_vat": (company or {}).get("vat"),
       "year_month": ym_fallback or (created[0].get("year_month") if created else None),

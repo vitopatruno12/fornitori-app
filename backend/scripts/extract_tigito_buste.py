@@ -37,11 +37,11 @@ COMPANY_LOCALES = {
     "company": "La Mediazione S.r.l.",
     "locales": [
       "Mediazione via abba",
-      "Mediazione via zanardelli",
+      "La mediazione via zanardelli",
     ],
     "default_locale_by_address": {
       "ABBA": "Mediazione via abba",
-      "ZANARDELLI": "Mediazione via zanardelli",
+      "ZANARDELLI": "La mediazione via zanardelli",
     },
   },
   "04886500752": {

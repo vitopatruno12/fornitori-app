@@ -111,8 +111,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   }
 
   const load = useCallback(async () => {
-    // Buste: elenco per mese (società sul documento dal PDF); altri fogli richiedono Accedi
-    if (!panel || (panel !== 'busta_paga' && !locale)) {
+    if (!panel || !locale) {
       setItems([])
       setMonthHint('')
       return
@@ -127,14 +126,14 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
     try {
       const res = await fetchStaffDocuments({
         category: panel,
-        locale: panel === 'busta_paga' ? undefined : locale,
+        locale,
         yearMonth: panel === 'busta_paga' ? yearMonth : undefined,
       })
       setItems(Array.isArray(res?.items) ? res.items : [])
       setMonthHint('')
 
       if (panel === 'busta_paga' && yearMonth) {
-        const allRes = await fetchStaffDocuments({ category: panel })
+        const allRes = await fetchStaffDocuments({ category: panel, locale })
         const all = Array.isArray(allRes?.items) ? allRes.items : []
         const otherMonths = [
           ...new Set(all.map((r) => r.year_month).filter((ym) => ym && ym !== yearMonth)),
@@ -142,7 +141,9 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
         if (otherMonths.length) {
           const nOther = all.filter((r) => r.year_month && r.year_month !== yearMonth).length
           setMonthHint(
-            `${nOther} buste in altri mesi: ${otherMonths.map(ymLabel).join(', ')}. Cambia il mese in alto per vederle.`,
+            `${nOther} buste di questo locale in altri mesi: ${otherMonths
+              .map(ymLabel)
+              .join(', ')}. Cambia il mese in alto per vederle.`,
           )
         }
       }
@@ -283,16 +284,16 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
   }
 
   async function handleImportExtract() {
+    if (!locale) {
+      setError('Apri Accedi sul locale (Via Abba o Via Zanardelli): il PDF Mediazione contiene entrambe le sedi.')
+      return
+    }
     const file = importFileRef.current?.files?.[0]
     if (!file) {
       setError('Seleziona il PDF delle buste')
       return
     }
     const hit = resolveTigitoCompanyFromFilename(file.name)
-    if (!hit && !locale) {
-      setError('Società non riconosciuta dal file. Usa PG0218… (Mediazione) o PG0216… (Via Lattea), oppure Accedi.')
-      return
-    }
     setBusy(true)
     setError('')
     setSuccess('')
@@ -301,16 +302,20 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
       fd.append('file', file)
       const pwd = pdfPassword.trim() || hit?.vat || ''
       if (pwd) fd.append('password', pwd)
-      if (locale) fd.append('locale_name', locale)
+      fd.append('locale_name', locale)
       if (yearMonth) fd.append('year_month', yearMonth)
       const res = await importStaffBuste(fd)
       const n = Number(res?.imported) || 0
+      const skipped = Number(res?.skipped) || 0
       const imported = Array.isArray(res?.items) ? res.items : []
       if (imported.length) setItems(imported)
-      const societa = res?.societa || hit?.shortLabel || '—'
+      const locLabel = formatStaffLocaleOptionLabel(res?.locale_name || locale) || locale
+      const societa = res?.societa || hit?.shortLabel || ''
       setDetectedSocieta(societa)
       setSuccess(
-        `Importate ${n} buste · società «${societa}» · ${ymLabel(res?.year_month || yearMonth)} — vedi tabella sotto`,
+        `Importate ${n} buste per «${locLabel}»${societa ? ` (${societa})` : ''}` +
+          (skipped ? ` · escluse ${skipped} di altre sedi` : '') +
+          ` · ${ymLabel(res?.year_month || yearMonth)}`,
       )
       setPreviewRows([])
       if (importFileRef.current) importFileRef.current.value = ''
@@ -388,11 +393,11 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
         </h2>
         <p className="muted stipendi-edit-hint">
           {isBuste
-            ? `Mese: ${ymLabel(yearMonth)}. Colonna Società dal PDF (PG0218 = Mediazione, PG0216 = Via Lattea).`
+            ? `Locale Accedi: ${formatStaffLocaleOptionLabel(locale) || '—'} · mese ${ymLabel(yearMonth)}. Dal PDF Mediazione restano solo i dipendenti di questo locale (indirizzo Abba/Zanardelli + pack stazione operativa).`
             : `Locale: ${formatStaffLocaleOptionLabel(locale) || '—'} · Compila i campi, scegli il PDF e premi Carica.`}
         </p>
 
-        {!isBuste && !locale ? (
+        {!locale ? (
           <div className="alert alert-warning">Apri il locale con Accedi nel banner sopra per caricare e vedere i documenti.</div>
         ) : null}
         {error ? <div className="alert alert-danger">{error}</div> : null}
@@ -423,13 +428,13 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
         {isBuste && busteMode === 'extract' ? (
           <div className="stipendi-docs-form">
             <p className="muted" style={{ marginTop: 0 }}>
-              Le buste finiscono nella <strong>tabella sotto</strong> per il mese {ymLabel(yearMonth)}. Società dal nome
-              file: <code>PG02180000826.PDF</code> → Mediazione, <code>PG02160000826.PDF</code> → Via Lattea. Password =
-              P.IVA (si compila in automatico dal file).
+              PDF Mediazione (<code>PG0218…</code>) con entrambe le sedi: restano solo i cedolini di{' '}
+              <strong>{formatStaffLocaleOptionLabel(locale) || locale || 'questo locale'}</strong> (indirizzo Via Abba /
+              Via Zanardelli, oppure nome già nel pack Personale / stazione operativa). Password = P.IVA.
               {detectedSocieta ? (
                 <>
                   {' '}
-                  Rilevata: <strong>{detectedSocieta}</strong>.
+                  Società file: <strong>{detectedSocieta}</strong>.
                 </>
               ) : null}
             </p>
@@ -461,13 +466,13 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
             </div>
             <div className="stipendi-edit-footer" style={{ marginTop: '0.75rem' }}>
               <div className="stipendi-row-actions">
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void handlePreviewExtract()}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !locale} onClick={() => void handlePreviewExtract()}>
                   {busy ? 'Leggo…' : 'Anteprima estrazione'}
                 </button>
-                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void handleImportExtract()}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy || !locale} onClick={() => void handleImportExtract()}>
                   {busy ? 'Importo…' : 'Importa buste'}
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={() => void load()}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading || !locale} onClick={() => void load()}>
                   Aggiorna elenco
                 </button>
               </div>
@@ -638,7 +643,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                     <th>Mese busta</th>
                     <th>Nome</th>
                     <th>Cognome</th>
-                    <th>Società</th>
+                    <th>Locale</th>
                     <th>Ruolo</th>
                   </>
                 ) : (
@@ -680,7 +685,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                         <td>{ymLabel(row.year_month || yearMonth)}</td>
                         <td>{row.first_name || '—'}</td>
                         <td>{row.last_name || '—'}</td>
-                        <td>{row.locale_name || '—'}</td>
+                        <td>{formatStaffLocaleOptionLabel(row.locale_name) || row.locale_name || '—'}</td>
                         <td>{row.ruolo || '—'}</td>
                       </>
                     ) : (
