@@ -44,6 +44,14 @@ const STIPENDI_COLUMNS = [
   { id: 'totale', label: 'Totale busta', width: 12, fluid: true, numeric: true },
 ]
 
+/** Fogli come in Report personale: un click apre una sola sezione. */
+const STIPENDI_SHEETS = [
+  { id: 'stipendi', label: 'STIPENDI' },
+  { id: 'contratto', label: 'CONTRATTI' },
+  { id: 'busta_paga', label: 'BUSTE' },
+  { id: 'documento_personale', label: 'DOCUMENTI' },
+]
+
 function eur(n) {
   const v = Number(n) || 0
   return v.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })
@@ -160,6 +168,12 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [activeSheet, setActiveSheet] = useState('stipendi')
+
+  const activeSheetMeta = useMemo(
+    () => STIPENDI_SHEETS.find((s) => s.id === activeSheet) || STIPENDI_SHEETS[0],
+    [activeSheet],
+  )
 
   const totals = useMemo(() => {
     const busta = lines.reduce((a, r) => a + (Number(r.busta) || 0), 0)
@@ -550,8 +564,8 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           <h1>Stipendi</h1>
           <p className="staff-page-lead" style={{ marginTop: '0.35rem' }}>
             {operatorMode
-              ? 'Archivio buste paga della sede di questa postazione operativa.'
-              : 'Scegli società/locale dal menu (come in Personale): buste, contratti e documenti sono divisi per sede.'}
+              ? 'Archivio buste paga della sede di questa postazione operativa. Usa i fogli in basso come nel Report.'
+              : 'Come nel Report personale: apri il locale, poi scegli il foglio (STIPENDI, CONTRATTI, BUSTE, DOCUMENTI) — una sola sezione alla volta.'}
           </p>
         </div>
       </div>
@@ -563,35 +577,49 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
-      <section className="card pagamenti-workbook-card stipendi-toolbar-card">
-        <div className="stipendi-toolbar">
-          <label className="stipendi-month-field">
-            <span className="muted">Mese</span>
-            <input
-              type="month"
-              className="form-control"
-              value={yearMonth}
-              onChange={(e) => setYearMonth(e.target.value)}
-            />
-            <strong>{ymLabel(yearMonth)}</strong>
-          </label>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={handleNewMonth}>
-            Nuovo da dipendenti
-          </button>
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || loading} onClick={handleSave}>
-            {busy ? 'Salvo…' : activeId ? 'Aggiorna mese' : 'Salva mese'}
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={handleExcel}>
-            Scarica Excel
-          </button>
-          {activeId ? (
-            <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={handleDelete}>
-              Elimina archivio
-            </button>
-          ) : null}
+      <section className="card pagamenti-workbook-card stipendi-workbook-card">
+        <div className="pagamenti-workbook-toolbar">
+          <div className="pagamenti-workbook-toolbar-left">
+            <span className="pagamenti-workbook-title">Stipendi</span>
+            <span className="pagamenti-workbook-sheet-label">Foglio: {activeSheetMeta.label}</span>
+            {documentsLocale ? (
+              <span className="pagamenti-workbook-updated">{documentsLocale}</span>
+            ) : null}
+          </div>
+          <div className="pagamenti-workbook-actions staff-report-period-actions">
+            <label className="staff-report-period-field stipendi-month-field">
+              <span>Mese</span>
+              <input
+                type="month"
+                className="form-control form-control-sm"
+                value={yearMonth}
+                onChange={(e) => setYearMonth(e.target.value)}
+              />
+            </label>
+            <strong className="stipendi-month-label">{ymLabel(yearMonth)}</strong>
+            {activeSheet === 'stipendi' ? (
+              <>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={handleNewMonth}>
+                  Nuovo da dipendenti
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy || loading} onClick={handleSave}>
+                  {busy ? 'Salvo…' : activeId ? 'Aggiorna mese' : 'Salva mese'}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={handleExcel}>
+                  Download Excel
+                </button>
+                {activeId ? (
+                  <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={handleDelete}>
+                    Elimina archivio
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         </div>
-        {archives.length > 0 && (
-          <div className="pagamenti-sheet-tabs stipendi-month-tabs">
+
+        {archives.length > 0 && activeSheet === 'stipendi' ? (
+          <div className="pagamenti-sheet-tabs stipendi-month-tabs" style={{ marginBottom: '0.75rem' }}>
             {archives.map((a) => (
               <button
                 key={a.id}
@@ -603,199 +631,214 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
               </button>
             ))}
           </div>
+        ) : null}
+
+        {activeSheet === 'stipendi' ? (
+          loading ? (
+            <AnalisiLoadingBar active label="Caricamento stipendi" variant="subtle" />
+          ) : (
+            <>
+              <div className="stipendi-edit-card stipendi-edit-card--nested">
+                <h2 className="stipendi-section-title">Compila voci</h2>
+                <p className="muted stipendi-edit-hint">
+                  {editIndex !== null
+                    ? `Modifica riga ${editIndex + 1} (${draft.name || '—'}). Premi Aggiorna, poi vedi il foglio sotto.`
+                    : 'Compila e premi Aggiungi. Seleziona una riga nel foglio per Modifica o Elimina.'}
+                </p>
+                <div className="stipendi-edit-row stipendi-draft-row">
+                  <input
+                    className="form-control stipendi-edit-name"
+                    value={draft.name}
+                    onChange={(e) => updateDraft('name', e.target.value)}
+                    placeholder="Nominativo"
+                  />
+                  <label className="stipendi-edit-field">
+                    <span>Busta</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.busta)}
+                      onChange={(e) => updateDraft('busta', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <label className="stipendi-edit-field">
+                    <span>Fuori</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.fuori)}
+                      onChange={(e) => updateDraft('fuori', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <label className="stipendi-edit-field">
+                    <span>TFR attuale</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.tfr_attuale)}
+                      onChange={(e) => updateDraft('tfr_attuale', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <label className="stipendi-edit-field">
+                    <span>Acconto TFR (−)</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.acconto_tfr)}
+                      onChange={(e) => updateDraft('acconto_tfr', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <div className="stipendi-edit-field stipendi-nuovo-tfr" title="TFR attuale − Acconto">
+                    <span>Nuovo TFR</span>
+                    <strong>{eur(lineNuovoTfr(draft))}</strong>
+                  </div>
+                  <label className="stipendi-edit-field">
+                    <span>Anticipato/sottratto</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.tfr_anticipato)}
+                      onChange={(e) => updateDraft('tfr_anticipato', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <div className="stipendi-edit-total" title="Busta + Fuori − Acconto TFR">
+                    {eur(lineTotale(draft))}
+                  </div>
+                </div>
+
+                <div className="stipendi-edit-footer">
+                  <div className="stipendi-row-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={handleNuovaRiga}>
+                      + riga
+                    </button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleAggiungi}>
+                      {editIndex !== null ? 'Aggiorna' : 'Aggiungi'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleModifica}
+                      disabled={editIndex === null && selectedIndex === null}
+                    >
+                      Modifica
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={handleEliminaRiga}
+                      disabled={editIndex === null && selectedIndex === null}
+                    >
+                      Elimina
+                    </button>
+                  </div>
+                  <div className="stipendi-edit-totals">
+                    <span>Busta {eur(totals.busta)}</span>
+                    <span>Acconti (−) {eur(totals.tfr)}</span>
+                    <span>Fuori {eur(totals.fuori)}</span>
+                    <span>TFR att. {eur(totals.tfrAttuale)}</span>
+                    <span>Nuovo TFR {eur(totals.nuovoTfr)}</span>
+                    <span>Anticip. {eur(totals.tfrAnticipato)}</span>
+                    <strong>Totale busta {eur(totals.amount)}</strong>
+                  </div>
+                </div>
+
+                <label className="stipendi-notes">
+                  <span className="muted">Note</span>
+                  <input
+                    className="form-control"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Note mese (opzionale)"
+                  />
+                </label>
+              </div>
+
+              <WorkbookGrid
+                title={`Foglio Excel · ${ymLabel(yearMonth)}`}
+                sheetLabel={
+                  selectedIndex !== null && lines[selectedIndex]
+                    ? `${lines.length} nominativi · selezionato: ${lines[selectedIndex].name || '—'}`
+                    : `${lines.length} nominativi · clicca una riga per selezionarla`
+                }
+                columns={STIPENDI_COLUMNS}
+                rows={lines}
+                cellValue={stipendiCellValue}
+                emptyMessage="Nessuna riga. Compila sopra e premi Aggiungi."
+                gridClassName="stipendi-excel-grid"
+                hideToolbar
+                rowKey={(row, idx) => `${row.staff_member_id || row.name}-${idx}`}
+                onRowClick={(_row, idx) => {
+                  setSelectedIndex(idx)
+                  setError('')
+                }}
+                rowClickTitle="Seleziona riga per eliminarla o modificarla"
+                getRowClassName={(_row, idx) =>
+                  [
+                    selectedIndex === idx ? 'stipendi-excel-row-selected' : '',
+                    editIndex === idx ? 'stipendi-excel-row-editing' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
+                }
+                totals={{
+                  busta: totals.busta,
+                  fuori: totals.fuori,
+                  tfr_attuale: totals.tfrAttuale,
+                  acconto_tfr: totals.tfr,
+                  nuovo_tfr: totals.nuovoTfr,
+                  tfr_anticipato: totals.tfrAnticipato,
+                  totale: totals.amount,
+                }}
+                totalsLabel={(colId, t) => {
+                  if (colId === 'name') return 'TOTALI'
+                  if (colId === 'busta') return eur(t?.busta)
+                  if (colId === 'fuori') return eur(t?.fuori)
+                  if (colId === 'tfr_attuale') return eur(t?.tfr_attuale)
+                  if (colId === 'acconto_tfr') return eur(t?.acconto_tfr)
+                  if (colId === 'nuovo_tfr') return eur(t?.nuovo_tfr)
+                  if (colId === 'tfr_anticipato') return eur(t?.tfr_anticipato)
+                  if (colId === 'totale') return eur(t?.totale)
+                  return ''
+                }}
+              />
+            </>
+          )
+        ) : (
+          <StipendiDocumentsPanel
+            localeName={documentsLocale}
+            yearMonth={yearMonth}
+            category={activeSheet}
+          />
         )}
+
+        <div className="pagamenti-sheet-tabs" role="tablist" aria-label="Fogli stipendi">
+          {STIPENDI_SHEETS.map((sheet) => (
+            <div
+              key={sheet.id}
+              className={`pagamenti-sheet-tab-wrap${sheet.id === activeSheet ? ' is-active' : ''}`}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sheet.id === activeSheet}
+                className={`pagamenti-sheet-tab${sheet.id === activeSheet ? ' is-active' : ''}`}
+                onClick={() => {
+                  setActiveSheet(sheet.id)
+                  setError('')
+                  setSuccess('')
+                }}
+              >
+                {sheet.label}
+              </button>
+            </div>
+          ))}
+        </div>
       </section>
-
-      <StipendiDocumentsPanel
-        localeName={documentsLocale}
-        yearMonth={yearMonth}
-      />
-
-      {loading ? (
-        <AnalisiLoadingBar active label="Caricamento stipendi" variant="subtle" />
-      ) : (
-        <>
-          <section className="card pagamenti-workbook-card stipendi-edit-card">
-            <h2 className="stipendi-section-title">Compila voci</h2>
-            <p className="muted stipendi-edit-hint">
-              {editIndex !== null
-                ? `Modifica riga ${editIndex + 1} (${draft.name || '—'}). Premi Aggiorna, poi vedi il foglio Excel sotto.`
-                : 'Compila e premi Aggiungi: i dati compaiono solo nel foglio Excel. Seleziona una riga lì per Modifica o Elimina.'}
-            </p>
-            <div className="stipendi-edit-row stipendi-draft-row">
-              <input
-                className="form-control stipendi-edit-name"
-                value={draft.name}
-                onChange={(e) => updateDraft('name', e.target.value)}
-                placeholder="Nominativo"
-              />
-              <label className="stipendi-edit-field">
-                <span>Busta</span>
-                <input
-                  className="form-control"
-                  inputMode="decimal"
-                  value={moneyDisplay(draft.busta)}
-                  onChange={(e) => updateDraft('busta', e.target.value)}
-                  placeholder="0,00"
-                />
-              </label>
-              <label className="stipendi-edit-field">
-                <span>Fuori</span>
-                <input
-                  className="form-control"
-                  inputMode="decimal"
-                  value={moneyDisplay(draft.fuori)}
-                  onChange={(e) => updateDraft('fuori', e.target.value)}
-                  placeholder="0,00"
-                />
-              </label>
-              <label className="stipendi-edit-field">
-                <span>TFR attuale</span>
-                <input
-                  className="form-control"
-                  inputMode="decimal"
-                  value={moneyDisplay(draft.tfr_attuale)}
-                  onChange={(e) => updateDraft('tfr_attuale', e.target.value)}
-                  placeholder="0,00"
-                />
-              </label>
-              <label className="stipendi-edit-field">
-                <span>Acconto TFR (−)</span>
-                <input
-                  className="form-control"
-                  inputMode="decimal"
-                  value={moneyDisplay(draft.acconto_tfr)}
-                  onChange={(e) => updateDraft('acconto_tfr', e.target.value)}
-                  placeholder="0,00"
-                />
-              </label>
-              <div className="stipendi-edit-field stipendi-nuovo-tfr" title="TFR attuale − Acconto">
-                <span>Nuovo TFR</span>
-                <strong>{eur(lineNuovoTfr(draft))}</strong>
-              </div>
-              <label className="stipendi-edit-field">
-                <span>Anticipato/sottratto</span>
-                <input
-                  className="form-control"
-                  inputMode="decimal"
-                  value={moneyDisplay(draft.tfr_anticipato)}
-                  onChange={(e) => updateDraft('tfr_anticipato', e.target.value)}
-                  placeholder="0,00"
-                />
-              </label>
-              <div className="stipendi-edit-total" title="Busta + Fuori − Acconto TFR">
-                {eur(lineTotale(draft))}
-              </div>
-            </div>
-
-            <div className="stipendi-edit-footer">
-              <div className="stipendi-row-actions">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={handleNuovaRiga}>
-                  + riga
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={handleAggiungi}>
-                  {editIndex !== null ? 'Aggiorna' : 'Aggiungi'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleModifica}
-                  disabled={editIndex === null && selectedIndex === null}
-                >
-                  Modifica
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm"
-                  onClick={handleEliminaRiga}
-                  disabled={editIndex === null && selectedIndex === null}
-                >
-                  Elimina
-                </button>
-              </div>
-              <div className="stipendi-edit-totals">
-                <span>Busta {eur(totals.busta)}</span>
-                <span>Acconti (−) {eur(totals.tfr)}</span>
-                <span>Fuori {eur(totals.fuori)}</span>
-                <span>TFR att. {eur(totals.tfrAttuale)}</span>
-                <span>Nuovo TFR {eur(totals.nuovoTfr)}</span>
-                <span>Anticip. {eur(totals.tfrAnticipato)}</span>
-                <strong>Totale busta {eur(totals.amount)}</strong>
-              </div>
-            </div>
-
-            <label className="stipendi-notes">
-              <span className="muted">Note</span>
-              <input
-                className="form-control"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Note mese (opzionale)"
-              />
-            </label>
-          </section>
-
-          <section className="card pagamenti-workbook-card stipendi-excel-card">
-            <WorkbookGrid
-              title={`Foglio Excel · ${ymLabel(yearMonth)}`}
-              sheetLabel={
-                selectedIndex !== null && lines[selectedIndex]
-                  ? `${lines.length} nominativi · selezionato: ${lines[selectedIndex].name || '—'}`
-                  : `${lines.length} nominativi · clicca una riga per selezionarla`
-              }
-              columns={STIPENDI_COLUMNS}
-              rows={lines}
-              cellValue={stipendiCellValue}
-              emptyMessage="Nessuna riga. Compila sopra e premi Aggiungi."
-              gridClassName="stipendi-excel-grid"
-              rowKey={(row, idx) => `${row.staff_member_id || row.name}-${idx}`}
-              onRowClick={(_row, idx) => {
-                setSelectedIndex(idx)
-                setError('')
-              }}
-              rowClickTitle="Seleziona riga per eliminarla o modificarla"
-              getRowClassName={(_row, idx) =>
-                [
-                  selectedIndex === idx ? 'stipendi-excel-row-selected' : '',
-                  editIndex === idx ? 'stipendi-excel-row-editing' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')
-              }
-              toolbarActions={
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm"
-                  disabled={editIndex === null && selectedIndex === null}
-                  onClick={handleEliminaRiga}
-                >
-                  Elimina riga selezionata
-                </button>
-              }
-              totals={{
-                busta: totals.busta,
-                fuori: totals.fuori,
-                tfr_attuale: totals.tfrAttuale,
-                acconto_tfr: totals.tfr,
-                nuovo_tfr: totals.nuovoTfr,
-                tfr_anticipato: totals.tfrAnticipato,
-                totale: totals.amount,
-              }}
-              totalsLabel={(colId, t) => {
-                if (colId === 'name') return 'TOTALI'
-                if (colId === 'busta') return eur(t?.busta)
-                if (colId === 'fuori') return eur(t?.fuori)
-                if (colId === 'tfr_attuale') return eur(t?.tfr_attuale)
-                if (colId === 'acconto_tfr') return eur(t?.acconto_tfr)
-                if (colId === 'nuovo_tfr') return eur(t?.nuovo_tfr)
-                if (colId === 'tfr_anticipato') return eur(t?.tfr_anticipato)
-                if (colId === 'totale') return eur(t?.totale)
-                return ''
-              }}
-            />
-          </section>
-        </>
-      )}
     </div>
   )
 

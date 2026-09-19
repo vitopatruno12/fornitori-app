@@ -15,11 +15,11 @@ const DOC_TYPES = [
   { id: 'permesso_soggiorno', label: 'Permesso di soggiorno' },
 ]
 
-const TABS = [
-  { id: 'contratto', label: 'Contratto dipendente' },
-  { id: 'busta_paga', label: 'Buste paghe' },
-  { id: 'documento_personale', label: 'Documenti personale' },
-]
+const CATEGORY_LABELS = {
+  contratto: 'Contratto dipendente',
+  busta_paga: 'Buste paghe',
+  documento_personale: 'Documenti personale',
+}
 
 function formatDateIt(iso) {
   if (!iso) return '—'
@@ -68,11 +68,12 @@ const emptyForm = {
 }
 
 /**
- * Pannello documenti sotto il mese stipendi: Contratto / Buste / Documenti personale.
+ * Una sola voce documenti (contratto / buste / documenti), come un foglio del Report.
+ * La scelta della sezione è nei tab esterni di StipendiPage.
  */
-export default function StipendiDocumentsPanel({ localeName, yearMonth }) {
+export default function StipendiDocumentsPanel({ localeName, yearMonth, category }) {
   const locale = String(localeName || '').trim()
-  const [panel, setPanel] = useState('')
+  const panel = String(category || '').trim()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -105,6 +106,11 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth }) {
   }, [panel, locale, yearMonth])
 
   useEffect(() => {
+    setForm(emptyForm)
+    setEditId(null)
+    setError('')
+    setSuccess('')
+    if (fileRef.current) fileRef.current.value = ''
     void load()
   }, [load])
 
@@ -216,208 +222,183 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth }) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
-  const title = useMemo(() => TABS.find((t) => t.id === panel)?.label || '', [panel])
+  const title = useMemo(() => CATEGORY_LABELS[panel] || panel, [panel])
 
-  if (!locale) return null
+  if (!locale || !panel) return null
 
   return (
-    <section className="card pagamenti-workbook-card stipendi-docs-card">
-      <p className="muted" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
-        Società / locale attivo:{' '}
-        <strong>{formatStaffLocaleOptionLabel(locale)}</strong>
-        {' · '}contratti, buste e documenti restano separati per questa sede (stessi locali di Personale).
-      </p>
-      <div className="stipendi-docs-tabs" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`btn btn-sm ${panel === t.id ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => {
-              setPanel((prev) => (prev === t.id ? '' : t.id))
-              resetForm()
-              setError('')
-              setSuccess('')
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div className="stipendi-docs-panel">
+      <div className="pagamenti-workbook-toolbar">
+        <div className="pagamenti-workbook-toolbar-left">
+          <span className="pagamenti-workbook-title">{title}</span>
+          <span className="pagamenti-workbook-sheet-label">
+            {formatStaffLocaleOptionLabel(locale)}
+            {panel === 'busta_paga' ? ` · ${ymLabel(yearMonth)}` : ''}
+          </span>
+        </div>
       </div>
 
-      {!panel ? (
-        <p className="muted" style={{ margin: 0 }}>
-          Scegli Contratto, Buste paghe o Documenti personale per caricare e stampare i PDF.
-        </p>
-      ) : (
-        <>
-          <h2 className="stipendi-section-title" style={{ marginTop: 0 }}>
-            {title}
-            {panel === 'busta_paga' ? ` · ${ymLabel(yearMonth)}` : ''}
-          </h2>
-          {error ? <div className="alert alert-danger">{error}</div> : null}
-          {success ? <div className="alert alert-success">{success}</div> : null}
+      {error ? <div className="alert alert-danger">{error}</div> : null}
+      {success ? <div className="alert alert-success">{success}</div> : null}
 
-          <form className="stipendi-docs-form" onSubmit={handleUpload} style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <form className="stipendi-docs-form" onSubmit={handleUpload} style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label className="form-group" style={{ margin: 0 }}>
+            <span>Nome</span>
+            <input className="form-control" value={form.first_name} onChange={(e) => updateForm('first_name', e.target.value)} />
+          </label>
+          <label className="form-group" style={{ margin: 0 }}>
+            <span>Cognome</span>
+            <input className="form-control" value={form.last_name} onChange={(e) => updateForm('last_name', e.target.value)} />
+          </label>
+          {panel !== 'busta_paga' ? (
+            <>
               <label className="form-group" style={{ margin: 0 }}>
-                <span>Nome</span>
-                <input className="form-control" value={form.first_name} onChange={(e) => updateForm('first_name', e.target.value)} />
+                <span>Data nascita</span>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={form.birth_date}
+                  onChange={(e) => updateForm('birth_date', e.target.value)}
+                />
               </label>
               <label className="form-group" style={{ margin: 0 }}>
-                <span>Cognome</span>
-                <input className="form-control" value={form.last_name} onChange={(e) => updateForm('last_name', e.target.value)} />
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={form.email}
+                  onChange={(e) => updateForm('email', e.target.value)}
+                />
               </label>
-              {panel !== 'busta_paga' ? (
-                <>
-                  <label className="form-group" style={{ margin: 0 }}>
-                    <span>Data nascita</span>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={form.birth_date}
-                      onChange={(e) => updateForm('birth_date', e.target.value)}
-                    />
-                  </label>
-                  <label className="form-group" style={{ margin: 0 }}>
-                    <span>Email</span>
-                    <input
-                      type="email"
-                      className="form-control"
-                      value={form.email}
-                      onChange={(e) => updateForm('email', e.target.value)}
-                    />
-                  </label>
-                  <label className="form-group" style={{ margin: 0 }}>
-                    <span>Telefono</span>
-                    <input className="form-control" value={form.phone} onChange={(e) => updateForm('phone', e.target.value)} />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label className="form-group" style={{ margin: 0 }}>
-                    <span>N. documento</span>
-                    <input
-                      className="form-control"
-                      value={form.document_number}
-                      onChange={(e) => updateForm('document_number', e.target.value)}
-                    />
-                  </label>
-                  <label className="form-group" style={{ margin: 0 }}>
-                    <span>Ruolo</span>
-                    <input className="form-control" value={form.ruolo} onChange={(e) => updateForm('ruolo', e.target.value)} />
-                  </label>
-                </>
-              )}
-              {panel === 'documento_personale' ? (
-                <label className="form-group" style={{ margin: 0 }}>
-                  <span>Tipo documento</span>
-                  <select className="form-control" value={form.doc_type} onChange={(e) => updateForm('doc_type', e.target.value)}>
-                    {DOC_TYPES.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              {!editId ? (
-                <label className="form-group" style={{ margin: 0 }}>
-                  <span>PDF</span>
-                  <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="form-control" />
-                </label>
-              ) : null}
-              <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
-                {busy ? 'Salvo…' : editId ? 'Salva modifiche' : 'Carica documento'}
-              </button>
-              {editId ? (
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={resetForm}>
-                  Annulla
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          {loading ? (
-            <p className="muted">Caricamento…</p>
+              <label className="form-group" style={{ margin: 0 }}>
+                <span>Telefono</span>
+                <input className="form-control" value={form.phone} onChange={(e) => updateForm('phone', e.target.value)} />
+              </label>
+            </>
           ) : (
-            <div className="pagamenti-grid-wrap excel-wrap" style={{ overflowX: 'auto' }}>
-              <table className="app-table excel-table pagamenti-grid">
-                <thead>
-                  <tr>
+            <>
+              <label className="form-group" style={{ margin: 0 }}>
+                <span>N. documento</span>
+                <input
+                  className="form-control"
+                  value={form.document_number}
+                  onChange={(e) => updateForm('document_number', e.target.value)}
+                />
+              </label>
+              <label className="form-group" style={{ margin: 0 }}>
+                <span>Ruolo</span>
+                <input className="form-control" value={form.ruolo} onChange={(e) => updateForm('ruolo', e.target.value)} />
+              </label>
+            </>
+          )}
+          {panel === 'documento_personale' ? (
+            <label className="form-group" style={{ margin: 0 }}>
+              <span>Tipo documento</span>
+              <select className="form-control" value={form.doc_type} onChange={(e) => updateForm('doc_type', e.target.value)}>
+                {DOC_TYPES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {!editId ? (
+            <label className="form-group" style={{ margin: 0 }}>
+              <span>PDF</span>
+              <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="form-control" />
+            </label>
+          ) : null}
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+            {busy ? 'Salvo…' : editId ? 'Salva modifiche' : 'Carica documento'}
+          </button>
+          {editId ? (
+            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={resetForm}>
+              Annulla
+            </button>
+          ) : null}
+        </div>
+      </form>
+
+      {loading ? (
+        <p className="muted">Caricamento…</p>
+      ) : (
+        <div className="pagamenti-grid-wrap excel-wrap" style={{ overflowX: 'auto' }}>
+          <table className="app-table excel-table pagamenti-grid">
+            <thead>
+              <tr>
+                {panel === 'busta_paga' ? (
+                  <>
+                    <th>N. documento</th>
+                    <th>Mese busta</th>
+                    <th>Nome</th>
+                    <th>Cognome</th>
+                    <th>Locale</th>
+                    <th>Ruolo</th>
+                  </>
+                ) : (
+                  <>
+                    <th>Nome</th>
+                    <th>Cognome</th>
+                    <th>Data nascita</th>
+                    <th>Email</th>
+                    <th>Telefono</th>
+                    {panel === 'documento_personale' ? <th>Tipo</th> : null}
+                  </>
+                )}
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    Nessun documento. Carica un PDF.
+                  </td>
+                </tr>
+              ) : (
+                items.map((row) => (
+                  <tr key={row.id}>
                     {panel === 'busta_paga' ? (
                       <>
-                        <th>N. documento</th>
-                        <th>Mese busta</th>
-                        <th>Nome</th>
-                        <th>Cognome</th>
-                        <th>Locale</th>
-                        <th>Ruolo</th>
+                        <td>{row.document_number || '—'}</td>
+                        <td>{ymLabel(row.year_month || yearMonth)}</td>
+                        <td>{row.first_name || '—'}</td>
+                        <td>{row.last_name || '—'}</td>
+                        <td>{row.locale_name || locale}</td>
+                        <td>{row.ruolo || '—'}</td>
                       </>
                     ) : (
                       <>
-                        <th>Nome</th>
-                        <th>Cognome</th>
-                        <th>Data nascita</th>
-                        <th>Email</th>
-                        <th>Telefono</th>
-                        {panel === 'documento_personale' ? <th>Tipo</th> : null}
+                        <td>{row.first_name || '—'}</td>
+                        <td>{row.last_name || '—'}</td>
+                        <td>{formatDateIt(row.birth_date)}</td>
+                        <td>{row.email || '—'}</td>
+                        <td>{row.phone || '—'}</td>
+                        {panel === 'documento_personale' ? <td>{docTypeLabel(row.doc_type)}</td> : null}
                       </>
                     )}
-                    <th>Azioni</th>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPdf(row)}>
+                          Apri PDF
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(row)}>
+                          Modifica
+                        </button>
+                        <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={() => handleDelete(row)}>
+                          Elimina
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="muted">
-                        Nessun documento. Carica un PDF.
-                      </td>
-                    </tr>
-                  ) : (
-                    items.map((row) => (
-                      <tr key={row.id}>
-                        {panel === 'busta_paga' ? (
-                          <>
-                            <td>{row.document_number || '—'}</td>
-                            <td>{ymLabel(row.year_month || yearMonth)}</td>
-                            <td>{row.first_name || '—'}</td>
-                            <td>{row.last_name || '—'}</td>
-                            <td>{row.locale_name || locale}</td>
-                            <td>{row.ruolo || '—'}</td>
-                          </>
-                        ) : (
-                          <>
-                            <td>{row.first_name || '—'}</td>
-                            <td>{row.last_name || '—'}</td>
-                            <td>{formatDateIt(row.birth_date)}</td>
-                            <td>{row.email || '—'}</td>
-                            <td>{row.phone || '—'}</td>
-                            {panel === 'documento_personale' ? <td>{docTypeLabel(row.doc_type)}</td> : null}
-                          </>
-                        )}
-                        <td>
-                          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPdf(row)}>
-                              Apri PDF
-                            </button>
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(row)}>
-                              Modifica
-                            </button>
-                            <button type="button" className="btn btn-outline-danger btn-sm" disabled={busy} onClick={() => handleDelete(row)}>
-                              Elimina
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
-    </section>
+    </div>
   )
 }
