@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, deleteAllSuppliers, parseSupplierInvoiceFile, syncSupplierLocalesFromInvoices } from '../services/suppliersService'
-import { fetchInvoices } from '../services/invoicesService'
-import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
 import { checkAiAnomalies, suggestSupplierFields } from '../services/aiService'
 import GeminiVoiceAssistant from '../components/GeminiVoiceAssistant.jsx'
@@ -32,18 +30,6 @@ import {
   parseContactListFromSupplier,
   parseMerchandiseCategoriesFromSupplier,
 } from '../utils/supplierContactLists.js'
-
-function formatEuro(n) {
-  if (n == null || Number.isNaN(Number(n))) return '–'
-  return `€ ${Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-function formatDateTime(value) {
-  if (!value) return '–'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '–'
-  return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
 
 async function copyToClipboard(text) {
   const t = String(text || '')
@@ -94,9 +80,7 @@ export default function SuppliersPage() {
   const [deletingAll, setDeletingAll] = useState(false)
   const [search, setSearch] = useState('')
   const [drawerSupplier, setDrawerSupplier] = useState(null)
-  const [drawerTab, setDrawerTab] = useState('doc')
-  const [drawerInvoices, setDrawerInvoices] = useState([])
-  const [drawerDeliveries, setDrawerDeliveries] = useState([])
+  const [drawerTab, setDrawerTab] = useState('anagrafica')
   const [drawerPrices, setDrawerPrices] = useState([])
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [aiSupplierText, setAiSupplierText] = useState('')
@@ -322,21 +306,11 @@ export default function SuppliersPage() {
 
   async function openSupplierDrawer(s) {
     setDrawerSupplier(s)
-    setDrawerTab('doc')
+    setDrawerTab('anagrafica')
     setDrawerLoading(true)
-    setDrawerInvoices([])
-    setDrawerDeliveries([])
     setDrawerPrices([])
     try {
-      const to = new Date().toISOString().slice(0, 10)
-      const from = new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10)
-      const [inv, del, price] = await Promise.all([
-        fetchInvoices({ supplier_id: s.id }),
-        fetchDeliveries({ supplier_id: s.id, date_from: from, date_to: to }),
-        fetchPriceList(s.id),
-      ])
-      setDrawerInvoices(inv || [])
-      setDrawerDeliveries(del || [])
+      const price = await fetchPriceList(s.id)
       setDrawerPrices(price || [])
     } catch {
       // noop
@@ -1089,55 +1063,24 @@ export default function SuppliersPage() {
             </div>
             <div className="ui-drawer-body">
               <div className="ui-tabs">
-                <button type="button" className={`ui-tab ${drawerTab === 'doc' ? 'active' : ''}`} onClick={() => setDrawerTab('doc')}>Documenti</button>
+                <button type="button" className={`ui-tab ${drawerTab === 'anagrafica' ? 'active' : ''}`} onClick={() => setDrawerTab('anagrafica')}>Anagrafica</button>
                 <button type="button" className={`ui-tab ${drawerTab === 'price' ? 'active' : ''}`} onClick={() => setDrawerTab('price')}>Listino</button>
               </div>
               {drawerLoading && <AnalisiLoadingBar active label="Caricamento dettaglio" variant="subtle" />}
-              {!drawerLoading && drawerTab === 'doc' && (
-                <>
-                  <p style={{ marginTop: 0, fontSize: '0.9rem' }}><strong>Saldo aperto:</strong> {formatEuro(drawerSupplier.saldo_aperto)}</p>
-                  <h3 className="page-subheader" style={{ fontSize: '0.95rem' }}>Fatture recenti</h3>
-                  <div className="table-wrap">
-                    <table className="app-table app-table--compact">
-                      <thead>
-                        <tr><th>N.</th><th>Data</th><th className="text-end">Tot.</th><th>Stato</th></tr>
-                      </thead>
-                      <tbody>
-                        {drawerInvoices.slice(0, 12).map((inv) => (
-                          <tr key={inv.id}>
-                            <td>{inv.invoice_number}</td>
-                            <td>{formatDateTime(inv.invoice_date)}</td>
-                            <td className="text-end amount">{formatEuro(inv.total)}</td>
-                            <td>{inv.payment_status === 'paid' ? 'Pagata' : inv.payment_status === 'partial' ? 'Parz.' : 'Da pagare'}</td>
-                          </tr>
-                        ))}
-                        {drawerInvoices.length === 0 && (
-                          <tr><td colSpan={4} className="empty-state">Nessuna fattura.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <h3 className="page-subheader" style={{ fontSize: '0.95rem', marginTop: '1rem' }}>Consegne recenti</h3>
-                  <div className="table-wrap">
-                    <table className="app-table app-table--compact">
-                      <thead>
-                        <tr><th>Data</th><th>Merce</th><th className="text-end">Tot.</th></tr>
-                      </thead>
-                      <tbody>
-                        {drawerDeliveries.slice(0, 12).map((d) => (
-                          <tr key={d.id}>
-                            <td>{formatDateTime(d.delivery_date)}</td>
-                            <td>{d.product_description || '–'}</td>
-                            <td className="text-end amount">{formatEuro(d.total)}</td>
-                          </tr>
-                        ))}
-                        {drawerDeliveries.length === 0 && (
-                          <tr><td colSpan={3} className="empty-state">Nessuna consegna nel periodo.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
+              {!drawerLoading && drawerTab === 'anagrafica' && (
+                <dl className="fatture-note" style={{ margin: 0, display: 'grid', gap: '0.35rem' }}>
+                  <div><strong>Email:</strong> {drawerSupplier.email || '–'}</div>
+                  <div><strong>Telefono:</strong> {drawerSupplier.phone || '–'}</div>
+                  <div><strong>Referente:</strong> {drawerSupplier.contact_person || '–'}</div>
+                  <div><strong>Indirizzo:</strong> {[drawerSupplier.address, drawerSupplier.city, drawerSupplier.country].filter(Boolean).join(', ') || '–'}</div>
+                  <div><strong>Pagamento:</strong> {drawerSupplier.payment_terms || '–'}</div>
+                  <div><strong>Categoria:</strong> {drawerSupplier.merchandise_category || '–'}</div>
+                  <div><strong>Locali:</strong> {formatSupplierLocales(drawerSupplier.locales, localeOptions) || '–'}</div>
+                  <div><strong>Note:</strong> {drawerSupplier.notes || '–'}</div>
+                  <p style={{ margin: '0.75rem 0 0', fontSize: '0.85rem' }}>
+                    Le fatture di questo fornitore sono in <strong>Fatture ricevute</strong>.
+                  </p>
+                </dl>
               )}
               {!drawerLoading && drawerTab === 'price' && (
                 <div className="table-wrap">

@@ -24,19 +24,8 @@ export const SUPPLIER_WORKBOOK_COLUMNS = [
   { id: 'notes', label: 'Note', width: 180 },
   { id: 'is_active', label: 'Attivo', width: 72 },
   { id: 'is_expired', label: 'Scaduto', width: 72 },
-  { id: 'totale_fatture', label: 'Tot. fatture', numeric: true, width: 120 },
-  { id: 'totale_da_pagare', label: 'Da pagare', numeric: true, width: 110 },
-  { id: 'saldo_aperto', label: 'Saldo aperto', numeric: true, width: 120 },
-  { id: 'ultima_consegna', label: 'Ult. consegna', width: 130 },
-  { id: 'ultima_fattura', label: 'Ult. fattura', width: 130 },
-  { id: 'scadenze_aperte', label: 'Scad. aperte', numeric: true, width: 100 },
   { id: 'created_at', label: 'Inserito il', width: 130 },
 ]
-
-function formatEuro(n) {
-  if (n == null || Number.isNaN(Number(n))) return ''
-  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 function formatDateTime(value) {
   if (!value) return ''
@@ -108,18 +97,6 @@ export function supplierWorkbookCellValue(supplier, column, ctx = {}) {
       return yesNo(supplier.is_active)
     case 'is_expired':
       return yesNo(supplier.is_expired)
-    case 'totale_fatture':
-      return formatEuro(supplier.totale_fatture)
-    case 'totale_da_pagare':
-      return formatEuro(supplier.totale_da_pagare)
-    case 'saldo_aperto':
-      return formatEuro(supplier.saldo_aperto)
-    case 'ultima_consegna':
-      return formatDateTime(supplier.ultima_consegna)
-    case 'ultima_fattura':
-      return formatDateTime(supplier.ultima_fattura)
-    case 'scadenze_aperte':
-      return supplier.scadenze_aperte > 0 ? String(supplier.scadenze_aperte) : ''
     case 'created_at':
       return formatDateTime(supplier.created_at)
     default:
@@ -127,15 +104,11 @@ export function supplierWorkbookCellValue(supplier, column, ctx = {}) {
   }
 }
 
-/** Totali numerici in fondo al foglio. */
+/** Totali numerici in fondo al foglio (solo anagrafica). */
 export function supplierWorkbookTotals(suppliers) {
   const list = Array.isArray(suppliers) ? suppliers : []
   const sum = (key) => list.reduce((acc, s) => acc + (Number(s[key]) || 0), 0)
   return {
-    totale_fatture: formatEuro(sum('totale_fatture')),
-    totale_da_pagare: formatEuro(sum('totale_da_pagare')),
-    saldo_aperto: formatEuro(sum('saldo_aperto')),
-    scadenze_aperte: String(sum('scadenze_aperte')),
     listino_righe: String(sum('listino_righe')),
     count: list.length,
   }
@@ -143,10 +116,6 @@ export function supplierWorkbookTotals(suppliers) {
 
 export function supplierWorkbookTotalsLabel(columnId, totals) {
   if (columnId === 'name') return `TOTALI (${totals.count})`
-  if (columnId === 'totale_fatture') return totals.totale_fatture
-  if (columnId === 'totale_da_pagare') return totals.totale_da_pagare
-  if (columnId === 'saldo_aperto') return totals.saldo_aperto
-  if (columnId === 'scadenze_aperte') return totals.scadenze_aperte
   if (columnId === 'listino_righe') return totals.listino_righe
   return ''
 }
