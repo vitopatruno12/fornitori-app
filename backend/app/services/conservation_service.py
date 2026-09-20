@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 CONSERVATION_ROOT = APP_ROOT / "uploads" / "conservazione"
-CONSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
+try:
+  CONSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
+except OSError as exc:
+  logger.warning("uploads/conservazione non creabile all'import: %s", exc)
 
 _T = TypeVar("_T")
 _table_ready = False
@@ -398,68 +401,159 @@ def create_package(
     if company_id == "non_classificata":
       raise HTTPException(status_code=400, detail="Seleziona una società valida")
 
-    candidates = list_candidates(db, company=company_id, period_from=period_from, period_to=period_to)
-    by_key = {c["selected_key"]: c for c in candidates["items"]}
-    keys = list(document_keys or [])
+    keys = [str(k).strip() for k in (document_keys or []) if str(k).strip()]
     if not keys:
-      keys = list(by_key.keys())
-    selected = [by_key[k] for k in keys if k in by_key]
-    if not selected:
-      raise HTTPException(status_code=400, detail="Nessun documento selezionabile per il periodo")
+      raise HTTPException(status_code=400, detail="Seleziona almeno un documento")
+
+    # Solo i documenti selezionati (niente scan completo del periodo: evita OOM/timeout)
+    selected: List[Dict[str, Any]] = []
+    for key in keys:
+      kind, sep, sid_raw = key.partition(":")
+      if not sep or kind not in {"atlas", "issued"}:
+        raise HTTPException(status_code=400, detail=f"Chiave documento non valida: {key}")
+      try:
+        source_id = int(sid_raw)
+      except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"ID documento non valido: {key}") from exc
+      selected.append(
+        {
+          "source_kind": kind,
+          "source_id": source_id,
+          "invoice_number": None,
+          "invoice_date": None,
+          "supplier_name": None,
+          "total_amount": None,
+          "selected_key": key,
+        }
+      )
 
     start = _parse_day(period_from)
     end = _parse_day(period_to)
+    label_raw = (label or "").strip() or (
+      f"Conservazione {company_id} {(period_from or '…')}→{(period_to or '…')}"
+    )
+    try:
+      CONSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+      raise HTTPException(
+        status_code=500,
+        detail=f"Cartella uploads/conservazione non scrivibile: {exc}",
+      ) from exc
+
     pkg = ConservationPackage(
       company=company_id,
-      label=(label or "").strip()
-      or f"Conservazione {company_id} {(period_from or '…')}→{(period_to or '…')}",
+      label=label_raw[:255],
       period_from=start,
       period_to=end,
       status="bozza",
       document_count=0,
-      note=(note or "").strip() or None,
+      note=((note or "").strip() or None),
     )
     db.add(pkg)
     db.flush()
 
+    errors: List[str] = []
     for doc in selected:
-      _add_document_files(db, pkg, doc)
+      try:
+        _add_document_files(db, pkg, doc)
+      except HTTPException as exc:
+        errors.append(f"{doc.get('selected_key')}: {exc.detail}")
+      except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Conservazione file fallita per %s", doc.get("selected_key"))
+        errors.append(f"{doc.get('selected_key')}: {exc}")
 
     pkg.document_count = (
       db.query(ConservationPackageItem).filter(ConservationPackageItem.package_id == pkg.id).count()
     )
+    if pkg.document_count <= 0:
+      db.rollback()
+      detail = "Nessun file allegabile ai documenti selezionati."
+      if errors:
+        detail = f"{detail} Dettagli: " + "; ".join(errors[:5])
+      raise HTTPException(status_code=400, detail=detail)
+
+    if errors:
+      note_extra = "Avvisi: " + "; ".join(errors[:8])
+      pkg.note = ((pkg.note + " | ") if pkg.note else "") + note_extra
+      if len(pkg.note) > 2000:
+        pkg.note = pkg.note[:2000]
+
     db.commit()
     db.refresh(pkg)
     return get_package(db, pkg.id)
 
-  return _with_conservation_tables(db, _run)
+  try:
+    return _with_conservation_tables(db, _run)
+  except HTTPException:
+    raise
+  except Exception as exc:  # pylint: disable=broad-except
+    logger.exception("create_package fallita")
+    _rollback_db(db)
+    raise HTTPException(status_code=500, detail=f"Creazione pacchetto fallita: {exc}") from exc
 
 
 def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, Any]) -> None:
   kind = doc["source_kind"]
   source_id = int(doc["source_id"])
   pkg_dir = CONSERVATION_ROOT / str(pkg.id) / "docs"
-  pkg_dir.mkdir(parents=True, exist_ok=True)
+  try:
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+  except OSError as exc:
+    raise HTTPException(
+      status_code=500,
+      detail=f"Impossibile creare cartella pacchetto (permessi uploads): {exc}",
+    ) from exc
 
   if kind == "atlas":
     xml_text, pdf_bytes, err = invoice_pdf_service.load_xml_text_for_atlas_invoice(db, source_id)
+    meta_number = doc.get("invoice_number")
+    meta_date = doc.get("invoice_date")
+    meta_supplier = doc.get("supplier_name")
+    meta_total = doc.get("total_amount")
+    # Arricchisci metadati da DB se mancanti (query singola, non list_invoices)
+    if meta_number is None or meta_supplier is None or meta_total is None:
+      try:
+        from ..models.invoice import Invoice
+        from ..models.supplier import Supplier
+
+        row = (
+          db.query(Invoice, Supplier.name)
+          .join(Supplier, Invoice.supplier_id == Supplier.id)
+          .filter(Invoice.id == source_id)
+          .first()
+        )
+        if row:
+          inv, supplier_name = row
+          meta_number = meta_number or inv.invoice_number
+          meta_date = meta_date or _iso_or_none(inv.invoice_date)
+          meta_supplier = meta_supplier or supplier_name
+          if meta_total is None and inv.total is not None:
+            meta_total = float(inv.total)
+      except Exception:  # pylint: disable=broad-except
+        pass
     if xml_text:
       raw = xml_text.encode("utf-8")
       name = f"atlas_{source_id}.xml"
       dest = pkg_dir / name
-      dest.write_bytes(raw)
+      try:
+        dest.write_bytes(raw)
+      except OSError as exc:
+        raise HTTPException(
+          status_code=500,
+          detail=f"Scrittura XML fallita (permessi uploads): {exc}",
+        ) from exc
       db.add(
         ConservationPackageItem(
           package_id=pkg.id,
           source_kind="atlas",
           source_id=source_id,
-          invoice_number=doc.get("invoice_number"),
-          invoice_date=_parse_iso(doc.get("invoice_date")),
-          supplier_name=doc.get("supplier_name"),
-          total_amount=_dec(doc.get("total_amount")),
+          invoice_number=(str(meta_number)[:128] if meta_number else None),
+          invoice_date=_parse_iso(meta_date),
+          supplier_name=(str(meta_supplier)[:512] if meta_supplier else None),
+          total_amount=_dec(meta_total),
           file_role="xml",
           original_filename=name,
-          stored_relpath=_rel(dest),
+          stored_relpath=_rel(dest)[:500],
           content_sha256=_sha256_bytes(raw),
         )
       )
@@ -474,24 +568,33 @@ def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, An
     if pdf_out:
       name = f"atlas_{source_id}.pdf"
       dest = pkg_dir / name
-      dest.write_bytes(pdf_out)
+      try:
+        dest.write_bytes(pdf_out)
+      except OSError as exc:
+        raise HTTPException(
+          status_code=500,
+          detail=f"Scrittura PDF fallita (permessi uploads): {exc}",
+        ) from exc
       db.add(
         ConservationPackageItem(
           package_id=pkg.id,
           source_kind="atlas",
           source_id=source_id,
-          invoice_number=doc.get("invoice_number"),
-          invoice_date=_parse_iso(doc.get("invoice_date")),
-          supplier_name=doc.get("supplier_name"),
-          total_amount=_dec(doc.get("total_amount")),
+          invoice_number=(str(meta_number)[:128] if meta_number else None),
+          invoice_date=_parse_iso(meta_date),
+          supplier_name=(str(meta_supplier)[:512] if meta_supplier else None),
+          total_amount=_dec(meta_total),
           file_role="pdf",
           original_filename=name,
-          stored_relpath=_rel(dest),
+          stored_relpath=_rel(dest)[:500],
           content_sha256=_sha256_bytes(pdf_out),
         )
       )
     if not xml_text and not pdf_out:
-      logger.warning("Documento atlas %s senza file: %s", source_id, err)
+      raise HTTPException(
+        status_code=400,
+        detail=f"Documento atlas {source_id} senza XML/PDF ({err or 'file assente'})",
+      )
     return
 
   if kind == "issued":
@@ -503,27 +606,43 @@ def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, An
         role = "other"
       if role == "image":
         role = "other"
-      name = f"issued_{source_id}_{path.name}"
+      safe_base = (path.name or f"file_{source_id}")[-180:]
+      name = f"issued_{source_id}_{safe_base}"
       dest = pkg_dir / name
-      dest.write_bytes(raw)
+      try:
+        dest.write_bytes(raw)
+      except OSError as exc:
+        raise HTTPException(
+          status_code=500,
+          detail=f"Scrittura issued fallita (permessi uploads): {exc}",
+        ) from exc
+      orig_name = (row.original_filename or path.name or name)[:255]
       db.add(
         ConservationPackageItem(
           package_id=pkg.id,
           source_kind="issued",
           source_id=source_id,
-          invoice_number=row.invoice_number or row.original_filename,
+          invoice_number=(row.invoice_number or row.original_filename or "")[:128] or None,
           invoice_date=row.invoice_date or row.created_at,
-          supplier_name=row.customer_name or "Cliente",
-          customer_vat=row.customer_vat,
+          supplier_name=(row.customer_name or "Cliente")[:512],
+          customer_vat=(row.customer_vat or None),
           total_amount=row.total_amount,
           file_role="xml" if role == "xml" else ("pdf" if role == "pdf" else "other"),
-          original_filename=row.original_filename or path.name,
-          stored_relpath=_rel(dest),
+          original_filename=orig_name,
+          stored_relpath=_rel(dest)[:500],
           content_sha256=_sha256_bytes(raw),
         )
       )
     except HTTPException:
-      logger.warning("Issued %s non disponibile per conservazione", source_id)
+      raise
+    except Exception as exc:  # pylint: disable=broad-except
+      raise HTTPException(
+        status_code=400,
+        detail=f"Issued {source_id} non disponibile: {exc}",
+      ) from exc
+    return
+
+  raise HTTPException(status_code=400, detail=f"Tipo documento non supportato: {kind}")
 
 
 def _parse_iso(raw: Any) -> Optional[datetime]:

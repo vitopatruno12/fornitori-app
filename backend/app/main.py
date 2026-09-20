@@ -277,7 +277,13 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
 async def _generic_error_handler(request: Request, exc: Exception):
     """Catchall: assicura JSON + header CORS anche su eccezioni non previste."""
     logger.exception("Errore non gestito su %s", request.url.path)
-    payload = {"detail": "Errore interno.", "error": "internal_error"}
+    path = request.url.path or ""
+    # Conservazione: messaggio utile in UI (senza DEBUG_ERRORS) per diagnosi create/build
+    if "/conservazione" in path:
+        detail = f"Errore interno: {type(exc).__name__}: {exc}"
+    else:
+        detail = "Errore interno."
+    payload = {"detail": detail, "error": "internal_error"}
     if EXPOSE_ERROR_DETAILS:
         payload["debug"] = f"{type(exc).__name__}: {exc}"
     return JSONResponse(status_code=500, content=payload)
