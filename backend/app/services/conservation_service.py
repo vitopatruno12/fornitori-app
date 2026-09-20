@@ -462,6 +462,8 @@ def create_package(
         logger.exception("Conservazione file fallita per %s", doc.get("selected_key"))
         errors.append(f"{doc.get('selected_key')}: {exc}")
 
+    # SessionLocal ha autoflush=False: senza flush il count non vede gli item appena addati
+    db.flush()
     pkg.document_count = (
       db.query(ConservationPackageItem).filter(ConservationPackageItem.package_id == pkg.id).count()
     )
