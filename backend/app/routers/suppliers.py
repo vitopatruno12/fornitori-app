@@ -23,6 +23,12 @@ async def parse_supplier_invoice(file: UploadFile = File(...)):
   return await parse_supplier_invoice_upload(file)
 
 
+@router.post("/sync-locales-from-invoices")
+def sync_supplier_locales_from_invoices(db: Session = Depends(get_db)):
+  """Assegna locali ai fornitori in base alle fatture ricevute (società cessionario)."""
+  return supplier_service.sync_locales_from_received_invoices(db)
+
+
 @router.get("/{supplier_id}", response_model=supplier_schema.SupplierRead)
 def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
   supplier = supplier_service.get_supplier(db, supplier_id)

@@ -19,8 +19,10 @@ from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice, Inco
 from ..models.invoice import Invoice
 from ..models.invoice_row import InvoiceRow
 from ..models.supplier import Supplier
+from ..constants.sdi_companies import pick_company
 from .invoice_parser import InvoiceParser
 from .invoice_service import sync_invoice_paid_flag
+from .supplier_service import attach_locales_from_company
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "electronic_invoices"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,12 +86,17 @@ class InvoiceImportService:
     if total is None:
       total = taxable + vat_amt
 
-    # 4. supplier (cerca per P.IVA; crea se assente)
+    # 4. supplier (cerca per P.IVA; crea se assente) + locali da società cessionario
     supplier, supplier_created = self.find_or_create_supplier(
       vat=supplier_data.get("vat"),
       name=supplier_data.get("name"),
       fiscal_code=supplier_data.get("fiscal_code"),
     )
+    company_id = pick_company(
+      receiver_vat=customer_data.get("vat"),
+      seller_vat=supplier_data.get("vat"),
+    )
+    attach_locales_from_company(supplier, company_id)
 
     # 5. ElectronicInvoice
     electronic = ElectronicInvoice(

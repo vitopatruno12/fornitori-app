@@ -2,7 +2,7 @@
 
 import re
 
-PRIMA_NOTA_ACTIVITIES = ("risacca", "via_lattea", "via_abba", "via_zanardelli")
+PRIMA_NOTA_ACTIVITIES = ("risacca", "via_lattea", "via_abba", "via_zanardelli", "pg")
 DEFAULT_PRIMA_NOTA_ACTIVITY = "risacca"
 LEGACY_ACTIVITY_ALIASES = {"mediazione": "via_abba"}
 ACTIVITY_SLUG_PATTERN = re.compile(r"^[a-z0-9_]{1,32}$")

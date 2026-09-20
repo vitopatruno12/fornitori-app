@@ -264,6 +264,24 @@ def company_label(company_id: str) -> str:
   return SDI_COMPANY_LABELS.get(cid, cid)
 
 
+# Società fatture → slug locali (suppliers.locales / Prima Nota)
+COMPANY_TO_LOCALES: Dict[str, tuple[str, ...]] = {
+  "mediazione_a": ("via_abba",),
+  "mediazione_z": ("via_zanardelli",),
+  "via_lattea": ("via_lattea",),
+  "risacca": ("risacca",),
+  "pg": ("pg",),
+}
+
+
+def company_locale_slugs(company_id: Optional[str]) -> List[str]:
+  """Slug locali da associare al fornitore in base alla società della fattura ricevuta."""
+  cid = normalize_company_section(company_id)
+  if cid == "non_classificata":
+    return []
+  return list(COMPANY_TO_LOCALES.get(cid, ()))
+
+
 def list_companies() -> List[Dict[str, Any]]:
   ade = _ade_profile_pivas()
   rows: List[Dict[str, Any]] = []

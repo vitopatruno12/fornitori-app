@@ -4,6 +4,7 @@ export const DEFAULT_PRIMA_NOTA_LOCALES = [
   { id: 'via_lattea', label: 'La Via Lattea Registro', builtin: true },
   { id: 'via_abba', label: 'Mediazione Via Abba', builtin: true },
   { id: 'via_zanardelli', label: 'Mediazione Via Zanardelli', builtin: true },
+  { id: 'pg', label: 'Gazza Ladra (PG)', builtin: true },
 ]
 
 export const DEFAULT_PRIMA_NOTA_ACTIVITY = 'risacca'

@@ -50,3 +50,8 @@ export async function deleteAllSuppliers() {
   return apiFetch('/suppliers/all', { method: 'DELETE' })
 }
 
+/** Assegna locali ai fornitori dalle fatture ricevute (società cessionario). */
+export async function syncSupplierLocalesFromInvoices() {
+  return apiFetch('/suppliers/sync-locales-from-invoices', { method: 'POST' })
+}
+

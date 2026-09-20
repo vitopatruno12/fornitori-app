@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, cast, or_
 from sqlalchemy.types import Numeric
 from sqlalchemy.orm import Session
 
+from ..constants.sdi_companies import company_locale_slugs
 from ..models.cash_entry import CashEntry
 from ..models.delivery import Delivery
 from ..models.delivery_document import DeliveryDocument
@@ -13,7 +14,83 @@ from ..models.supplier import Supplier
 from ..models.supplier_order import SupplierOrder, SupplierOrderItem
 from ..models.supplier_price_list import SupplierPriceList
 from ..schemas import supplier as supplier_schema
-from ..schemas.supplier import SupplierRead, SupplierWithStats
+from ..schemas.supplier import SupplierRead, SupplierWithStats, normalize_supplier_locales
+from . import invoice_service
+
+
+def merge_supplier_locales(supplier: Supplier, slugs: List[str]) -> bool:
+  """Aggiunge slug locali al fornitore (union). True se ha cambiato qualcosa."""
+  if not supplier or not slugs:
+    return False
+  existing = [
+    p.strip().lower()
+    for p in str(supplier.locales or "").split(",")
+    if p.strip()
+  ]
+  changed = False
+  for slug in slugs:
+    s = str(slug or "").strip().lower()
+    if s and s not in existing:
+      existing.append(s)
+      changed = True
+  if not changed:
+    return False
+  supplier.locales = normalize_supplier_locales(",".join(existing))
+  return True
+
+
+def attach_locales_from_company(supplier: Supplier, company_id: Optional[str]) -> bool:
+  return merge_supplier_locales(supplier, company_locale_slugs(company_id))
+
+
+def sync_locales_from_received_invoices(db: Session) -> Dict[str, Any]:
+  """
+  Dalle fatture ricevute Atlas: assegna ai fornitori i locali della società
+  che ha ricevuto la fattura (union; non rimuove associazioni manuali).
+  """
+  invoices = invoice_service.list_invoices(db, include_ignored=False)
+  by_supplier: Dict[int, set[str]] = {}
+  invoice_links = 0
+  for inv in invoices:
+    sid = int(getattr(inv, "supplier_id", 0) or 0)
+    company = getattr(inv, "company", None)
+    if not sid:
+      continue
+    slugs = company_locale_slugs(company)
+    if not slugs:
+      continue
+    invoice_links += 1
+    by_supplier.setdefault(sid, set()).update(slugs)
+
+  suppliers_updated = 0
+  locales_added = 0
+  for sid, slugs in by_supplier.items():
+    supplier = get_supplier(db, sid)
+    if not supplier:
+      continue
+    before = set(
+      p.strip().lower()
+      for p in str(supplier.locales or "").split(",")
+      if p.strip()
+    )
+    if merge_supplier_locales(supplier, sorted(slugs)):
+      suppliers_updated += 1
+      after = set(
+        p.strip().lower()
+        for p in str(supplier.locales or "").split(",")
+        if p.strip()
+      )
+      locales_added += max(0, len(after) - len(before))
+
+  if suppliers_updated:
+    db.commit()
+  return {
+    "ok": True,
+    "invoices_with_company": invoice_links,
+    "suppliers_touched": len(by_supplier),
+    "suppliers_updated": suppliers_updated,
+    "locales_added": locales_added,
+  }
 
 
 def list_suppliers(db: Session) -> List[Supplier]:

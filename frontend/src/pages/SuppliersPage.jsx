@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, deleteAllSuppliers, parseSupplierInvoiceFile } from '../services/suppliersService'
+import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, deleteAllSuppliers, parseSupplierInvoiceFile, syncSupplierLocalesFromInvoices } from '../services/suppliersService'
 import { fetchInvoices } from '../services/invoicesService'
 import { fetchDeliveries } from '../services/deliveriesService'
 import { fetchPriceList } from '../services/priceListService'
@@ -109,6 +109,7 @@ export default function SuppliersPage() {
   const invoiceUploadRef = useRef(null)
   const [quickEditSupplierId, setQuickEditSupplierId] = useState('')
   const [filterLocale, setFilterLocale] = useState('')
+  const [syncLocalesBusy, setSyncLocalesBusy] = useState(false)
   const localeOptions = useMemo(() => loadPrimaNotaLocales(), [])
 
   const localeFilterOptions = useMemo(() => {
@@ -117,6 +118,7 @@ export default function SuppliersPage() {
       via_lattea: 'Via Lattea',
       via_abba: 'Mediazione Via Abba',
       via_zanardelli: 'Mediazione Via Zanardelli',
+      pg: 'Gazza Ladra (PG)',
     }
     return (localeOptions || []).map((loc) => ({
       id: loc.id,
@@ -826,6 +828,33 @@ export default function SuppliersPage() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={syncLocalesBusy}
+              title="Assegna a ogni fornitore i locali delle società che hanno ricevuto le sue fatture"
+              onClick={async () => {
+                setSyncLocalesBusy(true)
+                setError('')
+                try {
+                  const res = await syncSupplierLocalesFromInvoices()
+                  await loadSuppliers()
+                  const n = Number(res?.suppliers_updated || 0)
+                  const added = Number(res?.locales_added || 0)
+                  window.alert(
+                    n > 0
+                      ? `Locali aggiornati su ${n} fornitori (${added} associazioni aggiunte dalle fatture ricevute). Usa il filtro locali per vedere solo i tuoi.`
+                      : 'Nessun aggiornamento: i fornitori hanno già i locali dalle fatture, oppure le fatture non sono classificate per società.',
+                  )
+                } catch (e) {
+                  setError(e?.message || 'Sync locali dalle fatture fallito')
+                } finally {
+                  setSyncLocalesBusy(false)
+                }
+              }}
+            >
+              {syncLocalesBusy ? 'Carico locali…' : 'Locali dalle fatture'}
+            </button>
             {filterLocale ? (
               <button
                 type="button"
