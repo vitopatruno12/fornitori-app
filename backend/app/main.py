@@ -258,7 +258,7 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
         detail = (
             "Tabelle conservazione assenti. "
             "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh "
-            "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/aggiorna-tutto.sh"
+            "poi sudo bash deploy/aggiorna-tutto.sh"
         )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (

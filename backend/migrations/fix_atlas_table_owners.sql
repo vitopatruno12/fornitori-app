@@ -14,6 +14,8 @@ BEGIN
     'staff_locale_packs',
     'staff_backups',
     'staff_documents',
+    'conservation_packages',
+    'conservation_package_items',
     'bank_accounts',
     'bank_movements',
     'carriers',
