@@ -557,19 +557,28 @@ def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, An
           content_sha256=_sha256_bytes(raw),
         )
       )
-    pdf_out = pdf_bytes
+    pdf_out = pdf_bytes if isinstance(pdf_bytes, (bytes, bytearray, memoryview)) else None
     if not pdf_out and xml_text:
       try:
         from .fatturapa_pdf import build_fatturapa_pdf_bytes
 
-        pdf_out = build_fatturapa_pdf_bytes(xml_text)
+        built = build_fatturapa_pdf_bytes(xml_text)
+        # API: (pdf_bytes, source) — non usare la tupla intera come bytes
+        if isinstance(built, tuple):
+          pdf_out = built[0] if built else None
+        else:
+          pdf_out = built
       except Exception as exc:  # pylint: disable=broad-except
         logger.warning("PDF generazione atlas %s: %s", source_id, exc)
+    if isinstance(pdf_out, memoryview):
+      pdf_out = pdf_out.tobytes()
+    if not isinstance(pdf_out, (bytes, bytearray)):
+      pdf_out = None
     if pdf_out:
       name = f"atlas_{source_id}.pdf"
       dest = pkg_dir / name
       try:
-        dest.write_bytes(pdf_out)
+        dest.write_bytes(bytes(pdf_out))
       except OSError as exc:
         raise HTTPException(
           status_code=500,
@@ -587,7 +596,7 @@ def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, An
           file_role="pdf",
           original_filename=name,
           stored_relpath=_rel(dest)[:500],
-          content_sha256=_sha256_bytes(pdf_out),
+          content_sha256=_sha256_bytes(bytes(pdf_out)),
         )
       )
     if not xml_text and not pdf_out:
