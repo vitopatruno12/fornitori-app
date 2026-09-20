@@ -8,12 +8,15 @@ import zipfile
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 from fastapi import HTTPException
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import normalize_company_section
+from ..database import engine
 from ..models.conservation import ConservationPackage, ConservationPackageItem
 from ..models.issued_invoice import IssuedInvoice
 from . import invoice_pdf_service, invoice_service, issued_invoice_service
@@ -23,6 +26,15 @@ logger = logging.getLogger(__name__)
 APP_ROOT = Path(__file__).resolve().parent.parent
 CONSERVATION_ROOT = APP_ROOT / "uploads" / "conservazione"
 CONSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
+
+_T = TypeVar("_T")
+_table_ready = False
+
+CONSERVATION_ENSURE_HINT = (
+  "Tabelle conservazione assenti. Sul server esegui: "
+  "sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh "
+  "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/aggiorna-tutto.sh"
+)
 
 STATUSES = (
   "bozza",
@@ -41,6 +53,118 @@ STATUS_TRANSITIONS = {
   "conservato": set(),
   "errore": {"bozza", "pronto"},
 }
+
+
+def _verify_conservation_tables() -> bool:
+  try:
+    with engine.connect() as conn:
+      conn.execute(text("SELECT 1 FROM conservation_packages LIMIT 1"))
+      conn.execute(text("SELECT 1 FROM conservation_package_items LIMIT 1"))
+    return True
+  except SQLAlchemyError as exc:
+    logger.warning("Tabelle conservazione non accessibili: %s", exc)
+    return False
+
+
+def ensure_conservation_schema(*, force: bool = False) -> bool:
+  """Crea conservation_packages / items se mancano (DDL idempotente)."""
+  global _table_ready
+  if _table_ready and not force and _verify_conservation_tables():
+    return True
+  if not force and _verify_conservation_tables():
+    _table_ready = True
+    return True
+  try:
+    with engine.begin() as conn:
+      conn.execute(
+        text(
+          """
+          CREATE TABLE IF NOT EXISTS conservation_packages (
+            id SERIAL PRIMARY KEY,
+            company VARCHAR(64) NOT NULL,
+            label VARCHAR(255),
+            period_from TIMESTAMPTZ,
+            period_to TIMESTAMPTZ,
+            status VARCHAR(32) NOT NULL DEFAULT 'bozza',
+            document_count INTEGER NOT NULL DEFAULT 0,
+            package_hash VARCHAR(64),
+            package_path VARCHAR(500),
+            index_json_path VARCHAR(500),
+            note TEXT,
+            built_at TIMESTAMPTZ,
+            exported_at TIMESTAMPTZ,
+            sent_at TIMESTAMPTZ,
+            conserved_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          )
+          """
+        )
+      )
+      conn.execute(
+        text(
+          """
+          CREATE TABLE IF NOT EXISTS conservation_package_items (
+            id SERIAL PRIMARY KEY,
+            package_id INTEGER NOT NULL REFERENCES conservation_packages(id) ON DELETE CASCADE,
+            source_kind VARCHAR(32) NOT NULL,
+            source_id INTEGER NOT NULL,
+            invoice_number VARCHAR(128),
+            invoice_date TIMESTAMPTZ,
+            supplier_name VARCHAR(512),
+            customer_vat VARCHAR(32),
+            total_amount NUMERIC(12, 2),
+            file_role VARCHAR(16) NOT NULL,
+            original_filename VARCHAR(255),
+            stored_relpath VARCHAR(500),
+            content_sha256 VARCHAR(64),
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          )
+          """
+        )
+      )
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conservation_packages_company ON conservation_packages (company)"))
+      conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conservation_packages_status ON conservation_packages (status)"))
+      conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_conservation_package_items_package ON conservation_package_items (package_id)")
+      )
+      conn.execute(
+        text(
+          "CREATE INDEX IF NOT EXISTS ix_conservation_package_items_source "
+          "ON conservation_package_items (source_kind, source_id)"
+        )
+      )
+    _table_ready = _verify_conservation_tables()
+    return _table_ready
+  except Exception as exc:
+    logger.warning("Creazione tabelle conservazione fallita: %s", exc)
+    return False
+
+
+def _rollback_db(db: Session) -> None:
+  try:
+    db.rollback()
+  except Exception:
+    pass
+
+
+def _with_conservation_tables(db: Session, fn: Callable[[], _T]) -> _T:
+  try:
+    return fn()
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "conservation_package" not in err:
+      raise
+    _rollback_db(db)
+    global _table_ready
+    _table_ready = False
+    if not ensure_conservation_schema(force=True):
+      raise HTTPException(status_code=503, detail=CONSERVATION_ENSURE_HINT) from exc
+    try:
+      return fn()
+    except ProgrammingError as retry_exc:
+      _rollback_db(db)
+      raise HTTPException(status_code=503, detail=CONSERVATION_ENSURE_HINT) from retry_exc
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -230,26 +354,32 @@ def list_candidates(
 
 
 def list_packages(db: Session, *, company: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-  q = db.query(ConservationPackage).order_by(ConservationPackage.id.desc())
-  if company:
-    cid = normalize_company_section(company)
-    if cid != "non_classificata":
-      q = q.filter(ConservationPackage.company == cid)
-  rows = q.limit(max(1, min(limit, 300))).all()
-  return [_package_out(r) for r in rows]
+  def _run() -> List[Dict[str, Any]]:
+    q = db.query(ConservationPackage).order_by(ConservationPackage.id.desc())
+    if company:
+      cid = normalize_company_section(company)
+      if cid != "non_classificata":
+        q = q.filter(ConservationPackage.company == cid)
+    rows = q.limit(max(1, min(limit, 300))).all()
+    return [_package_out(r) for r in rows]
+
+  return _with_conservation_tables(db, _run)
 
 
 def get_package(db: Session, package_id: int) -> Dict[str, Any]:
-  pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
-  if not pkg:
-    raise HTTPException(status_code=404, detail="Pacchetto non trovato")
-  items = (
-    db.query(ConservationPackageItem)
-    .filter(ConservationPackageItem.package_id == package_id)
-    .order_by(ConservationPackageItem.id.asc())
-    .all()
-  )
-  return _package_out(pkg, items)
+  def _run() -> Dict[str, Any]:
+    pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
+    if not pkg:
+      raise HTTPException(status_code=404, detail="Pacchetto non trovato")
+    items = (
+      db.query(ConservationPackageItem)
+      .filter(ConservationPackageItem.package_id == package_id)
+      .order_by(ConservationPackageItem.id.asc())
+      .all()
+    )
+    return _package_out(pkg, items)
+
+  return _with_conservation_tables(db, _run)
 
 
 def create_package(
@@ -262,43 +392,46 @@ def create_package(
   document_keys: Optional[List[str]] = None,
   note: Optional[str] = None,
 ) -> Dict[str, Any]:
-  company_id = normalize_company_section(company)
-  if company_id == "non_classificata":
-    raise HTTPException(status_code=400, detail="Seleziona una società valida")
+  def _run() -> Dict[str, Any]:
+    company_id = normalize_company_section(company)
+    if company_id == "non_classificata":
+      raise HTTPException(status_code=400, detail="Seleziona una società valida")
 
-  candidates = list_candidates(db, company=company_id, period_from=period_from, period_to=period_to)
-  by_key = {c["selected_key"]: c for c in candidates["items"]}
-  keys = list(document_keys or [])
-  if not keys:
-    keys = list(by_key.keys())
-  selected = [by_key[k] for k in keys if k in by_key]
-  if not selected:
-    raise HTTPException(status_code=400, detail="Nessun documento selezionabile per il periodo")
+    candidates = list_candidates(db, company=company_id, period_from=period_from, period_to=period_to)
+    by_key = {c["selected_key"]: c for c in candidates["items"]}
+    keys = list(document_keys or [])
+    if not keys:
+      keys = list(by_key.keys())
+    selected = [by_key[k] for k in keys if k in by_key]
+    if not selected:
+      raise HTTPException(status_code=400, detail="Nessun documento selezionabile per il periodo")
 
-  start = _parse_day(period_from)
-  end = _parse_day(period_to)
-  pkg = ConservationPackage(
-    company=company_id,
-    label=(label or "").strip()
-    or f"Conservazione {company_id} {(period_from or '…')}→{(period_to or '…')}",
-    period_from=start,
-    period_to=end,
-    status="bozza",
-    document_count=0,
-    note=(note or "").strip() or None,
-  )
-  db.add(pkg)
-  db.flush()
+    start = _parse_day(period_from)
+    end = _parse_day(period_to)
+    pkg = ConservationPackage(
+      company=company_id,
+      label=(label or "").strip()
+      or f"Conservazione {company_id} {(period_from or '…')}→{(period_to or '…')}",
+      period_from=start,
+      period_to=end,
+      status="bozza",
+      document_count=0,
+      note=(note or "").strip() or None,
+    )
+    db.add(pkg)
+    db.flush()
 
-  for doc in selected:
-    _add_document_files(db, pkg, doc)
+    for doc in selected:
+      _add_document_files(db, pkg, doc)
 
-  pkg.document_count = (
-    db.query(ConservationPackageItem).filter(ConservationPackageItem.package_id == pkg.id).count()
-  )
-  db.commit()
-  db.refresh(pkg)
-  return get_package(db, pkg.id)
+    pkg.document_count = (
+      db.query(ConservationPackageItem).filter(ConservationPackageItem.package_id == pkg.id).count()
+    )
+    db.commit()
+    db.refresh(pkg)
+    return get_package(db, pkg.id)
+
+  return _with_conservation_tables(db, _run)
 
 
 def _add_document_files(db: Session, pkg: ConservationPackage, doc: Dict[str, Any]) -> None:
@@ -420,6 +553,7 @@ def _rel(path: Path) -> str:
 
 
 def build_package(db: Session, package_id: int) -> Dict[str, Any]:
+  ensure_conservation_schema()
   pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
   if not pkg:
     raise HTTPException(status_code=404, detail="Pacchetto non trovato")
@@ -491,6 +625,7 @@ def build_package(db: Session, package_id: int) -> Dict[str, Any]:
 
 
 def resolve_package_zip(db: Session, package_id: int) -> Tuple[Path, ConservationPackage]:
+  ensure_conservation_schema()
   pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
   if not pkg:
     raise HTTPException(status_code=404, detail="Pacchetto non trovato")
@@ -513,6 +648,7 @@ def set_package_status(
   status: str,
   note: Optional[str] = None,
 ) -> Dict[str, Any]:
+  ensure_conservation_schema()
   pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
   if not pkg:
     raise HTTPException(status_code=404, detail="Pacchetto non trovato")
@@ -542,6 +678,7 @@ def set_package_status(
 
 
 def delete_package(db: Session, package_id: int) -> bool:
+  ensure_conservation_schema()
   pkg = db.query(ConservationPackage).filter(ConservationPackage.id == package_id).first()
   if not pkg:
     return False
