@@ -11,6 +11,7 @@ import {
   printSchedaContabileFornitore,
 } from '../services/schedaContabileFornitore.js'
 import { companyLabel } from '../utils/fattureCompany.js'
+import { printVneTable } from '../utils/vneTableExport.js'
 
 function monthBounds(d = new Date()) {
   const y = d.getFullYear()
@@ -215,6 +216,46 @@ export function SchedaContabileFornitorePage({
                 onChange={(e) => setQuery(e.target.value)}
                 style={{ minWidth: 220, maxWidth: 360 }}
               />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!parties.length || loading}
+                title="Apre la stampa: da lì puoi salvare come PDF"
+                onClick={() => {
+                  try {
+                    const totals = {
+                      ricevute: parties.reduce((a, p) => a + (Number(p.ricevuteCount) || 0), 0),
+                      pagate: parties.reduce((a, p) => a + (Number(p.pagateCount) || 0), 0),
+                      daPagare: parties.reduce((a, p) => a + (Number(p.daPagareCount) || 0), 0),
+                      dare: parties.reduce((a, p) => a + (Number(p.totalDare) || 0), 0),
+                      avere: parties.reduce((a, p) => a + (Number(p.totalAvere) || 0), 0),
+                      saldo: parties.reduce((a, p) => a + (Number(p.finalBalance) || 0), 0),
+                    }
+                    printVneTable({
+                      title: `Elenco fornitori · ${companyName}`,
+                      subtitle: `${periodLabel} · ${parties.length} fornitori`,
+                      columns: LIST_COLUMNS,
+                      rows: parties,
+                      cellValue: listCellValue,
+                      totals,
+                      totalsLabel: (colId, t) => {
+                        if (colId === 'name') return 'TOTALI'
+                        if (colId === 'ricevute') return String(t?.ricevute || 0)
+                        if (colId === 'pagate') return String(t?.pagate || 0)
+                        if (colId === 'daPagare') return String(t?.daPagare || 0)
+                        if (colId === 'dare') return eur(t?.dare)
+                        if (colId === 'avere') return eur(t?.avere)
+                        if (colId === 'saldo') return eur(t?.saldo)
+                        return ''
+                      },
+                    })
+                  } catch (err) {
+                    window.alert(err?.message || 'Stampa non riuscita')
+                  }
+                }}
+              >
+                Stampa elenco PDF
+              </button>
               <span className="fatture-note" style={{ margin: 0 }}>
                 Clic sul nome per aprire la scheda contabile · {periodLabel}
               </span>
