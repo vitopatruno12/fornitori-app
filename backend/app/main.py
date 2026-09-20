@@ -257,8 +257,9 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     elif "conservation_packages" in err_text or "conservation_package_items" in err_text:
         detail = (
             "Tabelle conservazione assenti. "
-            "Sul server: sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh "
-            "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/aggiorna-tutto.sh"
+            "L'API gira da /opt/fornitori-app. Esegui: "
+            "sudo APP_DIR=/opt/fornitori-app bash /opt/fornitori-app/deploy/ensure-conservation-tables.sh "
+            "&& sudo systemctl restart fornitori-api"
         )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (

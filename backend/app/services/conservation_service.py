@@ -31,9 +31,10 @@ _T = TypeVar("_T")
 _table_ready = False
 
 CONSERVATION_ENSURE_HINT = (
-  "Tabelle conservazione assenti. Sul server esegui: "
-  "sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh "
-  "poi sudo APP_DIR=/var/www/app-fornitori/fornitori-app RESTART_API=1 bash deploy/aggiorna-tutto.sh"
+  "Tabelle conservazione assenti. Sul server (API in /opt/fornitori-app): "
+  "sudo -u postgres psql -d fornitori_db -f /opt/fornitori-app/backend/migrations/20260915_conservation_packages.sql "
+  "&& sudo APP_DIR=/opt/fornitori-app bash /opt/fornitori-app/deploy/ensure-conservation-tables.sh "
+  "&& sudo systemctl restart fornitori-api"
 )
 
 STATUSES = (

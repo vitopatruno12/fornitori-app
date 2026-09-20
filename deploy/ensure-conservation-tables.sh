@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Crea tabelle conservazione sostitutiva e assegna ownership all'utente app.
+# Uso:
+#   sudo APP_DIR=/var/www/app-fornitori/fornitori-app bash deploy/ensure-conservation-tables.sh
+#   # oppure (API systemd):
+#   sudo APP_DIR=/opt/fornitori-app bash deploy/ensure-conservation-tables.sh
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/fornitori-app}"
 if [[ ! -d "$APP_DIR/.git" && -d /var/www/app-fornitori/fornitori-app/.git ]]; then
   APP_DIR="/var/www/app-fornitori/fornitori-app"
+fi
+if [[ ! -d "$APP_DIR/.git" && -d /opt/fornitori-app/.git ]]; then
+  APP_DIR="/opt/fornitori-app"
 fi
 
 DB_NAME="${DB_NAME:-fornitori_db}"
@@ -49,8 +56,9 @@ fi
 log() { printf "\033[1;32m==> %s\033[0m\n" "$*"; }
 err() { printf "\033[1;31mERRORE: %s\033[0m\n" "$*" >&2; }
 
-[[ -f "$MIG" ]] || { err "Migrazione assente: $MIG"; exit 1; }
+[[ -f "$MIG" ]] || { err "Migrazione assente: $MIG — esegui git pull su $APP_DIR"; exit 1; }
 
+log "APP_DIR=$APP_DIR"
 log "Applico conservation_packages su $DB_NAME (owner $DB_USER)"
 sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -f "$MIG"
 
@@ -79,4 +87,10 @@ END
 \$\$;
 SQL
 
-log "OK: tabelle conservazione presenti"
+log "Verifica tabelle"
+sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -c \
+  "SELECT 'conservation_packages' AS t, COUNT(*) AS n FROM conservation_packages
+   UNION ALL
+   SELECT 'conservation_package_items', COUNT(*) FROM conservation_package_items;"
+
+log "OK: tabelle conservazione presenti e accessibili"
