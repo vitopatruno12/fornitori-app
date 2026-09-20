@@ -821,13 +821,13 @@ export default function SuppliersPage() {
                       : 'Nessun aggiornamento: i fornitori hanno già i locali dalle fatture, oppure le fatture non sono classificate per società.',
                   )
                 } catch (e) {
-                  setError(e?.message || 'Sync locali dalle fatture fallito')
+                  setError(e?.message || 'Assegnazione locali dai fornitori fallita')
                 } finally {
                   setSyncLocalesBusy(false)
                 }
               }}
             >
-              {syncLocalesBusy ? 'Carico locali…' : 'Locali dalle fatture'}
+              {syncLocalesBusy ? 'Assegno…' : 'Assegna fornitore'}
             </button>
             {filterLocale ? (
               <button
