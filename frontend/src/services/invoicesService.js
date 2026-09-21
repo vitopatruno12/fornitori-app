@@ -164,15 +164,31 @@ export function getIssuedInvoicePdfUrl(id) {
 export async function deleteIssuedInvoice(id) {
   const response = await fetch(apiUrl(`/invoices/emesse/${id}`), { method: 'DELETE' })
   if (!response.ok && response.status !== 204) {
-    let detail = 'Errore eliminazione'
+    let detail = 'Errore eliminazione fattura emessa'
     try {
       const data = await response.json()
       detail = data?.detail || detail
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === 'string' ? detail : 'Errore eliminazione')
+    throw new Error(typeof detail === 'string' ? detail : 'Errore eliminazione fattura emessa')
   }
+}
+
+/** Assegna manualmente una fattura emessa a una società (es. Mediazione Z). */
+export async function assignIssuedInvoiceCompany(id, company) {
+  const params = new URLSearchParams({ company: String(company || '') })
+  return apiFetch(`/invoices/emesse/${id}/assign?${params}`, { method: 'POST' })
+}
+
+/** Riallinea in blocco le emesse già caricate (A/Z da sede/filename). */
+export async function reclassifyIssuedInvoices({ dryRun = false } = {}) {
+  const params = new URLSearchParams()
+  if (dryRun) params.set('dry_run', 'true')
+  const q = params.toString()
+  return apiFetch(q ? `/invoices/emesse/reclassify?${q}` : '/invoices/emesse/reclassify', {
+    method: 'POST',
+  })
 }
 
 export async function fetchIncomingInvoices(limit = 100) {

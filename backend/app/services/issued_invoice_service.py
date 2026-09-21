@@ -287,6 +287,14 @@ def _extract_meta_from_text(text: str) -> Dict[str, Any]:
     out["warnings"].append("Numero fattura non rilevato automaticamente")
   if out.get("total_amount") is None:
     out["warnings"].append("Importo non rilevato automaticamente")
+
+  # Hint sede Mediazione A/Z dal testo (PDF/OCR)
+  low = text.lower()
+  if any(k in low for k in ("zanardelli", "zanandelli", "oberdan", "mani in pasta zanardelli")):
+    out["seller_destination"] = "via zanardelli"
+  elif any(k in low for k in ("via abba", "cesare abba", "mani in pasta abba", "le mani in pasta")):
+    out["seller_destination"] = "via abba"
+
   return out
 
 
@@ -508,11 +516,16 @@ def store_issued_xml_bytes(
     seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
     ade_profile_id=ade_profile_id,
     form_company=company,
+    extra_text=filename,
   )
   if company_id == "non_classificata":
     company_id = normalize_company_section(company)
-  if company_id == "non_classificata":
-    company_id = "mediazione_a"
+  # Non forzare più Mediazione A: lascia non_classificata se A/Z non risolvibile
+  if company_id == "non_classificata" and normalize_company_section(ade_profile_id or "") in {
+    "mediazione_a",
+    "mediazione_z",
+  }:
+    company_id = normalize_company_section(ade_profile_id)
 
   final_number = (str(extracted.get("invoice_number") or "").strip() or None)
   final_amount = extracted.get("total_amount")
@@ -607,19 +620,34 @@ async def upload_issued_invoice(
   extracted = extract_issued_invoice_fields(raw, filename=file.filename or "", file_kind=kind)
   warnings = list(extracted.get("warnings") or [])
 
-  # P.IVA cedente (chi emette) ha priorità sul form UI / profilo AdE
+  # P.IVA cedente (chi emette) ha priorità; per Mediazione A/Z usa anche testo/file + form UI
   auto_company = pick_issued_company(
     seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
     seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
     form_company=company_id,
+    extra_text=" ".join(
+      p
+      for p in (
+        file.filename or "",
+        str(extracted.get("seller_name") or ""),
+        note or "",
+      )
+      if p
+    ),
   )
   if auto_company != "non_classificata" and auto_company != company_id:
     warnings.append(
-      f"Società riallineata da P.IVA cedente: {company_id} → {auto_company}"
+      f"Società riallineata da P.IVA/sede cedente: {company_id} → {auto_company}"
     )
     company_id = auto_company
   elif auto_company != "non_classificata":
     company_id = auto_company
+  # Se resta non classificata ma l'utente ha scelto A o Z, rispetta la selezione
+  if company_id == "non_classificata" and normalize_company_section(company) in {
+    "mediazione_a",
+    "mediazione_z",
+  }:
+    company_id = normalize_company_section(company)
 
   final_number = (invoice_number or "").strip() or (extracted.get("invoice_number") or None)
   if total_amount not in (None, ""):
@@ -795,8 +823,9 @@ def delete_issued_invoice(db: Session, invoice_id: int) -> bool:
 
 def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[str, Any]:
   """
-  Riallinea le fatture emesse già caricate: società = P.IVA cedente nell'XML
-  (Via Lattea / Risacca / PG / Mediazione A-Z). Sposta anche i file se serve.
+  Riallinea le fatture emesse già caricate: società = P.IVA cedente nell'XML/PDF
+  + hint sede (Zanardelli/Abba) da indirizzo, filename e note.
+  Sposta anche i file se serve.
   """
 
   def _run() -> Dict[str, Any]:
@@ -809,29 +838,51 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
 
     for row in rows:
       kind = (row.file_kind or "").lower()
-      if kind not in ("xml", "") and not str(row.file_path or "").lower().endswith((".xml", ".p7m")):
-        skipped += 1
-        continue
+      path = None
+      raw = b""
       try:
         path, _ = resolve_issued_file(db, int(row.id))
         raw = path.read_bytes()
       except Exception:
-        skipped += 1
-        continue
+        # Anche senza file: prova hint da nome/nota (PDF già spostati / mancanti)
+        raw = b""
+        path = None
 
-      extracted = extract_issued_invoice_fields(
-        raw,
-        filename=row.original_filename or path.name,
-        file_kind="xml",
-      )
+      extract_kind = "xml" if kind in ("xml", "") or str(row.file_path or "").lower().endswith((".xml", ".p7m")) else kind or "pdf"
+      if raw:
+        extracted = extract_issued_invoice_fields(
+          raw,
+          filename=row.original_filename or (path.name if path else ""),
+          file_kind=extract_kind,
+        )
+      else:
+        extracted = {"warnings": ["file assente"]}
+        skipped += 1
+
       seller_vat = str(extracted.get("seller_vat") or "").strip() or None
       seller_dest = str(extracted.get("seller_destination") or "").strip() or None
+      extra = " ".join(
+        p
+        for p in (
+          row.original_filename or "",
+          row.file_path or "",
+          row.note or "",
+          row.activity or "",
+          str(extracted.get("seller_name") or ""),
+        )
+        if p
+      )
       old = normalize_company_section(row.company)
+      # Per Mediazione già in A/Z, passa old come form così resta stabile se non c'è hint Z/A
       new = pick_issued_company(
         seller_vat=seller_vat,
         seller_destination=seller_dest,
-        form_company=old,
+        form_company=old if old in {"mediazione_a", "mediazione_z"} else old,
+        extra_text=extra,
       )
+      # Se rimane non_classificata ma era A/Z, non toccare
+      if new == "non_classificata":
+        new = old
       if new == "non_classificata" or new == old:
         unchanged += 1
         by_company[old] = by_company.get(old, 0) + 1
@@ -845,6 +896,7 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
             "seller_vat": seller_vat or "",
             "from": old,
             "to": new,
+            "hint": (seller_dest or extra)[:120],
           }
         )
 
@@ -853,18 +905,18 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
         by_company[new] = by_company.get(new, 0) + 1
         continue
 
-      # Sposta file sotto la cartella società corretta
-      try:
-        new_dir = UPLOAD_ROOT / new
-        new_dir.mkdir(parents=True, exist_ok=True)
-        new_path = new_dir / path.name
-        if new_path.resolve() != path.resolve():
-          if new_path.exists():
-            new_path = new_dir / f"{path.stem}_{uuid.uuid4().hex[:6]}{path.suffix}"
-          path.rename(new_path)
-          row.file_path = str(new_path.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
-      except Exception as exc:
-        logger.warning("reclassify emessa %s: move file failed: %s", row.id, exc)
+      if path is not None:
+        try:
+          new_dir = UPLOAD_ROOT / new
+          new_dir.mkdir(parents=True, exist_ok=True)
+          new_path = new_dir / path.name
+          if new_path.resolve() != path.resolve():
+            if new_path.exists():
+              new_path = new_dir / f"{path.stem}_{uuid.uuid4().hex[:6]}{path.suffix}"
+            path.rename(new_path)
+            row.file_path = str(new_path.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
+        except Exception as exc:
+          logger.warning("reclassify emessa %s: move file failed: %s", row.id, exc)
 
       row.company = new
       if extracted.get("customer_name") and not (row.customer_name or "").strip():
@@ -889,3 +941,37 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
     }
 
   return _with_issued_invoices_table(db, _run)
+
+
+def assign_issued_invoice_company(db: Session, invoice_id: int, company: str) -> Dict[str, Any]:
+  """Assegna manualmente una fattura emessa a Mediazione A/Z (o altra società)."""
+  company_id = normalize_company_section(company)
+  if company_id == "non_classificata":
+    raise HTTPException(status_code=400, detail="Seleziona una società valida (es. Mediazione Z)")
+
+  def _run() -> IssuedInvoice:
+    row = db.query(IssuedInvoice).filter(IssuedInvoice.id == int(invoice_id)).first()
+    if not row:
+      raise HTTPException(status_code=404, detail="Fattura emessa non trovata")
+    old = normalize_company_section(row.company)
+    if old == company_id:
+      return row
+    try:
+      path, _ = resolve_issued_file(db, int(row.id))
+      new_dir = UPLOAD_ROOT / company_id
+      new_dir.mkdir(parents=True, exist_ok=True)
+      new_path = new_dir / path.name
+      if new_path.resolve() != path.resolve():
+        if new_path.exists():
+          new_path = new_dir / f"{path.stem}_{uuid.uuid4().hex[:6]}{path.suffix}"
+        path.rename(new_path)
+        row.file_path = str(new_path.relative_to(UPLOAD_ROOT.parent.parent)).replace("\\", "/")
+    except Exception as exc:
+      logger.warning("assign emessa %s: move file failed: %s", invoice_id, exc)
+    row.company = company_id
+    db.commit()
+    db.refresh(row)
+    return row
+
+  row = _with_issued_invoices_table(db, _run)
+  return _row_out(row, extra={"assigned_company": company_id})

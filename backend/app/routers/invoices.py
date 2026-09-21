@@ -110,9 +110,19 @@ def reclassify_issued_invoices(
 ):
   """
   Riallinea le fatture emesse già in archivio: società da P.IVA cedente
-  (Via Lattea / Risacca / PG / Mediazione), non dal profilo AdE usato in download.
+  + sede Mediazione A/Z (indirizzo/filename), non dal profilo AdE usato in download.
   """
   return issued_invoice_service.reclassify_issued_invoices(db, dry_run=dry_run)
+
+
+@router.post("/emesse/{invoice_id}/assign")
+def assign_issued_invoice_company(
+  invoice_id: int,
+  company: str = Query(..., description="Società destinazione: mediazione_a|mediazione_z|via_lattea|risacca|pg"),
+  db: Session = Depends(get_db),
+):
+  """Assegna manualmente una fattura emessa a una società (es. da Mediazione A → Mediazione Z)."""
+  return issued_invoice_service.assign_issued_invoice_company(db, invoice_id, company)
 
 
 @router.post("/cleanup-misrouted-emesse")

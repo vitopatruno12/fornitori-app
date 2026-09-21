@@ -32,6 +32,8 @@ import {
   getIssuedInvoiceFileUrl,
   getIssuedInvoicePdfUrl,
   deleteIssuedInvoice,
+  assignIssuedInvoiceCompany,
+  reclassifyIssuedInvoices,
 } from '../services/invoicesService'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
@@ -896,6 +898,7 @@ export function FattureEmessePage() {
   const [dateTo, setDateTo] = useState('')
   const [focusIssuedId, setFocusIssuedId] = useState('')
   const [focusIssuedNumber, setFocusIssuedNumber] = useState('')
+  const [reclassifyBusy, setReclassifyBusy] = useState(false)
   const importInputRef = React.useRef(null)
   const focusAppliedRef = React.useRef('')
 
@@ -1023,12 +1026,19 @@ export function FattureEmessePage() {
         `Caricato ${kindLabel[uploadKind] || uploadKind}: ${row?.original_filename || file.name}`,
         num ? `n. ${num}` : null,
         tot != null ? `importo ${eur(tot)}` : null,
+        row?.company && row.company !== companyId
+          ? `spostata in ${companyLabel(row.company)}`
+          : null,
       ].filter(Boolean)
       setImportMsg(bits.join(' · '))
       if (warns.length) {
         setError(warns.join(' · '))
       }
-      await reload()
+      if (row?.company && row.company !== companyId && gestionaleMode) {
+        setCompanyId(row.company)
+      } else {
+        await reload()
+      }
     } catch (e) {
       setError(e?.message || 'Caricamento fallito')
     } finally {
@@ -1047,12 +1057,59 @@ export function FattureEmessePage() {
     }
   }
 
+  async function handleAssignCompany(row, targetCompany) {
+    if (!row?.id || !targetCompany) return
+    try {
+      await assignIssuedInvoiceCompany(row.id, targetCompany)
+      setImportMsg(`Fattura n. ${row.invoice_number || row.id} → ${companyLabel(targetCompany)}`)
+      setError('')
+      if (targetCompany !== companyId) {
+        setItems((prev) => prev.filter((r) => r.id !== row.id))
+      } else {
+        await reload()
+      }
+    } catch (e) {
+      setError(e?.message || 'Assegnazione fallita')
+    }
+  }
+
+  async function handleReclassifyMediazione() {
+    if (
+      !window.confirm(
+        'Riallinea le fatture emesse già caricate: le Mediazione con sede Zanardelli/Abba nel file o nel nome vanno in Mediazione Z o A. Continuare?',
+      )
+    ) {
+      return
+    }
+    setReclassifyBusy(true)
+    setError('')
+    setImportMsg('')
+    try {
+      const res = await reclassifyIssuedInvoices({ dryRun: false })
+      const moved = Number(res?.reclassified || 0)
+      const by = res?.by_company && typeof res.by_company === 'object' ? res.by_company : {}
+      const bits = Object.entries(by)
+        .map(([cid, n]) => `${companyLabel(cid)}: ${n}`)
+        .join(' · ')
+      setImportMsg(
+        moved
+          ? `Separate ${moved} fatture emesse.${bits ? ` ${bits}` : ''}`
+          : 'Nessuna fattura da spostare (già classificate o senza hint A/Z nel file). Usa «Sposta a…» sulle singole righe.',
+      )
+      await reload()
+    } catch (e) {
+      setError(e?.message || 'Riallineamento fallito')
+    } finally {
+      setReclassifyBusy(false)
+    }
+  }
+
   return (
     <FatturePageShell
       title="Fatture emesse"
       lead={
         gestionaleMode
-          ? 'Fatture attive / emesse per società. Scegli PDF, immagine o XML e caricale dal banner.'
+          ? 'Fatture attive / emesse per società. Mediazione A e Z sono separate: scegli la società nel banner o usa «Separa A/Z».'
           : companyId
             ? `Fatture emesse del registro ${companyLabel(companyId)}.`
             : 'Fatture emesse del registro locale.'
@@ -1103,6 +1160,17 @@ export function FattureEmessePage() {
             >
               {importBusy ? 'Caricamento…' : `Carica ${kindLabel[uploadKind] || 'file'}`}
             </button>
+            {gestionaleMode ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={reclassifyBusy || importBusy}
+                onClick={() => void handleReclassifyMediazione()}
+                title="Sposta le emesse Mediazione con hint Zanardelli/Abba sotto Z o A"
+              >
+                {reclassifyBusy ? 'Separazione…' : 'Separa A/Z'}
+              </button>
+            ) : null}
           </div>
           {importMsg ? <p className="fatture-hero-tools-msg">{importMsg}</p> : null}
         </aside>
@@ -1118,8 +1186,8 @@ export function FattureEmessePage() {
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
           <FattureSupplierDateFilters
             supplierInput="search"
-            supplierLabel="Fornitore"
-            supplierPlaceholder="Cerca fornitore o file…"
+            supplierLabel="Cliente"
+            supplierPlaceholder="Cerca cliente o file…"
             supplierValue={nameQuery}
             onSupplierChange={setNameQuery}
             dateFrom={dateFrom}
@@ -1168,6 +1236,13 @@ export function FattureEmessePage() {
             renderActions={(row) => {
               const isXml = String(row.file_kind || '').toLowerCase() === 'xml'
               const openUrl = isXml ? getIssuedInvoicePdfUrl(row.id) : getIssuedInvoiceFileUrl(row.id)
+              const assignItems = gestionaleMode
+                ? FATTURE_COMPANY_ORDER.filter((cid) => cid !== (row.company || companyId)).map((cid) => ({
+                    key: `assign-${cid}`,
+                    label: `Sposta a ${companyLabel(cid)}`,
+                    onClick: () => void handleAssignCompany(row, cid),
+                  }))
+                : []
               return (
                 <FattureActionsMenu
                   primary={
@@ -1191,6 +1266,7 @@ export function FattureEmessePage() {
                           },
                         ]
                       : []),
+                    ...assignItems,
                     {
                       key: 'delete',
                       label: 'Elimina',

@@ -81,7 +81,7 @@ _DEFAULT_ABBA_KEYWORDS = (
   "abba,via abba,cesare abba,mani in pasta abba,le mani in pasta"
 )
 _DEFAULT_ZAN_KEYWORDS = (
-  "zanardelli,via zanardelli,oberdan,guglielmo oberdan,mani in pasta zanardelli"
+  "zanardelli,via zanardelli,oberdan,guglielmo oberdan,mani in pasta zanardelli,zanandelli"
 )
 
 
@@ -349,21 +349,34 @@ def pick_issued_company(
   ade_profile_id: Optional[str] = None,
   seller_destination: Optional[str] = None,
   form_company: Optional[str] = None,
+  extra_text: Optional[str] = None,
 ) -> str:
   """
   Classificazione fatture emesse: P.IVA del cedente (chi emette) decide la società.
   Via Lattea 04886500752 · Risacca 05186540752 · PG 05440050754 · Mediazione 04945600759.
-  Il profilo AdE / form UI è solo fallback se la P.IVA non è mappata.
+  Per Mediazione (stessa P.IVA) lo split A/Z usa indirizzo sede, profilo, testo file o form UI.
   """
-  legacy = normalize_company_section(destination_to_legacy_section(seller_destination))
+  hint_blob = " ".join(
+    p for p in (seller_destination or "", extra_text or "") if str(p).strip()
+  )
+  legacy = normalize_company_section(destination_to_legacy_section(hint_blob))
   pid = (ade_profile_id or "").strip().lower()
   form = normalize_company_section(form_company) if form_company else "non_classificata"
+  profile_mapped = PROFILE_TO_COMPANY.get(pid) if pid in PROFILE_TO_COMPANY else None
+
+  # Hint sede Abba/Zanardelli ha priorità sullo split Mediazione (anche senza P.IVA nel PDF).
+  if legacy in MEDIAZIONE_COMPANY_IDS:
+    if (
+      is_mediazione_vat(seller_vat)
+      or form in MEDIAZIONE_COMPANY_IDS
+      or profile_mapped in MEDIAZIONE_COMPANY_IDS
+      or not normalize_vat(seller_vat)
+    ):
+      return legacy
 
   if is_mediazione_vat(seller_vat):
-    if legacy in MEDIAZIONE_COMPANY_IDS:
-      return legacy
-    if pid in PROFILE_TO_COMPANY:
-      return PROFILE_TO_COMPANY[pid]
+    if profile_mapped in MEDIAZIONE_COMPANY_IDS:
+      return profile_mapped
     if form in MEDIAZIONE_COMPANY_IDS:
       return form
     return "non_classificata"
@@ -372,8 +385,8 @@ def pick_issued_company(
   if by_vat:
     return by_vat
 
-  if pid in PROFILE_TO_COMPANY:
-    return PROFILE_TO_COMPANY[pid]
+  if profile_mapped:
+    return profile_mapped
   if pid in SDI_COMPANY_LABELS:
     return pid
   if form != "non_classificata":
