@@ -438,6 +438,61 @@ function buildFornitoriMastrini(
   }
 }
 
+/** Separa clienti (solo emesse) e fornitori (ricevute + pagamenti) da un mastrino misto. */
+function splitSoggettiMastrini(mixed) {
+  const parties = Array.isArray(mixed?.parties) ? mixed.parties : []
+
+  const project = (party, kinds, type) => {
+    const movements = (party.movements || []).filter((m) => kinds.has(String(m.invoiceKind || '')))
+    if (!movements.length) return null
+    let progressive = 0
+    let totalDare = 0
+    let totalAvere = 0
+    const withBalance = movements.map((m) => {
+      totalDare += toNum(m.dare)
+      totalAvere += toNum(m.avere)
+      progressive += toNum(m.dare) - toNum(m.avere)
+      return { ...m, progressiveBalance: progressive }
+    })
+    return {
+      ...party,
+      type,
+      movements: withBalance,
+      totalDare,
+      totalAvere,
+      finalBalance: progressive,
+      ricevuteCount: movements.filter((m) => m.invoiceKind === 'ricevuta').length,
+      emesseCount: movements.filter((m) => m.invoiceKind === 'emessa').length,
+      pagamentiCount: movements.filter((m) => m.invoiceKind === 'pagamento').length,
+    }
+  }
+
+  const metricsOf = (list) => ({
+    totalParties: list.length,
+    totalDare: list.reduce((acc, p) => acc + toNum(p.totalDare), 0),
+    totalAvere: list.reduce((acc, p) => acc + toNum(p.totalAvere), 0),
+    finalBalance: list.reduce((acc, p) => acc + toNum(p.finalBalance), 0),
+    ricevuteCount: list.reduce((acc, p) => acc + toNum(p.ricevuteCount), 0),
+    emesseCount: list.reduce((acc, p) => acc + toNum(p.emesseCount), 0),
+    pagamentiCount: list.reduce((acc, p) => acc + toNum(p.pagamentiCount), 0),
+  })
+
+  const clientiParties = parties
+    .map((p) => project(p, new Set(['emessa']), 'cliente'))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }))
+
+  const fornitoriParties = parties
+    .map((p) => project(p, new Set(['ricevuta', 'pagamento']), 'fornitore'))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }))
+
+  return {
+    clienti: { parties: clientiParties, metrics: metricsOf(clientiParties) },
+    fornitori: { parties: fornitoriParties, metrics: metricsOf(fornitoriParties) },
+  }
+}
+
 function mapBankMovements(items = [], invoicesById = new Map(), ledgerByAccountId = new Map()) {
   const out = []
   for (const row of items) {
@@ -791,15 +846,17 @@ export async function fetchMastriniData({ dateFrom, dateTo, company } = {}) {
   })
   const ledger = buildLedger(movements, extraLedgerAccounts)
   const partitario = buildPartitario(movements)
-  const fornitori = buildFornitoriMastrini(invoices, issuedInvoices, bankMovements, {
+  const soggettiMist = buildFornitoriMastrini(invoices, issuedInvoices, bankMovements, {
     dateFrom,
     dateTo,
     company: companyId || undefined,
   })
+  const { clienti, fornitori } = splitSoggettiMastrini(soggettiMist)
   return {
     ...ledger,
     accountPlan: ACCOUNT_PLAN,
     partitario,
+    clienti,
     fornitori,
     bankAccounts,
     company: companyId || '',

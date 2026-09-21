@@ -318,19 +318,17 @@ function mastroCellValue(row, col) {
   return ''
 }
 
-const FORNITORI_COLUMNS = [
-  { id: 'name', label: 'Fornitore / soggetto', width: 34, fluid: true, emphasis: true },
-  { id: 'ricevute', label: 'Ricevute', width: 10, fluid: true, numeric: true },
+const CLIENTI_COLUMNS = [
+  { id: 'name', label: 'Cliente', width: 34, fluid: true, emphasis: true },
   { id: 'emesse', label: 'Emesse', width: 10, fluid: true, numeric: true },
   { id: 'dare', label: 'Dare', width: 14, fluid: true, numeric: true },
   { id: 'avere', label: 'Avere', width: 14, fluid: true, numeric: true },
   { id: 'saldo', label: 'Saldo', width: 14, fluid: true, numeric: true },
 ]
 
-function fornitoriCellValue(row, col) {
+function clientiCellValue(row, col) {
   if (!row) return ''
   if (col.id === 'name') return row.name || ''
-  if (col.id === 'ricevute') return String(row.ricevuteCount || 0)
   if (col.id === 'emesse') return String(row.emesseCount || 0)
   if (col.id === 'dare') return eur(row.totalDare)
   if (col.id === 'avere') return eur(row.totalAvere)
@@ -492,7 +490,7 @@ function sortMovementsNewestFirst(movements = []) {
 export default function MastriniContabiliPage() {
   const year = new Date().getFullYear()
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
-  const [viewMode, setViewMode] = useState('fornitori')
+  const [viewMode, setViewMode] = useState('clienti')
   const [dateFrom, setDateFrom] = useState(`${year}-01-01`)
   const [dateTo, setDateTo] = useState(`${year}-12-31`)
   const [category, setCategory] = useState('')
@@ -534,8 +532,8 @@ export default function MastriniContabiliPage() {
       const firstCode = res?.accounts?.[0]?.code
       if (!selectedCode && firstCode) setSelectedCode(firstCode)
       if (!selectedPartyKey && res?.partitario?.parties?.[0]) setSelectedPartyKey(res.partitario.parties[0].key)
-      if (!selectedFornitoreKey && res?.fornitori?.parties?.[0]) {
-        setSelectedFornitoreKey(res.fornitori.parties[0].key)
+      if (!selectedFornitoreKey && res?.clienti?.parties?.[0]) {
+        setSelectedFornitoreKey(res.clienti.parties[0].key)
       }
       return res
     } catch (e) {
@@ -793,8 +791,8 @@ export default function MastriniContabiliPage() {
     [parties, selectedPartyKey],
   )
 
-  const fornitoriParties = useMemo(() => {
-    const rows = Array.isArray(data?.fornitori?.parties) ? data.fornitori.parties : []
+  const clientiParties = useMemo(() => {
+    const rows = Array.isArray(data?.clienti?.parties) ? data.clienti.parties : []
     const q = String(advancedSearch || '').trim().toLowerCase()
     if (!q) return rows
     return rows.filter((p) => {
@@ -811,8 +809,8 @@ export default function MastriniContabiliPage() {
   }, [data, advancedSearch])
 
   const selectedFornitore = useMemo(
-    () => fornitoriParties.find((p) => p.key === selectedFornitoreKey) || fornitoriParties[0] || null,
-    [fornitoriParties, selectedFornitoreKey],
+    () => clientiParties.find((p) => p.key === selectedFornitoreKey) || clientiParties[0] || null,
+    [clientiParties, selectedFornitoreKey],
   )
 
   const fornitoreRows = useMemo(() => {
@@ -862,7 +860,7 @@ export default function MastriniContabiliPage() {
       title="Schede contabili / Mastrini"
       lead={
         companyId
-          ? `Mastrini ${selectedCompanyLabel}: elenco fornitori da fatture ricevute (Dare) ed emesse (Avere). Clic sul nome per aprire la scheda.`
+          ? `Mastrini ${selectedCompanyLabel}: Scheda clienti (fatture emesse). I fornitori sono in Scheda fornitori, per società.`
           : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
       }
       actions={
@@ -900,13 +898,13 @@ export default function MastriniContabiliPage() {
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             type="button"
-            className={`btn btn-sm ${viewMode === 'fornitori' ? 'btn-primary' : 'btn-secondary'}`}
+            className={`btn btn-sm ${viewMode === 'clienti' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => {
-              setViewMode('fornitori')
+              setViewMode('clienti')
               setFornitoreDetailOpen(false)
             }}
           >
-            Fornitori (Dare/Avere)
+            Scheda clienti
           </button>
           <button
             type="button"
@@ -973,24 +971,24 @@ export default function MastriniContabiliPage() {
       </section>
       ) : null}
 
-      {companyId && viewMode === 'fornitori' ? (
+      {companyId && viewMode === 'clienti' ? (
         <>
           <div className="ui-kpi-row">
             <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Soggetti</div>
-              <div className="ui-kpi-card-value">{data?.fornitori?.metrics?.totalParties ?? '—'}</div>
+              <div className="ui-kpi-card-label">Clienti</div>
+              <div className="ui-kpi-card-value">{data?.clienti?.metrics?.totalParties ?? '—'}</div>
             </div>
             <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Dare (ricevute)</div>
-              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.totalDare)}</div>
+              <div className="ui-kpi-card-label">Fatture emesse</div>
+              <div className="ui-kpi-card-value">{data?.clienti?.metrics?.emesseCount ?? '—'}</div>
             </div>
             <div className="ui-kpi-card">
               <div className="ui-kpi-card-label">Avere (emesse)</div>
-              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.totalAvere)}</div>
+              <div className="ui-kpi-card-value">{eur(data?.clienti?.metrics?.totalAvere)}</div>
             </div>
             <div className="ui-kpi-card">
               <div className="ui-kpi-card-label">Saldo</div>
-              <div className="ui-kpi-card-value">{eur(data?.fornitori?.metrics?.finalBalance)}</div>
+              <div className="ui-kpi-card-value">{eur(data?.clienti?.metrics?.finalBalance)}</div>
             </div>
           </div>
 
@@ -1011,12 +1009,12 @@ export default function MastriniContabiliPage() {
                 <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
               </label>
               <label style={{ minWidth: 240 }}>
-                Cerca fornitore
+                Cerca cliente
                 <input
                   className="form-control"
                   value={advancedSearch}
                   onChange={(e) => setAdvancedSearch(e.target.value)}
-                  placeholder="Nome fornitore o n. fattura…"
+                  placeholder="Nome cliente o n. fattura…"
                 />
               </label>
               <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -1024,21 +1022,22 @@ export default function MastriniContabiliPage() {
               </button>
             </form>
             <p className="fatture-note" style={{ marginBottom: 0 }}>
-              Ricevute → Dare · Emesse / pagamenti c/c → Avere. Conti banca: Popolare Puglia (oggi condivisa); Otranto e
-              Sanpaolo si associano dopo. Clic sul nome per aprire il mastrino.
+              Solo clienti con fatture emesse. I fornitori (ricevute / pagamenti) sono in{' '}
+              <Link to="/amministrazione/mastrini/scheda-fornitori">Scheda fornitori</Link>, sotto la società
+              selezionata. Clic sul nome per aprire il mastrino.
             </p>
           </section>
 
           {!fornitoreDetailOpen ? (
             <section className="card fatture-panel mastrini-fit-panel">
-              <h2 className="fatture-panel-title">Elenco fornitori</h2>
+              <h2 className="fatture-panel-title">Elenco clienti</h2>
               <WorkbookGrid
-                title="Mastrini fornitori"
-                sheetLabel={`${fornitoriParties.length} soggetti`}
-                columns={FORNITORI_COLUMNS}
-                rows={fornitoriParties}
-                cellValue={fornitoriCellValue}
-                emptyMessage="Nessun fornitore con fatture nel periodo per questa società."
+                title="Scheda clienti"
+                sheetLabel={`${clientiParties.length} clienti`}
+                columns={CLIENTI_COLUMNS}
+                rows={clientiParties}
+                cellValue={clientiCellValue}
+                emptyMessage="Nessun cliente con fatture emesse nel periodo per questa società."
                 gridClassName="mastrini-fit-grid"
                 rowKey={(row) => row.key}
                 onRowClick={(row) => {
@@ -1046,20 +1045,18 @@ export default function MastriniContabiliPage() {
                   setFornitoreDetailOpen(true)
                 }}
                 getRowClassName={(row) => (selectedFornitore?.key === row.key ? 'workbook-row-selected' : '')}
-                rowClickTitle="Apri mastrino dare/avere"
+                rowClickTitle="Apri mastrino cliente"
                 totals={{
-                  dare: fornitoriParties.reduce((acc, p) => acc + (Number(p.totalDare) || 0), 0),
-                  avere: fornitoriParties.reduce((acc, p) => acc + (Number(p.totalAvere) || 0), 0),
-                  saldo: fornitoriParties.reduce((acc, p) => acc + (Number(p.finalBalance) || 0), 0),
-                  ricevute: fornitoriParties.reduce((acc, p) => acc + (Number(p.ricevuteCount) || 0), 0),
-                  emesse: fornitoriParties.reduce((acc, p) => acc + (Number(p.emesseCount) || 0), 0),
+                  dare: clientiParties.reduce((acc, p) => acc + (Number(p.totalDare) || 0), 0),
+                  avere: clientiParties.reduce((acc, p) => acc + (Number(p.totalAvere) || 0), 0),
+                  saldo: clientiParties.reduce((acc, p) => acc + (Number(p.finalBalance) || 0), 0),
+                  emesse: clientiParties.reduce((acc, p) => acc + (Number(p.emesseCount) || 0), 0),
                 }}
                 totalsLabel={(colId, totals) => {
                   if (colId === 'name') return 'TOTALI'
                   if (colId === 'dare') return eur(totals?.dare)
                   if (colId === 'avere') return eur(totals?.avere)
                   if (colId === 'saldo') return eur(totals?.saldo)
-                  if (colId === 'ricevute') return String(totals?.ricevute || 0)
                   if (colId === 'emesse') return String(totals?.emesse || 0)
                   return ''
                 }}
@@ -1071,11 +1068,10 @@ export default function MastriniContabiliPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'start' }}>
                 <div>
                   <h2 className="fatture-panel-title" style={{ margin: 0 }}>
-                    Mastrino — {selectedFornitore.name}
+                    Mastrino cliente — {selectedFornitore.name}
                   </h2>
                   <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
-                    Periodo: {periodLabel} · Ricevute {selectedFornitore.ricevuteCount || 0} · Emesse{' '}
-                    {selectedFornitore.emesseCount || 0}
+                    Periodo: {periodLabel} · Emesse {selectedFornitore.emesseCount || 0}
                   </p>
                 </div>
                 <button

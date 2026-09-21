@@ -149,8 +149,8 @@ export function SchedaContabileFornitorePage({
       title="Scheda contabile fornitori"
       lead={
         companyId
-          ? `${companyName}: elenco fornitori con fatture ricevute (Avere), pagamenti (Dare) e saldo progressivo come in Passcom.`
-          : 'Scegli la società nel banner, poi Aggiorna per aprire le schede fornitore.'
+          ? `${companyName}: fornitori di questa società (fatture ricevute / pagamenti). I clienti con fatture emesse sono in Mastrini → Scheda clienti.`
+          : 'Scegli la società nel banner, poi Aggiorna per aprire le schede fornitore di quel registro.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Filtri scheda contabile">
