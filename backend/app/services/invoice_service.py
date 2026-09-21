@@ -337,6 +337,17 @@ def mark_invoice_paid(db: Session, invoice_id: int) -> Optional[Invoice]:
   return inv
 
 
+def mark_invoice_unpaid(db: Session, invoice_id: int) -> Optional[Invoice]:
+  inv = get_invoice(db, invoice_id)
+  if not inv:
+    return None
+  inv.amount_paid = Decimal("0.00")
+  sync_invoice_paid_flag(inv)
+  db.commit()
+  db.refresh(inv)
+  return inv
+
+
 def set_invoice_ignored(db: Session, invoice_id: int, ignored: bool) -> Optional[Invoice]:
   inv = get_invoice(db, invoice_id)
   if not inv:

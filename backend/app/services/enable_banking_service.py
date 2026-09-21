@@ -662,7 +662,12 @@ def complete_enable_banking_callback(
   }
 
 
-def sync_enable_banking_account(db: Session, account_id: int) -> Dict[str, Any]:
+def sync_enable_banking_account(
+  db: Session,
+  account_id: int,
+  *,
+  sync_payments: bool = True,
+) -> Dict[str, Any]:
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
     raise ValueError("Conto non trovato")
@@ -686,7 +691,7 @@ def sync_enable_banking_account(db: Session, account_id: int) -> Dict[str, Any]:
 
   bank_sync = None
   company = (getattr(row, "company", None) or "").strip() or None
-  if company or imported:
+  if sync_payments and (company or imported):
     try:
       from . import banca_service
 

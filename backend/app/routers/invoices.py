@@ -181,7 +181,7 @@ def delete_issued_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.get("/incoming")
 def list_incoming_invoices(
-  limit: int = Query(50, ge=1, le=200),
+  limit: int = Query(50, ge=1, le=500),
   db: Session = Depends(get_db),
 ):
   """Elenco fatture ricevute (XML), una riga per documento logico (fornitore+numero+data)."""
@@ -423,6 +423,14 @@ def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
 @router.post("/{invoice_id}/mark-paid", response_model=InvoiceRead)
 def mark_invoice_paid(invoice_id: int, db: Session = Depends(get_db)):
   inv = invoice_service.mark_invoice_paid(db, invoice_id)
+  if not inv:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
+  return inv
+
+
+@router.post("/{invoice_id}/mark-unpaid", response_model=InvoiceRead)
+def mark_invoice_unpaid(invoice_id: int, db: Session = Depends(get_db)):
+  inv = invoice_service.mark_invoice_unpaid(db, invoice_id)
   if not inv:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
   return inv

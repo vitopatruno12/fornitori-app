@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
+  fetchPagamentiWatchAgent,
   fetchSupplierPaymentsWorkbook,
+  runPagamentiWatchAgent,
   saveSupplierPaymentsWorkbook,
 } from '../services/supplierPaymentsService.js'
 import {
@@ -55,6 +57,8 @@ export default function PagamentiPage() {
   const [success, setSuccess] = useState('')
   const [updatedAt, setUpdatedAt] = useState('')
   const [importing, setImporting] = useState(false)
+  const [watch, setWatch] = useState(null)
+  const [watching, setWatching] = useState(false)
   const [newSheetOpen, setNewSheetOpen] = useState(false)
   const [newSheetName, setNewSheetName] = useState('')
   const [selectedCell, setSelectedCell] = useState(null)
@@ -93,6 +97,32 @@ export default function PagamentiPage() {
   useEffect(() => {
     void refreshWorkbook()
   }, [refreshWorkbook])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPagamentiWatchAgent()
+      .then((data) => {
+        if (!cancelled) setWatch(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleWatchRun() {
+    setWatching(true)
+    setError('')
+    try {
+      const res = await runPagamentiWatchAgent({ force: false })
+      setWatch(res)
+      if (res?.message) setSuccess(res.message)
+    } catch (err) {
+      setError(err?.message || 'Controllo file e banca non riuscito')
+    } finally {
+      setWatching(false)
+    }
+  }
 
   useEffect(() => {
     setSelectedCell(null)
@@ -383,6 +413,30 @@ export default function PagamentiPage() {
 
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+
+      <section className="card pagamenti-watch-card">
+        <div className="pagamenti-watch-bar">
+          <div>
+            <strong>Agente automatico</strong>
+            <span className="pagamenti-watch-schedule">
+              Controlla file Pagamenti e movimenti banca {watch?.schedule || 'martedì e venerdì alle 7:30'}
+            </span>
+            <span className="pagamenti-watch-last">
+              {watch?.last_run_at
+                ? `Ultimo controllo: ${formatUpdatedAt(watch.last_run_at)}${watch.message ? ` — ${watch.message}` : ''}`
+                : 'Nessun controllo ancora eseguito. Si attiva due volte a settimana, oppure ora con il pulsante.'}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => void handleWatchRun()}
+            disabled={watching}
+          >
+            {watching ? 'Controllo…' : 'Controlla ora'}
+          </button>
+        </div>
+      </section>
 
       <section className="card pagamenti-workbook-card">
         <div className="pagamenti-workbook-toolbar">

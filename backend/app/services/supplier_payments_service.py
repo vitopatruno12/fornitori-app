@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -230,11 +231,55 @@ def _num_cell(value: Any) -> float:
 
 
 def _normalize_doc(value: Any) -> str:
-  return "".join(ch for ch in _strip_excel_quotes(value).upper() if ch.isalnum())
+  """Normalizza il n. documento tenendo i separatori (1/17 ≠ 117)."""
+  text = _strip_excel_quotes(value).upper()
+  text = re.sub(r"[^A-Z0-9]+", "/", text)
+  return text.strip("/")
 
 
 def _normalize_party(value: Any) -> str:
   return " ".join(_strip_excel_quotes(value).lower().split())
+
+
+_NAME_STOPWORDS = frozenset(
+  {
+    "srl",
+    "srls",
+    "spa",
+    "snc",
+    "sas",
+    "ss",
+    "soc",
+    "coop",
+    "societa",
+    "unipersonale",
+    "di",
+    "del",
+    "della",
+    "e",
+    "the",
+  }
+)
+
+
+def _name_tokens(value: Any) -> set:
+  text = _normalize_party(value).replace("'", " ")
+  toks = set()
+  for part in text.split():
+    if len(part) >= 4 and part not in _NAME_STOPWORDS:
+      toks.add(part)
+  return toks
+
+
+def _names_overlap(left: Any, right: Any) -> bool:
+  a = _normalize_party(left)
+  b = _normalize_party(right)
+  if not a or not b:
+    return False
+  if a == b or a in b or b in a:
+    return True
+  ta, tb = _name_tokens(a), _name_tokens(b)
+  return bool(ta and tb and (ta & tb))
 
 
 def list_paid_document_rows(
@@ -294,32 +339,30 @@ def find_paid_row_for_invoice(
   supplier_name: Optional[str] = None,
   supplier_vat: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-  """Abbina una fattura Atlas a una riga pagata del file Pagamenti."""
+  """Abbina una fattura Atlas a una riga pagata del file Pagamenti.
+
+  Serve lo stesso n. documento E lo stesso fornitore (P.IVA o denominazione).
+  Il solo numero non basta: i fornitori riutilizzano 125, 18, 274/2026, ecc.
+  """
   num_norm = _normalize_doc(invoice_number)
   name_norm = _normalize_party(supplier_name)
   vat_norm = _normalize_doc(supplier_vat)
-  if not num_norm and not name_norm and not vat_norm:
+  if not num_norm:
     return None
 
   best = None
   for row in paid_rows:
-    score = 0
-    if num_norm and row.get("invoice_number_norm") == num_norm:
-      score += 3
-    elif num_norm:
+    if row.get("invoice_number_norm") != num_norm:
       continue
+    score = 3
     if vat_norm and _normalize_doc(row.get("supplier_vat")) == vat_norm:
       score += 2
-    if name_norm and row.get("supplier_name_norm"):
-      a = name_norm
-      b = str(row["supplier_name_norm"])
-      if a == b or a in b or b in a:
-        score += 1
-    if score <= 0:
+    if name_norm and _names_overlap(name_norm, row.get("supplier_name_norm")):
+      score += 1
+    if score < 4:
       continue
     if best is None or score > best[0]:
       best = (score, row)
-  # Con solo il numero documento (score 3) è sufficiente
-  if best and best[0] >= 3:
+  if best:
     return best[1]
   return None

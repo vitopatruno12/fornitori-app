@@ -2036,7 +2036,7 @@ export function BancaRiconciliazionePage() {
   }
 
   useEffect(() => {
-    reload(companyId, { auto: true })
+    reload(companyId, { auto: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 

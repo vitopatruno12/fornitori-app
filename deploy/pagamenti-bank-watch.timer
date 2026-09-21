@@ -1,0 +1,12 @@
+[Unit]
+Description=ATLAS agente Pagamenti + banca due volte a settimana (mar e ven 7:30)
+Requires=pagamenti-bank-watch.service
+
+[Timer]
+OnCalendar=Tue,Fri *-*-* 07:30:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=pagamenti-bank-watch.service
+
+[Install]
+WantedBy=timers.target

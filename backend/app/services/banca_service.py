@@ -805,6 +805,52 @@ def _invoice_number_in_text(invoice_number: Optional[str], text: str) -> bool:
   return False
 
 
+_BANK_NAME_STOPWORDS = frozenset(
+  {
+    "srl",
+    "srls",
+    "spa",
+    "snc",
+    "sas",
+    "soc",
+    "coop",
+    "societa",
+    "unipersonale",
+  }
+)
+
+
+def _supplier_in_blob(supplier_name: Optional[str], blob: str) -> bool:
+  blob_u = (blob or "").upper()
+  if not blob_u:
+    return False
+  raw = re.sub(r"[^A-Z0-9]+", " ", (supplier_name or "").upper())
+  tokens = [t for t in raw.split() if len(t) >= 4 and t.lower() not in _BANK_NAME_STOPWORDS]
+  if not tokens:
+    return False
+  return any(re.search(rf"(?<![A-Z0-9]){re.escape(t)}(?![A-Z0-9])", blob_u) for t in tokens)
+
+
+def _movement_amount_matches_invoice(inv: Any, mov: Any) -> bool:
+  total = abs(_dec(getattr(inv, "total", 0)))
+  amt = abs(_dec(getattr(mov, "amount", 0)))
+  if total <= Decimal("0.009") or amt <= Decimal("1.00"):
+    return False
+  residuo = abs(total - _dec(getattr(inv, "amount_paid", 0)))
+  if residuo <= Decimal("0.009"):
+    residuo = total
+  return abs(total - amt) <= Decimal("0.05") or abs(residuo - amt) <= Decimal("0.05")
+
+
+def _bank_movement_pays_invoice(inv: Any, mov: Any, blob: str) -> bool:
+  """Un movimento marca la fattura solo se n. documento E (importo o fornitore)."""
+  if not _invoice_number_in_text(getattr(inv, "invoice_number", None), blob):
+    return False
+  if _movement_amount_matches_invoice(inv, mov):
+    return True
+  return _supplier_in_blob(getattr(inv, "supplier_name", None), blob)
+
+
 def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = None, reason: str = "") -> Dict[str, Any]:
   total = _dec(getattr(inv, "total", 0))
   paid = _dec(getattr(inv, "amount_paid", 0))
@@ -877,7 +923,7 @@ def reconciliation_preview(
     status = inv.payment_status or "unpaid"
     residuo = _dec(inv.total) - _dec(inv.amount_paid)
 
-    # Già riconciliata su un movimento
+    # Già riconciliata su un movimento (solo se importo o fornitore confermano)
     already = next(
       (
         m
@@ -886,13 +932,18 @@ def reconciliation_preview(
       ),
       None,
     )
-    found = already
+    found = None
+    if already and (
+      _movement_amount_matches_invoice(inv, already["mov"])
+      or _supplier_in_blob(getattr(inv, "supplier_name", None), already["blob"])
+    ):
+      found = already
     if not found and num:
       for m in mov_meta:
         # Solo uscite (bonifici) sui conti collegati
         if m["mov"].movement_type != "uscita":
           continue
-        if _invoice_number_in_text(num, m["blob"]):
+        if _bank_movement_pays_invoice(inv, m["mov"], m["blob"]):
           found = m
           break
 
@@ -965,7 +1016,7 @@ def reconciliation_preview(
       residuo = _dec(inv.total) - _dec(inv.amount_paid)
       if residuo <= Decimal("0.009"):
         continue
-      if not _invoice_number_in_text(inv.invoice_number, blob):
+      if not _bank_movement_pays_invoice(inv, mov, blob):
         continue
       diff = abs(residuo - _dec(mov.amount))
       best = {
@@ -981,12 +1032,14 @@ def reconciliation_preview(
       }
       break
 
-    # 2) Fallback per importo
+    # 2) Fallback per importo: solo se la causale cita il fornitore
     if best is None:
       amt = _dec(mov.amount)
       near = None
       for inv in open_for_amount:
         if inv["invoice_id"] in used_invoices:
+          continue
+        if not _supplier_in_blob(inv.get("supplier_name"), blob):
           continue
         diff = abs(_dec(inv["residuo"]) - amt)
         if diff <= Decimal("0.05"):
@@ -1051,8 +1104,8 @@ def sync_payment_status_from_bank(
 ) -> Dict[str, Any]:
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
-  - bonifici in uscita sui conti collegati (n. documento in causale)
-  - file Pagamenti (colonne PAGATO / DATA PAGAMENTO)
+  - bonifici in uscita sui conti collegati (n. documento + importo o fornitore)
+  - file Pagamenti (stesso n. documento e stesso fornitore, colonne PAGATO / DATA PAGAMENTO)
   Non riapre le già pagate se non trovate.
   """
   from . import supplier_payments_service
@@ -1093,16 +1146,19 @@ def sync_payment_status_from_bank(
       or ""
     ).strip()
 
-    found = next(
-      (meta["mov"] for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
+    already = next(
+      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
       None,
     )
+    found = None
+    if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
+      found = already["mov"]
     if not found and num:
       for meta in mov_meta:
         mov = meta["mov"]
         if mov.movement_type != "uscita":
           continue
-        if not _invoice_number_in_text(num, meta["blob"]):
+        if not _bank_movement_pays_invoice(inv_dto, mov, meta["blob"]):
           continue
         found = mov
         break
@@ -1185,8 +1241,8 @@ def auto_reconcile(
     inv_id = inv.get("invoice_id")
     quality = inv.get("match_quality")
     status = sug.get("status")
-    # Match sicuri: numero documento (anche se importo leggermente diverso) o importo esatto
-    if quality == "number" and status in {"matched", "difference"}:
+    # Match sicuri: n. documento con importo allineato, oppure importo esatto + fornitore in causale
+    if quality == "number" and status == "matched":
       apply_status = "matched"
     elif quality == "exact" and status == "matched":
       apply_status = "matched"

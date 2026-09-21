@@ -17,12 +17,13 @@ export async function saveSupplierPaymentsWorkbook(payload) {
   })
 }
 
-export async function deleteSupplierPaymentsWorkbook({ reseed = true } = {}) {
-  const q = new URLSearchParams({
-    workbook_key: WORKBOOK_KEY,
-    reseed: reseed ? 'true' : 'false',
-  })
-  return apiFetch(`/supplier-payments/workbook/delete?${q}`, { method: 'POST' })
+export async function fetchPagamentiWatchAgent() {
+  return apiFetch('/supplier-payments/watch-agent')
+}
+
+export async function runPagamentiWatchAgent({ force = false } = {}) {
+  const q = new URLSearchParams({ force: force ? 'true' : 'false' })
+  return apiFetch(`/supplier-payments/watch-agent/run?${q}`, { method: 'POST' })
 }
 
 export { WORKBOOK_KEY }

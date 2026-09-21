@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..schemas.supplier_payments import SupplierPaymentsWorkbookRead, SupplierPaymentsWorkbookUpsert
-from ..services import supplier_payments_service
+from ..services import pagamenti_watch_agent, supplier_payments_service
 
 router = APIRouter(prefix="/supplier-payments", tags=["supplier-payments"])
 
@@ -35,3 +35,18 @@ def delete_supplier_payments_workbook(
 ) -> Dict[str, Any]:
   """Elimina il file Excel/registro pagamenti salvato (opzionalmente lo ricrea vuoto dal template)."""
   return supplier_payments_service.delete_workbook(db, workbook_key, reseed=reseed)
+
+
+@router.get("/watch-agent")
+def get_pagamenti_watch_agent() -> Dict[str, Any]:
+  """Ultimo controllo periodico file Pagamenti + movimenti banca."""
+  return pagamenti_watch_agent.read_status()
+
+
+@router.post("/watch-agent/run")
+def run_pagamenti_watch_agent(
+  force: bool = Query(default=False, description="Aggiorna anche senza variazioni"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """Esegue ora il controllo (stesso lavoro del timer mar/ven)."""
+  return pagamenti_watch_agent.run_watch(db, force=force)

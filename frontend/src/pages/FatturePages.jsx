@@ -48,7 +48,7 @@ import {
 } from '../utils/vneTableExport.js'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
-import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
+import { fetchBancaRiconciliazione, postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import {
   buildConservationPackage,
   createConservationPackage,
@@ -71,12 +71,14 @@ const SDI_INVOICE_COLUMNS = [
 ]
 
 const EMESSE_COLUMNS = [
-  { id: 'created_at', label: 'Data carico', width: 14, fluid: true },
-  { id: 'file_kind', label: 'Tipo', width: 10, fluid: true },
-  { id: 'original_filename', label: 'File', width: 30, fluid: true },
-  { id: 'invoice_number', label: 'Numero', width: 14, fluid: true },
-  { id: 'total_amount', label: 'Importo', width: 14, fluid: true, numeric: true },
-  { id: 'status', label: 'Stato', width: 12, fluid: true },
+  { id: 'created_at', label: 'Data carico', width: 12, fluid: true },
+  { id: 'invoice_date', label: 'Data doc.', width: 12, fluid: true },
+  { id: 'file_kind', label: 'Tipo', width: 8, fluid: true },
+  { id: 'invoice_number', label: 'Numero', width: 12, fluid: true },
+  { id: 'customer_name', label: 'Cliente', width: 24, fluid: true },
+  { id: 'original_filename', label: 'File', width: 18, fluid: true },
+  { id: 'total_amount', label: 'Importo', width: 12, fluid: true, numeric: true },
+  { id: 'status', label: 'Stato', width: 10, fluid: true },
 ]
 
 const DA_REGISTRARE_COLUMNS = [
@@ -276,6 +278,9 @@ export function AdeSdiInvoicesPanel({
   companyId = '',
   embeddedMode = false,
   hideImportLink = false,
+  nameQuery = '',
+  dateFrom = '',
+  dateTo = '',
 }) {
   const [days, setDays] = useState('60')
   const [loading, setLoading] = useState(false)
@@ -344,7 +349,10 @@ export function AdeSdiInvoicesPanel({
     }
   }
 
-  const visibleList = companyId ? sdiListForCompany(rows, companyId) : []
+  const visibleList = filterInvoicesBySupplierAndDate(
+    companyId ? sdiListForCompany(rows, companyId) : [],
+    { supplierName: nameQuery, dateFrom, dateTo, nameFields: ['supplier_name'] },
+  )
   const panelTitle = companyId ? `${title} · ${companyLabel(companyId)}` : title
 
   function renderTable(list, withAssign = false) {
@@ -558,6 +566,9 @@ export function FattureRicevutePage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [importMsg, setImportMsg] = useState('')
+  const [nameQuery, setNameQuery] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const importInputRef = React.useRef(null)
 
   const ricevuteLead = gestionaleMode
@@ -571,7 +582,7 @@ export function FattureRicevutePage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetchIncomingInvoices(200)
+      const res = await fetchIncomingInvoices(500)
       const list = Array.isArray(res?.items) ? res.items : []
       setItems(list)
       if (!selectedId && list[0]?.id) setSelectedId(list[0].id)
@@ -635,6 +646,16 @@ export function FattureRicevutePage() {
     }
   }, [selectedId])
 
+  const filteredIncoming = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(items, {
+        supplierName: nameQuery,
+        dateFrom,
+        dateTo,
+        nameFields: ['supplier_name', 'invoice_number'],
+      }),
+    [items, nameQuery, dateFrom, dateTo],
+  )
   const selected = detail || items.find((r) => r.id === selectedId) || null
   const vatRate =
     selected?.lines?.find((l) => l.vat_rate != null)?.vat_rate ??
@@ -687,6 +708,25 @@ export function FattureRicevutePage() {
       {error && <div className="alert alert-danger">{error}</div>}
       {loading ? <AnalisiLoadingBar active label="Caricamento fatture ricevute" variant="subtle" /> : null}
 
+      <section className="card fatture-panel" style={{ paddingBottom: '0.35rem' }}>
+        <FattureSupplierDateFilters
+          supplierInput="search"
+          supplierLabel="Fornitore"
+          supplierPlaceholder="Cerca fornitore…"
+          supplierValue={nameQuery}
+          onSupplierChange={setNameQuery}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          onReset={() => {
+            setNameQuery('')
+            setDateFrom('')
+            setDateTo('')
+          }}
+        />
+      </section>
+
       <AdeSdiInvoicesPanel
         title="Inbox SDI"
         showAssign={gestionaleMode && companyId === 'non_classificata'}
@@ -694,6 +734,9 @@ export function FattureRicevutePage() {
         companyId={companyId}
         embeddedMode={!gestionaleMode}
         hideImportLink
+        nameQuery={nameQuery}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
       />
 
       {gestionaleMode && !companyId ? (
@@ -702,7 +745,7 @@ export function FattureRicevutePage() {
         <h2 className="fatture-panel-title">Elenco importate (tutte le società)</h2>
         <WorkbookGrid
           title="Elenco importate"
-          sheetLabel={`${items.length} documenti`}
+          sheetLabel={`${filteredIncoming.length} documenti`}
           hideToolbar
           gridClassName="fatture-excel-grid"
           columns={[
@@ -711,7 +754,7 @@ export function FattureRicevutePage() {
             { id: 'invoice_date', label: 'Data', width: 18, fluid: true },
             { id: 'total_amount', label: 'Totale', width: 22, fluid: true, numeric: true, emphasis: true },
           ]}
-          rows={items}
+          rows={filteredIncoming}
           rowKey={(row) => row.id}
           cellValue={(row, col) => {
             if (col.id === 'invoice_date') return formatDate(row.invoice_date)
@@ -719,12 +762,12 @@ export function FattureRicevutePage() {
             return row[col.id] || '—'
           }}
           totals={
-            items.length
-              ? { count: items.length, total: sumField(items, 'total_amount') }
+            filteredIncoming.length
+              ? { count: filteredIncoming.length, total: sumField(filteredIncoming, 'total_amount') }
               : null
           }
           totalsLabel={moneyTotalsLabel}
-          emptyMessage="Nessuna fattura ricevuta. Usa Importa XML o il canale SDI."
+          emptyMessage="Nessuna fattura ricevuta con i filtri selezionati. Usa Importa XML o il canale SDI."
           onRowClick={(row) => setSelectedId(row.id)}
           getRowClassName={(row) => (selectedId === row.id ? 'workbook-row-selected' : '')}
         />
@@ -833,6 +876,9 @@ export function FattureEmessePage() {
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
+  const [nameQuery, setNameQuery] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const importInputRef = React.useRef(null)
 
   const acceptByKind = {
@@ -851,7 +897,7 @@ export function FattureEmessePage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetchIssuedInvoices({ company: companyId, limit: 200 })
+      const res = await fetchIssuedInvoices({ company: companyId, limit: 500 })
       setItems(Array.isArray(res?.items) ? res.items : [])
     } catch (e) {
       setError(e?.message || 'Errore caricamento fatture emesse')
@@ -902,6 +948,18 @@ export function FattureEmessePage() {
       setImportBusy(false)
     }
   }
+
+  const filteredIssued = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(items, {
+        supplierName: nameQuery,
+        dateFrom,
+        dateTo,
+        nameFields: ['customer_name', 'original_filename', 'invoice_number'],
+        dateField: 'invoice_date',
+      }),
+    [items, nameQuery, dateFrom, dateTo],
+  )
 
   async function handleDelete(id) {
     if (!window.confirm('Eliminare questo documento emesso?')) return
@@ -983,29 +1041,45 @@ export function FattureEmessePage() {
       ) : (
         <section className="card fatture-panel">
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
+          <FattureSupplierDateFilters
+            supplierInput="search"
+            supplierLabel="Fornitore"
+            supplierPlaceholder="Cerca fornitore o file…"
+            supplierValue={nameQuery}
+            onSupplierChange={setNameQuery}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            onReset={() => {
+              setNameQuery('')
+              setDateFrom('')
+              setDateTo('')
+            }}
+          />
           <WorkbookGrid
             title={`Emesse · ${companyLabel(companyId)}`}
-            sheetLabel={`${items.length} documenti`}
+            sheetLabel={`${filteredIssued.length} documenti`}
             hideToolbar
             loading={loading}
             loadingLabel="Caricamento fatture emesse"
             gridClassName="fatture-excel-grid"
             columns={EMESSE_COLUMNS}
-            rows={items}
+            rows={filteredIssued}
             rowKey={(row) => `emessa-${row.id}`}
             cellValue={(row, col) => {
-              if (col.id === 'created_at') return formatDate(row.created_at || row.invoice_date)
+              if (col.id === 'created_at' || col.id === 'invoice_date') return formatDate(row[col.id] || (col.id === 'created_at' ? row.invoice_date : ''))
               if (col.id === 'file_kind') return kindLabel[row.file_kind] || row.file_kind || '—'
               if (col.id === 'total_amount') return row.total_amount != null ? eur(row.total_amount) : '—'
               return row[col.id] || '—'
             }}
             totals={
-              items.length
-                ? { count: items.length, total: sumField(items, 'total_amount') }
+              filteredIssued.length
+                ? { count: filteredIssued.length, total: sumField(filteredIssued, 'total_amount') }
                 : null
             }
             totalsLabel={moneyTotalsLabel}
-            emptyMessage={`Nessuna fattura emessa per ${companyLabel(companyId)}. Scegli PDF o Immagine (o XML) e carica dal banner.`}
+            emptyMessage={`Nessuna fattura emessa per ${companyLabel(companyId)} con i filtri selezionati. Scegli PDF o Immagine (o XML) e carica dal banner.`}
             actionsHeader="Azioni"
             actionsColWidth="8.75rem"
             renderActions={(row) => {
@@ -1287,7 +1361,7 @@ export function FatturePagatePage() {
   const [appliedDateTo, setAppliedDateTo] = useState('')
   const [selectedSupplierKey, setSelectedSupplierKey] = useState('')
 
-  async function reload(nextCompany = companyId) {
+  async function reload(nextCompany = companyId, { auto = false } = {}) {
     if (!nextCompany) {
       setPaidRows([])
       setOpenRows([])
@@ -1300,7 +1374,9 @@ export function FatturePagatePage() {
     setError('')
     setVerifySummary('')
     try {
-      const res = await postBancaRiconciliazioneAuto(nextCompany)
+      const res = auto
+        ? await postBancaRiconciliazioneAuto(nextCompany)
+        : await fetchBancaRiconciliazione(nextCompany)
       const paid = Array.isArray(res?.paid_by_bank) ? res.paid_by_bank : []
       const open = Array.isArray(res?.da_pagare) ? res.da_pagare : []
       setPaidRows(paid)
@@ -1480,7 +1556,7 @@ export function FatturePagatePage() {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => reload(companyId)}
+            onClick={() => reload(companyId, { auto: true })}
             disabled={loading || !companyId}
           >
             {loading ? 'Verifico…' : 'Verifica con banca'}
