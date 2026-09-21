@@ -8932,8 +8932,8 @@ select.form-control {
 }
 
 .mastrini-hero-tools-btns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0.45rem;
 }
 
@@ -8944,8 +8944,16 @@ select.form-control {
   white-space: nowrap;
 }
 
-.mastrini-hero-tools-btns .btn-primary {
-  grid-column: 1 / -1;
+.mastrini-hero-tools-btns .btn-secondary {
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f172a;
+  border-color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+}
+
+.mastrini-hero-tools-btns .btn-secondary:hover:not(:disabled) {
+  background: #fff;
+  color: #0f172a;
 }
 
 .mastrini-hero-tools-dates {
@@ -9018,11 +9026,21 @@ select.form-control {
   margin-top: 0.75rem;
 }
 
+.scheda-contabile-riepilogo-card {
+  margin-top: 0.5rem;
+}
+
+.scheda-contabile-riepilogo-wrap {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
 .scheda-contabile-riepilogo {
   width: 100%;
-  max-width: 720px;
-  margin-top: 1rem;
+  max-width: 100%;
+  margin: 0;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.9rem;
 }
 
@@ -9031,6 +9049,9 @@ select.form-control {
   border: 1px solid #94a3b8;
   padding: 0.4rem 0.65rem;
   text-align: left;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .scheda-contabile-riepilogo thead th {
@@ -9046,7 +9067,7 @@ select.form-control {
   font-variant-numeric: tabular-nums;
 }
 
-.scheda-contabile-riepilogo tbody td:first-child {
+.scheda-contabile-riepilogo tbody td[colspan] {
   font-weight: 600;
   color: #0f172a;
 }
@@ -9230,7 +9251,7 @@ select.form-control {
 }
 
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .banca-page .fatture-header-row:has(.mastrini-hero-tools) {

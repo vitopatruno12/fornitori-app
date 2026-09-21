@@ -395,48 +395,67 @@ export function SchedaContabileFornitorePage({
               return ''
             }}
           />
-          <table className="scheda-contabile-riepilogo" aria-label="Riepilogo totali Passcom">
-            <thead>
-              <tr>
-                <th>TOTALI</th>
-                <th className="num">Dare</th>
-                <th className="num">Avere</th>
-                <th className="num">Saldo</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Saldo da esercizio precedente</td>
-                <td className="num">{eurPlain(0)}</td>
-                <td className="num">{eurPlain(0)}</td>
-                <td className="num">{eurPlain(0)}</td>
-              </tr>
-              <tr>
-                <td>Prima del : {formatDate(dateFrom)}</td>
-                <td className="num">{eurPlain(0)}</td>
-                <td className="num">{eurPlain(0)}</td>
-                <td className="num">{eurPlain(0)}</td>
-              </tr>
-              <tr>
-                <td>
-                  Periodo dal : {formatDate(dateFrom)} al : {formatDate(dateTo)}
-                </td>
-                <td className="num">{eurPlain(selected.totalDare)}</td>
-                <td className="num">{eurPlain(selected.totalAvere)}</td>
-                <td className="num">
-                  {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
-                </td>
-              </tr>
-              <tr>
-                <td>Saldo progessivo al : {formatDate(dateTo)}</td>
-                <td className="num">{eurPlain(selected.totalDare)}</td>
-                <td className="num">{eurPlain(selected.totalAvere)}</td>
-                <td className="num">
-                  {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="workbook-card-nested scheda-contabile-riepilogo-card">
+            <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap scheda-contabile-riepilogo-wrap">
+              <table className="scheda-contabile-riepilogo" aria-label="Riepilogo totali Passcom">
+                <colgroup>
+                  {DETAIL_COLUMNS.map((col) => (
+                    <col key={col.id} style={{ width: `${col.width}%` }} />
+                  ))}
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th colSpan={3}>TOTALI</th>
+                    <th className="num">Dare</th>
+                    <th className="num">Avere</th>
+                    <th aria-hidden="true" />
+                    <th className="num">Saldo</th>
+                    <th aria-hidden="true" />
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colSpan={3}>Saldo da esercizio precedente</td>
+                    <td className="num">{eurPlain(0)}</td>
+                    <td className="num">{eurPlain(0)}</td>
+                    <td aria-hidden="true" />
+                    <td className="num">{eurPlain(0)}</td>
+                    <td aria-hidden="true" />
+                  </tr>
+                  <tr>
+                    <td colSpan={3}>Prima del : {formatDate(dateFrom)}</td>
+                    <td className="num">{eurPlain(0)}</td>
+                    <td className="num">{eurPlain(0)}</td>
+                    <td aria-hidden="true" />
+                    <td className="num">{eurPlain(0)}</td>
+                    <td aria-hidden="true" />
+                  </tr>
+                  <tr>
+                    <td colSpan={3}>
+                      Periodo dal : {formatDate(dateFrom)} al : {formatDate(dateTo)}
+                    </td>
+                    <td className="num">{eurPlain(selected.totalDare)}</td>
+                    <td className="num">{eurPlain(selected.totalAvere)}</td>
+                    <td aria-hidden="true" />
+                    <td className="num">
+                      {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
+                    </td>
+                    <td aria-hidden="true" />
+                  </tr>
+                  <tr>
+                    <td colSpan={3}>Saldo progessivo al : {formatDate(dateTo)}</td>
+                    <td className="num">{eurPlain(selected.totalDare)}</td>
+                    <td className="num">{eurPlain(selected.totalAvere)}</td>
+                    <td aria-hidden="true" />
+                    <td className="num">
+                      {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
+                    </td>
+                    <td aria-hidden="true" />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           <p className="scheda-contabile-fine-stampa">Fine Stampa</p>
           <p className="fatture-note">
             Convenzione Passcom: <strong>FR</strong> (fattura ricevuta) in Avere · <strong>PG</strong> (pagamento) in
