@@ -1195,7 +1195,38 @@ export function FattureEmessePage() {
               Zanardelli qui), oppure usa <strong>Sposta a Mediazione Z</strong> sulla riga.
             </div>
           ) : null}
-          <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              marginBottom: '0.35rem',
+            }}
+          >
+            <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+              Emesse · {companyLabel(companyId)}
+            </h2>
+            {nameQuery || dateFrom || dateTo || focusIssuedId || focusIssuedNumber ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setNameQuery('')
+                  setDateFrom('')
+                  setDateTo('')
+                  setFocusIssuedId('')
+                  setFocusIssuedNumber('')
+                  focusAppliedRef.current = ''
+                  setSearchParams({}, { replace: true })
+                }}
+                title="Togli filtri e evidenziazione, mostra tutto l'elenco della società"
+              >
+                ← Torna all&apos;elenco
+              </button>
+            ) : null}
+          </div>
           <FattureSupplierDateFilters
             supplierInput="search"
             supplierLabel="Cliente"
