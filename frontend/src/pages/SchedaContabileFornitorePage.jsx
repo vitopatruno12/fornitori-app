@@ -22,6 +22,14 @@ function monthBounds(d = new Date()) {
   return { from: iso(from), to: iso(to) }
 }
 
+function eurPlain(value) {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toLocaleString('it-IT', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 const LIST_COLUMNS = [
   { id: 'name', label: 'Fornitore', width: 32, fluid: true, emphasis: true },
   { id: 'ricevute', label: 'Fatture', width: 8, fluid: true, numeric: true },
@@ -387,6 +395,49 @@ export function SchedaContabileFornitorePage({
               return ''
             }}
           />
+          <table className="scheda-contabile-riepilogo" aria-label="Riepilogo totali Passcom">
+            <thead>
+              <tr>
+                <th>TOTALI</th>
+                <th className="num">Dare</th>
+                <th className="num">Avere</th>
+                <th className="num">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Saldo da esercizio precedente</td>
+                <td className="num">{eurPlain(0)}</td>
+                <td className="num">{eurPlain(0)}</td>
+                <td className="num">{eurPlain(0)}</td>
+              </tr>
+              <tr>
+                <td>Prima del : {formatDate(dateFrom)}</td>
+                <td className="num">{eurPlain(0)}</td>
+                <td className="num">{eurPlain(0)}</td>
+                <td className="num">{eurPlain(0)}</td>
+              </tr>
+              <tr>
+                <td>
+                  Periodo dal : {formatDate(dateFrom)} al : {formatDate(dateTo)}
+                </td>
+                <td className="num">{eurPlain(selected.totalDare)}</td>
+                <td className="num">{eurPlain(selected.totalAvere)}</td>
+                <td className="num">
+                  {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
+                </td>
+              </tr>
+              <tr>
+                <td>Saldo progessivo al : {formatDate(dateTo)}</td>
+                <td className="num">{eurPlain(selected.totalDare)}</td>
+                <td className="num">{eurPlain(selected.totalAvere)}</td>
+                <td className="num">
+                  {eurPlain(Number(selected.totalAvere || 0) - Number(selected.totalDare || 0))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="scheda-contabile-fine-stampa">Fine Stampa</p>
           <p className="fatture-note">
             Convenzione Passcom: <strong>FR</strong> (fattura ricevuta) in Avere · <strong>PG</strong> (pagamento) in
             Dare · saldo con suffisso A/D.

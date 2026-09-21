@@ -400,6 +400,11 @@ export function printSchedaContabileFornitore({
   const contoLabel = party.code
     ? `001.${String(party.code).padStart(5, '0')} ${party.name}`
     : party.name
+  const zero = eurPlain(0)
+  const periodDare = toNum(party.totalDare)
+  const periodAvere = toNum(party.totalAvere)
+  // Passcom: in TOTALI il saldo è Avere − Dare (stesso segno della scheda fornitore)
+  const periodSaldo = periodAvere - periodDare
 
   const rowsHtml = [
     `<tr class="saldo-iniziale">
@@ -448,14 +453,19 @@ export function printSchedaContabileFornitore({
     td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; }
     td.num, th.num { text-align: right; white-space: nowrap; }
     tr.saldo-iniziale td { background: #eff6ff; font-weight: 600; }
-    .totali {
-      background: #2f6fed; color: #fff; display: grid; grid-template-columns: 1fr auto auto auto;
-      gap: 16px; padding: 8px 12px; margin-top: 0; font-weight: 700; align-items: center;
+    .riepilogo {
+      margin-top: 14px; width: 100%; max-width: 720px; border-collapse: collapse;
+      font-size: 11px;
     }
-    .riepilogo { margin-top: 12px; width: 420px; border-collapse: collapse; }
-    .riepilogo th, .riepilogo td { border: 1px solid #94a3b8; padding: 4px 8px; }
-    .riepilogo th { background: #e2e8f0; color: #0f172a; }
-    .fine { margin-top: 16px; text-align: center; color: #64748b; }
+    .riepilogo th, .riepilogo td { border: 1px solid #94a3b8; padding: 5px 8px; }
+    .riepilogo thead th {
+      background: #2f6fed; color: #fff; font-weight: 700; text-align: left;
+      border-color: #1d4ed8;
+    }
+    .riepilogo thead th.num { text-align: right; }
+    .riepilogo td.num { text-align: right; white-space: nowrap; }
+    .riepilogo td.label { font-weight: 600; }
+    .fine { margin-top: 14px; text-align: left; font-weight: 700; color: #0f172a; }
     @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
   </style>
 </head>
@@ -484,27 +494,43 @@ export function printSchedaContabileFornitore({
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
-  <div class="totali">
-    <div>TOTALI</div>
-    <div>Dare ${esc(eurPlain(party.totalDare))}</div>
-    <div>Avere ${esc(eurPlain(party.totalAvere))}</div>
-    <div>Saldo ${esc(party.finalBalanceLabel || eurPlain(party.finalBalance))}</div>
-  </div>
   <table class="riepilogo">
-    <tr><th></th><th>Dare</th><th>Avere</th><th>Saldo</th></tr>
-    <tr>
-      <td>Periodo dal ${esc(dal)} al ${esc(al)}</td>
-      <td class="num">${esc(eurPlain(party.totalDare))}</td>
-      <td class="num">${esc(eurPlain(party.totalAvere))}</td>
-      <td class="num">${esc(party.finalBalanceLabel || '')}</td>
-    </tr>
-    <tr>
-      <td>Saldo progressivo al ${esc(al)}</td>
-      <td></td><td></td>
-      <td class="num">${esc(party.finalBalanceLabel || '')}</td>
-    </tr>
+    <thead>
+      <tr>
+        <th>TOTALI</th>
+        <th class="num">Dare</th>
+        <th class="num">Avere</th>
+        <th class="num">Saldo</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="label">Saldo da esercizio precedente</td>
+        <td class="num">${esc(zero)}</td>
+        <td class="num">${esc(zero)}</td>
+        <td class="num">${esc(zero)}</td>
+      </tr>
+      <tr>
+        <td class="label">Prima del : ${esc(dal)}</td>
+        <td class="num">${esc(zero)}</td>
+        <td class="num">${esc(zero)}</td>
+        <td class="num">${esc(zero)}</td>
+      </tr>
+      <tr>
+        <td class="label">Periodo dal : ${esc(dal)} al : ${esc(al)}</td>
+        <td class="num">${esc(eurPlain(periodDare))}</td>
+        <td class="num">${esc(eurPlain(periodAvere))}</td>
+        <td class="num">${esc(eurPlain(periodSaldo))}</td>
+      </tr>
+      <tr>
+        <td class="label">Saldo progessivo al : ${esc(al)}</td>
+        <td class="num">${esc(eurPlain(periodDare))}</td>
+        <td class="num">${esc(eurPlain(periodAvere))}</td>
+        <td class="num">${esc(eurPlain(periodSaldo))}</td>
+      </tr>
+    </tbody>
   </table>
-  <p class="fine">— Fine Stampa —</p>
+  <p class="fine">Fine Stampa</p>
 </body>
 </html>`
 

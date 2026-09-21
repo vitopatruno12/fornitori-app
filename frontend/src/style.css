@@ -9018,6 +9018,45 @@ select.form-control {
   margin-top: 0.75rem;
 }
 
+.scheda-contabile-riepilogo {
+  width: 100%;
+  max-width: 720px;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.scheda-contabile-riepilogo th,
+.scheda-contabile-riepilogo td {
+  border: 1px solid #94a3b8;
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+}
+
+.scheda-contabile-riepilogo thead th {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+}
+
+.scheda-contabile-riepilogo th.num,
+.scheda-contabile-riepilogo td.num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.scheda-contabile-riepilogo tbody td:first-child {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.scheda-contabile-fine-stampa {
+  margin: 0.75rem 0 0.25rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .scheda-contabile-panel,
 .scheda-contabile-panel .workbook-card-nested,
 .scheda-contabile-panel .workbook-grid-wrap {
