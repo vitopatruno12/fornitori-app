@@ -534,6 +534,41 @@ export function createMonthlySheetTemplate(name) {
   }
 }
 
+/** Svuota tutti i fogli: restano solo intestazioni (tabella pulita). */
+export function clearAllWorkbookSheets(workbook) {
+  const sheets = (workbook?.sheets || []).map((sheet) => {
+    const name = normalizeSheetName(sheet.name)
+    if (!name) return sheet
+    if (isSpecialSheet(name)) {
+      if (name === 'TOTALI') {
+        const header = Array.isArray(sheet.rows?.[0]) ? [...sheet.rows[0]] : []
+        const width = Math.max(9, header.length)
+        return {
+          name,
+          rows: [
+            header.length ? header : padRow([], width),
+            ...Array.from({ length: 6 }, () => padRow([], width)),
+          ],
+        }
+      }
+      // DELEGHE F24 / VERSAMENTO CONTANTI: tieni solo le prime 4 righe di struttura
+      const top = (sheet.rows || []).slice(0, 4).map((row) => (Array.isArray(row) ? [...row] : padRow([])))
+      while (top.length < 4) top.push(padRow([]))
+      return { name, rows: top }
+    }
+    return createMonthlySheetTemplate(name)
+  })
+  if (!sheets.length) {
+    sheets.push(createMonthlySheetTemplate('GENNAIO'))
+  }
+  return recalculateWorkbook({
+    ...workbook,
+    title: workbook?.title || 'FILE FORNITORI_RISACCA_2026',
+    sheets,
+    highlights: {},
+  })
+}
+
 export function addWorkbookSheet(workbook, sheetName) {
   const name = normalizeSheetName(sheetName)
   if (!name) throw new Error('Inserisci un nome per il foglio')

@@ -23,6 +23,76 @@ def _load_default_payload() -> Dict[str, Any]:
   return {"title": "FILE FORNITORI_RISACCA_2026", "sheets": []}
 
 
+_MONTHLY_HEADERS = [
+  "Tipo documento",
+  "Numero fattura / Documento",
+  "Data emissione",
+  "Identificativo fornitore",
+  "Denominazione",
+  "Imponibile",
+  "Imposta ",
+  "PAGARE (AVERE)",
+  " PAGATO (DARE)",
+  "TOTALE FORNITORE",
+  "DATA PAGAMENTO",
+  "acquisto attrezzature",
+]
+
+_EMPTY_MONTH_SHEETS = (
+  "GENNAIO",
+  "FEBBRAIO",
+  "MARZO",
+  "APRILE",
+  "MAGGIO",
+  "GIUGNO",
+)
+
+
+def _empty_monthly_sheet(name: str) -> Dict[str, Any]:
+  footer = [None] * len(_MONTHLY_HEADERS)
+  footer[6] = "TOTALE"
+  return {
+    "name": name,
+    "rows": [
+      list(_MONTHLY_HEADERS),
+      [None] * len(_MONTHLY_HEADERS),
+      [None] * len(_MONTHLY_HEADERS),
+      [None] * len(_MONTHLY_HEADERS),
+      footer,
+    ],
+  }
+
+
+def _empty_workbook_payload() -> Dict[str, Any]:
+  """Registro pulito: fogli mese vuoti + fogli speciali con sola struttura."""
+  default = _load_default_payload()
+  sheets: List[Dict[str, Any]] = []
+  for name in _EMPTY_MONTH_SHEETS:
+    sheets.append(_empty_monthly_sheet(name))
+  for item in default.get("sheets") or []:
+    if not isinstance(item, dict):
+      continue
+    name = str(item.get("name") or "").strip().upper()
+    if name in {"TOTALI", "DELEGHE F24", "VERSAMENTO CONTANTI"}:
+      rows = item.get("rows") if isinstance(item.get("rows"), list) else []
+      if name == "TOTALI":
+        header = list(rows[0]) if rows and isinstance(rows[0], list) else []
+        width = max(9, len(header))
+        empty_rows = [header if header else [None] * width]
+        empty_rows.extend([[None] * width for _ in range(6)])
+        sheets.append({"name": name, "rows": empty_rows})
+      else:
+        top = [list(r) if isinstance(r, list) else [] for r in rows[:4]]
+        while len(top) < 4:
+          top.append([])
+        sheets.append({"name": name, "rows": top})
+  return {
+    "title": str(default.get("title") or "FILE FORNITORI_RISACCA_2026"),
+    "sheets": sheets,
+    "highlights": {},
+  }
+
+
 def _normalize_workbook_key(workbook_key: str) -> str:
   key = (workbook_key or DEFAULT_WORKBOOK_KEY).strip()
   return key or DEFAULT_WORKBOOK_KEY
@@ -113,13 +183,21 @@ def delete_workbook(
     db.commit()
     deleted = True
   if reseed:
-    seeded = get_workbook(db, key)
+    # Registro vuoto (solo intestazioni), non il template pieno di dati storici
+    empty_payload = _empty_workbook_payload()
+    title = str(empty_payload.get("title") or "FILE FORNITORI_RISACCA_2026")
+    payload_json = json.dumps(empty_payload, ensure_ascii=False)
+    row = SupplierPaymentsWorkbook(workbook_key=key, title=title, payload_json=payload_json)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    seeded = workbook_to_read(row, seeded=True)
     return {
       "ok": True,
       "deleted": deleted,
       "reseeded": True,
       "workbook": seeded,
-      "message": "File eliminato e registro reinizializzato dal template.",
+      "message": "Tutti i fogli eliminati: registro reinizializzato vuoto.",
     }
   return {
     "ok": True,

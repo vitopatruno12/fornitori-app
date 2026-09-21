@@ -5,7 +5,6 @@ import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   fetchSupplierPaymentsWorkbook,
   saveSupplierPaymentsWorkbook,
-  deleteSupplierPaymentsWorkbook,
 } from '../services/supplierPaymentsService.js'
 import {
   MONTHLY_HEADERS,
@@ -33,6 +32,7 @@ import {
   getSheetHighlights,
   resolveHighlightClass,
   applyWorkbookHighlight,
+  clearAllWorkbookSheets,
 } from '../utils/pagamentiWorkbook.js'
 import { downloadWorkbookAsExcel, parseExcelFileToWorkbook } from '../utils/pagamentiExcel.js'
 
@@ -332,18 +332,18 @@ export default function PagamentiPage() {
     }
   }
 
-  async function handleDeleteFile() {
+  async function handleDeleteAllSheets() {
     const title = workbook?.title || 'registro corrente'
     if (
       !window.confirm(
-        `Eliminare tutto il file "${title}" dal database?\nVerrà ricreato un registro vuoto dal template di partenza.`,
+        `Eliminare TUTTI i fogli di "${title}"?\nResterà una tabella pulita (solo intestazioni).`,
       )
     ) {
       return
     }
     if (
       !window.confirm(
-        'Conferma definitiva: tutti i fogli e i dati salvati di questo file verranno cancellati.',
+        'Conferma definitiva: tutti i dati di tutti i fogli verranno cancellati.',
       )
     ) {
       return
@@ -352,20 +352,20 @@ export default function PagamentiPage() {
     setSuccess('')
     setSaving(true)
     try {
-      const res = await deleteSupplierPaymentsWorkbook({ reseed: true })
-      const wb = res?.workbook
-      if (wb) {
-        const next = recalculateWorkbook(workbookFromApi(wb))
-        setWorkbook(next)
-        setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
-        setUpdatedAt(wb.updated_at || '')
-      } else {
-        await refreshWorkbook()
-      }
+      const empty = clearAllWorkbookSheets(workbook)
+      const saved = await saveSupplierPaymentsWorkbook({
+        title: empty.title,
+        sheets: empty.sheets,
+        highlights: {},
+      })
+      const next = recalculateWorkbook(workbookFromApi(saved))
+      setWorkbook(next)
+      setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
+      setUpdatedAt(saved?.updated_at || '')
       setDirty(false)
-      setSuccess(res?.message || 'File eliminato e registro reinizializzato.')
+      setSuccess('Tutti i fogli sono stati svuotati. Tabella pulita.')
     } catch (err) {
-      setError(err?.message || 'Eliminazione file non riuscita')
+      setError(err?.message || 'Eliminazione fogli non riuscita')
     } finally {
       setSaving(false)
     }
@@ -430,10 +430,10 @@ export default function PagamentiPage() {
               type="button"
               className="btn btn-outline-danger btn-sm"
               disabled={loading || importing || saving}
-              onClick={() => void handleDeleteFile()}
-              title="Elimina tutto il file/registro dal database e reinizializza"
+              onClick={() => void handleDeleteAllSheets()}
+              title="Svuota tutti i fogli e lascia la tabella pulita"
             >
-              {saving ? 'Elimino…' : 'Elimina file'}
+              {saving ? 'Elimino…' : 'Elimina tutti fogli'}
             </button>
             <button
               type="button"
