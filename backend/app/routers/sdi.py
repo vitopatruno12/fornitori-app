@@ -154,6 +154,15 @@ def _empty_company_buckets() -> Dict[str, List[Dict[str, Any]]]:
   return {cid: [] for cid in SDI_COMPANY_ORDER} | {"non_classificata": []}
 
 
+def _sdi_invoice_date_sort_key(item: Dict[str, Any]) -> tuple:
+  """Data documento crescente (più vecchia → più recente); senza data in coda."""
+  raw = item.get("invoice_date") or item.get("created_at") or ""
+  if hasattr(raw, "isoformat"):
+    raw = raw.isoformat()
+  key = str(raw)[:10] if raw else "9999-99-99"
+  return (key, int(item.get("id") or 0))
+
+
 @router.get("/companies")
 def sdi_companies() -> Dict[str, Any]:
   companies = list_companies()
@@ -303,6 +312,11 @@ def list_sdi_received_invoices(
       legacy_abba.append(item)
     elif legacy == "zanardelli":
       legacy_zanardelli.append(item)
+
+  for cid in list(buckets.keys()):
+    buckets[cid].sort(key=_sdi_invoice_date_sort_key)
+  legacy_abba.sort(key=_sdi_invoice_date_sort_key)
+  legacy_zanardelli.sort(key=_sdi_invoice_date_sort_key)
 
   count = sum(len(v) for v in buckets.values())
   payload: Dict[str, Any] = {

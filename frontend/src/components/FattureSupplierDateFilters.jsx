@@ -4,11 +4,34 @@ import React, { useMemo } from 'react'
 export function invoiceDateKey(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
+  const iso = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (iso) return iso[1]
+  const it = raw.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/)
+  if (it) {
+    const dd = it[1].padStart(2, '0')
+    const mm = it[2].padStart(2, '0')
+    return `${it[3]}-${mm}-${dd}`
+  }
   return raw.slice(0, 10)
+}
+
+function invoiceChronologicalKey(row, dateField = 'invoice_date') {
+  return invoiceDateKey(row?.[dateField] || row?.invoice_date || row?.created_at) || '9999-99-99'
+}
+
+/** Data documento crescente (più vecchia → più recente). Senza data in coda. */
+export function sortInvoicesByDateAsc(rows, dateField = 'invoice_date') {
+  return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const da = invoiceChronologicalKey(a, dateField)
+    const db = invoiceChronologicalKey(b, dateField)
+    if (da !== db) return da.localeCompare(db)
+    return (Number(a?.id) || 0) - (Number(b?.id) || 0)
+  })
 }
 
 /**
  * Filtra fatture per fornitore (id o nome) e intervallo date documento.
+ * Restituisce sempre l'elenco ordinato per data documento (vecchia → recente).
  * @param {Array} rows
  * @param {{ supplierId?: string, supplierName?: string, dateFrom?: string, dateTo?: string, nameFields?: string[], dateField?: string }} filters
  */
@@ -23,7 +46,7 @@ export function filterInvoicesBySupplierAndDate(rows, filters = {}) {
     : ['supplier_name']
   const dateField = filters.dateField || 'invoice_date'
 
-  return list.filter((row) => {
+  const filtered = list.filter((row) => {
     if (supplierId) {
       if (String(row?.supplier_id ?? '') !== supplierId) return false
     } else if (supplierName) {
@@ -35,6 +58,7 @@ export function filterInvoicesBySupplierAndDate(rows, filters = {}) {
     if (dateTo && (!d || d > dateTo)) return false
     return true
   })
+  return sortInvoicesByDateAsc(filtered, dateField)
 }
 
 /** Opzioni fornitore da elenco fatture (id+name o solo name). */
