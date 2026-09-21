@@ -321,7 +321,8 @@ function buildFornitoriMastrini(
       'Cliente non indicato'
     const number = invoiceNumber(inv) || inv?.id || ''
     const party = ensure(name)
-    party.totalAvere += amount
+    // Conto cliente: fattura emessa = credito (Dare); saldo Dare − Avere positivo = ti devono
+    party.totalDare += amount
     party.emesseCount += 1
     party.finalBalance = party.totalDare - party.totalAvere
     party.movements.push({
@@ -343,8 +344,8 @@ function buildFornitoriMastrini(
       companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
       locale: String(inv?.activity || '').trim().toLowerCase(),
       amount,
-      dare: 0,
-      avere: amount,
+      dare: amount,
+      avere: 0,
       source: 'fatture_emesse',
       invoiceKind: 'emessa',
     })

@@ -983,8 +983,8 @@ export default function MastriniContabiliPage() {
               <div className="ui-kpi-card-value">{data?.clienti?.metrics?.emesseCount ?? '—'}</div>
             </div>
             <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Avere (emesse)</div>
-              <div className="ui-kpi-card-value">{eur(data?.clienti?.metrics?.totalAvere)}</div>
+              <div className="ui-kpi-card-label">Dare (crediti / emesse)</div>
+              <div className="ui-kpi-card-value">{eur(data?.clienti?.metrics?.totalDare)}</div>
             </div>
             <div className="ui-kpi-card">
               <div className="ui-kpi-card-label">Saldo</div>
@@ -1022,7 +1022,7 @@ export default function MastriniContabiliPage() {
               </button>
             </form>
             <p className="fatture-note" style={{ marginBottom: 0 }}>
-              Solo clienti con fatture emesse. I fornitori (ricevute / pagamenti) sono in{' '}
+              Solo clienti con fatture emesse (in Dare = credito). I fornitori (ricevute / pagamenti) sono in{' '}
               <Link to="/amministrazione/mastrini/scheda-fornitori">Scheda fornitori</Link>, sotto la società
               selezionata. Clic sul nome per aprire il mastrino.
             </p>
