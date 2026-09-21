@@ -4,7 +4,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { FattureLink, FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
@@ -669,8 +669,15 @@ export default function InvoicesPage() {
       </div>
 
       <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>{editingId ? 'Modifica fattura' : 'Nuova fattura'}</h2>
-        <div className="form-group" style={{ marginBottom: '0.9rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
+            {editingId ? 'Modifica fattura' : 'Nuova fattura'}
+          </h2>
+          <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+            ← Torna all&apos;elenco
+          </FattureLink>
+        </div>
+        <div className="form-group" style={{ marginBottom: '0.9rem', marginTop: '0.9rem' }}>
           <label>Comando AI fattura</label>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <input
@@ -749,6 +756,9 @@ export default function InvoicesPage() {
             {editingId && (
               <button type="button" className="btn btn-secondary" onClick={handleCancelEdit}>Annulla</button>
             )}
+            <FattureLink className="btn btn-secondary" to="/fatture/ricevute">
+              ← Torna all&apos;elenco
+            </FattureLink>
           </div>
         </form>
       </section>

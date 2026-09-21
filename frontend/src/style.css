@@ -1855,6 +1855,13 @@ select.form-control {
   background: #eff6ff !important;
 }
 
+.workbook-row-focus-purple .excel-cell,
+.workbook-row-focus-purple .workbook-col-sticky-left,
+.workbook-row-focus-purple .sup-actions-col {
+  background: #f3e8ff !important;
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
 .workbook-row-totals .excel-cell,
 .workbook-row-totals .workbook-cell-total,
 .suppliers-row-totals .excel-cell,
@@ -9248,6 +9255,10 @@ select.form-control {
 
 .fatture-page .workbook-row-selected .excel-cell {
   background: #ecfdf5 !important;
+}
+
+.fatture-page .workbook-row-focus-purple .excel-cell {
+  background: #ede9fe !important;
 }
 
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {

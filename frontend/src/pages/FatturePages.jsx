@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FattureLink,
   FattureNavigate,
@@ -883,6 +884,7 @@ export function FattureEmessePage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [uploadKind, setUploadKind] = useState('pdf')
   const [importBusy, setImportBusy] = useState(false)
   const [importMsg, setImportMsg] = useState('')
@@ -892,7 +894,10 @@ export function FattureEmessePage() {
   const [nameQuery, setNameQuery] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [focusIssuedId, setFocusIssuedId] = useState('')
+  const [focusIssuedNumber, setFocusIssuedNumber] = useState('')
   const importInputRef = React.useRef(null)
+  const focusAppliedRef = React.useRef('')
 
   const acceptByKind = {
     xml: '.xml,.p7m,application/xml,text/xml',
@@ -924,6 +929,75 @@ export function FattureEmessePage() {
     void reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
+
+  // Deep-link da Mastrini: /fatture/emesse?id=&n=&company=&from=&to=&customer=
+  useEffect(() => {
+    const qId = String(searchParams.get('id') || '').trim()
+    const qNum = String(searchParams.get('n') || '').trim()
+    const qCompany = String(searchParams.get('company') || '').trim()
+    const qDate = String(searchParams.get('date') || '').trim().slice(0, 10)
+    const qFrom = String(searchParams.get('from') || qDate || '').trim().slice(0, 10)
+    const qTo = String(searchParams.get('to') || qDate || '').trim().slice(0, 10)
+    const qCustomer = String(searchParams.get('customer') || '').trim()
+
+    if (!qId && !qNum && !qCompany && !qFrom && !qTo && !qCustomer) return
+
+    const key = `id:${qId}|n:${qNum}|c:${qCompany}|f:${qFrom}|t:${qTo}|cu:${qCustomer}`
+    if (focusAppliedRef.current === key) return
+    focusAppliedRef.current = key
+
+    if (qCompany && gestionaleMode && companyId !== qCompany) {
+      setCompanyId(qCompany)
+    }
+    if (qFrom) setDateFrom(qFrom)
+    if (qTo) setDateTo(qTo)
+    if (qNum) setNameQuery(qNum)
+    else if (qCustomer) setNameQuery(qCustomer)
+
+    if (qId) setFocusIssuedId(qId)
+    if (qNum) setFocusIssuedNumber(qNum)
+
+    const cleaned = new URLSearchParams()
+    if (qId) cleaned.set('id', qId)
+    if (qNum) cleaned.set('n', qNum)
+    setSearchParams(cleaned, { replace: true })
+  }, [searchParams, gestionaleMode, companyId, setCompanyId, setSearchParams])
+
+  const filteredIssued = useMemo(
+    () =>
+      filterInvoicesBySupplierAndDate(items, {
+        supplierName: nameQuery,
+        dateFrom,
+        dateTo,
+        nameFields: ['customer_name', 'original_filename', 'invoice_number'],
+        dateField: 'invoice_date',
+      }),
+    [items, nameQuery, dateFrom, dateTo],
+  )
+
+  function rowMatchesFocus(row) {
+    if (!row) return false
+    if (focusIssuedId && String(row.id) === String(focusIssuedId)) return true
+    if (focusIssuedNumber) {
+      const norm = focusIssuedNumber.toLowerCase()
+      return String(row.invoice_number || '')
+        .trim()
+        .toLowerCase() === norm
+    }
+    return false
+  }
+
+  useEffect(() => {
+    if (loading) return
+    if (!focusIssuedId && !focusIssuedNumber) return
+    const match = filteredIssued.find((row) => rowMatchesFocus(row))
+    if (!match?.id) return
+    const t = window.setTimeout(() => {
+      document.getElementById(`issued-row-${match.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, filteredIssued, focusIssuedId, focusIssuedNumber])
 
   async function handleBannerImport(ev) {
     const file = ev.target.files?.[0]
@@ -961,18 +1035,6 @@ export function FattureEmessePage() {
       setImportBusy(false)
     }
   }
-
-  const filteredIssued = useMemo(
-    () =>
-      filterInvoicesBySupplierAndDate(items, {
-        supplierName: nameQuery,
-        dateFrom,
-        dateTo,
-        nameFields: ['customer_name', 'original_filename', 'invoice_number'],
-        dateField: 'invoice_date',
-      }),
-    [items, nameQuery, dateFrom, dateTo],
-  )
 
   async function handleDelete(id) {
     if (!window.confirm('Eliminare questo documento emesso?')) return
@@ -1068,6 +1130,10 @@ export function FattureEmessePage() {
               setNameQuery('')
               setDateFrom('')
               setDateTo('')
+              setFocusIssuedId('')
+              setFocusIssuedNumber('')
+              focusAppliedRef.current = ''
+              setSearchParams({}, { replace: true })
             }}
             onApply={() => void reload()}
             applyDisabled={loading || !companyId}
@@ -1082,6 +1148,8 @@ export function FattureEmessePage() {
             columns={EMESSE_COLUMNS}
             rows={filteredIssued}
             rowKey={(row) => `emessa-${row.id}`}
+            getRowId={(row) => `issued-row-${row.id}`}
+            getRowClassName={(row) => (rowMatchesFocus(row) ? 'workbook-row-focus-purple' : '')}
             cellValue={(row, col) => {
               if (col.id === 'created_at' || col.id === 'invoice_date') return formatDate(row[col.id] || (col.id === 'created_at' ? row.invoice_date : ''))
               if (col.id === 'file_kind') return kindLabel[row.file_kind] || row.file_kind || '—'

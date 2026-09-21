@@ -219,7 +219,20 @@ function emesseHref(mv) {
   const invId = mv.linkedInvoiceId || mv.documentId || ''
   const params = new URLSearchParams()
   if (invId) params.set('id', String(invId))
+  const number = String(mv.documentLabel || mv.description || '')
+    .replace(/^Emessa\s+/i, '')
+    .replace(/^Fattura emessa n\.\s*/i, '')
+    .trim()
+  if (number) params.set('n', number)
   if (mv.company && mv.company !== 'non_classificata') params.set('company', String(mv.company))
+  const date = String(mv.date || mv.documentDate || '').slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    params.set('date', date)
+    params.set('from', date)
+    params.set('to', date)
+  }
+  const customer = String(mv.customer || mv.counterparty || '').trim()
+  if (customer) params.set('customer', customer)
   const qs = params.toString()
   return qs ? `/fatture/emesse?${qs}` : '/fatture/emesse'
 }
