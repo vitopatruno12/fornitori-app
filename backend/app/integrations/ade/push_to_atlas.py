@@ -111,8 +111,11 @@ def issued_company_for_profile(
 
   pid = (profile_id or "").strip().lower()
   form_fallback = sdi_section or (pid if pid in ("via_lattea", "risacca", "pg", "mediazione_a", "mediazione_z") else None)
-  if not form_fallback and (auto_section or pid == "mediazione"):
-    form_fallback = "mediazione_a"
+  if not form_fallback and pid in ("mediazione_a", "mediazione_z"):
+    form_fallback = pid
+  # Profilo unico "mediazione": niente default su A — decide solo la sede nel XML
+  if not form_fallback and pid == "mediazione":
+    form_fallback = None
 
   return pick_issued_company(
     seller_vat=seller_vat or None,

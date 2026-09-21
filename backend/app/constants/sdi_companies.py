@@ -9,6 +9,7 @@ P.IVA da visure Camera di Commercio (gen–feb 2026):
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional, Set
 
 # Ordine fisso per menu UI — Mediazione divisa in A (Abba) e Z (Zanardelli)
@@ -78,7 +79,7 @@ ENV_PIVA_KEYS: Dict[str, str] = {
 }
 
 _DEFAULT_ABBA_KEYWORDS = (
-  "abba,via abba,cesare abba,mani in pasta abba,le mani in pasta"
+  "via abba,cesare abba,c. abba,via c. abba,mani in pasta abba,abba 42,abba42"
 )
 _DEFAULT_ZAN_KEYWORDS = (
   "zanardelli,via zanardelli,oberdan,guglielmo oberdan,mani in pasta zanardelli,zanandelli"
@@ -234,10 +235,14 @@ def destination_to_legacy_section(destination: Optional[str]) -> str:
     return "non_classificata"
   abba = _keyword_list("SDI_DEST_ABBA_KEYWORDS", _DEFAULT_ABBA_KEYWORDS)
   zan = _keyword_list("SDI_DEST_ZANARDELLI_KEYWORDS", _DEFAULT_ZAN_KEYWORDS)
-  if any(k in dest for k in abba):
-    return "abba"
+  # Zanardelli prima: il brand "Mani in Pasta" non deve finire sempre in Abba.
   if any(k in dest for k in zan):
     return "zanardelli"
+  if any(k in dest for k in abba):
+    return "abba"
+  # "abba" da solo solo se non è parte di altre parole ambigue
+  if re.search(r"(^|[^a-z])abba([^a-z]|$)", dest):
+    return "abba"
   return "non_classificata"
 
 
@@ -356,23 +361,25 @@ def pick_issued_company(
   Via Lattea 04886500752 · Risacca 05186540752 · PG 05440050754 · Mediazione 04945600759.
   Per Mediazione (stessa P.IVA) lo split A/Z usa indirizzo sede, profilo, testo file o form UI.
   """
-  hint_blob = " ".join(
-    p for p in (seller_destination or "", extra_text or "") if str(p).strip()
-  )
-  legacy = normalize_company_section(destination_to_legacy_section(hint_blob))
+  # Indirizzo sede prima del testo libero (nome file / ragione sociale brand).
+  addr_legacy = normalize_company_section(destination_to_legacy_section(seller_destination))
+  extra_legacy = normalize_company_section(destination_to_legacy_section(extra_text))
+  legacy = addr_legacy if addr_legacy in MEDIAZIONE_COMPANY_IDS else extra_legacy
   pid = (ade_profile_id or "").strip().lower()
   form = normalize_company_section(form_company) if form_company else "non_classificata"
   profile_mapped = PROFILE_TO_COMPANY.get(pid) if pid in PROFILE_TO_COMPANY else None
 
-  # Hint sede Abba/Zanardelli ha priorità sullo split Mediazione (anche senza P.IVA nel PDF).
-  if legacy in MEDIAZIONE_COMPANY_IDS:
-    if (
+  def _accept_mediazione_hint(hint: str) -> bool:
+    return hint in MEDIAZIONE_COMPANY_IDS and (
       is_mediazione_vat(seller_vat)
       or form in MEDIAZIONE_COMPANY_IDS
       or profile_mapped in MEDIAZIONE_COMPANY_IDS
       or not normalize_vat(seller_vat)
-    ):
-      return legacy
+    )
+
+  # Hint sede Abba/Zanardelli ha priorità sullo split Mediazione.
+  if _accept_mediazione_hint(legacy):
+    return legacy
 
   if is_mediazione_vat(seller_vat):
     if profile_mapped in MEDIAZIONE_COMPANY_IDS:

@@ -15,7 +15,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..constants.sdi_companies import normalize_company_section, pick_issued_company
+from ..constants.sdi_companies import (
+  MEDIAZIONE_COMPANY_IDS,
+  normalize_company_section,
+  pick_issued_company,
+)
 from ..database import engine
 from ..models.issued_invoice import IssuedInvoice
 
@@ -495,6 +499,39 @@ def _row_out(row: IssuedInvoice, extra: Optional[Dict[str, Any]] = None) -> Dict
   return data
 
 
+def _company_scope_for_dedup(company_id: str) -> List[str]:
+  """Mediazione A/Z condividono la P.IVA: i duplicati vanno cercati in entrambe."""
+  cid = normalize_company_section(company_id)
+  if cid in MEDIAZIONE_COMPANY_IDS:
+    return sorted(MEDIAZIONE_COMPANY_IDS)
+  if cid != "non_classificata":
+    return [cid]
+  return []
+
+
+def _find_issued_duplicate(
+  db: Session,
+  *,
+  company_id: str,
+  invoice_number: Optional[str],
+  customer_vat: Optional[str],
+) -> Optional[IssuedInvoice]:
+  num = (invoice_number or "").strip()
+  if not num:
+    return None
+  scope = _company_scope_for_dedup(company_id)
+  if not scope:
+    return None
+  q = db.query(IssuedInvoice).filter(
+    IssuedInvoice.company.in_(scope),
+    IssuedInvoice.invoice_number == num,
+  )
+  vat = (customer_vat or "").strip()
+  if vat:
+    q = q.filter(IssuedInvoice.customer_vat == vat)
+  return q.order_by(IssuedInvoice.id.desc()).first()
+
+
 def store_issued_xml_bytes(
   db: Session,
   raw: bytes,
@@ -538,17 +575,23 @@ def store_issued_xml_bytes(
   customer_vat = (str(extracted.get("customer_vat") or "").strip() or None)
 
   def _find_dup() -> Optional[IssuedInvoice]:
-    q = db.query(IssuedInvoice).filter(IssuedInvoice.company == company_id)
-    if final_number:
-      q = q.filter(IssuedInvoice.invoice_number == final_number)
-    if customer_vat:
-      q = q.filter(IssuedInvoice.customer_vat == customer_vat)
-    if final_number:
-      return q.order_by(IssuedInvoice.id.desc()).first()
-    return None
+    return _find_issued_duplicate(
+      db,
+      company_id=company_id,
+      invoice_number=final_number,
+      customer_vat=customer_vat,
+    )
 
   existing = _with_issued_invoices_table(db, _find_dup)
   if existing:
+    # Se il duplicato è sull'altra sede Mediazione, riallinea alla società corretta
+    if normalize_company_section(existing.company) != company_id:
+      existing.company = company_id
+      try:
+        db.commit()
+        db.refresh(existing)
+      except Exception:
+        db.rollback()
     return _row_out(existing, extra={"duplicate": True})
 
   company_dir = UPLOAD_ROOT / company_id
@@ -620,19 +663,13 @@ async def upload_issued_invoice(
   extracted = extract_issued_invoice_fields(raw, filename=file.filename or "", file_kind=kind)
   warnings = list(extracted.get("warnings") or [])
 
-  # P.IVA cedente (chi emette) ha priorità; per Mediazione A/Z usa anche testo/file + form UI
+  # P.IVA cedente (chi emette) ha priorità; per Mediazione A/Z usa sede + filename (non il brand)
   auto_company = pick_issued_company(
     seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
     seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
     form_company=company_id,
     extra_text=" ".join(
-      p
-      for p in (
-        file.filename or "",
-        str(extracted.get("seller_name") or ""),
-        note or "",
-      )
-      if p
+      p for p in (file.filename or "", note or "") if p
     ),
   )
   if auto_company != "non_classificata" and auto_company != company_id:
@@ -664,6 +701,40 @@ async def upload_issued_invoice(
     if isinstance(final_date, date) and not isinstance(final_date, datetime):
       final_date = datetime(final_date.year, final_date.month, final_date.day, tzinfo=timezone.utc)
 
+  customer_name = (str(extracted.get("customer_name") or "").strip() or None)
+  customer_vat = (str(extracted.get("customer_vat") or "").strip() or None)
+
+  def _find_dup() -> Optional[IssuedInvoice]:
+    return _find_issued_duplicate(
+      db,
+      company_id=company_id,
+      invoice_number=final_number,
+      customer_vat=customer_vat,
+    )
+
+  existing = _with_issued_invoices_table(db, _find_dup)
+  if existing:
+    if normalize_company_section(existing.company) != company_id:
+      existing.company = company_id
+      try:
+        db.commit()
+        db.refresh(existing)
+      except Exception:
+        db.rollback()
+    return _row_out(
+      existing,
+      extra={
+        "duplicate": True,
+        "extracted": {
+          "invoice_number": extracted.get("invoice_number"),
+          "total_amount": float(final_amount) if final_amount is not None else None,
+          "invoice_date": final_date.isoformat() if isinstance(final_date, (datetime, date)) else final_date,
+          "source": extracted.get("source"),
+          "warnings": warnings + ["Documento già presente (deduplicato A/Z)"],
+        },
+      },
+    )
+
   company_dir = UPLOAD_ROOT / company_id
   company_dir.mkdir(parents=True, exist_ok=True)
   stored_name = (
@@ -687,8 +758,8 @@ async def upload_issued_invoice(
       invoice_number=final_number,
       invoice_date=final_date,
       total_amount=final_amount,
-      customer_name=(str(extracted.get("customer_name") or "").strip() or None),
-      customer_vat=(str(extracted.get("customer_vat") or "").strip() or None),
+      customer_name=customer_name,
+      customer_vat=customer_vat,
       status="caricata",
       note=(note or "").strip() or None,
     )
@@ -825,7 +896,7 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
   """
   Riallinea le fatture emesse già caricate: società = P.IVA cedente nell'XML/PDF
   + hint sede (Zanardelli/Abba) da indirizzo, filename e note.
-  Sposta anche i file se serve.
+  Sposta anche i file se serve. Elimina duplicati Mediazione A/Z stesso numero+cliente.
   """
 
   def _run() -> Dict[str, Any]:
@@ -833,6 +904,7 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
     moved = 0
     unchanged = 0
     skipped = 0
+    duplicates_removed = 0
     sample: List[Dict[str, Any]] = []
     by_company: Dict[str, int] = {}
 
@@ -844,7 +916,6 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
         path, _ = resolve_issued_file(db, int(row.id))
         raw = path.read_bytes()
       except Exception:
-        # Anche senza file: prova hint da nome/nota (PDF già spostati / mancanti)
         raw = b""
         path = None
 
@@ -861,6 +932,7 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
 
       seller_vat = str(extracted.get("seller_vat") or "").strip() or None
       seller_dest = str(extracted.get("seller_destination") or "").strip() or None
+      # Solo filename/path: non passare ragione sociale brand ("Mani in Pasta")
       extra = " ".join(
         p
         for p in (
@@ -868,19 +940,17 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
           row.file_path or "",
           row.note or "",
           row.activity or "",
-          str(extracted.get("seller_name") or ""),
         )
         if p
       )
       old = normalize_company_section(row.company)
-      # Per Mediazione già in A/Z, passa old come form così resta stabile se non c'è hint Z/A
+      # Non "ancorare" ad A/Z già sbagliata: lascia decidere sede/P.IVA
       new = pick_issued_company(
         seller_vat=seller_vat,
         seller_destination=seller_dest,
-        form_company=old if old in {"mediazione_a", "mediazione_z"} else old,
+        form_company=None if old in MEDIAZIONE_COMPANY_IDS else old,
         extra_text=extra,
       )
-      # Se rimane non_classificata ma era A/Z, non toccare
       if new == "non_classificata":
         new = old
       if new == "non_classificata" or new == old:
@@ -926,8 +996,67 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
       moved += 1
       by_company[new] = by_company.get(new, 0) + 1
 
-    if not dry_run and moved:
+    # Deduplica Mediazione A/Z: stesso numero + P.IVA cliente → tieni una sola riga
+    mediazione_rows = [
+      r
+      for r in db.query(IssuedInvoice)
+      .filter(IssuedInvoice.company.in_(sorted(MEDIAZIONE_COMPANY_IDS)))
+      .order_by(IssuedInvoice.id.asc())
+      .all()
+    ]
+    groups: Dict[Tuple[str, str], List[IssuedInvoice]] = {}
+    for row in mediazione_rows:
+      num = (row.invoice_number or "").strip()
+      if not num:
+        continue
+      key = (num, (row.customer_vat or "").strip())
+      groups.setdefault(key, []).append(row)
+
+    for _key, group in groups.items():
+      if len(group) < 2:
+        continue
+      # Preferisci riga già sulla società "giusta" se c'è hint nel path/filename
+      def _score(r: IssuedInvoice) -> Tuple[int, int]:
+        blob = f"{r.original_filename or ''} {r.file_path or ''} {r.note or ''}".lower()
+        cid = normalize_company_section(r.company)
+        zan = 1 if any(k in blob for k in ("zanardelli", "zanandelli", "oberdan")) else 0
+        abb = 1 if any(k in blob for k in ("via abba", "cesare abba", "abba")) else 0
+        match = 0
+        if zan and cid == "mediazione_z":
+          match = 2
+        elif abb and cid == "mediazione_a":
+          match = 2
+        elif zan and cid == "mediazione_a":
+          match = 0
+        elif abb and cid == "mediazione_z":
+          match = 0
+        else:
+          match = 1
+        return (match, int(r.id or 0))
+
+      keep = max(group, key=_score)
+      for r in group:
+        if r.id == keep.id:
+          continue
+        if dry_run:
+          duplicates_removed += 1
+          continue
+        try:
+          path, _ = resolve_issued_file(db, int(r.id))
+          path.unlink(missing_ok=True)
+        except Exception:
+          pass
+        db.delete(r)
+        duplicates_removed += 1
+
+    if not dry_run and (moved or duplicates_removed):
       db.commit()
+
+    # Conteggio finale per società
+    final_counts: Dict[str, int] = {}
+    for r in db.query(IssuedInvoice).all():
+      cid = normalize_company_section(r.company)
+      final_counts[cid] = final_counts.get(cid, 0) + 1
 
     return {
       "ok": True,
@@ -936,7 +1065,8 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
       "reclassified": moved,
       "unchanged": unchanged,
       "skipped_non_xml": skipped,
-      "by_company": by_company,
+      "duplicates_removed": duplicates_removed,
+      "by_company": final_counts if not dry_run else by_company,
       "sample": sample,
     }
 

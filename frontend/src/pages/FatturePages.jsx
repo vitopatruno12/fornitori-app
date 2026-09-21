@@ -919,7 +919,9 @@ export function FattureEmessePage() {
     setError('')
     try {
       const res = await fetchIssuedInvoices({ company: companyId, limit: 500 })
-      setItems(Array.isArray(res?.items) ? res.items : [])
+      const raw = Array.isArray(res?.items) ? res.items : []
+      // Cintura di sicurezza: mostra solo righe della società selezionata
+      setItems(raw.filter((row) => !companyId || String(row.company || '') === String(companyId)))
     } catch (e) {
       setError(e?.message || 'Errore caricamento fatture emesse')
       setItems([])
@@ -1073,49 +1075,10 @@ export function FattureEmessePage() {
     }
   }
 
-  async function handleBulkMoveToZ() {
-    const rows = filteredIssued.filter((r) => r?.id && (r.company || companyId) !== 'mediazione_z')
-    if (!rows.length) {
-      setImportMsg('Nessuna fattura da spostare tra quelle filtrate.')
-      return
-    }
-    if (
-      !window.confirm(
-        `Spostare ${rows.length} fattura/e filtrate da ${companyLabel(companyId)} a Mediazione Z?`,
-      )
-    ) {
-      return
-    }
-    setReclassifyBusy(true)
-    setError('')
-    setImportMsg('')
-    let ok = 0
-    let fail = 0
-    for (const row of rows) {
-      try {
-        await assignIssuedInvoiceCompany(row.id, 'mediazione_z')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    setImportMsg(
-      fail
-        ? `Spostate ${ok} a Mediazione Z · ${fail} errori.`
-        : `Spostate ${ok} fatture a Mediazione Z. Aprila dal menu Società.`,
-    )
-    setReclassifyBusy(false)
-    if (ok) {
-      setCompanyId('mediazione_z')
-    } else {
-      await reload()
-    }
-  }
-
   async function handleReclassifyMediazione() {
     if (
       !window.confirm(
-        'Riallinea le fatture emesse già caricate: le Mediazione con sede Zanardelli/Abba nel file o nel nome vanno in Mediazione Z o A. Continuare?',
+        'Riallinea le fatture emesse: Via Zanardelli → Mediazione Z, Via Abba → Mediazione A. Rimuove anche i duplicati A/Z. Continuare?',
       )
     ) {
       return
@@ -1126,23 +1089,19 @@ export function FattureEmessePage() {
     try {
       const res = await reclassifyIssuedInvoices({ dryRun: false })
       const moved = Number(res?.reclassified || 0)
+      const dupes = Number(res?.duplicates_removed || 0)
       const by = res?.by_company && typeof res.by_company === 'object' ? res.by_company : {}
-      const underA = Number(by.mediazione_a || 0)
-      const underZ = Number(by.mediazione_z || 0)
       const bits = Object.entries(by)
         .map(([cid, n]) => `${companyLabel(cid)}: ${n}`)
         .join(' · ')
-      if (moved) {
-        setImportMsg(`Separate ${moved} fatture emesse.${bits ? ` ${bits}` : ''}`)
-      } else if (underA > 0 && underZ === 0) {
-        setImportMsg(
-          `Nessun hint Zanardelli nei file: le ${underA} emesse restano sotto Mediazione A. Aprila e usa «Sposta filtrate → Z» oppure «Sposta a…» sulla riga.`,
-        )
-      } else {
-        setImportMsg(
-          `Nessuna fattura da spostare automaticamente.${bits ? ` ${bits}.` : ''} Usa «Sposta a…» sulle singole righe.`,
-        )
-      }
+      const parts = []
+      if (moved) parts.push(`Spostate ${moved}`)
+      if (dupes) parts.push(`rimossi ${dupes} duplicati`)
+      setImportMsg(
+        parts.length
+          ? `${parts.join(', ')}.${bits ? ` Ora: ${bits}` : ''}`
+          : `Nessuna modifica automatica.${bits ? ` Conteggio: ${bits}.` : ''} Se serve, usa «Sposta a…» sulla riga.`,
+      )
       await reload()
     } catch (e) {
       setError(e?.message || 'Riallineamento fallito')
@@ -1156,7 +1115,7 @@ export function FattureEmessePage() {
       title="Fatture emesse"
       lead={
         gestionaleMode
-          ? 'Fatture attive / emesse per società. Mediazione A e Z sono separate: scegli la società nel banner; se Z è vuota, sono ancora sotto A.'
+          ? 'Fatture attive / emesse per società. Mediazione A = Via Abba · Mediazione Z = Via Zanardelli. Usa «Separa A/Z» per riallineare.'
           : companyId
             ? `Fatture emesse del registro ${companyLabel(companyId)}.`
             : 'Fatture emesse del registro locale.'
@@ -1213,20 +1172,9 @@ export function FattureEmessePage() {
                 className="btn btn-secondary btn-sm"
                 disabled={reclassifyBusy || importBusy}
                 onClick={() => void handleReclassifyMediazione()}
-                title="Sposta le emesse Mediazione con hint Zanardelli/Abba sotto Z o A"
+                title="Riallinea Abba→A e Zanardelli→Z; elimina duplicati"
               >
                 {reclassifyBusy ? 'Separazione…' : 'Separa A/Z'}
-              </button>
-            ) : null}
-            {gestionaleMode && companyId === 'mediazione_a' && filteredIssued.length > 0 ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={reclassifyBusy || importBusy}
-                onClick={() => void handleBulkMoveToZ()}
-                title="Sposta tutte le fatture filtrate in questo elenco a Mediazione Z"
-              >
-                Sposta filtrate → Z
               </button>
             ) : null}
           </div>
@@ -1243,9 +1191,8 @@ export function FattureEmessePage() {
         <section className="card fatture-panel">
           {gestionaleMode && companyId === 'mediazione_z' && !loading && items.length === 0 ? (
             <div className="alert alert-warning">
-              Mediazione Z è vuota: le emesse sono ancora sotto <strong>Mediazione A</strong>. Apri A dal menu
-              Società, poi usa <strong>Sposta filtrate → Z</strong> oppure <strong>Sposta a Mediazione Z</strong>{' '}
-              sul menu della riga.
+              Mediazione Z è vuota. Apri <strong>Mediazione A</strong>, clicca <strong>Separa A/Z</strong> (sposta le
+              Zanardelli qui), oppure usa <strong>Sposta a Mediazione Z</strong> sulla riga.
             </div>
           ) : null}
           <h2 className="fatture-panel-title">Emesse · {companyLabel(companyId)}</h2>
