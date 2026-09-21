@@ -281,6 +281,7 @@ export function AdeSdiInvoicesPanel({
   nameQuery = '',
   dateFrom = '',
   dateTo = '',
+  refreshKey = 0,
 }) {
   const [days, setDays] = useState('60')
   const [loading, setLoading] = useState(false)
@@ -338,6 +339,11 @@ export function AdeSdiInvoicesPanel({
     if (autoLoad) load(60)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLoad, companyId])
+
+  useEffect(() => {
+    if (refreshKey > 0) load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   async function handleManualAssign(item, section) {
     try {
@@ -569,6 +575,7 @@ export function FattureRicevutePage() {
   const [nameQuery, setNameQuery] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [sdiRefreshKey, setSdiRefreshKey] = useState(0)
   const importInputRef = React.useRef(null)
 
   const ricevuteLead = gestionaleMode
@@ -724,6 +731,11 @@ export function FattureRicevutePage() {
             setDateFrom('')
             setDateTo('')
           }}
+          onApply={() => {
+            void reload()
+            setSdiRefreshKey((n) => n + 1)
+          }}
+          applyDisabled={loading}
         />
       </section>
 
@@ -737,6 +749,7 @@ export function FattureRicevutePage() {
         nameQuery={nameQuery}
         dateFrom={dateFrom}
         dateTo={dateTo}
+        refreshKey={sdiRefreshKey}
       />
 
       {gestionaleMode && !companyId ? (
@@ -1056,6 +1069,8 @@ export function FattureEmessePage() {
               setDateFrom('')
               setDateTo('')
             }}
+            onApply={() => void reload()}
+            applyDisabled={loading || !companyId}
           />
           <WorkbookGrid
             title={`Emesse · ${companyLabel(companyId)}`}
