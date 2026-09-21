@@ -548,12 +548,14 @@ def store_issued_xml_bytes(
     raise ValueError("XML vuoto")
 
   extracted = extract_issued_invoice_fields(raw, filename=filename, file_kind="xml")
+  final_number = (str(extracted.get("invoice_number") or "").strip() or None)
   company_id = pick_issued_company(
     seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
     seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
     ade_profile_id=ade_profile_id,
     form_company=company,
     extra_text=filename,
+    invoice_number=final_number,
   )
   if company_id == "non_classificata":
     company_id = normalize_company_section(company)
@@ -564,7 +566,6 @@ def store_issued_xml_bytes(
   }:
     company_id = normalize_company_section(ade_profile_id)
 
-  final_number = (str(extracted.get("invoice_number") or "").strip() or None)
   final_amount = extracted.get("total_amount")
   if final_amount is not None and not isinstance(final_amount, Decimal):
     final_amount = _amount_to_decimal(final_amount)
@@ -663,7 +664,7 @@ async def upload_issued_invoice(
   extracted = extract_issued_invoice_fields(raw, filename=file.filename or "", file_kind=kind)
   warnings = list(extracted.get("warnings") or [])
 
-  # P.IVA cedente (chi emette) ha priorità; per Mediazione A/Z usa sede + filename (non il brand)
+  # P.IVA cedente + serie numero (/A/|/Z/) + sede; filename solo come extra
   auto_company = pick_issued_company(
     seller_vat=(str(extracted.get("seller_vat") or "").strip() or None),
     seller_destination=(str(extracted.get("seller_destination") or "").strip() or None),
@@ -671,6 +672,7 @@ async def upload_issued_invoice(
     extra_text=" ".join(
       p for p in (file.filename or "", note or "") if p
     ),
+    invoice_number=(invoice_number or "").strip() or (str(extracted.get("invoice_number") or "").strip() or None),
   )
   if auto_company != "non_classificata" and auto_company != company_id:
     warnings.append(
@@ -944,12 +946,14 @@ def reclassify_issued_invoices(db: Session, *, dry_run: bool = False) -> Dict[st
         if p
       )
       old = normalize_company_section(row.company)
-      # Non "ancorare" ad A/Z già sbagliata: lascia decidere sede/P.IVA
+      inv_num = (row.invoice_number or "").strip() or str(extracted.get("invoice_number") or "").strip() or None
+      # Serie /A/|/Z/ nel numero; non ancorare ad A/Z già sbagliata
       new = pick_issued_company(
         seller_vat=seller_vat,
         seller_destination=seller_dest,
         form_company=None if old in MEDIAZIONE_COMPANY_IDS else old,
         extra_text=extra,
+        invoice_number=inv_num,
       )
       if new == "non_classificata":
         new = old

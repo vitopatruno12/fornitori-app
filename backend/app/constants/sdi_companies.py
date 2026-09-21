@@ -228,6 +228,23 @@ def company_from_vat(raw: Optional[str]) -> Optional[str]:
   return vat_to_company_map().get(norm)
 
 
+def mediazione_company_from_invoice_number(number: Optional[str]) -> Optional[str]:
+  """
+  Serie numerazione emesse Mediazione:
+  - …/A/… → Via Abba (mediazione_a)
+  - …/Z/… → Via Zanardelli (mediazione_z)
+  La sede legale nel XML è spesso sempre Via Abba: il numero è il discriminante.
+  """
+  n = (number or "").strip().upper().replace(" ", "")
+  if not n:
+    return None
+  if re.search(r"/Z(/|$)", n):
+    return "mediazione_z"
+  if re.search(r"/A(/|$)", n):
+    return "mediazione_a"
+  return None
+
+
 def destination_to_legacy_section(destination: Optional[str]) -> str:
   """Euristica indirizzo XML → abba | zanardelli | non_classificata."""
   dest = (destination or "").lower()
@@ -355,13 +372,23 @@ def pick_issued_company(
   seller_destination: Optional[str] = None,
   form_company: Optional[str] = None,
   extra_text: Optional[str] = None,
+  invoice_number: Optional[str] = None,
 ) -> str:
   """
   Classificazione fatture emesse: P.IVA del cedente (chi emette) decide la società.
   Via Lattea 04886500752 · Risacca 05186540752 · PG 05440050754 · Mediazione 04945600759.
-  Per Mediazione (stessa P.IVA) lo split A/Z usa indirizzo sede, profilo, testo file o form UI.
+  Per Mediazione (stessa P.IVA) lo split A/Z usa: numero (…/A/…|…/Z/…), poi indirizzo, profilo, form.
   """
-  # Indirizzo sede prima del testo libero (nome file / ragione sociale brand).
+  by_number = mediazione_company_from_invoice_number(invoice_number)
+  # Anche nel testo libero (filename / note) può comparire la serie
+  if not by_number and extra_text:
+    by_number = mediazione_company_from_invoice_number(extra_text)
+    if not by_number:
+      m = re.search(r"(\d+\s*/\s*[AZ]\s*/\s*\d+)", str(extra_text), re.I)
+      if m:
+        by_number = mediazione_company_from_invoice_number(m.group(1))
+
+  # Indirizzo sede (spesso legale Abba anche per Zanardelli — meno affidabile del numero)
   addr_legacy = normalize_company_section(destination_to_legacy_section(seller_destination))
   extra_legacy = normalize_company_section(destination_to_legacy_section(extra_text))
   legacy = addr_legacy if addr_legacy in MEDIAZIONE_COMPANY_IDS else extra_legacy
@@ -377,7 +404,16 @@ def pick_issued_company(
       or not normalize_vat(seller_vat)
     )
 
-  # Hint sede Abba/Zanardelli ha priorità sullo split Mediazione.
+  # 1) Serie numero fattura A/Z — priorità massima per Mediazione
+  if by_number and (
+    is_mediazione_vat(seller_vat)
+    or form in MEDIAZIONE_COMPANY_IDS
+    or profile_mapped in MEDIAZIONE_COMPANY_IDS
+    or not normalize_vat(seller_vat)
+  ):
+    return by_number
+
+  # 2) Hint sede Abba/Zanardelli
   if _accept_mediazione_hint(legacy):
     return legacy
 
@@ -400,6 +436,8 @@ def pick_issued_company(
     return form
   if legacy != "non_classificata":
     return legacy
+  if by_number:
+    return by_number
   return "non_classificata"
 
 

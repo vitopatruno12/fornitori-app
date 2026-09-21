@@ -117,11 +117,22 @@ def issued_company_for_profile(
   if not form_fallback and pid == "mediazione":
     form_fallback = None
 
+  inv_num = ""
+  m_num = re.search(
+    r"<DatiGeneraliDocumento>[\s\S]*?<Numero>\s*([^<]+)\s*</Numero>",
+    text or "",
+    re.I,
+  )
+  if m_num:
+    inv_num = (m_num.group(1) or "").strip()
+
   return pick_issued_company(
     seller_vat=seller_vat or None,
     ade_profile_id=pid or None,
     seller_destination=seller_dest or None,
     form_company=form_fallback,
+    invoice_number=inv_num or None,
+    extra_text=inv_num or None,
   )
 
 
