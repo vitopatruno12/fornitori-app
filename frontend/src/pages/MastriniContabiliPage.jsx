@@ -1264,6 +1264,14 @@ export default function MastriniContabiliPage() {
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setViewMode('elenco')}
+                title="Torna al piano dei conti / elenco mastrini"
+              >
+                ← Torna all&apos;elenco
+              </button>
+              <button
+                type="button"
                 className="btn btn-primary btn-sm"
                 onClick={() => void load()}
                 disabled={loading || !companyId}
