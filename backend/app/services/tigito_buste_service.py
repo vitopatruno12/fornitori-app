@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 CF_RE = re.compile(r"\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b")
 HEADER_RE = re.compile(
   r"(GENNAIO|FEBBRAIO|MARZO|APRILE|MAGGIO|GIUGNO|LUGLIO|AGOSTO|SETTEMBRE|OTTOBRE|NOVEMBRE|DICEMBRE)"
-  r"\s+(\d{4})\s+\d+\s+\d+\s+"
+  r"\s+(\d{4})\s+(\d+)\s+(\d+)\s+"
   r"(?:\S+\s+){1,2}"
   r"(\d+)\s+(.+?)\s+(\d{2}/\d{2}/\d{2})\s*$"
 )
@@ -53,13 +53,21 @@ COMPANY_BY_VAT = {
 }
 
 # Indirizzo cedolino → locale Personale / Accedi (allineato a stazioni operative)
+# Zanardelli in Tigito spesso è «VIA OBERDAN 40 LECCE» (non «Zanardelli»).
 ADDRESS_TO_LOCALE = (
   ("ZANARDELLI", "La mediazione via zanardelli"),
+  ("OBERDAN", "La mediazione via zanardelli"),
   ("ABBA", "Mediazione via abba"),
   ("LATTEA", "Mucche Volanti"),
   ("MUCHE", "Mucche Volanti"),  # typo guard
   ("MUCCHE", "Mucche Volanti"),
 )
+
+# Mediazione (azienda 218): Filiale 1 = Abba, Filiale 2 = Zanardelli
+MEDIAZIONE_FILIALE_TO_LOCALE = {
+  "1": "Mediazione via abba",
+  "2": "La mediazione via zanardelli",
+}
 
 
 def locale_name_key(value: Optional[str]) -> str:
@@ -86,11 +94,24 @@ def shop_token_from_address(address: Optional[str], suggested_locale: Optional[s
   return shop_token_from_locale(suggested_locale) or shop_token_from_locale(address)
 
 
-def resolve_suggested_locale_from_text(*, ditta: str = "", address: str = "") -> Optional[str]:
+def resolve_suggested_locale_from_text(
+  *,
+  ditta: str = "",
+  address: str = "",
+  azienda: Optional[str] = None,
+  filiale: Optional[str] = None,
+) -> Optional[str]:
   blob = f"{ditta} {address}".upper()
   for token, locale in ADDRESS_TO_LOCALE:
     if token in blob:
       return locale
+  # Mediazione: Filiale 1 = Abba, Filiale 2 = Zanardelli (anche se indirizzo = Oberdan)
+  az = str(azienda or "").strip()
+  fil = str(filiale or "").strip()
+  if az in {"218", "0218"} or "MEDIAZIONE" in blob:
+    mapped = MEDIAZIONE_FILIALE_TO_LOCALE.get(fil)
+    if mapped:
+      return mapped
   return None
 
 
@@ -178,6 +199,7 @@ MEDIAZIONE_ZANARDELLI_CF = frozenset(
     "LNGLBT81T66E506T",  # LONGO ELISABETTA
     "MHMWSA01D16Z236U",  # MUHAMMAD AWAIS
     "PNWRHL05D30Z222H",  # PANWAR RAHUL
+    "KNASFL04B08Z249H",  # AKON ASRAFUL
   }
 )
 
@@ -308,6 +330,8 @@ def extract_employees_from_tigito_pdf(
       name = cf = birth = month = year = codice = qualifica = None
       ditta = ""
       addr = ""
+      azienda_code = None
+      filiale_code = None
       for _, txt in ordered:
         up = txt.upper()
         if ("MEDIAZIONE" in up or "LATTEA" in up) and (
@@ -315,17 +339,23 @@ def extract_employees_from_tigito_pdf(
         ):
           ditta = txt.strip()
         if "VIA " in up and (
-          "LECCE" in up or "ABBA" in up or "ZANARDELLI" in up or "LATTEA" in up
+          "LECCE" in up
+          or "ABBA" in up
+          or "ZANARDELLI" in up
+          or "OBERDAN" in up
+          or "LATTEA" in up
         ) and "COD.FISCALE" not in up and "CODICE FISCALE" not in up:
           addr = txt.strip()
         m = HEADER_RE.search(txt)
         if m:
-          month, year, codice, name, _hire = (
+          month, year, azienda_code, filiale_code, codice, name, _hire = (
             m.group(1),
             m.group(2),
             m.group(3),
-            m.group(4).strip(),
+            m.group(4),
             m.group(5),
+            m.group(6).strip(),
+            m.group(7),
           )
         m2 = CF_RE.search(txt)
         if m2 and re.search(r"\d{2}/\d{2}/\d{2}", txt):
@@ -369,7 +399,12 @@ def extract_employees_from_tigito_pdf(
 
       last_name, first_name = split_cognome_nome(name)
       ym = f"{year}-{MONTHS.get(month, 0):02d}" if year and month else None
-      suggested = resolve_suggested_locale_from_text(ditta=ditta, address=addr)
+      suggested = resolve_suggested_locale_from_text(
+        ditta=ditta,
+        address=addr,
+        azienda=azienda_code,
+        filiale=filiale_code,
+      )
       row = {
           "page_index": i,
           "page": i + 1,
@@ -386,6 +421,8 @@ def extract_employees_from_tigito_pdf(
           "month_label": f"{month} {year}" if month else None,
           "ditta": ditta or None,
           "address": addr or None,
+          "azienda": azienda_code,
+          "filiale": filiale_code,
           "suggested_locale": suggested,
           "shop_token": shop_token_from_address(addr, suggested),
         }
