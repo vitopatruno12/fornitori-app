@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
+  DEFAULT_WORKBOOK_KEY,
   PAGAMENTI_WORKBOOKS,
   fetchPagamentiWatchAgent,
   fetchSupplierPaymentsWorkbook,
+  migrateRisaccaWorkbookToMediazione,
   readPagamentiWorkbookKey,
   runPagamentiWatchAgent,
   saveSupplierPaymentsWorkbook,
@@ -42,9 +44,15 @@ import {
 } from '../utils/pagamentiWorkbook.js'
 import { downloadWorkbookAsExcel, parseExcelFileToWorkbook } from '../utils/pagamentiExcel.js'
 
-function workbookFromApi(data) {
+function workbookFromApi(data, workbookKey = '') {
+  const meta = PAGAMENTI_WORKBOOKS.find((w) => w.key === workbookKey)
+  const fallbackTitle = meta?.title || 'FILE FORNITORI_MEDIAZIONE_2026'
+  let title = String(data?.title || fallbackTitle).trim() || fallbackTitle
+  if (workbookKey === 'mediazione_2026' && /risacca/i.test(title)) {
+    title = fallbackTitle
+  }
   return {
-    title: data?.title || seedWorkbook.title,
+    title,
     sheets: Array.isArray(data?.sheets) ? data.sheets : seedWorkbook.sheets,
     highlights: data?.highlights && typeof data.highlights === 'object' ? data.highlights : {},
   }
@@ -103,8 +111,14 @@ export default function PagamentiPage() {
     setLoading(true)
     setError('')
     try {
+      // Sposta sempre il registro storico Risacca → Mediazione prima del load
+      try {
+        await migrateRisaccaWorkbookToMediazione()
+      } catch {
+        // se API vecchia, continua comunque
+      }
       const data = await fetchSupplierPaymentsWorkbook(key)
-      const next = recalculateWorkbook(workbookFromApi(data))
+      const next = recalculateWorkbook(workbookFromApi(data, key))
       setWorkbook(next)
       setUpdatedAt(data?.updated_at || '')
       setDirty(false)

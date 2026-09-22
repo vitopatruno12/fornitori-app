@@ -105,17 +105,18 @@ def _load_default_payload() -> Dict[str, Any]:
   return {"title": "FILE FORNITORI_MEDIAZIONE_2026", "sheets": []}
 
 
-def _workbook_has_invoice_rows(row: Optional[SupplierPaymentsWorkbook]) -> bool:
+def _invoice_row_count(row: Optional[SupplierPaymentsWorkbook]) -> int:
   if row is None:
-    return False
+    return 0
   try:
     raw = json.loads(row.payload_json or "{}")
   except json.JSONDecodeError:
-    return False
+    return 0
   sheets = raw.get("sheets") if isinstance(raw, dict) else None
   if not isinstance(sheets, list):
-    return False
+    return 0
   special = {"TOTALI", "DELEGHE F24", "VERSAMENTO CONTANTI"}
+  count = 0
   for sheet in sheets:
     if not isinstance(sheet, dict):
       continue
@@ -128,16 +129,30 @@ def _workbook_has_invoice_rows(row: Optional[SupplierPaymentsWorkbook]) -> bool:
     for idx, line in enumerate(rows):
       if idx == 0 or not isinstance(line, list):
         continue
-      # numero fattura o denominazione valorizzati
-      num = str(line[1] if len(line) > 1 else "" or "").strip()
-      name_cell = str(line[4] if len(line) > 4 else "" or "").strip()
+      num = str(line[1] if len(line) > 1 else "" or "").strip().strip("'")
+      name_cell = str(line[4] if len(line) > 4 else "" or "").strip().strip("'")
       if num or name_cell:
-        return True
-  return False
+        count += 1
+  return count
+
+
+def _workbook_has_invoice_rows(row: Optional[SupplierPaymentsWorkbook]) -> bool:
+  return _invoice_row_count(row) > 0
+
+
+def _apply_payload_to_row(row: SupplierPaymentsWorkbook, payload: Dict[str, Any], *, title: str) -> None:
+  body = dict(payload) if isinstance(payload, dict) else {}
+  body["title"] = title
+  row.title = title
+  row.payload_json = json.dumps(body, ensure_ascii=False)
 
 
 def migrate_legacy_risacca_workbook_to_mediazione(db: Session) -> bool:
-  """Il registro storico era salvato come risacca_2026: va sotto Mediazione."""
+  """Sposta il registro storico da risacca_2026 a mediazione_2026.
+
+  Il file unico era salvato come Risacca: i dati vanno sotto Mediazione.
+  Se entrambi hanno righe, vince quello con più documenti (di solito Risacca live).
+  """
   med_key = "mediazione_2026"
   ris_key = LEGACY_RISACCA_KEY
   med = (
@@ -151,24 +166,36 @@ def migrate_legacy_risacca_workbook_to_mediazione(db: Session) -> bool:
     .first()
   )
   if ris is None:
+    # Solo rinomina titolo se Mediazione ha ancora "RISACCA" nel titolo
+    if med is not None and "RISACCA" in str(med.title or "").upper():
+      try:
+        raw = json.loads(med.payload_json or "{}")
+      except json.JSONDecodeError:
+        raw = {}
+      if not isinstance(raw, dict):
+        raw = {}
+      title = "FILE FORNITORI_MEDIAZIONE_2026"
+      _apply_payload_to_row(med, raw, title=title)
+      db.add(med)
+      db.commit()
+      return True
     return False
 
   title = "FILE FORNITORI_MEDIAZIONE_2026"
-  ris_has = _workbook_has_invoice_rows(ris)
-  med_has = _workbook_has_invoice_rows(med)
+  ris_count = _invoice_row_count(ris)
+  med_count = _invoice_row_count(med)
 
-  # Caso 1: solo Risacca esiste → rinomina in Mediazione + crea Risacca vuota
+  try:
+    ris_raw = json.loads(ris.payload_json or "{}")
+  except json.JSONDecodeError:
+    ris_raw = {}
+  if not isinstance(ris_raw, dict):
+    ris_raw = {}
+
+  # Caso 1: solo Risacca → rinomina in Mediazione + Risacca vuota
   if med is None:
-    try:
-      raw = json.loads(ris.payload_json or "{}")
-    except json.JSONDecodeError:
-      raw = {}
-    if not isinstance(raw, dict):
-      raw = {}
-    raw["title"] = title
     ris.workbook_key = med_key
-    ris.title = title
-    ris.payload_json = json.dumps(raw, ensure_ascii=False)
+    _apply_payload_to_row(ris, ris_raw, title=title)
     db.add(ris)
     empty = _empty_workbook_payload("FILE FORNITORI_RISACCA_2026")
     db.add(
@@ -181,22 +208,27 @@ def migrate_legacy_risacca_workbook_to_mediazione(db: Session) -> bool:
     db.commit()
     return True
 
-  # Caso 2: Mediazione vuota, Risacca piena → sposta contenuto
-  if ris_has and not med_has:
+  # Caso 2: Risacca ha dati (e non meno di Mediazione) → sposta su Mediazione
+  # Copre anche Mediazione già seedata dal template JSON (stesso contenuto o meno righe).
+  if ris_count > 0 and ris_count >= med_count:
+    _apply_payload_to_row(med, ris_raw, title=title)
+    empty = _empty_workbook_payload("FILE FORNITORI_RISACCA_2026")
+    _apply_payload_to_row(ris, empty, title=str(empty.get("title") or "FILE FORNITORI_RISACCA_2026"))
+    db.add(med)
+    db.add(ris)
+    db.commit()
+    return True
+
+  # Caso 3: Mediazione ha i dati ma titolo ancora RISACCA
+  if med is not None and "RISACCA" in str(med.title or "").upper():
     try:
-      raw = json.loads(ris.payload_json or "{}")
+      raw = json.loads(med.payload_json or "{}")
     except json.JSONDecodeError:
       raw = {}
     if not isinstance(raw, dict):
       raw = {}
-    raw["title"] = title
-    med.title = title
-    med.payload_json = json.dumps(raw, ensure_ascii=False)
-    empty = _empty_workbook_payload("FILE FORNITORI_RISACCA_2026")
-    ris.title = str(empty.get("title") or "FILE FORNITORI_RISACCA_2026")
-    ris.payload_json = json.dumps(empty, ensure_ascii=False)
+    _apply_payload_to_row(med, raw, title=title)
     db.add(med)
-    db.add(ris)
     db.commit()
     return True
 

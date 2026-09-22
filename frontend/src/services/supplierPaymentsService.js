@@ -63,6 +63,10 @@ export async function saveSupplierPaymentsWorkbook(payload, workbookKey = readPa
   })
 }
 
+export async function migrateRisaccaWorkbookToMediazione() {
+  return apiFetch('/supplier-payments/migrate-risacca-to-mediazione', { method: 'POST' })
+}
+
 export async function fetchPagamentiWatchAgent() {
   return apiFetch('/supplier-payments/watch-agent')
 }
