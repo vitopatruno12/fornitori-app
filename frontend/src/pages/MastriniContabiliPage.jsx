@@ -590,11 +590,8 @@ export default function MastriniContabiliPage() {
     return plan.filter((row) => companyAccountCodes.has(row.code))
   }, [data, companyAccountCodes])
 
-  /** Selezione scheda: conti di tutte le società (Abba, Zanardelli, Via Lattea, …). */
-  const selezioneAccountOptions = useMemo(() => {
-    const plan = data?.accountPlan || ACCOUNT_PLAN
-    return Array.isArray(plan) && plan.length ? plan : ACCOUNT_PLAN
-  }, [data])
+  /** Selezione scheda: sempre piano completo (tutte le società), non filtrato. */
+  const selezioneAccountOptions = ACCOUNT_PLAN
 
   const accountOptionsByGroup = useMemo(() => {
     const groups = new Map()
@@ -609,9 +606,9 @@ export default function MastriniContabiliPage() {
   const selezioneAccountOptionsByGroup = useMemo(() => {
     const groups = new Map()
     for (const row of selezioneAccountOptions) {
-      const companyPart = row.company ? companyLabel(row.company) : ''
+      const companyPart = row.company ? companyLabel(row.company) : 'Comune'
       const base = row.group || row.category || 'Altri'
-      const key = companyPart ? `${base} · ${companyPart}` : base
+      const key = `${companyPart} · ${base}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key).push(row)
     }
@@ -858,16 +855,13 @@ export default function MastriniContabiliPage() {
     return sortMovementsNewestFirst(selectedFornitore.movements || [])
   }, [selectedFornitore])
 
-  const accountOptionsForSelect = accountOptions.length ? accountOptions : ACCOUNT_PLAN
-
   function openScheda(e) {
     e?.preventDefault?.()
     if (!accountCode) {
       setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
       return
     }
-    const plan = data?.accountPlan || ACCOUNT_PLAN
-    const row = plan.find((a) => String(a.code) === String(accountCode))
+    const row = ACCOUNT_PLAN.find((a) => String(a.code) === String(accountCode))
     const targetCompany = String(row?.company || companyId || '').trim()
     if (!targetCompany) {
       setError('Seleziona una società dal menu nel banner verde.')
@@ -1245,21 +1239,15 @@ export default function MastriniContabiliPage() {
                 onChange={(e) => setAccountCode(e.target.value)}
                 required
               >
-                {selezioneAccountOptionsByGroup.length
-                  ? selezioneAccountOptionsByGroup.map(([group, rows]) => (
-                      <optgroup key={group} label={group}>
-                        {rows.map((a) => (
-                          <option key={a.code} value={a.code}>
-                            {a.code} — {a.description}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : selezioneAccountOptions.map((a) => (
-                      <option key={a.code} value={a.code}>
+                {selezioneAccountOptionsByGroup.map(([group, rows]) => (
+                  <optgroup key={group} label={group}>
+                    {rows.map((a) => (
+                      <option key={`${a.company || 'common'}-${a.code}`} value={a.code}>
                         {a.code} — {a.description}
                       </option>
                     ))}
+                  </optgroup>
+                ))}
               </select>
             </label>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
