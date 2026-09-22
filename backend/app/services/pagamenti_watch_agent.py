@@ -114,13 +114,13 @@ def _release_lock() -> None:
 
 
 def _file_fingerprint(db: Session) -> Dict[str, Any]:
-  wb = supplier_payments_service.get_workbook(db)
-  rows = supplier_payments_service.list_paid_document_rows(db)
+  rows = supplier_payments_service.list_paid_document_rows(db, all_workbooks=True)
   parts = []
   for row in rows:
     parts.append(
       "|".join(
         [
+          str(row.get("workbook_key") or ""),
           str(row.get("sheet") or ""),
           str(row.get("invoice_number_norm") or ""),
           str(row.get("supplier_name_norm") or ""),
@@ -130,12 +130,15 @@ def _file_fingerprint(db: Session) -> Dict[str, Any]:
       )
     )
   digest = hashlib.sha256("\n".join(sorted(parts)).encode("utf-8")).hexdigest()[:32]
-  updated = wb.updated_at.isoformat() if getattr(wb, "updated_at", None) else None
+  catalog = supplier_payments_service.list_workbook_catalog(db)
+  updated_times = [c.get("updated_at") for c in catalog if c.get("updated_at")]
+  updated = max(updated_times) if updated_times else None
   return {
     "updated_at": updated,
     "paid_rows": len(rows),
     "fingerprint": digest,
-    "title": wb.title,
+    "workbooks": len(catalog),
+    "title": "file fornitori (tutte le società)",
   }
 
 

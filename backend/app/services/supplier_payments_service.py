@@ -16,6 +16,81 @@ from ..schemas.supplier_payments import (
 DEFAULT_WORKBOOK_KEY = "risacca_2026"
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "fornitori_risacca_2026_default.json"
 
+# Un file Excel/registro per società (Mediazione A+Z condividono lo stesso file).
+WORKBOOK_CATALOG: List[Dict[str, Any]] = [
+  {
+    "key": "mediazione_2026",
+    "label": "File fornitori Mediazione",
+    "title": "FILE FORNITORI_MEDIAZIONE_2026",
+    "companies": ["mediazione_a", "mediazione_z", "mediazione"],
+  },
+  {
+    "key": "via_lattea_2026",
+    "label": "File fornitori Via Lattea",
+    "title": "FILE FORNITORI_VIA_LATTEA_2026",
+    "companies": ["via_lattea"],
+  },
+  {
+    "key": "risacca_2026",
+    "label": "File fornitori Risacca",
+    "title": "FILE FORNITORI_RISACCA_2026",
+    "companies": ["risacca"],
+  },
+  {
+    "key": "pg_2026",
+    "label": "File fornitori PG",
+    "title": "FILE FORNITORI_PG_2026",
+    "companies": ["pg"],
+  },
+]
+
+_WORKBOOK_BY_KEY = {str(item["key"]): item for item in WORKBOOK_CATALOG}
+_COMPANY_TO_WORKBOOK = {
+  str(company): str(item["key"])
+  for item in WORKBOOK_CATALOG
+  for company in (item.get("companies") or [])
+}
+
+
+def list_workbook_catalog(db: Optional[Session] = None) -> List[Dict[str, Any]]:
+  """Elenco file fornitori disponibili (menu a tendina Pagamenti)."""
+  existing: Dict[str, Any] = {}
+  if db is not None:
+    for row in db.query(SupplierPaymentsWorkbook).all():
+      existing[str(row.workbook_key)] = row
+  out: List[Dict[str, Any]] = []
+  for item in WORKBOOK_CATALOG:
+    key = str(item["key"])
+    row = existing.get(key)
+    out.append(
+      {
+        "key": key,
+        "label": item["label"],
+        "title": (row.title if row and row.title else item["title"]),
+        "companies": list(item.get("companies") or []),
+        "exists": row is not None,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+      }
+    )
+  return out
+
+
+def workbook_key_for_company(company_id: Optional[str]) -> str:
+  raw = str(company_id or "").strip().lower()
+  if not raw:
+    return DEFAULT_WORKBOOK_KEY
+  return _COMPANY_TO_WORKBOOK.get(raw, DEFAULT_WORKBOOK_KEY)
+
+
+def catalog_entry_for_key(workbook_key: str) -> Dict[str, Any]:
+  key = _normalize_workbook_key(workbook_key)
+  return _WORKBOOK_BY_KEY.get(key) or {
+    "key": key,
+    "label": key,
+    "title": f"FILE FORNITORI_{key.upper()}",
+    "companies": [],
+  }
+
 
 def _load_default_payload() -> Dict[str, Any]:
   if _DEFAULT_PATH.is_file():
@@ -64,7 +139,7 @@ def _empty_monthly_sheet(name: str) -> Dict[str, Any]:
   }
 
 
-def _empty_workbook_payload() -> Dict[str, Any]:
+def _empty_workbook_payload(title: Optional[str] = None) -> Dict[str, Any]:
   """Registro pulito: fogli mese vuoti + fogli speciali con sola struttura."""
   default = _load_default_payload()
   sheets: List[Dict[str, Any]] = []
@@ -87,11 +162,24 @@ def _empty_workbook_payload() -> Dict[str, Any]:
         while len(top) < 4:
           top.append([])
         sheets.append({"name": name, "rows": top})
+  default_title = str(default.get("title") or "FILE FORNITORI_RISACCA_2026")
   return {
-    "title": str(default.get("title") or "FILE FORNITORI_RISACCA_2026"),
+    "title": str(title or default_title).strip() or default_title,
     "sheets": sheets,
     "highlights": {},
   }
+
+
+def _seed_payload_for_key(workbook_key: str) -> Dict[str, Any]:
+  """Risacca mantiene il template storico; le altre società partono vuote."""
+  key = _normalize_workbook_key(workbook_key)
+  entry = catalog_entry_for_key(key)
+  title = str(entry.get("title") or f"FILE FORNITORI_{key.upper()}")
+  if key == DEFAULT_WORKBOOK_KEY:
+    payload = _load_default_payload()
+    payload["title"] = str(payload.get("title") or title)
+    return payload
+  return _empty_workbook_payload(title)
 
 
 def _normalize_workbook_key(workbook_key: str) -> str:
@@ -138,9 +226,9 @@ def get_workbook(db: Session, workbook_key: str = DEFAULT_WORKBOOK_KEY) -> Suppl
   if row:
     return workbook_to_read(row)
 
-  default_payload = _load_default_payload()
-  title = str(default_payload.get("title") or "FILE FORNITORI_RISACCA_2026")
-  payload_json = json.dumps(default_payload, ensure_ascii=False)
+  seed_payload = _seed_payload_for_key(key)
+  title = str(seed_payload.get("title") or catalog_entry_for_key(key).get("title") or key)
+  payload_json = json.dumps(seed_payload, ensure_ascii=False)
   row = SupplierPaymentsWorkbook(workbook_key=key, title=title, payload_json=payload_json)
   db.add(row)
   db.commit()
@@ -150,8 +238,9 @@ def get_workbook(db: Session, workbook_key: str = DEFAULT_WORKBOOK_KEY) -> Suppl
 
 def upsert_workbook(db: Session, payload: SupplierPaymentsWorkbookUpsert) -> SupplierPaymentsWorkbookRead:
   key = _normalize_workbook_key(payload.workbook_key)
+  default_title = str(catalog_entry_for_key(key).get("title") or "FILE FORNITORI")
   body = {
-      "title": (payload.title or "FILE FORNITORI_RISACCA_2026").strip(),
+      "title": (payload.title or default_title).strip() or default_title,
       "sheets": [sheet.model_dump() for sheet in payload.sheets],
   }
   if isinstance(payload.highlights, dict):
@@ -184,9 +273,8 @@ def delete_workbook(
     db.commit()
     deleted = True
   if reseed:
-    # Registro vuoto (solo intestazioni), non il template pieno di dati storici
-    empty_payload = _empty_workbook_payload()
-    title = str(empty_payload.get("title") or "FILE FORNITORI_RISACCA_2026")
+    empty_payload = _empty_workbook_payload(catalog_entry_for_key(key).get("title"))
+    title = str(empty_payload.get("title") or catalog_entry_for_key(key).get("title") or key)
     payload_json = json.dumps(empty_payload, ensure_ascii=False)
     row = SupplierPaymentsWorkbook(workbook_key=key, title=title, payload_json=payload_json)
     db.add(row)
@@ -284,51 +372,68 @@ def _names_overlap(left: Any, right: Any) -> bool:
 
 def list_paid_document_rows(
   db: Session,
-  workbook_key: str = DEFAULT_WORKBOOK_KEY,
+  workbook_key: Optional[str] = None,
+  *,
+  company: Optional[str] = None,
+  all_workbooks: bool = False,
 ) -> List[Dict[str, Any]]:
   """
   Righe del file Pagamenti con pagamento registrato
-  (col. PAGATO / DATA PAGAMENTO) sui fogli mensili.
+  (col. PAGATO DARE > 0) sui fogli mensili.
+  Se company è valorizzata usa il file della società;
+  se all_workbooks=True unisce tutti i file del catalogo.
   """
-  wb = get_workbook(db, workbook_key)
+  keys: List[str]
+  if all_workbooks:
+    keys = [str(item["key"]) for item in WORKBOOK_CATALOG]
+  elif workbook_key:
+    keys = [_normalize_workbook_key(workbook_key)]
+  elif company:
+    keys = [workbook_key_for_company(company)]
+  else:
+    keys = [DEFAULT_WORKBOOK_KEY]
+
   paid: List[Dict[str, Any]] = []
-  for sheet in wb.sheets or []:
-    name = str(getattr(sheet, "name", "") or "").strip().upper()
-    if not name or name in _SPECIAL_SHEETS:
-      continue
-    rows = getattr(sheet, "rows", None) or []
-    for idx, raw in enumerate(rows):
-      if idx == 0 or not isinstance(raw, list):
+  for key in keys:
+    wb = get_workbook(db, key)
+    for sheet in wb.sheets or []:
+      name = str(getattr(sheet, "name", "") or "").strip().upper()
+      if not name or name in _SPECIAL_SHEETS:
         continue
-      cells = list(raw) + [None] * max(0, 12 - len(raw))
-      # Subtotali / footer: hanno TOTALE FORNITORE senza numero fattura
-      invoice_number = _strip_excel_quotes(cells[1])
-      supplier_name = _strip_excel_quotes(cells[4])
-      if not invoice_number and not supplier_name:
-        continue
-      if str(cells[6] or "").strip().upper() == "TOTALE":
-        continue
-      pagato = _num_cell(cells[8])
-      data_pag = cells[10]
-      has_pay_date = bool(str(data_pag or "").strip())
-      if pagato <= 0.009 and not has_pay_date:
-        continue
-      doc_norm = _normalize_doc(invoice_number)
-      if not doc_norm and not _normalize_party(supplier_name):
-        continue
-      paid.append(
-        {
-          "sheet": str(getattr(sheet, "name", "") or ""),
-          "invoice_number": invoice_number,
-          "invoice_number_norm": doc_norm,
-          "supplier_vat": _strip_excel_quotes(cells[3]),
-          "supplier_name": supplier_name,
-          "supplier_name_norm": _normalize_party(supplier_name),
-          "amount_paid": pagato if pagato > 0.009 else _num_cell(cells[7]),
-          "payment_date": str(data_pag).strip() if has_pay_date else None,
-          "row_index": idx,
-        }
-      )
+      rows = getattr(sheet, "rows", None) or []
+      for idx, raw in enumerate(rows):
+        if idx == 0 or not isinstance(raw, list):
+          continue
+        cells = list(raw) + [None] * max(0, 12 - len(raw))
+        invoice_number = _strip_excel_quotes(cells[1])
+        supplier_name = _strip_excel_quotes(cells[4])
+        if not invoice_number and not supplier_name:
+          continue
+        if str(cells[6] or "").strip().upper() == "TOTALE":
+          continue
+        # Solo colonna « PAGATO (DARE)» = pagata. «PAGARE (AVERE)» = ancora da pagare.
+        pagato = _num_cell(cells[8])
+        if pagato <= 0.009:
+          continue
+        data_pag = cells[10]
+        has_pay_date = bool(str(data_pag or "").strip())
+        doc_norm = _normalize_doc(invoice_number)
+        if not doc_norm and not _normalize_party(supplier_name):
+          continue
+        paid.append(
+          {
+            "workbook_key": key,
+            "sheet": str(getattr(sheet, "name", "") or ""),
+            "invoice_number": invoice_number,
+            "invoice_number_norm": doc_norm,
+            "supplier_vat": _strip_excel_quotes(cells[3]),
+            "supplier_name": supplier_name,
+            "supplier_name_norm": _normalize_party(supplier_name),
+            "amount_paid": pagato,
+            "payment_date": str(data_pag).strip() if has_pay_date else None,
+            "row_index": idx,
+          }
+        )
   return paid
 
 

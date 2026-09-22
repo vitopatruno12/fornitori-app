@@ -10,6 +10,13 @@ from ..services import pagamenti_watch_agent, supplier_payments_service
 router = APIRouter(prefix="/supplier-payments", tags=["supplier-payments"])
 
 
+@router.get("/workbooks")
+def list_supplier_payments_workbooks(db: Session = Depends(get_db)) -> Dict[str, Any]:
+  """Catalogo file fornitori per società (menu a tendina)."""
+  items = supplier_payments_service.list_workbook_catalog(db)
+  return {"items": items, "count": len(items)}
+
+
 @router.get("/workbook", response_model=SupplierPaymentsWorkbookRead)
 @router.get("/workbook/", response_model=SupplierPaymentsWorkbookRead, include_in_schema=False)
 def get_supplier_payments_workbook(

@@ -126,9 +126,11 @@ def _movement_out(
     out["matched_invoice"] = {
       "id": invoice.id,
       "invoice_number": invoice.invoice_number or str(invoice.id),
+      "supplier_id": getattr(invoice, "supplier_id", None),
       "supplier_name": supplier_name or "",
       "total": float(_dec(invoice.total)),
       "payment_status": payment_status_label(invoice),
+      "company": getattr(invoice, "company", None) or getattr(account, "company", None),
     }
   return out
 
@@ -793,13 +795,16 @@ def _invoice_number_in_text(invoice_number: Optional[str], text: str) -> bool:
   num = (invoice_number or "").strip()
   if not num:
     return False
+  norm_num = _normalize_doc_token(num)
+  # Numeri troppo corti (1, 12, 18…) generano falsi positivi nei bonifici
+  if len(norm_num) < 3:
+    return False
   text_u = (text or "").upper()
   num_u = num.upper()
   # Match con confini alfanumerici (evita falsi positivi su numeri corti)
   pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(num_u)}(?![A-Z0-9])", re.IGNORECASE)
   if pattern.search(text_u):
     return True
-  norm_num = _normalize_doc_token(num)
   if len(norm_num) >= 4:
     return norm_num in _normalize_doc_token(text_u)
   return False
@@ -843,12 +848,22 @@ def _movement_amount_matches_invoice(inv: Any, mov: Any) -> bool:
 
 
 def _bank_movement_pays_invoice(inv: Any, mov: Any, blob: str) -> bool:
-  """Un movimento marca la fattura solo se n. documento E (importo o fornitore)."""
+  """Pagamento valido solo con n. documento E importo (fornitore da solo non basta).
+
+  Prima bastava numero + nome fornitore in causale → molte fatture segnate pagate
+  senza bonifico reale. Ora serve sempre l'importo (totale o residuo ±0,05 €).
+  Per numeri corti (<4 caratteri) serve anche un token del fornitore.
+  """
+  if getattr(mov, "movement_type", None) and str(mov.movement_type).lower() != "uscita":
+    return False
   if not _invoice_number_in_text(getattr(inv, "invoice_number", None), blob):
     return False
-  if _movement_amount_matches_invoice(inv, mov):
-    return True
-  return _supplier_in_blob(getattr(inv, "supplier_name", None), blob)
+  if not _movement_amount_matches_invoice(inv, mov):
+    return False
+  norm = _normalize_doc_token(str(getattr(inv, "invoice_number", None) or ""))
+  if len(norm) < 4:
+    return _supplier_in_blob(getattr(inv, "supplier_name", None), blob)
+  return True
 
 
 def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = None, reason: str = "") -> Dict[str, Any]:
@@ -910,7 +925,9 @@ def reconciliation_preview(
   from . import supplier_payments_service
 
   try:
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(db)
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
+      db, company=company_id, all_workbooks=not company_id
+    )
   except Exception:
     paid_file_rows = []
 
@@ -1129,7 +1146,9 @@ def sync_payment_status_from_bank(
   mov_meta = [{"mov": m, "blob": _movement_search_blob(m)} for m in movements]
 
   try:
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(db)
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
+      db, company=company_id, all_workbooks=not company_id
+    )
   except Exception:
     paid_file_rows = []
 
@@ -1280,6 +1299,7 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
     raise ValueError("Movimento non trovato")
   if status not in {"matched", "unmatched", "difference"}:
     raise ValueError("Stato non valido")
+  prev_invoice_id = mov.matched_invoice_id
   mov.reconciliation_status = status
   mov.matched_invoice_id = invoice_id if status != "unmatched" else None
   if status == "difference" and invoice_id:
@@ -1298,6 +1318,22 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
       inv.is_paid = True
   else:
     mov.difference_amount = None
+    # Scollega: ripristina da pagare se non resta altro match valido
+    if status == "unmatched" and prev_invoice_id:
+      still = (
+        db.query(BankMovement)
+        .filter(
+          BankMovement.matched_invoice_id == prev_invoice_id,
+          BankMovement.id != mov.id,
+          BankMovement.reconciliation_status.in_(("matched", "difference")),
+        )
+        .first()
+      )
+      if not still:
+        inv = db.query(Invoice).filter(Invoice.id == prev_invoice_id).first()
+        if inv:
+          inv.amount_paid = Decimal("0.00")
+          inv.is_paid = False
   db.commit()
   db.refresh(mov)
   acc = db.query(BankAccount).filter(BankAccount.id == mov.bank_account_id).first()

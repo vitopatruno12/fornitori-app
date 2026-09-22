@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Literal, Optional
 from pathlib import Path
+import re
 
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from ..constants.sdi_companies import (
   normalize_company_section,
   pick_company,
 )
+from ..models.bank_movement import BankMovement
 from ..models.cash_entry import CashEntry
 from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice
 from ..models.invoice import Invoice
@@ -417,6 +419,197 @@ def ignore_misrouted_our_emesse(db: Session, *, dry_run: bool = False) -> dict:
     "ok": True,
     "dry_run": dry_run,
     "ignored": marked,
+    "sample": sample,
+  }
+
+
+def _invoice_day(inv: Invoice) -> str:
+  if not inv.invoice_date:
+    return ""
+  d = inv.invoice_date
+  return d.date().isoformat() if hasattr(d, "date") else str(d)[:10]
+
+
+def _norm_invoice_number(value: Optional[str]) -> str:
+  return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def dedupe_received_invoices(db: Session, *, dry_run: bool = False) -> dict:
+  """
+  Nasconde duplicati Atlas sulla stessa fattura ricevuta
+  (fornitore + n. documento + data). Tiene la migliore e collega
+  IncomingInvoice / movimenti banca al survivor.
+  """
+  rows = (
+    db.query(Invoice)
+    .filter(Invoice.ignored.is_(False))
+    .order_by(Invoice.id.asc())
+    .all()
+  )
+  groups: dict[tuple, list] = {}
+  for inv in rows:
+    key = (int(inv.supplier_id or 0), _norm_invoice_number(inv.invoice_number), _invoice_day(inv))
+    if not key[1] or not key[2]:
+      continue
+    groups.setdefault(key, []).append(inv)
+
+  ignored = 0
+  sample: List[dict] = []
+  for key, items in groups.items():
+    if len(items) < 2:
+      continue
+    items_sorted = sorted(
+      items,
+      key=lambda i: (
+        0 if payment_status_label(i) == "paid" else 1,
+        0 if Decimal(str(i.amount_paid or 0)) > Decimal("0.009") else 1,
+        0 if i.file_path else 1,
+        int(i.id or 0),
+      ),
+    )
+    keep = items_sorted[0]
+    for dup in items_sorted[1:]:
+      ignored += 1
+      if len(sample) < 60:
+        sample.append(
+          {
+            "keep_id": keep.id,
+            "ignored_id": dup.id,
+            "supplier_id": keep.supplier_id,
+            "invoice_number": keep.invoice_number,
+            "invoice_date": key[2],
+          }
+        )
+      if dry_run:
+        continue
+      # Collega incoming e movimenti al survivor
+      db.query(IncomingInvoice).filter(IncomingInvoice.atlas_invoice_id == dup.id).update(
+        {IncomingInvoice.atlas_invoice_id: keep.id},
+        synchronize_session=False,
+      )
+      db.query(BankMovement).filter(BankMovement.matched_invoice_id == dup.id).update(
+        {BankMovement.matched_invoice_id: keep.id},
+        synchronize_session=False,
+      )
+      if payment_status_label(dup) == "paid" and payment_status_label(keep) != "paid":
+        keep.amount_paid = Decimal(str(keep.total or 0)).quantize(Decimal("0.01"))
+        sync_invoice_paid_flag(keep)
+      dup.ignored = True
+      note = (dup.note or "").strip()
+      tag = f"Duplicato di invoice #{keep.id} (stesso fornitore/n./data)"
+      if tag not in note:
+        dup.note = f"{note} · {tag}".strip(" ·") if note else tag
+
+  if not dry_run and ignored:
+    db.commit()
+  return {
+    "ok": True,
+    "dry_run": dry_run,
+    "duplicate_groups": sum(1 for items in groups.values() if len(items) > 1),
+    "ignored": ignored,
+    "sample": sample,
+  }
+
+
+def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dict:
+  """
+  Riporta a «da pagare» le fatture segnate pagate senza prova solida:
+  - movimento banca con n. documento + importo, oppure
+  - riga file fornitori con colonna PAGATO (DARE) > 0
+  Scollega anche match banca deboli (solo nome / senza importo).
+  """
+  from . import banca_service
+  from . import supplier_payments_service
+
+  paid_rows = []
+  try {
+    paid_rows = supplier_payments_service.list_paid_document_rows(db, all_workbooks=True)
+  except Exception:
+    paid_rows = []
+
+  movements = (
+    db.query(BankMovement)
+    .filter(BankMovement.movement_type == "uscita")
+    .order_by(BankMovement.movement_date.desc(), BankMovement.id.desc())
+    .limit(8000)
+    .all()
+  )
+  mov_meta = [{"mov": m, "blob": banca_service._movement_search_blob(m)} for m in movements]
+
+  invoices = (
+    db.query(Invoice, Supplier.name)
+    .join(Supplier, Supplier.id == Invoice.supplier_id)
+    .filter(Invoice.ignored.is_(False))
+    .filter((Invoice.is_paid.is_(True)) | (Invoice.amount_paid > 0))
+    .all()
+  )
+
+  reset = 0
+  weak_unlinked = 0
+  sample: List[dict] = []
+
+  for inv, supplier_name in invoices:
+    inv.supplier_name = supplier_name  # usato dal matcher banca
+    has_bank = False
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.matched_invoice_id == inv.id or banca_service._bank_movement_pays_invoice(
+        inv, mov, meta["blob"]
+      ):
+        if banca_service._bank_movement_pays_invoice(inv, mov, meta["blob"]):
+          has_bank = True
+          break
+        # Match collegato ma non valido con le nuove regole → scollega
+        if mov.matched_invoice_id == inv.id and not dry_run:
+          mov.matched_invoice_id = None
+          mov.reconciliation_status = "unmatched"
+          mov.difference_amount = None
+          weak_unlinked += 1
+
+    file_hit = None
+    if not has_bank and paid_rows:
+      file_hit = supplier_payments_service.find_paid_row_for_invoice(
+        paid_rows,
+        invoice_number=inv.invoice_number,
+        supplier_name=supplier_name,
+        supplier_vat=None,
+      )
+
+    if has_bank or file_hit:
+      continue
+
+    reset += 1
+    if len(sample) < 80:
+      sample.append(
+        {
+          "id": inv.id,
+          "invoice_number": inv.invoice_number,
+          "supplier_name": supplier_name,
+          "total": float(inv.total or 0),
+          "amount_paid": float(inv.amount_paid or 0),
+        }
+      )
+    if dry_run:
+      continue
+    inv.amount_paid = Decimal("0.00")
+    inv.is_paid = False
+    # Scollega eventuali match residui
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.matched_invoice_id == inv.id:
+        mov.matched_invoice_id = None
+        mov.reconciliation_status = "unmatched"
+        mov.difference_amount = None
+        weak_unlinked += 1
+
+  if not dry_run and (reset or weak_unlinked):
+    db.commit()
+  return {
+    "ok": True,
+    "dry_run": dry_run,
+    "checked_paid": len(invoices),
+    "reset_unpaid": reset,
+    "weak_bank_links_cleared": weak_unlinked,
     "sample": sample,
   }
 

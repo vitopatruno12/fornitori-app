@@ -263,6 +263,34 @@ class InvoiceImportService:
     rel_path = str(dest.relative_to(UPLOAD_DIR.parent.parent)).replace("\\", "/")
 
     # ---------------------------------------------------------
+    # Evita duplicati logici (stesso fornitore + n. + data, XML diversi)
+    # ---------------------------------------------------------
+    day = incoming.invoice_date.date() if incoming.invoice_date else None
+    if day is not None:
+      existing_atlas = (
+        self.db.query(Invoice)
+        .filter(
+          Invoice.supplier_id == supplier.id,
+          Invoice.invoice_number == str(incoming.invoice_number),
+          Invoice.ignored.is_(False),
+        )
+        .all()
+      )
+      for cand in existing_atlas:
+        cand_day = cand.invoice_date.date() if cand.invoice_date else None
+        if cand_day == day:
+          incoming.atlas_invoice_id = cand.id
+          incoming.status = "REGISTERED"
+          electronic.status = "PARSED"
+          self.db.flush()
+          return {
+            "status": "ALREADY_REGISTERED",
+            "incoming_invoice_id": incoming.id,
+            "atlas_invoice_id": cand.id,
+            "duplicate_logical": True,
+          }
+
+    # ---------------------------------------------------------
     # Invoice Atlas
     # ---------------------------------------------------------
     atlas_inv = Invoice(

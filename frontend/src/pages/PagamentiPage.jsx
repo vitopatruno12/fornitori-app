@@ -3,10 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
+  PAGAMENTI_WORKBOOKS,
   fetchPagamentiWatchAgent,
   fetchSupplierPaymentsWorkbook,
+  readPagamentiWorkbookKey,
   runPagamentiWatchAgent,
   saveSupplierPaymentsWorkbook,
+  workbookLabel,
+  writePagamentiWorkbookKey,
 } from '../services/supplierPaymentsService.js'
 import {
   MONTHLY_HEADERS,
@@ -46,10 +50,31 @@ function workbookFromApi(data) {
   }
 }
 
+function emptySeedForKey(workbookKey) {
+  const meta = PAGAMENTI_WORKBOOKS.find((w) => w.key === workbookKey)
+  return recalculateWorkbook({
+    title: meta?.title || `FILE FORNITORI_${String(workbookKey || '').toUpperCase()}`,
+    sheets: seedWorkbook.sheets.map((sheet) => ({
+      name: sheet.name,
+      rows: (sheet.rows || []).map((row, idx) => {
+        if (idx === 0) return [...(row || [])]
+        if (sheet.name === 'TOTALI') return Array.isArray(row) ? row.map(() => null) : []
+        if (sheet.name === 'DELEGHE F24' || sheet.name === 'VERSAMENTO CONTANTI') {
+          return idx < 4 ? [...(row || [])] : []
+        }
+        // mesi: tieni header, svuota corpo
+        return Array.isArray(row) ? row.map(() => null) : []
+      }),
+    })),
+    highlights: {},
+  })
+}
+
 export default function PagamentiPage() {
   const navigate = useNavigate()
-  const [workbook, setWorkbook] = useState(() => recalculateWorkbook(seedWorkbook))
-  const [activeSheet, setActiveSheet] = useState(seedWorkbook.sheets[0]?.name || 'GENNAIO')
+  const [workbookKey, setWorkbookKey] = useState(() => readPagamentiWorkbookKey())
+  const [workbook, setWorkbook] = useState(() => emptySeedForKey(readPagamentiWorkbookKey()))
+  const [activeSheet, setActiveSheet] = useState('GENNAIO')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -74,29 +99,48 @@ export default function PagamentiPage() {
     navigate('/fatture')
   }
 
-  const refreshWorkbook = useCallback(async () => {
+  const refreshWorkbook = useCallback(async (key = workbookKey) => {
     setLoading(true)
     setError('')
     try {
-      const data = await fetchSupplierPaymentsWorkbook()
+      const data = await fetchSupplierPaymentsWorkbook(key)
       const next = recalculateWorkbook(workbookFromApi(data))
       setWorkbook(next)
       setUpdatedAt(data?.updated_at || '')
       setDirty(false)
+      setActiveSheet((prev) => {
+        if (next.sheets.some((s) => s.name === prev)) return prev
+        return next.sheets[0]?.name || 'GENNAIO'
+      })
       if (data?.seeded) {
-        setSuccess('Registro inizializzato dal file Excel di partenza')
+        setSuccess(`Registro «${workbookLabel(key)}» inizializzato (vuoto o da template)`)
       }
     } catch {
-      setWorkbook(recalculateWorkbook(seedWorkbook))
-      setError('Impossibile caricare dal server: mostro i dati locali di partenza')
+      setWorkbook(emptySeedForKey(key))
+      setError('Impossibile caricare dal server: mostro un registro locale vuoto')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workbookKey])
 
   useEffect(() => {
-    void refreshWorkbook()
-  }, [refreshWorkbook])
+    void refreshWorkbook(workbookKey)
+  }, [workbookKey, refreshWorkbook])
+
+  function handleWorkbookChange(event) {
+    const nextKey = event.target.value
+    if (nextKey === workbookKey) return
+    if (dirty) {
+      const ok = window.confirm(
+        'Ci sono modifiche non salvate sul file corrente. Cambiando società andranno perse. Continuare?',
+      )
+      if (!ok) return
+    }
+    writePagamentiWorkbookKey(nextKey)
+    setWorkbookKey(nextKey)
+    setSuccess('')
+    setError('')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -197,15 +241,18 @@ export default function PagamentiPage() {
     setSuccess('')
     try {
       const payload = recalculateWorkbook(workbook)
-      const saved = await saveSupplierPaymentsWorkbook({
-        title: payload.title,
-        sheets: payload.sheets,
-        highlights: payload.highlights || {},
-      })
+      const saved = await saveSupplierPaymentsWorkbook(
+        {
+          title: payload.title,
+          sheets: payload.sheets,
+          highlights: payload.highlights || {},
+        },
+        workbookKey,
+      )
       setWorkbook(recalculateWorkbook(workbookFromApi(saved)))
       setUpdatedAt(saved?.updated_at || '')
       setDirty(false)
-      setSuccess('Registro pagamenti salvato sul database')
+      setSuccess(`Salvato: ${workbookLabel(workbookKey)}`)
     } catch (err) {
       setError(err?.message || 'Salvataggio non riuscito')
     } finally {
@@ -252,11 +299,17 @@ export default function PagamentiPage() {
     setSuccess('')
     try {
       const imported = await parseExcelFileToWorkbook(file)
-      const next = recalculateWorkbook(imported)
+      const meta = PAGAMENTI_WORKBOOKS.find((w) => w.key === workbookKey)
+      const next = recalculateWorkbook({
+        ...imported,
+        title: meta?.title || imported.title,
+      })
       setWorkbook(next)
       setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
       setDirty(true)
-      setSuccess(`File "${file.name}" caricato. Clicca Salva per registrarlo sul database.`)
+      setSuccess(
+        `File "${file.name}" caricato in «${workbookLabel(workbookKey)}». Clicca Salva per registrarlo sul database.`,
+      )
     } catch (err) {
       setError(err?.message || 'Caricamento Excel non riuscito')
     } finally {
@@ -383,11 +436,14 @@ export default function PagamentiPage() {
     setSaving(true)
     try {
       const empty = clearAllWorkbookSheets(workbook)
-      const saved = await saveSupplierPaymentsWorkbook({
-        title: empty.title,
-        sheets: empty.sheets,
-        highlights: {},
-      })
+      const saved = await saveSupplierPaymentsWorkbook(
+        {
+          title: empty.title,
+          sheets: empty.sheets,
+          highlights: {},
+        },
+        workbookKey,
+      )
       const next = recalculateWorkbook(workbookFromApi(saved))
       setWorkbook(next)
       setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
@@ -406,9 +462,27 @@ export default function PagamentiPage() {
       <section className="staff-page-hero">
         <h1 className="page-header staff-page-title">Pagamenti fornitori</h1>
         <p className="staff-page-lead">
-          Registro pagamenti Risacca 2026 — modificabile e salvato sul database. Puoi anche caricare o scaricare file Excel
-          per aggiungere altri registri.
+          Un file Excel per società (Mediazione, Via Lattea, Risacca, PG). Scegli il file dal menu, carica o modifica, poi
+          Salva.
         </p>
+        <div className="pagamenti-company-select-wrap">
+          <label htmlFor="pagamenti-workbook-select">
+            File fornitori
+            <select
+              id="pagamenti-workbook-select"
+              className="form-control"
+              value={workbookKey}
+              onChange={handleWorkbookChange}
+              disabled={loading || importing || saving}
+            >
+              {PAGAMENTI_WORKBOOKS.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -419,7 +493,8 @@ export default function PagamentiPage() {
           <div>
             <strong>Agente automatico</strong>
             <span className="pagamenti-watch-schedule">
-              Controlla file Pagamenti e movimenti banca {watch?.schedule || 'martedì e venerdì alle 7:30'}
+              Controlla i file Pagamenti di tutte le società e i movimenti banca{' '}
+              {watch?.schedule || 'martedì e venerdì alle 7:30'}
             </span>
             <span className="pagamenti-watch-last">
               {watch?.last_run_at
@@ -441,7 +516,8 @@ export default function PagamentiPage() {
       <section className="card pagamenti-workbook-card">
         <div className="pagamenti-workbook-toolbar">
           <div className="pagamenti-workbook-toolbar-left">
-            <span className="pagamenti-workbook-title">{workbook.title}</span>
+            <span className="pagamenti-workbook-title">{workbook.title || workbookLabel(workbookKey)}</span>
+            <span className="pagamenti-workbook-sheet-label">{workbookLabel(workbookKey)}</span>
             <span className="pagamenti-workbook-sheet-label">Foglio: {currentSheet?.name}</span>
             {updatedAt ? (
               <span className="pagamenti-workbook-updated">Ultimo salvataggio: {formatUpdatedAt(updatedAt)}</span>

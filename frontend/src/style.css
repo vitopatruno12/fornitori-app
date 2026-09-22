@@ -1457,6 +1457,26 @@ select.form-control {
   color: var(--primary);
 }
 
+.pagamenti-page .staff-page-hero {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pagamenti-company-select-wrap {
+  max-width: 420px;
+}
+
+.pagamenti-company-select-wrap label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pagamenti-company-select-wrap .form-control {
+  min-height: 2.4rem;
+}
+
 .pagamenti-workbook-card {
   padding: 0;
   overflow: hidden;
