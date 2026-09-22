@@ -507,6 +507,7 @@ export default function MastriniContabiliPage() {
   const [selectedPartyKey, setSelectedPartyKey] = useState('')
   const [selectedFornitoreKey, setSelectedFornitoreKey] = useState('')
   const [fornitoreDetailOpen, setFornitoreDetailOpen] = useState(false)
+  const pendingSchedaCodeRef = React.useRef('')
 
   const selectedCompanyLabel =
     companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId)
@@ -546,13 +547,33 @@ export default function MastriniContabiliPage() {
 
   React.useEffect(() => {
     // Cambio società: non ricaricare subito — serve Aggiorna esplicito.
+    // Se stiamo aprendo una scheda da un conto di un'altra società, non azzerare il codice.
     setData(null)
     setWarnings([])
     setError('')
-    setSelectedCode('')
-    setSelectedPartyKey('')
-    setSelectedFornitoreKey('')
-    setFornitoreDetailOpen(false)
+    if (!pendingSchedaCodeRef.current) {
+      setSelectedCode('')
+      setSelectedPartyKey('')
+      setSelectedFornitoreKey('')
+      setFornitoreDetailOpen(false)
+    }
+  }, [companyId])
+
+  React.useEffect(() => {
+    const code = pendingSchedaCodeRef.current
+    if (!code || !companyId) return
+    let cancelled = false
+    pendingSchedaCodeRef.current = ''
+    ;(async () => {
+      await load({ company: companyId })
+      if (cancelled) return
+      openContoScheda(code)
+      setError('')
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
   const periodLabel = useMemo(() => {
@@ -569,6 +590,12 @@ export default function MastriniContabiliPage() {
     return plan.filter((row) => companyAccountCodes.has(row.code))
   }, [data, companyAccountCodes])
 
+  /** Selezione scheda: conti di tutte le società (Abba, Zanardelli, Via Lattea, …). */
+  const selezioneAccountOptions = useMemo(() => {
+    const plan = data?.accountPlan || ACCOUNT_PLAN
+    return Array.isArray(plan) && plan.length ? plan : ACCOUNT_PLAN
+  }, [data])
+
   const accountOptionsByGroup = useMemo(() => {
     const groups = new Map()
     for (const row of accountOptions) {
@@ -579,8 +606,21 @@ export default function MastriniContabiliPage() {
     return [...groups.entries()]
   }, [accountOptions])
 
+  const selezioneAccountOptionsByGroup = useMemo(() => {
+    const groups = new Map()
+    for (const row of selezioneAccountOptions) {
+      const companyPart = row.company ? companyLabel(row.company) : ''
+      const base = row.group || row.category || 'Altri'
+      const key = companyPart ? `${base} · ${companyPart}` : base
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(row)
+    }
+    return [...groups.entries()]
+  }, [selezioneAccountOptions])
+
   React.useEffect(() => {
     if (!companyId || !accountOptions.length) return
+    if (pendingSchedaCodeRef.current) return
     const preferred = accountOptions.find((row) => row.code?.startsWith('100')) || accountOptions[0]
     if (preferred?.code) {
       setAccountCode(preferred.code)
@@ -822,15 +862,23 @@ export default function MastriniContabiliPage() {
 
   function openScheda(e) {
     e?.preventDefault?.()
-    if (!companyId) {
-      setError('Seleziona una società dal menu nel banner verde.')
-      return
-    }
     if (!accountCode) {
       setError('Seleziona un codice conto (obbligatorio, come in Passcom).')
       return
     }
-    // Solo apre la vista: i dati si aggiornano con Aggiorna.
+    const plan = data?.accountPlan || ACCOUNT_PLAN
+    const row = plan.find((a) => String(a.code) === String(accountCode))
+    const targetCompany = String(row?.company || companyId || '').trim()
+    if (!targetCompany) {
+      setError('Seleziona una società dal menu nel banner verde.')
+      return
+    }
+    // Conto di un'altra società: cambia società, carica dati e apri scheda
+    if (targetCompany !== companyId) {
+      pendingSchedaCodeRef.current = accountCode
+      setCompanyId(targetCompany)
+      return
+    }
     openContoScheda(accountCode)
     if (!data) {
       setError('Premi Aggiorna nel banner per caricare i movimenti della scheda.')
@@ -1185,6 +1233,10 @@ export default function MastriniContabiliPage() {
             onSubmit={openScheda}
             style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}
           >
+            <p className="fatture-note" style={{ margin: 0 }}>
+              Conti di tutte le società (Abba, Zanardelli, Via Lattea, Risacca, PG). Aprendo un conto si
+              seleziona automaticamente la società collegata.
+            </p>
             <label>
               Codice conto <span style={{ color: '#b91c1c' }}>*</span>
               <select
@@ -1193,8 +1245,8 @@ export default function MastriniContabiliPage() {
                 onChange={(e) => setAccountCode(e.target.value)}
                 required
               >
-                {accountOptionsByGroup.length
-                  ? accountOptionsByGroup.map(([group, rows]) => (
+                {selezioneAccountOptionsByGroup.length
+                  ? selezioneAccountOptionsByGroup.map(([group, rows]) => (
                       <optgroup key={group} label={group}>
                         {rows.map((a) => (
                           <option key={a.code} value={a.code}>
@@ -1203,7 +1255,7 @@ export default function MastriniContabiliPage() {
                         ))}
                       </optgroup>
                     ))
-                  : accountOptionsForSelect.map((a) => (
+                  : selezioneAccountOptions.map((a) => (
                       <option key={a.code} value={a.code}>
                         {a.code} — {a.description}
                       </option>
