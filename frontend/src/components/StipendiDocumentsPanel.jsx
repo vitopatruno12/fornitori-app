@@ -530,8 +530,8 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
           </div>
         ) : (
           <form className="stipendi-docs-form" onSubmit={handleUpload}>
-            <div className="stipendi-edit-row stipendi-draft-row" style={{ alignItems: 'flex-end' }}>
-              <label className="stipendi-edit-field" style={{ minWidth: '8rem', flex: '1 1 8rem' }}>
+            <div className="stipendi-edit-row stipendi-draft-row stipendi-docs-form-row">
+              <label className="stipendi-edit-field stipendi-docs-field-name">
                 <span>Nome</span>
                 <input
                   className="form-control"
@@ -540,7 +540,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                   placeholder="Nome"
                 />
               </label>
-              <label className="stipendi-edit-field" style={{ minWidth: '8rem', flex: '1 1 8rem' }}>
+              <label className="stipendi-edit-field stipendi-docs-field-name">
                 <span>Cognome</span>
                 <input
                   className="form-control"
@@ -552,7 +552,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
 
               {isBuste ? (
                 <>
-                  <label className="stipendi-edit-field">
+                  <label className="stipendi-edit-field stipendi-docs-field-sm">
                     <span>N. documento</span>
                     <input
                       className="form-control"
@@ -560,14 +560,14 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                       onChange={(e) => updateForm('document_number', e.target.value)}
                     />
                   </label>
-                  <label className="stipendi-edit-field">
+                  <label className="stipendi-edit-field stipendi-docs-field-sm">
                     <span>Ruolo</span>
                     <input className="form-control" value={form.ruolo} onChange={(e) => updateForm('ruolo', e.target.value)} />
                   </label>
                 </>
               ) : (
                 <>
-                  <label className="stipendi-edit-field">
+                  <label className="stipendi-edit-field stipendi-docs-field-date">
                     <span>Data nascita</span>
                     <input
                       type="date"
@@ -576,7 +576,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                       onChange={(e) => updateForm('birth_date', e.target.value)}
                     />
                   </label>
-                  <label className="stipendi-edit-field" style={{ minWidth: '10rem', flex: '1 1 10rem' }}>
+                  <label className="stipendi-edit-field stipendi-docs-field-email">
                     <span>Email</span>
                     <input
                       type="email"
@@ -585,7 +585,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                       onChange={(e) => updateForm('email', e.target.value)}
                     />
                   </label>
-                  <label className="stipendi-edit-field">
+                  <label className="stipendi-edit-field stipendi-docs-field-phone">
                     <span>Telefono</span>
                     <input className="form-control" value={form.phone} onChange={(e) => updateForm('phone', e.target.value)} />
                   </label>
@@ -593,7 +593,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
               )}
 
               {panel === 'documento_personale' ? (
-                <label className="stipendi-edit-field" style={{ minWidth: '11rem' }}>
+                <label className="stipendi-edit-field stipendi-docs-field-sm">
                   <span>Tipo documento</span>
                   <select className="form-control" value={form.doc_type} onChange={(e) => updateForm('doc_type', e.target.value)}>
                     {DOC_TYPES.map((t) => (
@@ -606,7 +606,7 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
               ) : null}
 
               {!editId ? (
-                <label className="stipendi-edit-field" style={{ minWidth: '12rem', flex: '1 1 12rem' }}>
+                <label className="stipendi-edit-field stipendi-docs-field-file">
                   <span>File PDF</span>
                   <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="form-control" />
                 </label>
