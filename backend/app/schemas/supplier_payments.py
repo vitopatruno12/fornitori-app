@@ -25,7 +25,7 @@ class SupplierPaymentsWorkbookRead(BaseModel):
 
 
 class SupplierPaymentsWorkbookUpsert(BaseModel):
-  workbook_key: str = Field(default="risacca_2026", max_length=64)
+  workbook_key: str = Field(default="mediazione_2026", max_length=64)
   title: Optional[str] = Field(default=None, max_length=255)
   sheets: List[SupplierPaymentsSheet]
   highlights: Optional[Dict[str, Any]] = None

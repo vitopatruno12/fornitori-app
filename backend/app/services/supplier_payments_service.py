@@ -13,7 +13,8 @@ from ..schemas.supplier_payments import (
     SupplierPaymentsWorkbookUpsert,
 )
 
-DEFAULT_WORKBOOK_KEY = "risacca_2026"
+DEFAULT_WORKBOOK_KEY = "mediazione_2026"
+LEGACY_RISACCA_KEY = "risacca_2026"
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "fornitori_risacca_2026_default.json"
 
 # Un file Excel/registro per società (Mediazione A+Z condividono lo stesso file).
@@ -54,6 +55,8 @@ _COMPANY_TO_WORKBOOK = {
 
 def list_workbook_catalog(db: Optional[Session] = None) -> List[Dict[str, Any]]:
   """Elenco file fornitori disponibili (menu a tendina Pagamenti)."""
+  if db is not None:
+    migrate_legacy_risacca_workbook_to_mediazione(db)
   existing: Dict[str, Any] = {}
   if db is not None:
     for row in db.query(SupplierPaymentsWorkbook).all():
@@ -95,8 +98,109 @@ def catalog_entry_for_key(workbook_key: str) -> Dict[str, Any]:
 def _load_default_payload() -> Dict[str, Any]:
   if _DEFAULT_PATH.is_file():
     with _DEFAULT_PATH.open(encoding="utf-8") as handle:
-      return json.load(handle)
-  return {"title": "FILE FORNITORI_RISACCA_2026", "sheets": []}
+      payload = json.load(handle)
+    if isinstance(payload, dict):
+      payload["title"] = "FILE FORNITORI_MEDIAZIONE_2026"
+      return payload
+  return {"title": "FILE FORNITORI_MEDIAZIONE_2026", "sheets": []}
+
+
+def _workbook_has_invoice_rows(row: Optional[SupplierPaymentsWorkbook]) -> bool:
+  if row is None:
+    return False
+  try:
+    raw = json.loads(row.payload_json or "{}")
+  except json.JSONDecodeError:
+    return False
+  sheets = raw.get("sheets") if isinstance(raw, dict) else None
+  if not isinstance(sheets, list):
+    return False
+  special = {"TOTALI", "DELEGHE F24", "VERSAMENTO CONTANTI"}
+  for sheet in sheets:
+    if not isinstance(sheet, dict):
+      continue
+    name = str(sheet.get("name") or "").strip().upper()
+    if not name or name in special:
+      continue
+    rows = sheet.get("rows")
+    if not isinstance(rows, list):
+      continue
+    for idx, line in enumerate(rows):
+      if idx == 0 or not isinstance(line, list):
+        continue
+      # numero fattura o denominazione valorizzati
+      num = str(line[1] if len(line) > 1 else "" or "").strip()
+      name_cell = str(line[4] if len(line) > 4 else "" or "").strip()
+      if num or name_cell:
+        return True
+  return False
+
+
+def migrate_legacy_risacca_workbook_to_mediazione(db: Session) -> bool:
+  """Il registro storico era salvato come risacca_2026: va sotto Mediazione."""
+  med_key = "mediazione_2026"
+  ris_key = LEGACY_RISACCA_KEY
+  med = (
+    db.query(SupplierPaymentsWorkbook)
+    .filter(SupplierPaymentsWorkbook.workbook_key == med_key)
+    .first()
+  )
+  ris = (
+    db.query(SupplierPaymentsWorkbook)
+    .filter(SupplierPaymentsWorkbook.workbook_key == ris_key)
+    .first()
+  )
+  if ris is None:
+    return False
+
+  title = "FILE FORNITORI_MEDIAZIONE_2026"
+  ris_has = _workbook_has_invoice_rows(ris)
+  med_has = _workbook_has_invoice_rows(med)
+
+  # Caso 1: solo Risacca esiste → rinomina in Mediazione + crea Risacca vuota
+  if med is None:
+    try:
+      raw = json.loads(ris.payload_json or "{}")
+    except json.JSONDecodeError:
+      raw = {}
+    if not isinstance(raw, dict):
+      raw = {}
+    raw["title"] = title
+    ris.workbook_key = med_key
+    ris.title = title
+    ris.payload_json = json.dumps(raw, ensure_ascii=False)
+    db.add(ris)
+    empty = _empty_workbook_payload("FILE FORNITORI_RISACCA_2026")
+    db.add(
+      SupplierPaymentsWorkbook(
+        workbook_key=ris_key,
+        title=str(empty.get("title") or "FILE FORNITORI_RISACCA_2026"),
+        payload_json=json.dumps(empty, ensure_ascii=False),
+      )
+    )
+    db.commit()
+    return True
+
+  # Caso 2: Mediazione vuota, Risacca piena → sposta contenuto
+  if ris_has and not med_has:
+    try:
+      raw = json.loads(ris.payload_json or "{}")
+    except json.JSONDecodeError:
+      raw = {}
+    if not isinstance(raw, dict):
+      raw = {}
+    raw["title"] = title
+    med.title = title
+    med.payload_json = json.dumps(raw, ensure_ascii=False)
+    empty = _empty_workbook_payload("FILE FORNITORI_RISACCA_2026")
+    ris.title = str(empty.get("title") or "FILE FORNITORI_RISACCA_2026")
+    ris.payload_json = json.dumps(empty, ensure_ascii=False)
+    db.add(med)
+    db.add(ris)
+    db.commit()
+    return True
+
+  return False
 
 
 _MONTHLY_HEADERS = [
@@ -162,7 +266,7 @@ def _empty_workbook_payload(title: Optional[str] = None) -> Dict[str, Any]:
         while len(top) < 4:
           top.append([])
         sheets.append({"name": name, "rows": top})
-  default_title = str(default.get("title") or "FILE FORNITORI_RISACCA_2026")
+  default_title = str(default.get("title") or "FILE FORNITORI_MEDIAZIONE_2026")
   return {
     "title": str(title or default_title).strip() or default_title,
     "sheets": sheets,
@@ -171,19 +275,22 @@ def _empty_workbook_payload(title: Optional[str] = None) -> Dict[str, Any]:
 
 
 def _seed_payload_for_key(workbook_key: str) -> Dict[str, Any]:
-  """Risacca mantiene il template storico; le altre società partono vuote."""
+  """Mediazione eredita il template storico; le altre società partono vuote."""
   key = _normalize_workbook_key(workbook_key)
   entry = catalog_entry_for_key(key)
   title = str(entry.get("title") or f"FILE FORNITORI_{key.upper()}")
-  if key == DEFAULT_WORKBOOK_KEY:
+  if key == "mediazione_2026":
     payload = _load_default_payload()
-    payload["title"] = str(payload.get("title") or title)
+    payload["title"] = title
     return payload
   return _empty_workbook_payload(title)
 
 
 def _normalize_workbook_key(workbook_key: str) -> str:
   key = (workbook_key or DEFAULT_WORKBOOK_KEY).strip()
+  # Alias legacy: il vecchio default era risacca ma i dati sono Mediazione
+  if key in {"", "default", "fornitori"}:
+    return DEFAULT_WORKBOOK_KEY
   return key or DEFAULT_WORKBOOK_KEY
 
 
@@ -221,6 +328,7 @@ def workbook_to_read(row: SupplierPaymentsWorkbook, *, seeded: bool = False) -> 
 
 
 def get_workbook(db: Session, workbook_key: str = DEFAULT_WORKBOOK_KEY) -> SupplierPaymentsWorkbookRead:
+  migrate_legacy_risacca_workbook_to_mediazione(db)
   key = _normalize_workbook_key(workbook_key)
   row = db.query(SupplierPaymentsWorkbook).filter(SupplierPaymentsWorkbook.workbook_key == key).first()
   if row:
