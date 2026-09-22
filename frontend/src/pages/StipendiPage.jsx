@@ -736,15 +736,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                       Elimina
                     </button>
                   </div>
-                  <div className="stipendi-edit-totals">
-                    <span>Busta {eur(totals.busta)}</span>
-                    <span>Acconti (−) {eur(totals.tfr)}</span>
-                    <span>Fuori {eur(totals.fuori)}</span>
-                    <span>TFR att. {eur(totals.tfrAttuale)}</span>
-                    <span>Nuovo TFR {eur(totals.nuovoTfr)}</span>
-                    <span>Anticip. {eur(totals.tfrAnticipato)}</span>
-                    <strong>Totale busta {eur(totals.amount)}</strong>
-                  </div>
                 </div>
 
                 <label className="stipendi-notes">
