@@ -33,11 +33,16 @@ const OPERATOR_ENTRY_POINT_KEY = 'atlasEntryPoint'
 
 export type OperatorDeliveryView =
   | 'overview'
+  | 'analisi-giornaliero'
+  | 'analisi-settimanale'
+  | 'analisi-mensile'
   | 'suppliers'
   | 'new-delivery'
   | 'history'
   | 'magazzino'
   | 'trasportatori'
+  | 'staff-report'
+  | 'stipendi'
   | 'fatturazione'
   | 'prima-nota'
 
@@ -309,6 +314,12 @@ export function getOperatorStationView(stationId: OperatorStationId = 'abba'): O
 const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
   panoramica: 'overview',
   overview: 'overview',
+  'analisi-giornaliero': 'analisi-giornaliero',
+  giornaliero: 'analisi-giornaliero',
+  'analisi-settimanale': 'analisi-settimanale',
+  settimanale: 'analisi-settimanale',
+  'analisi-mensile': 'analisi-mensile',
+  mensile: 'analisi-mensile',
   fornitori: 'suppliers',
   suppliers: 'suppliers',
   consegna: 'new-delivery',
@@ -321,6 +332,11 @@ const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
   trasportatori: 'trasportatori',
   trasportatore: 'trasportatori',
   corrieri: 'trasportatori',
+  'report-personale': 'staff-report',
+  report: 'staff-report',
+  'staff-report': 'staff-report',
+  stipendi: 'stipendi',
+  personale: 'staff-report',
   fatturazione: 'fatturazione',
   fatture: 'fatturazione',
   'prima-nota': 'prima-nota',
@@ -329,11 +345,16 @@ const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
 
 const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
   overview: null,
+  'analisi-giornaliero': 'analisi-giornaliero',
+  'analisi-settimanale': 'analisi-settimanale',
+  'analisi-mensile': 'analisi-mensile',
   suppliers: 'fornitori',
   'new-delivery': 'consegna',
   history: 'storico',
   magazzino: 'magazzino',
   trasportatori: 'trasportatori',
+  'staff-report': 'report-personale',
+  stipendi: 'stipendi',
   fatturazione: null,
   'prima-nota': 'prima-nota',
 }

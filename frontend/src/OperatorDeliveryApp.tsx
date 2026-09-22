@@ -10,6 +10,13 @@ import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
 import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
 import InvoicesPage from './pages/InvoicesPage.jsx'
+import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
+import StipendiPage from './pages/StipendiPage.jsx'
+import {
+  AnalisiGiornalieroPage,
+  AnalisiMensilePage,
+  AnalisiSettimanalePage,
+} from './pages/AnalisiPages.jsx'
 import {
   FattureConservazionePage,
   FattureDaRegistrarePage,
@@ -38,21 +45,45 @@ const DELIVERY_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'magazzino', label: 'Magazzino' },
 ]
 
+const PANORAMICA_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
+  { id: 'overview', label: 'Panoramica' },
+  { id: 'analisi-giornaliero', label: 'Analisi giornaliero' },
+  { id: 'analisi-settimanale', label: 'Analisi settimanale' },
+  { id: 'analisi-mensile', label: 'Analisi mensile' },
+]
+
+const PERSONALE_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
+  { id: 'staff-report', label: 'Report personale' },
+  { id: 'stipendi', label: 'Stipendi' },
+]
+
 const ADMIN_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'fatturazione', label: 'Fatture fornitori' },
   { id: 'prima-nota', label: 'Prima Nota' },
 ]
 
 const DELIVERY_MENU_VIEWS: OperatorDeliveryView[] = ['new-delivery', 'magazzino', 'trasportatori']
+const PANORAMICA_MENU_VIEWS: OperatorDeliveryView[] = [
+  'overview',
+  'analisi-giornaliero',
+  'analisi-settimanale',
+  'analisi-mensile',
+]
+const PERSONALE_MENU_VIEWS: OperatorDeliveryView[] = ['staff-report', 'stipendi']
 const ADMIN_MENU_VIEWS: OperatorDeliveryView[] = ['fatturazione', 'prima-nota']
 
 const TITLES: Record<OperatorDeliveryView, string> = {
   overview: 'Panoramica',
+  'analisi-giornaliero': 'Analisi giornaliero',
+  'analisi-settimanale': 'Analisi settimanale',
+  'analisi-mensile': 'Analisi mensile',
   suppliers: 'Fornitori',
   'new-delivery': 'Nuova consegna',
   history: 'Storico consegne',
   magazzino: 'Magazzino',
   trasportatori: 'Trasportatori',
+  'staff-report': 'Report personale',
+  stipendi: 'Stipendi',
   fatturazione: 'Fatture fornitori',
   'prima-nota': 'Prima Nota',
 }
@@ -114,6 +145,30 @@ function DeliveryMainContent({
       </>
     )
   }
+  if (view === 'analisi-giornaliero') {
+    return (
+      <>
+        {primaNotaLayer}
+        <AnalisiGiornalieroPage />
+      </>
+    )
+  }
+  if (view === 'analisi-settimanale') {
+    return (
+      <>
+        {primaNotaLayer}
+        <AnalisiSettimanalePage />
+      </>
+    )
+  }
+  if (view === 'analisi-mensile') {
+    return (
+      <>
+        {primaNotaLayer}
+        <AnalisiMensilePage />
+      </>
+    )
+  }
   if (view === 'suppliers') {
     return (
       <>
@@ -143,6 +198,22 @@ function DeliveryMainContent({
       <>
         {primaNotaLayer}
         <NewDeliveryPage operatorMode />
+      </>
+    )
+  }
+  if (view === 'staff-report') {
+    return (
+      <>
+        {primaNotaLayer}
+        <ReportPersonalePage />
+      </>
+    )
+  }
+  if (view === 'stipendi') {
+    return (
+      <>
+        {primaNotaLayer}
+        <StipendiPage />
       </>
     )
   }
@@ -193,32 +264,55 @@ export default function OperatorDeliveryApp() {
 
   const onOperatorNavigate = React.useCallback(
     (section: string) => {
-      if (section === 'suppliers' || section === 'fornitori') {
+      const key = String(section || '')
+        .trim()
+        .toLowerCase()
+      if (key === 'suppliers' || key === 'fornitori') {
         setDeliveryView('suppliers')
         return
       }
-      if (section === 'delivery' || section === 'orders') {
+      if (key === 'delivery' || key === 'orders') {
         setDeliveryView('new-delivery')
         return
       }
-      if (section === 'delivery-history' || section === 'history') {
+      if (key === 'delivery-history' || key === 'history') {
         setDeliveryView('history')
         return
       }
-      if (section === 'magazzino') {
+      if (key === 'magazzino') {
         setDeliveryView('magazzino')
         return
       }
-      if (section === 'trasportatori') {
+      if (key === 'trasportatori') {
         setDeliveryView('trasportatori')
         return
       }
-      if (section === 'fatturazione' || section === 'fatture') {
+      if (key === 'fatturazione' || key === 'fatture') {
         setDeliveryView('fatturazione')
         return
       }
-      if (section === 'prima-nota') {
+      if (key === 'prima-nota') {
         setDeliveryView('prima-nota')
+        return
+      }
+      if (key === 'staff-report' || key === 'report' || key === 'report-personale' || key === 'personale') {
+        setDeliveryView('staff-report')
+        return
+      }
+      if (key === 'stipendi') {
+        setDeliveryView('stipendi')
+        return
+      }
+      if (key === 'analisi-giornaliero' || key === 'giornaliero') {
+        setDeliveryView('analisi-giornaliero')
+        return
+      }
+      if (key === 'analisi-settimanale' || key === 'settimanale') {
+        setDeliveryView('analisi-settimanale')
+        return
+      }
+      if (key === 'analisi-mensile' || key === 'mensile') {
+        setDeliveryView('analisi-mensile')
         return
       }
       setDeliveryView('overview')
@@ -229,7 +323,13 @@ export default function OperatorDeliveryApp() {
   const effectiveView: OperatorDeliveryView = onFatturePath ? 'fatturazione' : view
   const headerTitle = TITLES[effectiveView] || 'Postazione trasportatore'
   const deliveryMenuActive = DELIVERY_MENU_VIEWS.includes(effectiveView)
+  const panoramicaMenuActive = PANORAMICA_MENU_VIEWS.includes(effectiveView)
+  const personaleMenuActive = PERSONALE_MENU_VIEWS.includes(effectiveView)
   const adminMenuActive = ADMIN_MENU_VIEWS.includes(effectiveView)
+  const panoramicaMain =
+    PANORAMICA_SUBMENU.find((item) => item.id === effectiveView) || PANORAMICA_SUBMENU[0]
+  const personaleMain =
+    PERSONALE_SUBMENU.find((item) => item.id === effectiveView) || PERSONALE_SUBMENU[0]
 
   return (
     <OperatorSatelliteShell
@@ -240,10 +340,16 @@ export default function OperatorDeliveryApp() {
       headerSubtitle=""
       nav={[
         {
-          id: 'overview',
+          id: 'panoramica-menu',
           label: 'Panoramica',
-          active: effectiveView === 'overview',
-          onClick: () => setDeliveryView('overview'),
+          active: panoramicaMenuActive,
+          onClick: () => setDeliveryView(panoramicaMain.id),
+          items: PANORAMICA_SUBMENU.map((item) => ({
+            id: item.id,
+            label: item.label,
+            active: effectiveView === item.id,
+            onClick: () => setDeliveryView(item.id),
+          })),
         },
         {
           id: 'suppliers',
@@ -268,6 +374,18 @@ export default function OperatorDeliveryApp() {
           label: 'Storico consegne',
           active: effectiveView === 'history',
           onClick: () => setDeliveryView('history'),
+        },
+        {
+          id: 'personale-menu',
+          label: 'Personale',
+          active: personaleMenuActive,
+          onClick: () => setDeliveryView(personaleMain.id),
+          items: PERSONALE_SUBMENU.map((item) => ({
+            id: item.id,
+            label: item.label,
+            active: effectiveView === item.id,
+            onClick: () => setDeliveryView(item.id),
+          })),
         },
         {
           id: 'admin-menu',
