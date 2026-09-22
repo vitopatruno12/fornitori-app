@@ -16,7 +16,7 @@ export function invoiceDateKey(value) {
 }
 
 function invoiceChronologicalKey(row, dateField = 'invoice_date') {
-  return invoiceDateKey(row?.[dateField] || row?.invoice_date || row?.created_at) || '9999-99-99'
+  return invoiceDateKey(row?.[dateField] || row?.invoice_date || row?.created_at) || ''
 }
 
 /** Data documento crescente (più vecchia → più recente). Senza data in coda. */
@@ -24,14 +24,30 @@ export function sortInvoicesByDateAsc(rows, dateField = 'invoice_date') {
   return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
     const da = invoiceChronologicalKey(a, dateField)
     const db = invoiceChronologicalKey(b, dateField)
+    if (!da && !db) return (Number(a?.id) || 0) - (Number(b?.id) || 0)
+    if (!da) return 1
+    if (!db) return -1
     if (da !== db) return da.localeCompare(db)
     return (Number(a?.id) || 0) - (Number(b?.id) || 0)
   })
 }
 
+/** Data documento decrescente (più recente → più vecchia). Senza data in coda. */
+export function sortInvoicesByDateDesc(rows, dateField = 'invoice_date') {
+  return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const da = invoiceChronologicalKey(a, dateField)
+    const db = invoiceChronologicalKey(b, dateField)
+    if (!da && !db) return (Number(b?.id) || 0) - (Number(a?.id) || 0)
+    if (!da) return 1
+    if (!db) return -1
+    if (da !== db) return db.localeCompare(da)
+    return (Number(b?.id) || 0) - (Number(a?.id) || 0)
+  })
+}
+
 /**
  * Filtra fatture per fornitore (id o nome) e intervallo date documento.
- * Restituisce sempre l'elenco ordinato per data documento (vecchia → recente).
+ * Restituisce l'elenco ordinato per data documento (recente → vecchia).
  * @param {Array} rows
  * @param {{ supplierId?: string, supplierName?: string, dateFrom?: string, dateTo?: string, nameFields?: string[], dateField?: string }} filters
  */
@@ -58,7 +74,7 @@ export function filterInvoicesBySupplierAndDate(rows, filters = {}) {
     if (dateTo && (!d || d > dateTo)) return false
     return true
   })
-  return sortInvoicesByDateAsc(filtered, dateField)
+  return sortInvoicesByDateDesc(filtered, dateField)
 }
 
 /** Opzioni fornitore da elenco fatture (id+name o solo name). */

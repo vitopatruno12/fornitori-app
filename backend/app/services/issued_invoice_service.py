@@ -801,7 +801,11 @@ def list_issued_invoices(
       cid = normalize_company_section(company)
       if cid != "non_classificata":
         q = q.filter(IssuedInvoice.company == cid)
-    rows = q.order_by(IssuedInvoice.created_at.desc(), IssuedInvoice.id.desc()).limit(max(1, min(limit, 500))).all()
+    rows = q.order_by(
+      IssuedInvoice.invoice_date.desc().nullslast(),
+      IssuedInvoice.created_at.desc(),
+      IssuedInvoice.id.desc(),
+    ).limit(max(1, min(limit, 500))).all()
     out: List[Dict[str, Any]] = []
     dirty = False
     for row in rows:
