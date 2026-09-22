@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import seedWorkbook from '../data/fornitoriRisacca2026.json'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
-  DEFAULT_WORKBOOK_KEY,
   PAGAMENTI_WORKBOOKS,
   fetchPagamentiWatchAgent,
   fetchSupplierPaymentsWorkbook,
@@ -263,7 +262,7 @@ export default function PagamentiPage() {
         },
         workbookKey,
       )
-      setWorkbook(recalculateWorkbook(workbookFromApi(saved)))
+      setWorkbook(recalculateWorkbook(workbookFromApi(saved, workbookKey)))
       setUpdatedAt(saved?.updated_at || '')
       setDirty(false)
       setSuccess(`Salvato: ${workbookLabel(workbookKey)}`)
@@ -458,7 +457,7 @@ export default function PagamentiPage() {
         },
         workbookKey,
       )
-      const next = recalculateWorkbook(workbookFromApi(saved))
+      const next = recalculateWorkbook(workbookFromApi(saved, workbookKey))
       setWorkbook(next)
       setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
       setUpdatedAt(saved?.updated_at || '')
