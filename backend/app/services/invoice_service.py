@@ -522,7 +522,7 @@ def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dic
   from . import supplier_payments_service
 
   paid_rows = []
-  try {
+  try:
     paid_rows = supplier_payments_service.list_paid_document_rows(db, all_workbooks=True)
   except Exception:
     paid_rows = []
