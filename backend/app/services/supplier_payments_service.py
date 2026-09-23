@@ -510,7 +510,22 @@ def _names_overlap(left: Any, right: Any) -> bool:
   return bool(ta and tb and (ta & tb))
 
 
-def list_paid_document_rows(
+def _iter_workbook_keys(
+  *,
+  workbook_key: Optional[str] = None,
+  company: Optional[str] = None,
+  all_workbooks: bool = False,
+) -> List[str]:
+  if all_workbooks:
+    return [str(item["key"]) for item in WORKBOOK_CATALOG]
+  if workbook_key:
+    return [_normalize_workbook_key(workbook_key)]
+  if company:
+    return [workbook_key_for_company(company)]
+  return [DEFAULT_WORKBOOK_KEY]
+
+
+def list_workbook_document_rows(
   db: Session,
   workbook_key: Optional[str] = None,
   *,
@@ -518,22 +533,16 @@ def list_paid_document_rows(
   all_workbooks: bool = False,
 ) -> List[Dict[str, Any]]:
   """
-  Righe del file Pagamenti con pagamento registrato
-  (col. PAGATO DARE > 0) sui fogli mensili.
-  Se company è valorizzata usa il file della società;
-  se all_workbooks=True unisce tutti i file del catalogo.
-  """
-  keys: List[str]
-  if all_workbooks:
-    keys = [str(item["key"]) for item in WORKBOOK_CATALOG]
-  elif workbook_key:
-    keys = [_normalize_workbook_key(workbook_key)]
-  elif company:
-    keys = [workbook_key_for_company(company)]
-  else:
-    keys = [DEFAULT_WORKBOOK_KEY]
+  Tutte le righe documento sui fogli mensili (con n. fattura).
 
-  paid: List[Dict[str, Any]] = []
+  Colonne:
+  - cells[7] PAGARE (AVERE) = ancora da pagare (anche se importo = totale fattura)
+  - cells[8] PAGATO (DARE)  = pagata solo se > 0
+  """
+  keys = _iter_workbook_keys(
+    workbook_key=workbook_key, company=company, all_workbooks=all_workbooks
+  )
+  out: List[Dict[str, Any]] = []
   for key in keys:
     wb = get_workbook(db, key)
     for sheet in wb.sheets or []:
@@ -551,16 +560,14 @@ def list_paid_document_rows(
           continue
         if str(cells[6] or "").strip().upper() == "TOTALE":
           continue
-        # Solo colonna « PAGATO (DARE)» = pagata. «PAGARE (AVERE)» = ancora da pagare.
-        pagato = _num_cell(cells[8])
-        if pagato <= 0.009:
+        doc_norm = _normalize_doc(invoice_number)
+        if not doc_norm:
           continue
+        pagare = _num_cell(cells[7])
+        pagato = _num_cell(cells[8])
         data_pag = cells[10]
         has_pay_date = bool(str(data_pag or "").strip())
-        doc_norm = _normalize_doc(invoice_number)
-        if not doc_norm and not _normalize_party(supplier_name):
-          continue
-        paid.append(
+        out.append(
           {
             "workbook_key": key,
             "sheet": str(getattr(sheet, "name", "") or ""),
@@ -569,12 +576,47 @@ def list_paid_document_rows(
             "supplier_vat": _strip_excel_quotes(cells[3]),
             "supplier_name": supplier_name,
             "supplier_name_norm": _normalize_party(supplier_name),
+            "amount_due": pagare,
             "amount_paid": pagato,
+            # Solo DARE = pagata. Importo solo in PAGARE (AVERE) → non pagata.
+            "is_paid_in_file": pagato > 0.009,
             "payment_date": str(data_pag).strip() if has_pay_date else None,
             "row_index": idx,
           }
         )
-  return paid
+  return out
+
+
+def list_paid_document_rows(
+  db: Session,
+  workbook_key: Optional[str] = None,
+  *,
+  company: Optional[str] = None,
+  all_workbooks: bool = False,
+) -> List[Dict[str, Any]]:
+  """
+  Righe del file Pagamenti con pagamento registrato
+  (col. PAGATO DARE > 0). PAGARE (AVERE) non conta come pagata.
+  """
+  return [
+    row
+    for row in list_workbook_document_rows(
+      db, workbook_key, company=company, all_workbooks=all_workbooks
+    )
+    if row.get("is_paid_in_file")
+  ]
+
+
+def workbook_has_invoice_number(
+  rows: List[Dict[str, Any]],
+  *,
+  invoice_number: Optional[str] = None,
+) -> bool:
+  """True se il n. documento compare nel file fornitori (qualsiasi colonna pagare/pagato)."""
+  num_norm = _normalize_doc(invoice_number)
+  if not num_norm:
+    return False
+  return any(row.get("invoice_number_norm") == num_norm for row in rows)
 
 
 def find_paid_row_for_invoice(
@@ -585,12 +627,13 @@ def find_paid_row_for_invoice(
   supplier_vat: Optional[str] = None,
   invoice_total: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-  """Abbina una fattura Atlas a una riga pagata del file Pagamenti.
+  """Abbina una fattura Atlas a una riga PAGATO (DARE) del file Pagamenti.
 
-  Match valido se stesso n. documento e almeno uno tra:
+  Match valido solo su colonna PAGATO (DARE) > 0, con stesso n. documento e almeno uno tra:
   - stesso fornitore (P.IVA o denominazione)
   - importo PAGATO (DARE) ≈ totale fattura (±0,05 €)
 
+  Se l'importo è solo in PAGARE (AVERE) → non è pagata (non entra in paid_rows).
   Il solo numero non basta (i fornitori riutilizzano 125, 18, 274/2026, ecc.).
   """
   num_norm = _normalize_doc(invoice_number)
@@ -608,12 +651,15 @@ def find_paid_row_for_invoice(
   for row in paid_rows:
     if row.get("invoice_number_norm") != num_norm:
       continue
+    # Difesa: non accettare mai righe senza PAGATO DARE
+    pagato = float(row.get("amount_paid") or 0)
+    if pagato <= 0.009:
+      continue
     score = 3
     if vat_norm and _normalize_doc(row.get("supplier_vat")) == vat_norm:
       score += 2
     if name_norm and _names_overlap(name_norm, row.get("supplier_name_norm")):
       score += 1
-    pagato = float(row.get("amount_paid") or 0)
     if total is not None and total > 0.009 and abs(pagato - total) <= 0.05:
       score += 2
     if score < 4:

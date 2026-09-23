@@ -1122,10 +1122,17 @@ def sync_payment_status_from_bank(
 ) -> Dict[str, Any]:
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
-  - bonifici in uscita sui conti collegati (n. documento + importo o fornitore)
-  - file Pagamenti (stesso n. documento e stesso fornitore, colonne PAGATO / DATA PAGAMENTO)
-  Non riapre le già pagate se non trovate.
+  - bonifici in uscita (n. documento + importo ±0,05 €)
+  - file Pagamenti: solo colonna PAGATO (DARE) > 0
+
+  Regole file fornitori:
+  - importo solo in PAGARE (AVERE) → non pagata (da pagare)
+  - n. fattura assente dal file della società e senza prova banca → da pagare
+
+  Riapre (da pagare) le fatture già «pagate» senza prova solida.
   """
+  from decimal import Decimal
+
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
@@ -1134,6 +1141,11 @@ def sync_payment_status_from_bank(
     inv
     for inv in listed
     if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+  ]
+  paid_listed = [
+    inv
+    for inv in listed
+    if (getattr(inv, "payment_status", None) or "unpaid") == "paid"
   ]
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -1147,52 +1159,59 @@ def sync_payment_status_from_bank(
   mov_meta = [{"mov": m, "blob": _movement_search_blob(m)} for m in movements]
 
   try:
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(
+    file_rows = supplier_payments_service.list_workbook_document_rows(
       db, company=company_id, all_workbooks=not company_id
     )
   except Exception:
-    paid_file_rows = []
+    file_rows = []
+  paid_file_rows = [r for r in file_rows if r.get("is_paid_in_file")]
 
-  marked: List[Dict[str, Any]] = []
-  marked_from_file = 0
-  changed = False
-  for inv_dto in unpaid:
+  def _bank_hit(inv_dto: Any) -> Optional[Any]:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    supplier_name = str(getattr(inv_dto, "supplier_name", None) or "").strip()
-    supplier_vat = str(
-      getattr(inv_dto, "supplier_vat", None)
-      or getattr(inv_dto, "vat_number", None)
-      or ""
-    ).strip()
-
     already = next(
       (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
       None,
     )
-    found = None
     if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
-      found = already["mov"]
-    if not found and num:
-      for meta in mov_meta:
-        mov = meta["mov"]
-        if mov.movement_type != "uscita":
-          continue
-        if not _bank_movement_pays_invoice(inv_dto, mov, meta["blob"]):
-          continue
-        found = mov
-        break
+      return already["mov"]
+    if not num:
+      return None
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.movement_type != "uscita":
+        continue
+      if not _bank_movement_pays_invoice(inv_dto, mov, meta["blob"]):
+        continue
+      return mov
+    return None
 
-    file_hit = None
-    if not found and paid_file_rows:
-      file_hit = supplier_payments_service.find_paid_row_for_invoice(
-        paid_file_rows,
-        invoice_number=num,
-        supplier_name=supplier_name,
-        supplier_vat=supplier_vat,
-        invoice_total=float(_dec(getattr(inv_dto, "total", 0)) or 0),
-      )
+  def _file_paid_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
+    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    if not num or not paid_file_rows:
+      return None
+    return supplier_payments_service.find_paid_row_for_invoice(
+      paid_file_rows,
+      invoice_number=num,
+      supplier_name=str(getattr(inv_dto, "supplier_name", None) or "").strip(),
+      supplier_vat=str(
+        getattr(inv_dto, "supplier_vat", None)
+        or getattr(inv_dto, "vat_number", None)
+        or ""
+      ).strip(),
+      invoice_total=float(_dec(getattr(inv_dto, "total", 0)) or 0),
+    )
 
+  marked: List[Dict[str, Any]] = []
+  reopened: List[Dict[str, Any]] = []
+  marked_from_file = 0
+  changed = False
+
+  for inv_dto in unpaid:
+    inv_id = int(getattr(inv_dto, "id"))
+    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    found = _bank_hit(inv_dto)
+    file_hit = None if found else _file_paid_hit(inv_dto)
     if not found and not file_hit:
       continue
 
@@ -1229,19 +1248,55 @@ def sync_payment_status_from_bank(
       item["pagamenti_payment_date"] = file_hit.get("payment_date")
     marked.append(item)
 
+  # Riapri «pagate» senza prova: niente PAGATO DARE e niente banca n.+importo
+  for inv_dto in paid_listed:
+    inv_id = int(getattr(inv_dto, "id"))
+    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    found = _bank_hit(inv_dto)
+    file_hit = _file_paid_hit(inv_dto)
+    in_file = supplier_payments_service.workbook_has_invoice_number(
+      file_rows, invoice_number=num
+    )
+    # Prova solida = PAGATO DARE oppure bonifico n.+importo
+    if found or file_hit:
+      continue
+    # N. assente dal file società, oppure presente solo in PAGARE (AVERE) → da pagare
+    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    if not row:
+      continue
+    row.amount_paid = Decimal("0.00")
+    row.is_paid = False
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.matched_invoice_id == inv_id:
+        mov.matched_invoice_id = None
+        mov.reconciliation_status = "unmatched"
+        mov.difference_amount = None
+    changed = True
+    reopened.append(
+      {
+        "invoice_id": inv_id,
+        "invoice_number": num,
+        "reason": "not_in_file" if not in_file else "pagare_avere_only",
+      }
+    )
+
   if changed:
     db.commit()
 
-  da_pagare_count = max(0, len(unpaid) - len(marked))
+  da_pagare_count = max(0, len(unpaid) - len(marked) + len(reopened))
   return {
     "ok": True,
     "company": company_id or "",
     "marked_paid": len(marked),
     "marked_from_pagamenti": marked_from_file,
+    "reopened_unpaid": len(reopened),
     "da_pagare": da_pagare_count,
     "accounts_checked": len(account_ids),
     "pagamenti_paid_rows": len(paid_file_rows),
+    "pagamenti_document_rows": len(file_rows),
     "items": marked,
+    "reopened_items": reopened[:80],
   }
 
 

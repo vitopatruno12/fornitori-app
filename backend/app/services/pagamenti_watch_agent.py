@@ -191,8 +191,11 @@ def _sync_enable_banking_accounts(db: Session) -> Tuple[int, List[Dict[str, Any]
 
 def _mark_paid_from_evidence(db: Session) -> Dict[str, Any]:
   marked_items: List[Dict[str, Any]] = []
+  reopened_items: List[Dict[str, Any]] = []
   companies = list(SDI_COMPANY_ORDER) + [None]
   seen = set()
+  seen_reopen = set()
+  reopened_total = 0
   for company in companies:
     res = banca_service.sync_payment_status_from_bank(db, company=company)
     for item in res.get("items") or []:
@@ -201,11 +204,20 @@ def _mark_paid_from_evidence(db: Session) -> Dict[str, Any]:
         continue
       seen.add(key)
       marked_items.append(item)
+    for item in res.get("reopened_items") or []:
+      key = int(item.get("invoice_id") or 0)
+      if not key or key in seen_reopen:
+        continue
+      seen_reopen.add(key)
+      reopened_items.append(item)
+    reopened_total += int(res.get("reopened_unpaid") or 0)
   from_file = sum(1 for item in marked_items if item.get("reason") == "file_pagamenti")
   return {
     "marked_paid": len(marked_items),
     "marked_from_pagamenti": from_file,
+    "reopened_unpaid": len(seen_reopen) or reopened_total,
     "items": marked_items[:80],
+    "reopened_items": reopened_items[:80],
   }
 
 
@@ -243,17 +255,29 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
       reasons.append("manuale")
 
     skipped = not reasons
-    marked = {"marked_paid": 0, "marked_from_pagamenti": 0, "items": []}
+    marked = {
+      "marked_paid": 0,
+      "marked_from_pagamenti": 0,
+      "reopened_unpaid": 0,
+      "items": [],
+      "reopened_items": [],
+    }
     if not skipped:
       marked = _mark_paid_from_evidence(db)
 
+    reopened_n = int(marked.get("reopened_unpaid") or 0)
     if skipped:
       message = "Nessuna variazione su file Pagamenti né sui movimenti banca: nessun aggiornamento."
-    elif marked["marked_paid"]:
-      message = (
-        f"Variazioni ({', '.join(reasons)}): aggiornate {marked['marked_paid']} fatture "
-        f"({marked['marked_from_pagamenti']} da file Pagamenti)."
-      )
+    elif marked["marked_paid"] or reopened_n:
+      bits = []
+      if marked["marked_paid"]:
+        bits.append(
+          f"segnate pagate {marked['marked_paid']} "
+          f"({marked['marked_from_pagamenti']} da PAGATO DARE)"
+        )
+      if reopened_n:
+        bits.append(f"riaperte da pagare {reopened_n} (solo PAGARE AVERE o n. assente dal file)")
+      message = f"Variazioni ({', '.join(reasons)}): " + "; ".join(bits) + "."
     else:
       message = (
         f"Variazioni ({', '.join(reasons)}): movimenti/file aggiornati, "
@@ -278,7 +302,9 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
       "accounts": accounts,
       "marked_paid": marked["marked_paid"],
       "marked_from_pagamenti": marked["marked_from_pagamenti"],
+      "reopened_unpaid": int(marked.get("reopened_unpaid") or 0),
       "items": marked["items"],
+      "reopened_items": marked.get("reopened_items") or [],
     }
     _write_status(payload)
     return payload
