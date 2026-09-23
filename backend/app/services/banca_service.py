@@ -971,6 +971,7 @@ def reconciliation_preview(
         invoice_number=num,
         supplier_name=getattr(inv, "supplier_name", None),
         supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
+        invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
       )
 
     if found:
@@ -1189,6 +1190,7 @@ def sync_payment_status_from_bank(
         invoice_number=num,
         supplier_name=supplier_name,
         supplier_vat=supplier_vat,
+        invoice_total=float(_dec(getattr(inv_dto, "total", 0)) or 0),
       )
 
     if not found and not file_hit:

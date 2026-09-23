@@ -96,6 +96,7 @@ def list_invoices(
     db.query(
       Invoice,
       Supplier.name,
+      Supplier.vat_number,
       ElectronicInvoice.customer_vat,
       ElectronicInvoice.supplier_vat,
       SdiInvoice.receiver_vat,
@@ -142,6 +143,7 @@ def list_invoices(
   for (
     inv,
     supplier_name,
+    supplier_vat_anag,
     customer_vat,
     seller_vat,
     receiver_vat,
@@ -190,6 +192,12 @@ def list_invoices(
 
     base = InvoiceRead.model_validate(inv).model_dump()
     base["supplier_name"] = supplier_name or ""
+    # P.IVA fornitore: anagrafica Atlas, poi XML venditore (ricevute)
+    vat_bits = [
+      str(supplier_vat_anag or "").strip(),
+      str(seller_vat or "").strip(),
+    ]
+    base["supplier_vat"] = next((v for v in vat_bits if v), None)
     base["payment_status"] = ps
     base["company"] = inv_company
     base["activity"] = inv_activity
@@ -537,7 +545,7 @@ def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dic
   mov_meta = [{"mov": m, "blob": banca_service._movement_search_blob(m)} for m in movements]
 
   invoices = (
-    db.query(Invoice, Supplier.name)
+    db.query(Invoice, Supplier.name, Supplier.vat_number)
     .join(Supplier, Supplier.id == Invoice.supplier_id)
     .filter(Invoice.ignored.is_(False))
     .filter((Invoice.is_paid.is_(True)) | (Invoice.amount_paid > 0))
@@ -548,7 +556,7 @@ def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dic
   weak_unlinked = 0
   sample: List[dict] = []
 
-  for inv, supplier_name in invoices:
+  for inv, supplier_name, supplier_vat in invoices:
     inv.supplier_name = supplier_name  # usato dal matcher banca
     has_bank = False
     for meta in mov_meta:
@@ -572,7 +580,8 @@ def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dic
         paid_rows,
         invoice_number=inv.invoice_number,
         supplier_name=supplier_name,
-        supplier_vat=None,
+        supplier_vat=supplier_vat,
+        invoice_total=float(inv.total or 0),
       )
 
     if has_bank or file_hit:

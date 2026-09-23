@@ -56,6 +56,7 @@ class InvoiceDetailOut(InvoiceRead):
 
 class InvoiceListOut(InvoiceRead):
   supplier_name: str = ""
+  supplier_vat: Optional[str] = None
   payment_status: Literal["paid", "unpaid", "partial"] = "unpaid"
   company: Optional[str] = None
   activity: Optional[str] = None

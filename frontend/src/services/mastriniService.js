@@ -282,13 +282,28 @@ function buildFornitoriMastrini(
     party.totalDare += amount
     party.ricevuteCount += 1
     party.finalBalance = party.totalDare - party.totalAvere
+    const imponibile = toNum(inv?.imponibile)
+    const vatAmount = toNum(inv?.vat_amount ?? inv?.iva)
+    const ivaBits = []
+    if (imponibile > 0.009) {
+      ivaBits.push(`imp. ${imponibile.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    }
+    if (vatAmount > 0.009) {
+      ivaBits.push(`IVA ${vatAmount.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    }
+    const frDesc = [
+      `Fattura ricevuta n. ${number}`.trim(),
+      ivaBits.length ? ivaBits.join(' + ') : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
     party.movements.push({
       date,
       documentDate: date,
       registrationNumber: `FR-${inv?.id ?? ''}`,
       causale: 'FR',
       causaleLabel: 'Fattura ricevuta',
-      description: `Fattura ricevuta n. ${number}`.trim(),
+      description: frDesc,
       documentLabel: `Ricevuta ${number}`.trim(),
       documentType: 'fattura_ricevuta',
       documentId: inv?.id ? String(inv.id) : '',
@@ -302,6 +317,8 @@ function buildFornitoriMastrini(
       companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
       locale: String(inv?.activity || inv?.section || '').trim().toLowerCase(),
       amount,
+      imponibile,
+      vat_amount: vatAmount,
       dare: amount,
       avere: 0,
       source: 'fatture_ricevute',

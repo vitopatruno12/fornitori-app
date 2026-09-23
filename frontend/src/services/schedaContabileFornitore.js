@@ -233,6 +233,8 @@ export function buildSchedaContabileFornitori(
     const number = invoiceNumber(inv)
     const status = paymentStatus(inv)
     const paidAmt = toNum(inv?.amount_paid)
+    const imponibile = toNum(inv?.imponibile)
+    const vatAmount = toNum(inv?.vat_amount ?? inv?.iva)
     const party = ensure(name, {
       supplierId: inv?.supplier_id != null ? Number(inv.supplier_id) : null,
       code: inv?.supplier_id != null ? String(inv.supplier_id).padStart(5, '0') : '',
@@ -242,18 +244,27 @@ export function buildSchedaContabileFornitori(
     if (status === 'paid' || paidInvoiceIds.has(Number(inv?.id))) party.pagateCount += 1
     else party.daPagareCount += 1
 
+    const ivaBits = []
+    if (imponibile > 0.009) ivaBits.push(`Imponibile ${imponibile.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    if (vatAmount > 0.009) ivaBits.push(`IVA ${vatAmount.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    const baseDesc =
+      status === 'paid' ? 'FATT. RICEV. (pagata)' : status === 'partial' ? 'FATT. RICEV. (parziale)' : 'FATT. RICEV.'
+    const frDesc = ivaBits.length ? `${baseDesc} · ${ivaBits.join(' + ')}` : baseDesc
+
     party.movements.push({
       date,
       documentDate: date,
       documento: `FR ${number || inv?.id || ''} ${formatDocDate(date)}`,
       documentoTipo: 'FR',
       registrationNumber: `FR-${inv?.id ?? ''}`,
-      description: status === 'paid' ? `FATT. RICEV. (pagata)` : status === 'partial' ? `FATT. RICEV. (parziale)` : `FATT. RICEV.`,
+      description: frDesc,
       documentLabel: `FR ${number || inv?.id || ''}`,
       contropartita: 'COSTI / ACQUISTI',
       counterparty: party.name,
       company: companyId,
       amount,
+      imponibile,
+      vat_amount: vatAmount,
       dare: 0,
       avere: amount,
       source: 'fatture_ricevute',
