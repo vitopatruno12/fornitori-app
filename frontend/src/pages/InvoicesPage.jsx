@@ -911,7 +911,7 @@ export default function InvoicesPage() {
             onRowClick={(inv) => openInvoiceDetail(inv)}
             getRowId={(inv) => `invoice-row-${inv.id}`}
             getRowClassName={(inv) =>
-              focusInvoiceId && String(inv.id) === String(focusInvoiceId) ? 'workbook-row-selected' : ''
+              focusInvoiceId && String(inv.id) === String(focusInvoiceId) ? 'workbook-row-focus-purple' : ''
             }
             actionsHeader="Azioni"
             actionsColWidth="8.75rem"

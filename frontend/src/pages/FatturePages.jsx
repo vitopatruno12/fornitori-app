@@ -1526,6 +1526,12 @@ export function FattureDaRegistrarePage() {
           actionsHeader="Azioni"
           renderActions={(row) => {
             const params = new URLSearchParams()
+            if (row?.id != null && row.id !== '') params.set('id', String(row.id))
+            if (row?.invoice_number) params.set('n', String(row.invoice_number).trim())
+            if (row?.invoice_date) {
+              const d = String(row.invoice_date).trim().slice(0, 10)
+              if (d) params.set('date', d)
+            }
             if (row?.supplier_id != null && row.supplier_id !== '') {
               params.set('supplier_id', String(row.supplier_id))
             } else if (row?.supplier_name) {

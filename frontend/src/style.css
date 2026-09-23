@@ -9328,8 +9328,11 @@ select.form-control {
   background: #ecfdf5 !important;
 }
 
-.fatture-page .workbook-row-focus-purple .excel-cell {
+.fatture-page .workbook-row-focus-purple .excel-cell,
+.fatture-page .workbook-row-focus-purple .workbook-col-sticky-left,
+.fatture-page .workbook-row-focus-purple .sup-actions-col {
   background: #ede9fe !important;
+  box-shadow: inset 3px 0 0 #7c3aed;
 }
 
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {
