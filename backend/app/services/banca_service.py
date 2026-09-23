@@ -872,6 +872,13 @@ def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = Non
   residuo = total - paid
   due = getattr(inv, "due_date", None)
   inv_date = getattr(inv, "invoice_date", None)
+  status = getattr(inv, "payment_status", None) or payment_status_label(inv)
+  aligned = reason in {
+    "matched",
+    "numero_in_movimento",
+    "file_pagamenti",
+    "gia_pagata_in_atlas",
+  } or residuo <= Decimal("0.009") or status == "paid"
   return {
     "invoice_id": getattr(inv, "id", None),
     "supplier_name": getattr(inv, "supplier_name", "") or "",
@@ -881,9 +888,11 @@ def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = Non
     "total": float(total),
     "amount_paid": float(paid),
     "residuo": float(residuo),
-    "payment_status": getattr(inv, "payment_status", None) or payment_status_label(inv),
+    "payment_status": status,
     "company": getattr(inv, "company", None),
     "match_reason": reason,
+    "aligned": aligned,
+    "paid_ok": aligned,
     "matched_movement": match_movement,
   }
 
@@ -940,7 +949,7 @@ def reconciliation_preview(
     status = inv.payment_status or "unpaid"
     residuo = _dec(inv.total) - _dec(inv.amount_paid)
 
-    # Già riconciliata su un movimento (solo se importo o fornitore confermano)
+    # Già riconciliata su un movimento (solo se n. documento + importo confermano)
     already = next(
       (
         m
@@ -950,10 +959,7 @@ def reconciliation_preview(
       None,
     )
     found = None
-    if already and (
-      _movement_amount_matches_invoice(inv, already["mov"])
-      or _supplier_in_blob(getattr(inv, "supplier_name", None), already["blob"])
-    ):
+    if already and _bank_movement_pays_invoice(inv, already["mov"], already["blob"]):
       found = already
     if not found and num:
       for m in mov_meta:

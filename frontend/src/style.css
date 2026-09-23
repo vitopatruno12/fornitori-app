@@ -9415,3 +9415,30 @@ select.form-control {
 .workbook-card-nested:has(.banca-fit-grid) .pagamenti-grid-wrap.excel-wrap {
   overflow-x: hidden !important;
 }
+
+.banca-recon-ok-cell {
+  color: #047857 !important;
+  font-weight: 700 !important;
+  background: #ecfdf5 !important;
+}
+
+.banca-recon-open-cell {
+  color: #b45309 !important;
+  font-weight: 600 !important;
+}
+
+.banca-recon-warn-cell {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+  background: #fffbeb !important;
+}
+
+.banca-recon-row-ok .excel-cell,
+.banca-recon-row-ok .pagamenti-cell-readonly {
+  background: #ecfdf5 !important;
+}
+
+.banca-recon-row-open .excel-cell,
+.banca-recon-row-open .pagamenti-cell-readonly {
+  background: #fffbeb !important;
+}

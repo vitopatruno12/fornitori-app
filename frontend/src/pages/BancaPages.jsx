@@ -311,18 +311,46 @@ const BANK_RECON_COLUMNS = [
   { id: 'amount', label: 'Importo', width: 12, fluid: true, numeric: true },
   { id: 'invoice', label: 'Proposta fattura', width: 32, fluid: true },
   { id: 'difference', label: 'Differenza', width: 12, fluid: true, numeric: true },
-  { id: 'status', label: 'Esito', width: 12, fluid: true },
+  {
+    id: 'status',
+    label: 'Esito',
+    width: 12,
+    fluid: true,
+    tone: (row) =>
+      row?.status === 'matched'
+        ? 'banca-recon-ok-cell'
+        : row?.status === 'difference'
+          ? 'banca-recon-warn-cell'
+          : 'banca-recon-open-cell',
+  },
 ]
 
 const BANK_INVOICE_STATUS_COLUMNS = [
-  { id: 'invoice_number', label: 'N. doc.', width: 12, fluid: true, emphasis: true },
-  { id: 'invoice_date', label: 'Data', width: 10, fluid: true },
-  { id: 'supplier_name', label: 'Fornitore', width: 24, fluid: true },
-  { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true },
-  { id: 'residuo', label: 'Residuo', width: 12, fluid: true, numeric: true },
-  { id: 'bank_hit', label: 'Movimento banca', width: 20, fluid: true },
+  {
+    id: 'ok',
+    label: 'OK',
+    width: 5,
+    fluid: true,
+    tone: (row) => (invoiceIsAligned(row) ? 'banca-recon-ok-cell' : 'banca-recon-open-cell'),
+  },
+  { id: 'invoice_number', label: 'N. doc.', width: 11, fluid: true, emphasis: true },
+  { id: 'invoice_date', label: 'Data', width: 9, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 20, fluid: true },
+  { id: 'total', label: 'Totale fattura', width: 11, fluid: true, numeric: true },
+  { id: 'bank_amount', label: 'Importo banca', width: 11, fluid: true, numeric: true },
+  { id: 'residuo', label: 'Residuo', width: 10, fluid: true, numeric: true },
+  { id: 'bank_hit', label: 'Movimento collegato', width: 16, fluid: true },
   { id: 'reason', label: 'Esito', width: 10, fluid: true },
 ]
+
+function invoiceIsAligned(row) {
+  if (!row) return false
+  if (row.aligned || row.paid_ok) return true
+  const reason = String(row.match_reason || '')
+  if (['matched', 'numero_in_movimento', 'file_pagamenti', 'gia_pagata_in_atlas'].includes(reason)) return true
+  if (String(row.payment_status || '') === 'paid') return true
+  return (Number(row.residuo) || 0) <= 0.009
+}
 
 function bankReconCellValue(row, col) {
   if (col.id === 'movement') {
@@ -336,25 +364,38 @@ function bankReconCellValue(row, col) {
     return `${inv.supplier_name || '—'} · n. ${inv.invoice_number || '—'} · Residuo ${eur(inv.residuo)} (${quality})`
   }
   if (col.id === 'difference') return row?.suggested_invoice ? eur(row.suggested_invoice.difference) : '—'
-  if (col.id === 'status') return reconciliationStatusLabel(row?.status)
+  if (col.id === 'status') {
+    if (row?.status === 'matched') return '✔ Riconciliato'
+    return reconciliationStatusLabel(row?.status)
+  }
   return ''
 }
 
 function bankInvoiceStatusCellValue(row, col) {
+  if (col.id === 'ok') return invoiceIsAligned(row) ? '✔' : '○'
   if (col.id === 'invoice_number') return row?.invoice_number || '—'
   if (col.id === 'invoice_date') return formatDate(row?.invoice_date)
   if (col.id === 'supplier_name') return row?.supplier_name || '—'
   if (col.id === 'total') return eur(row?.total)
+  if (col.id === 'bank_amount') {
+    const m = row?.matched_movement
+    if (m?.amount != null && m.amount !== '') return eur(m.amount)
+    if (invoiceIsAligned(row)) return eur(row?.total)
+    return '—'
+  }
   if (col.id === 'residuo') return eur(row?.residuo)
   if (col.id === 'bank_hit') {
     const m = row?.matched_movement
-    if (!m) return '—'
-    return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
+    if (!m) return invoiceIsAligned(row) ? 'Pagata (senza movimento)' : '—'
+    return [formatDate(m.movement_date), m.description || m.causale || (m.id != null ? `BA-${m.id}` : '')]
+      .filter(Boolean)
+      .join(' · ')
   }
   if (col.id === 'reason') {
-    if (row?.match_reason === 'numero_in_movimento') return 'N. in banca'
-    if (row?.match_reason === 'matched') return 'Riconciliata'
-    if (row?.match_reason === 'gia_pagata_in_atlas') return 'Pagata'
+    if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
+    if (row?.match_reason === 'matched') return '✔ Riconciliata'
+    if (row?.match_reason === 'file_pagamenti') return '✔ File PAGATO'
+    if (row?.match_reason === 'gia_pagata_in_atlas') return '✔ Pagata'
     if (row?.match_reason === 'da_pagare') return 'Da pagare'
     return row?.match_reason || '—'
   }
@@ -2036,7 +2077,8 @@ export function BancaRiconciliazionePage() {
   }
 
   useEffect(() => {
-    reload(companyId, { auto: false })
+    // Allinea subito fatture ↔ movimenti dei conti collegati alla società
+    reload(companyId, { auto: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
@@ -2128,8 +2170,8 @@ export function BancaRiconciliazionePage() {
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName}: i match sicuri (n. documento o importo uguale) si applicano da soli. Controlla solo differenze e movimenti da riconciliare.`
-          : 'Scegli la società nel banner verde: Atlas riconcilia automaticamente i match sicuri.'
+          ? `Fatture ${companyName} abbinate ai movimenti dei conti collegati. Spunta verde ✔ = pagata e allineata (n. documento + importo).`
+          : 'Scegli la società nel banner: Atlas abbina automaticamente fatture e bonifici dei conti collegati.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
@@ -2209,7 +2251,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da pagare</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Fatture aperte senza n. documento nei movimenti banca del c/c collegato a questa società.
+                  Fatture senza abbinamento ai movimenti dei conti collegati (n. documento + importo) e senza PAGATO DARE nel file fornitori.
                 </p>
                 <WorkbookGrid
                   title="Fatture da pagare"
@@ -2217,9 +2259,10 @@ export function BancaRiconciliazionePage() {
                   columns={BANK_INVOICE_STATUS_COLUMNS}
                   rows={unpaidRows}
                   cellValue={bankInvoiceStatusCellValue}
-                  emptyMessage="Nessuna fattura da pagare per questa società (o tutte trovano riscontro in banca)."
+                  emptyMessage="Nessuna fattura da pagare: tutte allineate ai movimenti o al file PAGATO."
                   gridClassName="banca-fit-grid"
                   rowKey={(row) => row.invoice_id}
+                  getRowClassName={(row) => (invoiceIsAligned(row) ? 'banca-recon-row-ok' : 'banca-recon-row-open')}
                   totals={
                     unpaidRows.length
                       ? {
@@ -2238,19 +2281,20 @@ export function BancaRiconciliazionePage() {
               </section>
 
               <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Pagate / trovate in banca</h2>
+                <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Fatture già pagate in Atlas oppure con n. documento presente in descrizione/causale movimento.
+                  Fattura e movimento allineati: stesso n. documento e importo sul c/c della società, oppure riga PAGATO DARE nel file fornitori.
                 </p>
                 <WorkbookGrid
-                  title="Fatture pagate o trovate"
+                  title="Fatture pagate o abbinate"
                   sheetLabel={`${paidRows.length} doc.`}
                   columns={BANK_INVOICE_STATUS_COLUMNS}
                   rows={paidRows}
                   cellValue={bankInvoiceStatusCellValue}
-                  emptyMessage="Nessuna fattura trovata come pagata o nei movimenti."
+                  emptyMessage="Nessuna fattura ancora abbinata ai movimenti."
                   gridClassName="banca-fit-grid"
                   rowKey={(row) => `paid-${row.invoice_id}`}
+                  getRowClassName={() => 'banca-recon-row-ok'}
                   totals={
                     paidRows.length
                       ? {
