@@ -342,9 +342,12 @@ def get_account_transactions(
   params: Dict[str, Any] = {"date_from": date_from.isoformat()}
   if date_to:
     params["date_to"] = date_to.isoformat()
+  # Intervalli lunghi: più pagine (Enable Banking pagina ~50-100 tx)
+  span_days = max(0, ((date_to or datetime.now(timezone.utc).date()) - date_from).days)
+  pages = max(max_pages, min(80, 10 + span_days // 7))
   out: List[Dict[str, Any]] = []
   continuation: Optional[str] = None
-  for _ in range(max(1, max_pages)):
+  for _ in range(max(1, pages)):
     q = dict(params)
     if continuation:
       q["continuation_key"] = continuation
@@ -667,6 +670,8 @@ def sync_enable_banking_account(
   account_id: int,
   *,
   sync_payments: bool = True,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
 ) -> Dict[str, Any]:
   row = db.query(BankAccount).filter(BankAccount.id == account_id, BankAccount.is_active.is_(True)).first()
   if not row:
@@ -683,7 +688,13 @@ def sync_enable_banking_account(
     except Exception:
       logger.warning("Sync balances fallito account %s", account_id, exc_info=True)
 
-    imported = _import_transactions(db, row, row.eb_account_uid)
+    imported = _import_transactions(
+      db,
+      row,
+      row.eb_account_uid,
+      date_from=date_from,
+      date_to=date_to,
+    )
     row.connection_status = "connected"
     row.last_sync_at = datetime.now(timezone.utc)
     db.commit()
@@ -700,13 +711,21 @@ def sync_enable_banking_account(
       logger.warning("Sync stato pagamenti da banca fallito account %s", account_id, exc_info=True)
 
   marked = int((bank_sync or {}).get("marked_paid") or 0)
-  msg = f"Sync Enable Banking: {imported} nuovi movimenti."
+  period_bits = []
+  if date_from:
+    period_bits.append(date_from.isoformat())
+  if date_to:
+    period_bits.append(date_to.isoformat())
+  period_note = f" (periodo {' → '.join(period_bits)})" if period_bits else ""
+  msg = f"Sync Enable Banking: {imported} nuovi movimenti{period_note}."
   if marked:
     msg += f" Segnate pagate {marked} fatture (n. documento in bonifico)."
 
   return {
     "ok": True,
     "imported": imported,
+    "date_from": date_from.isoformat() if date_from else None,
+    "date_to": date_to.isoformat() if date_to else None,
     "bank_sync": bank_sync,
     "account": {
       "id": row.id,
@@ -722,8 +741,15 @@ def sync_enable_banking_account(
   }
 
 
-def _import_transactions(db: Session, account: BankAccount, account_uid: str) -> int:
-  txs = get_account_transactions(account_uid)
+def _import_transactions(
+  db: Session,
+  account: BankAccount,
+  account_uid: str,
+  *,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+) -> int:
+  txs = get_account_transactions(account_uid, date_from=date_from, date_to=date_to)
   existing_keys = set()
   existing_ext = set()
   for m in (

@@ -57,8 +57,12 @@ export async function startEnableBankingAuth(accountId, payload = {}) {
   })
 }
 
-export async function syncEnableBankingAccount(id) {
-  return apiFetch(`/banca/accounts/${id}/enable-banking/sync`, { method: 'POST' })
+export async function syncEnableBankingAccount(id, params = {}) {
+  const search = new URLSearchParams()
+  if (params.date_from) search.append('date_from', params.date_from)
+  if (params.date_to) search.append('date_to', params.date_to)
+  const q = search.toString()
+  return apiFetch(`/banca/accounts/${id}/enable-banking/sync${q ? `?${q}` : ''}`, { method: 'POST' })
 }
 
 export async function fetchEnableBankingStatus() {

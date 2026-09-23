@@ -1818,7 +1818,7 @@ export function BancaMovimentiPage() {
     ? `Conto: ${formatBankAccountOptionLabel(selectedAccount)}`
     : lastSyncedLabel
       ? `Ultimo aggiornamento: ${lastSyncedLabel}. Seleziona un conto nel filtro per vedere solo quello.`
-      : 'Seleziona banca/conto nel filtro, poi Filtra o Aggiorna. Nella colonna Conto vedi banca · società · IBAN.'
+      : 'Seleziona banca/conto e Periodo da/a, poi Filtra o Aggiorna (Aggiorna scarica i movimenti sull’intervallo da Enable Banking).'
 
   async function load() {
     setLoading(true)
@@ -1870,19 +1870,27 @@ export function BancaMovimentiPage() {
       }
 
       let totalImported = 0
+      const periodParams = {
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      }
       for (const acc of targets) {
-        const res = await syncEnableBankingAccount(acc.id)
+        const res = await syncEnableBankingAccount(acc.id, periodParams)
         totalImported += Number(res?.imported || 0)
       }
+      const periodLabel =
+        dateFrom || dateTo
+          ? ` (periodo ${dateFrom || '…'} → ${dateTo || '…'})`
+          : ''
       if (targets.length === 1) {
         const label = formatBankAccountOptionLabel(targets[0])
         setLastSyncedLabel(label)
         // Resta sul conto aggiornato così titolo ed elenco coincidono
         setAccountId(String(targets[0].id))
-        setSuccess(`Aggiornato ${label}: ${totalImported} nuovi movimenti.`)
+        setSuccess(`Aggiornato ${label}: ${totalImported} nuovi movimenti${periodLabel}.`)
       } else {
         setLastSyncedLabel(`${targets.length} conti sincronizzati`)
-        setSuccess(`Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti.`)
+        setSuccess(`Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti${periodLabel}.`)
       }
       await load()
     } catch (e) {
@@ -1952,8 +1960,8 @@ export function BancaMovimentiPage() {
             onClick={() => void aggiornaMovimenti()}
             title={
               accountId
-                ? `Aggiorna solo: ${viewAccountLabel}`
-                : 'Aggiorna tutti i conti Enable Banking collegati'
+                ? `Scarica da Enable Banking${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''} · ${viewAccountLabel}`
+                : `Aggiorna tutti i conti Enable Banking collegati${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''}`
             }
           >
             {syncBusy ? 'Aggiorno…' : 'Aggiorna'}

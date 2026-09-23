@@ -224,11 +224,23 @@ def banca_enable_banking_callback(
 
 
 @router.post("/accounts/{account_id}/enable-banking/sync")
-def banca_enable_banking_sync(account_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def banca_enable_banking_sync(
+  account_id: int,
+  date_from: Optional[date] = Query(None, description="Inizio periodo movimenti (YYYY-MM-DD)"),
+  date_to: Optional[date] = Query(None, description="Fine periodo movimenti (YYYY-MM-DD)"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
   from ..services.enable_banking_service import sync_enable_banking_account
 
+  if date_from and date_to and date_to < date_from:
+    raise HTTPException(status_code=400, detail="date_to deve essere >= date_from")
   try:
-    return sync_enable_banking_account(db, account_id)
+    return sync_enable_banking_account(
+      db,
+      account_id,
+      date_from=date_from,
+      date_to=date_to,
+    )
   except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e)) from e
   except RuntimeError as e:
@@ -345,9 +357,13 @@ def banca_movimenti(
   date_to: Optional[date] = Query(None),
   category: Optional[str] = Query(None),
   counterparty: Optional[str] = Query(None),
-  limit: int = Query(200, ge=1, le=500),
+  limit: int = Query(200, ge=1, le=5000),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+  # Con periodo ampio alza il default se il client non passa limit
+  effective_limit = limit
+  if (date_from or date_to) and limit <= 200:
+    effective_limit = 2000
   items = banca_service.list_movements(
     db,
     account_id=account_id,
@@ -355,7 +371,7 @@ def banca_movimenti(
     date_to=date_to,
     category=category,
     counterparty=counterparty,
-    limit=limit,
+    limit=effective_limit,
   )
   return {"items": items, "count": len(items)}
 
