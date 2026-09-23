@@ -326,13 +326,6 @@ const BANK_RECON_COLUMNS = [
 ]
 
 const BANK_INVOICE_STATUS_COLUMNS = [
-  {
-    id: 'ok',
-    label: 'OK',
-    width: 5,
-    fluid: true,
-    tone: (row) => (invoiceIsAligned(row) ? 'banca-recon-ok-cell' : 'banca-recon-open-cell'),
-  },
   { id: 'invoice_number', label: 'N. doc.', width: 11, fluid: true, emphasis: true },
   { id: 'invoice_date', label: 'Data', width: 9, fluid: true },
   { id: 'supplier_name', label: 'Fornitore', width: 20, fluid: true },
@@ -340,6 +333,13 @@ const BANK_INVOICE_STATUS_COLUMNS = [
   { id: 'bank_amount', label: 'Importo banca', width: 11, fluid: true, numeric: true },
   { id: 'residuo', label: 'Residuo', width: 10, fluid: true, numeric: true },
   { id: 'bank_hit', label: 'Movimento collegato', width: 16, fluid: true },
+  {
+    id: 'ok',
+    label: 'OK',
+    width: 5,
+    fluid: true,
+    tone: (row) => (invoiceIsAligned(row) ? 'banca-recon-ok-cell' : 'banca-recon-open-cell'),
+  },
   { id: 'reason', label: 'Esito', width: 10, fluid: true },
 ]
 
