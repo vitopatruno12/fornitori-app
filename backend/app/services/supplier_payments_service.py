@@ -566,7 +566,9 @@ def list_workbook_document_rows(
         pagare = _num_cell(cells[7])
         pagato = _num_cell(cells[8])
         data_pag = cells[10]
-        has_pay_date = bool(str(data_pag or "").strip())
+        pay_raw = str(data_pag or "").strip()
+        has_pay_date = bool(pay_raw)
+        cash_paid = is_cash_payment_marker(pay_raw)
         out.append(
           {
             "workbook_key": key,
@@ -578,13 +580,55 @@ def list_workbook_document_rows(
             "supplier_name_norm": _normalize_party(supplier_name),
             "amount_due": pagare,
             "amount_paid": pagato,
-            # Solo DARE = pagata. Importo solo in PAGARE (AVERE) → non pagata.
+            # Solo DARE = pagata nel file. Importo solo in PAGARE (AVERE) → non pagata.
             "is_paid_in_file": pagato > 0.009,
-            "payment_date": str(data_pag).strip() if has_pay_date else None,
+            # Contanti/carta: prova senza movimento banca
+            "is_cash_payment": cash_paid and pagato > 0.009,
+            "payment_date": pay_raw if has_pay_date else None,
             "row_index": idx,
           }
         )
   return out
+
+
+_CASH_PAYMENT_MARKERS = (
+  "CONTANTI",
+  "CONTANTE",
+  "CARTA",
+  "POS",
+  "ASSEGNO",
+  "CASH",
+  "COMPENSATA",
+  "COMPENSAZIONE",
+)
+
+
+def is_cash_payment_marker(value: Any) -> bool:
+  """True se DATA PAGAMENTO / nota indica pagamento fuori bonifico (contanti/carta/…)."""
+  text = str(value or "").strip().upper()
+  if not text:
+    return False
+  # Date ISO/IT non sono contanti
+  if re.match(r"^\d{4}-\d{2}-\d{2}", text) or re.match(r"^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}", text):
+    return False
+  return any(marker in text for marker in _CASH_PAYMENT_MARKERS)
+
+
+def list_cash_paid_document_rows(
+  db: Session,
+  workbook_key: Optional[str] = None,
+  *,
+  company: Optional[str] = None,
+  all_workbooks: bool = False,
+) -> List[Dict[str, Any]]:
+  """PAGATO DARE con pagamento in contanti/carta (senza movimento banca)."""
+  return [
+    row
+    for row in list_workbook_document_rows(
+      db, workbook_key, company=company, all_workbooks=all_workbooks
+    )
+    if row.get("is_cash_payment")
+  ]
 
 
 def list_paid_document_rows(

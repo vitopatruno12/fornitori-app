@@ -347,9 +347,18 @@ function invoiceIsAligned(row) {
   if (!row) return false
   if (row.aligned || row.paid_ok) return true
   const reason = String(row.match_reason || '')
-  if (['matched', 'numero_in_movimento', 'file_pagamenti', 'gia_pagata_in_atlas'].includes(reason)) return true
-  if (String(row.payment_status || '') === 'paid') return true
-  return (Number(row.residuo) || 0) <= 0.009
+  if (
+    [
+      'matched',
+      'numero_in_movimento',
+      'importo_in_movimento',
+      'file_contanti',
+      'file_pagamenti',
+    ].includes(reason)
+  ) {
+    return true
+  }
+  return false
 }
 
 function bankReconCellValue(row, col) {
@@ -386,16 +395,28 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'residuo') return eur(row?.residuo)
   if (col.id === 'bank_hit') {
     const m = row?.matched_movement
-    if (!m) return invoiceIsAligned(row) ? 'Pagata (senza movimento)' : '—'
-    return [formatDate(m.movement_date), m.description || m.causale || (m.id != null ? `BA-${m.id}` : '')]
+    if (!m) {
+      if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
+        return 'Contanti (file Pagamenti)'
+      }
+      return invoiceIsAligned(row) ? 'Pagata' : '—'
+    }
+    const cro = m.bonifico_ref ? `CRO ${m.bonifico_ref}` : ''
+    return [
+      formatDate(m.movement_date),
+      cro,
+      m.description || m.causale || (m.id != null ? `BA-${m.id}` : ''),
+    ]
       .filter(Boolean)
       .join(' · ')
   }
   if (col.id === 'reason') {
     if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
+    if (row?.match_reason === 'importo_in_movimento') return '✔ Importo in banca'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
-    if (row?.match_reason === 'file_pagamenti') return '✔ File PAGATO'
-    if (row?.match_reason === 'gia_pagata_in_atlas') return '✔ Pagata'
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
+      return '✔ Contanti'
+    }
     if (row?.match_reason === 'da_pagare') return 'Da pagare'
     return row?.match_reason || '—'
   }

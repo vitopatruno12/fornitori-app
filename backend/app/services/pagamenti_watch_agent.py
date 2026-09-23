@@ -211,7 +211,9 @@ def _mark_paid_from_evidence(db: Session) -> Dict[str, Any]:
       seen_reopen.add(key)
       reopened_items.append(item)
     reopened_total += int(res.get("reopened_unpaid") or 0)
-  from_file = sum(1 for item in marked_items if item.get("reason") == "file_pagamenti")
+  from_file = sum(
+    1 for item in marked_items if item.get("reason") in ("file_contanti", "file_pagamenti")
+  )
   return {
     "marked_paid": len(marked_items),
     "marked_from_pagamenti": from_file,

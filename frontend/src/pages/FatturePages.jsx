@@ -160,9 +160,9 @@ function moneyTotalsLabel(colId, totals) {
 
 function matchReasonLabel(reason) {
   if (reason === 'numero_in_movimento') return 'N. in banca'
+  if (reason === 'importo_in_movimento') return 'Importo in banca'
   if (reason === 'matched') return 'Riconciliata'
-  if (reason === 'gia_pagata_in_atlas') return 'Pagata Atlas'
-  if (reason === 'file_pagamenti') return 'File Pagamenti'
+  if (reason === 'file_contanti' || reason === 'file_pagamenti') return 'Contanti'
   if (reason === 'da_pagare') return 'Da pagare'
   return reason || '—'
 }
@@ -179,8 +179,9 @@ function invoiceIsPaidRow(row) {
   if (reason === 'da_pagare') return false
   if (
     reason === 'numero_in_movimento'
+    || reason === 'importo_in_movimento'
     || reason === 'matched'
-    || reason === 'gia_pagata_in_atlas'
+    || reason === 'file_contanti'
     || reason === 'file_pagamenti'
   ) {
     return true
@@ -491,7 +492,7 @@ export function FattureDashboardPage() {
   return (
     <FatturePageShell
       title="Dashboard"
-      lead="Colpo d'occhio: ricevute, da registrare, scadenze, totali del mese e IVA."
+      lead="Colpo d'occhio: ricevute, da pagare, scadenze, totali del mese e IVA."
     >
       {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -504,7 +505,7 @@ export function FattureDashboardPage() {
               <div className="dashboard-kpi-hint">Documenti con data odierna</div>
             </div>
             <div className="dashboard-kpi dashboard-kpi--warn">
-              <div className="dashboard-kpi-label">Da registrare</div>
+              <div className="dashboard-kpi-label">Da pagare</div>
               <div className="dashboard-kpi-value">{data.da_registrare}</div>
               <div className="dashboard-kpi-hint">Senza movimento cassa collegato</div>
             </div>
@@ -535,7 +536,7 @@ export function FattureDashboardPage() {
                 Fatture ricevute
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
-                Fatture da registrare
+                Fatture da pagare
               </FattureLink>
               <FattureLink className="btn btn-secondary btn-sm" to="/fatture/pagate">
                 Fatture pagate
@@ -1446,7 +1447,7 @@ export function FattureDaRegistrarePage() {
 
   return (
     <FatturePageShell
-      title="Fatture da registrare"
+      title="Fatture da pagare"
       lead="Fatture senza movimento di Prima Nota. Imposta fornitore/periodo e premi Aggiorna; poi stampa o esporta."
       actions={
         gestionaleMode ? (
@@ -1487,7 +1488,7 @@ export function FattureDaRegistrarePage() {
           />
         ) : null}
         <VneWorkbookGrid
-          title="Fatture da registrare"
+          title="Fatture da pagare"
           sheetLabel={`${filteredInvoices.length} documenti`}
           exportSubtitle={
             [
@@ -1522,7 +1523,7 @@ export function FattureDaRegistrarePage() {
               : null
           }
           totalsLabel={moneyTotalsLabel}
-          emptyMessage="Nessuna fattura da registrare con i filtri selezionati."
+          emptyMessage="Nessuna fattura da pagare con i filtri selezionati."
           actionsHeader="Azioni"
           renderActions={(row) => {
             const params = new URLSearchParams()
