@@ -891,32 +891,117 @@ def _movement_amount_matches_invoice(inv: Any, mov: Any) -> bool:
   return abs(total - amt) <= Decimal("0.05") or abs(residuo - amt) <= Decimal("0.05")
 
 
-def _bank_movement_pays_invoice(inv: Any, mov: Any, blob: str) -> bool:
-  """Pagamento da movimento banca: n. documento O importo, con data che fa fede.
+# Pesi score riconciliazione (totale 100)
+_SCORE_AMOUNT = 40
+_SCORE_PARTY = 30
+_SCORE_NUMBER = 20
+_SCORE_DATE = 10
+_SCORE_AUTO = 80  # riconcilia subito
+_SCORE_PROBABLE = 70  # proposta / one-click
+_AMOUNT_FEE_TOLERANCE = Decimal("2.00")  # abbuono/commissione
 
-  - numero + importo → match sicuro
-  - numero + data compatibile → match
-  - importo + data + fornitore in causale → match (senza numero)
-  Se non compare né per numero né per importo → non pagata via banca.
+
+def _invoice_residuo(inv: Any) -> Decimal:
+  total = abs(_dec(getattr(inv, "total", 0)))
+  paid = abs(_dec(getattr(inv, "amount_paid", 0)))
+  residuo = total - paid
+  if residuo <= Decimal("0.009"):
+    return Decimal("0.00")
+  return residuo
+
+
+def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
+  """Score 0–100: importo 40 + anagrafica 30 + n. fattura 20 + data 10.
+
+  bande: auto (≥80), probable (70–79), review (<70).
   """
+  breakdown = {"amount": 0, "party": 0, "number": 0, "date": 0}
   if getattr(mov, "movement_type", None) and str(mov.movement_type).lower() != "uscita":
-    return False
-  has_num = _invoice_number_in_text(getattr(inv, "invoice_number", None), blob)
-  has_amt = _movement_amount_matches_invoice(inv, mov)
-  if not has_num and not has_amt:
-    return False
-  date_ok = _dates_compatible(inv, mov)
-  norm = _normalize_doc_token(str(getattr(inv, "invoice_number", None) or ""))
-  # Numeri corti: sempre numero + importo + token fornitore
-  if has_num and len(norm) < 4:
-    return has_amt and _supplier_in_blob(getattr(inv, "supplier_name", None), blob)
-  if has_num and has_amt:
-    return True
-  if has_num and date_ok:
-    return True
-  if has_amt and date_ok and _supplier_in_blob(getattr(inv, "supplier_name", None), blob):
-    return True
-  return False
+    return {
+      "score": 0,
+      "band": "review",
+      "breakdown": breakdown,
+      "partial": False,
+      "amount_diff": None,
+    }
+
+  residuo = _invoice_residuo(inv)
+  if residuo <= Decimal("0.009"):
+    residuo = abs(_dec(getattr(inv, "total", 0)))
+  amt = abs(_dec(getattr(mov, "amount", 0)))
+  diff = abs(residuo - amt) if residuo > 0 and amt > 0 else None
+  partial = False
+
+  if amt > Decimal("1.00") and residuo > Decimal("0.009"):
+    if diff is not None and diff <= Decimal("0.05"):
+      breakdown["amount"] = _SCORE_AMOUNT
+    elif diff is not None and diff <= _AMOUNT_FEE_TOLERANCE:
+      breakdown["amount"] = 25  # importo quasi esatto (commissioni)
+    elif amt < residuo - Decimal("0.05") and amt >= residuo * Decimal("0.4"):
+      breakdown["amount"] = 15  # acconto / parziale
+      partial = True
+
+  if _supplier_in_blob(getattr(inv, "supplier_name", None), blob):
+    breakdown["party"] = _SCORE_PARTY
+  else:
+    # P.IVA in causale
+    vat = str(
+      getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None) or ""
+    ).strip()
+    if vat and len(re.sub(r"\D", "", vat)) >= 11:
+      vat_digits = re.sub(r"\D", "", vat)
+      blob_digits = re.sub(r"\D", "", blob or "")
+      if vat_digits and vat_digits in blob_digits:
+        breakdown["party"] = _SCORE_PARTY
+
+  num = str(getattr(inv, "invoice_number", None) or "").strip()
+  norm = _normalize_doc_token(num)
+  has_num = _invoice_number_in_text(num, blob)
+  if has_num:
+    if len(norm) < 4:
+      # numeri corti: solo se c'è anche importo o fornitore
+      if breakdown["amount"] >= 25 or breakdown["party"] >= _SCORE_PARTY:
+        breakdown["number"] = _SCORE_NUMBER
+    else:
+      breakdown["number"] = _SCORE_NUMBER
+
+  if _dates_compatible(inv, mov, max_days=90):
+    breakdown["date"] = _SCORE_DATE
+  else:
+    # finestra più larga: metà punti
+    inv_d = _as_date(getattr(inv, "invoice_date", None))
+    mov_d = _as_date(getattr(mov, "movement_date", None))
+    if inv_d and mov_d:
+      delta = (mov_d - inv_d).days
+      if -7 <= delta <= 180:
+        breakdown["date"] = 5
+
+  score = int(sum(breakdown.values()))
+  if score >= _SCORE_AUTO:
+    band = "auto"
+  elif score >= _SCORE_PROBABLE:
+    band = "probable"
+  else:
+    band = "review"
+
+  # Numeri corti senza importo forte → mai auto
+  if has_num and len(norm) < 4 and breakdown["amount"] < 25:
+    if band == "auto":
+      band = "probable"
+      score = min(score, _SCORE_PROBABLE + 5)
+
+  return {
+    "score": score,
+    "band": band,
+    "breakdown": breakdown,
+    "partial": partial,
+    "amount_diff": float(diff) if diff is not None else None,
+  }
+
+
+def _bank_movement_pays_invoice(inv: Any, mov: Any, blob: str) -> bool:
+  """True se lo score è almeno auto (≥80): riconciliazione affidabile."""
+  return score_movement_invoice(inv, mov, blob)["band"] == "auto"
 
 
 def _enrich_movement_out(out: Dict[str, Any], mov: Any = None, blob: str = "") -> Dict[str, Any]:
@@ -932,21 +1017,30 @@ def _enrich_movement_out(out: Dict[str, Any], mov: Any = None, blob: str = "") -
   return enriched
 
 
-def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = None, reason: str = "") -> Dict[str, Any]:
+def _invoice_row_out(
+  inv: Any,
+  *,
+  match_movement: Optional[Dict[str, Any]] = None,
+  reason: str = "",
+  match_score: Optional[int] = None,
+  match_band: Optional[str] = None,
+  match_breakdown: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
   total = _dec(getattr(inv, "total", 0))
   paid = _dec(getattr(inv, "amount_paid", 0))
   residuo = total - paid
   due = getattr(inv, "due_date", None)
   inv_date = getattr(inv, "invoice_date", None)
   status = getattr(inv, "payment_status", None) or payment_status_label(inv)
-  # Allineata solo con prova banca (n./importo+data) o contanti da file Pagamenti
+  # Allineata solo con prova banca (score auto) o contanti da file Pagamenti
   aligned = reason in {
     "matched",
     "numero_in_movimento",
     "importo_in_movimento",
     "file_contanti",
+    "score_auto",
   }
-  return {
+  out = {
     "invoice_id": getattr(inv, "id", None),
     "supplier_name": getattr(inv, "supplier_name", "") or "",
     "invoice_number": getattr(inv, "invoice_number", None),
@@ -962,6 +1056,13 @@ def _invoice_row_out(inv: Any, *, match_movement: Optional[Dict[str, Any]] = Non
     "paid_ok": aligned,
     "matched_movement": match_movement,
   }
+  if match_score is not None:
+    out["match_score"] = int(match_score)
+  if match_band:
+    out["match_band"] = match_band
+  if match_breakdown:
+    out["match_breakdown"] = match_breakdown
+  return out
 
 
 def reconciliation_preview(
@@ -1014,7 +1115,7 @@ def reconciliation_preview(
     inv_id = int(inv.id)
     num = str(inv.invoice_number or "").strip()
 
-    # Già riconciliata / trovata nei movimenti (n. O importo + data)
+    # Già riconciliata / migliore score auto nei movimenti
     already = next(
       (
         m
@@ -1024,15 +1125,27 @@ def reconciliation_preview(
       None,
     )
     found = None
-    if already and _bank_movement_pays_invoice(inv, already["mov"], already["blob"]):
-      found = already
+    found_score: Optional[Dict[str, Any]] = None
+    if already:
+      sc = score_movement_invoice(inv, already["mov"], already["blob"])
+      if sc["band"] == "auto" or already["mov"].matched_invoice_id == inv_id:
+        found = already
+        found_score = sc
     if not found:
+      best_sc = None
+      best_m = None
       for m in mov_meta:
         if m["mov"].movement_type != "uscita":
           continue
-        if _bank_movement_pays_invoice(inv, m["mov"], m["blob"]):
-          found = m
-          break
+        sc = score_movement_invoice(inv, m["mov"], m["blob"])
+        if sc["band"] != "auto":
+          continue
+        if best_sc is None or sc["score"] > best_sc["score"]:
+          best_sc = sc
+          best_m = m
+      if best_m is not None:
+        found = best_m
+        found_score = best_sc
 
     cash_hit = None
     if not found and cash_file_rows:
@@ -1049,9 +1162,18 @@ def reconciliation_preview(
       reason = "matched" if found["mov"].matched_invoice_id == inv_id else (
         "numero_in_movimento" if has_num else "importo_in_movimento"
       )
+      if found_score and found_score.get("band") == "auto":
+        reason = "score_auto" if reason != "matched" else reason
       mov_out = _enrich_movement_out(found["out"], found["mov"], found["blob"])
       paid_by_bank.append(
-        _invoice_row_out(inv, match_movement=mov_out, reason=reason)
+        _invoice_row_out(
+          inv,
+          match_movement=mov_out,
+          reason=reason,
+          match_score=(found_score or {}).get("score"),
+          match_band=(found_score or {}).get("band"),
+          match_breakdown=(found_score or {}).get("breakdown"),
+        )
       )
     elif cash_hit:
       paid_by_bank.append(
@@ -1065,24 +1187,13 @@ def reconciliation_preview(
             "amount": cash_hit.get("amount_paid"),
             "id": None,
           },
+          match_score=100,
+          match_band="auto",
         )
       )
     else:
-      # Senza prova in movimenti (n. o importo) e senza contanti → da pagare
+      # Senza prova in movimenti (score auto) e senza contanti → da pagare
       da_pagare.append(_invoice_row_out(inv, reason="da_pagare"))
-
-  # Suggerimenti: prima match per numero su uscite unmatched, poi fallback importo
-  open_for_amount = [
-    {
-      "invoice_id": row["invoice_id"],
-      "supplier_name": row["supplier_name"],
-      "invoice_number": row["invoice_number"],
-      "due_date": row["due_date"],
-      "residuo": row["residuo"],
-    }
-    for row in da_pagare
-    if row["residuo"] > 0.009
-  ]
 
   unmatched = [
     (m["mov"], m["acc"], m["blob"], m["out"])
@@ -1093,65 +1204,62 @@ def reconciliation_preview(
   suggestions = []
   used_invoices = set()
   for mov, acc, blob, mov_out in unmatched:
-    # 1) Match per numero documento
     best = None
+    best_score_info: Optional[Dict[str, Any]] = None
     for inv in invoices:
       inv_id = int(inv.id)
       if inv_id in used_invoices:
         continue
       if (inv.payment_status or "") == "paid":
         continue
-      residuo = _dec(inv.total) - _dec(inv.amount_paid)
+      residuo = _invoice_residuo(inv)
       if residuo <= Decimal("0.009"):
         continue
-      if not _bank_movement_pays_invoice(inv, mov, blob):
+      sc = score_movement_invoice(inv, mov, blob)
+      if sc["score"] < _SCORE_PROBABLE:
         continue
-      diff = abs(residuo - _dec(mov.amount))
-      best = {
-        "invoice_id": inv_id,
-        "supplier_name": inv.supplier_name,
-        "invoice_number": inv.invoice_number,
-        "due_date": inv.due_date.date().isoformat()
-        if hasattr(inv.due_date, "date")
-        else (inv.due_date.isoformat() if inv.due_date else None),
-        "residuo": float(residuo),
-        "difference": float(diff),
-        "match_quality": "number",
-      }
-      break
-
-    # 2) Fallback per importo: solo se la causale cita il fornitore
-    if best is None:
-      amt = _dec(mov.amount)
-      near = None
-      for inv in open_for_amount:
-        if inv["invoice_id"] in used_invoices:
-          continue
-        if not _supplier_in_blob(inv.get("supplier_name"), blob):
-          continue
-        diff = abs(_dec(inv["residuo"]) - amt)
-        if diff <= Decimal("0.05"):
-          best = {**inv, "difference": float(diff), "match_quality": "exact"}
-          break
-        if near is None and diff <= Decimal("5.00"):
-          near = {**inv, "difference": float(diff), "match_quality": "near"}
-      if best is None:
-        best = near
+      if best_score_info is None or sc["score"] > best_score_info["score"]:
+        best_score_info = sc
+        diff = abs(residuo - _dec(mov.amount))
+        quality = (
+          "number"
+          if sc["breakdown"].get("number", 0) >= _SCORE_NUMBER
+          else ("exact" if sc["breakdown"].get("amount", 0) >= 25 else "near")
+        )
+        best = {
+          "invoice_id": inv_id,
+          "supplier_name": inv.supplier_name,
+          "invoice_number": inv.invoice_number,
+          "due_date": inv.due_date.date().isoformat()
+          if hasattr(inv.due_date, "date")
+          else (inv.due_date.isoformat() if inv.due_date else None),
+          "residuo": float(residuo),
+          "difference": float(diff),
+          "match_quality": quality,
+          "match_score": sc["score"],
+          "match_band": sc["band"],
+          "match_breakdown": sc["breakdown"],
+          "partial": sc.get("partial"),
+        }
 
     if best:
       used_invoices.add(best["invoice_id"])
-      diff_dec = _dec(best.get("difference", 0))
-      if best["match_quality"] == "number":
-        status = "matched" if diff_dec <= Decimal("0.05") else "difference"
-      elif best["match_quality"] == "exact":
+      band = best.get("match_band") or "review"
+      if band == "auto" and not best.get("partial"):
         status = "matched"
+      elif band in ("auto", "probable"):
+        status = "difference" if best.get("partial") or _dec(best.get("difference", 0)) > Decimal("0.05") else "matched"
+        if band == "probable":
+          status = "difference"  # richiede conferma one-click
       else:
-        status = "difference"
+        status = "unmatched"
       suggestions.append(
         {
           "movement": mov_out,
           "suggested_invoice": best,
           "status": status,
+          "match_score": best.get("match_score"),
+          "match_band": band,
         }
       )
     else:
@@ -1160,6 +1268,8 @@ def reconciliation_preview(
           "movement": mov_out,
           "suggested_invoice": None,
           "status": "unmatched",
+          "match_score": 0,
+          "match_band": "review",
         }
       )
 
@@ -1173,6 +1283,7 @@ def reconciliation_preview(
     "pagamenti_paid_rows": len(cash_file_rows),
     "pagamenti_cash_rows": len(cash_file_rows),
     "unmatched_movements": len([s for s in suggestions if s["status"] == "unmatched"]),
+    "score_thresholds": {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE},
     "accounts_used": [
       {
         "id": a.get("id"),
@@ -1285,13 +1396,19 @@ def sync_payment_status_from_bank(
     row.is_paid = True
     reason = "file_contanti"
     movement_id = None
+    match_score = None
+    match_band = None
     if found:
       blob = next((m["blob"] for m in mov_meta if m["mov"].id == found.id), "")
-      reason = (
-        "numero_in_movimento"
-        if _invoice_number_in_text(num, blob)
-        else "importo_in_movimento"
-      )
+      sc = score_movement_invoice(inv_dto, found, blob)
+      match_score = sc.get("score")
+      match_band = sc.get("band")
+      has_num = _invoice_number_in_text(num, blob)
+      reason = "score_auto"
+      if has_num:
+        reason = "numero_in_movimento"
+      elif sc.get("breakdown", {}).get("amount", 0) >= 25:
+        reason = "importo_in_movimento"
       movement_id = int(found.id)
       if (
         found.reconciliation_status == "unmatched"
@@ -1309,6 +1426,10 @@ def sync_payment_status_from_bank(
       "invoice_number": num,
       "reason": reason,
     }
+    if match_score is not None:
+      item["match_score"] = int(match_score)
+    if match_band:
+      item["match_band"] = match_band
     if movement_id is not None:
       item["movement_id"] = movement_id
       bonifico = _extract_bonifico_ref(
@@ -1373,7 +1494,7 @@ def auto_reconcile(
   company: Optional[str] = None,
   limit: int = 80,
 ) -> Dict[str, Any]:
-  """Applica automaticamente i match sicuri (n. documento o importo esatto), poi ricalcola l'anteprima."""
+  """Applica i match con score ≥80 (auto), poi ricalcola l'anteprima. Probable (70–79) restano da confermare."""
   preview = reconciliation_preview(db, limit=limit, company=company)
   applied: List[Dict[str, Any]] = []
   errors: List[Dict[str, Any]] = []
@@ -1383,12 +1504,16 @@ def auto_reconcile(
     mov = sug.get("movement") or {}
     mov_id = mov.get("id")
     inv_id = inv.get("invoice_id")
-    quality = inv.get("match_quality")
     status = sug.get("status")
-    # Match sicuri: n. documento con importo allineato, oppure importo esatto + fornitore in causale
-    if quality == "number" and status == "matched":
+    band = sug.get("match_band") or inv.get("match_band")
+    score = int(sug.get("match_score") or inv.get("match_score") or 0)
+    quality = inv.get("match_quality")
+    # Solo bande auto (≥80), non parziali: i probable restano one-click
+    if inv.get("partial"):
+      continue
+    if band == "auto" and status == "matched":
       apply_status = "matched"
-    elif quality == "exact" and status == "matched":
+    elif score >= _SCORE_AUTO and status == "matched":
       apply_status = "matched"
     else:
       continue
@@ -1401,13 +1526,15 @@ def auto_reconcile(
           "movement_id": int(mov_id),
           "invoice_id": int(inv_id),
           "invoice_number": inv.get("invoice_number"),
-          "match_quality": quality or "exact",
+          "match_quality": quality or "score",
+          "match_score": score,
+          "match_band": band or "auto",
         }
       )
     except Exception as e:  # noqa: BLE001 — continua con gli altri match
       errors.append({"movement_id": mov_id, "invoice_id": inv_id, "error": str(e)})
 
-  # Copre anche movimenti già collegati / non in suggestion: n. documento → pagata
+  # Copre anche movimenti già collegati / non in suggestion: score auto → pagata
   bank_sync = sync_payment_status_from_bank(db, company=company)
 
   refreshed = reconciliation_preview(db, limit=limit, company=company)
@@ -1415,6 +1542,7 @@ def auto_reconcile(
   refreshed["auto_applied_items"] = applied + list(bank_sync.get("items") or [])
   refreshed["auto_errors"] = errors
   refreshed["bank_sync"] = bank_sync
+  refreshed["score_thresholds"] = {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE}
   return refreshed
 
 

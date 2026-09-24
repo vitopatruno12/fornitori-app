@@ -309,14 +309,15 @@ function bankMovementsCellValue(row, col) {
 }
 
 const BANK_RECON_COLUMNS = [
-  { id: 'movement', label: 'Movimento', width: 32, fluid: true, emphasis: true },
-  { id: 'amount', label: 'Importo', width: 12, fluid: true, numeric: true },
-  { id: 'invoice', label: 'Proposta fattura', width: 32, fluid: true },
-  { id: 'difference', label: 'Differenza', width: 12, fluid: true, numeric: true },
+  { id: 'movement', label: 'Movimento', width: 28, fluid: true, emphasis: true },
+  { id: 'amount', label: 'Importo', width: 11, fluid: true, numeric: true },
+  { id: 'invoice', label: 'Proposta fattura', width: 28, fluid: true },
+  { id: 'score', label: 'Score', width: 9, fluid: true, numeric: true },
+  { id: 'difference', label: 'Differenza', width: 11, fluid: true, numeric: true },
   {
     id: 'status',
     label: 'Esito',
-    width: 12,
+    width: 13,
     fluid: true,
     tone: (row) =>
       row?.status === 'matched'
@@ -328,13 +329,14 @@ const BANK_RECON_COLUMNS = [
 ]
 
 const BANK_INVOICE_STATUS_COLUMNS = [
-  { id: 'invoice_number', label: 'N. doc.', width: 11, fluid: true, emphasis: true },
-  { id: 'invoice_date', label: 'Data', width: 9, fluid: true },
-  { id: 'supplier_name', label: 'Fornitore', width: 20, fluid: true },
-  { id: 'total', label: 'Totale fattura', width: 11, fluid: true, numeric: true },
-  { id: 'bank_amount', label: 'Importo banca', width: 11, fluid: true, numeric: true },
-  { id: 'residuo', label: 'Residuo', width: 10, fluid: true, numeric: true },
-  { id: 'bank_hit', label: 'Movimento collegato', width: 16, fluid: true },
+  { id: 'invoice_number', label: 'N. doc.', width: 10, fluid: true, emphasis: true },
+  { id: 'invoice_date', label: 'Data', width: 8, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore', width: 18, fluid: true },
+  { id: 'total', label: 'Totale fattura', width: 10, fluid: true, numeric: true },
+  { id: 'bank_amount', label: 'Importo banca', width: 10, fluid: true, numeric: true },
+  { id: 'residuo', label: 'Residuo', width: 9, fluid: true, numeric: true },
+  { id: 'bank_hit', label: 'Movimento collegato', width: 15, fluid: true },
+  { id: 'score', label: 'Score', width: 7, fluid: true, numeric: true },
   {
     id: 'ok',
     label: 'OK',
@@ -348,6 +350,7 @@ const BANK_INVOICE_STATUS_COLUMNS = [
 function invoiceIsAligned(row) {
   if (!row) return false
   if (row.aligned || row.paid_ok) return true
+  if (row.match_band === 'auto' || (Number(row.match_score) || 0) >= 80) return true
   const reason = String(row.match_reason || '')
   if (
     [
@@ -356,11 +359,22 @@ function invoiceIsAligned(row) {
       'importo_in_movimento',
       'file_contanti',
       'file_pagamenti',
+      'score_auto',
     ].includes(reason)
   ) {
     return true
   }
   return false
+}
+
+function formatMatchScore(row) {
+  const score = row?.match_score ?? row?.suggested_invoice?.match_score
+  if (score == null || score === '') return '—'
+  const n = Number(score)
+  if (!Number.isFinite(n)) return '—'
+  const band = row?.match_band || row?.suggested_invoice?.match_band
+  const bandLabel = band === 'auto' ? 'auto' : band === 'probable' ? 'prob.' : band === 'review' ? 'review' : ''
+  return bandLabel ? `${Math.round(n)}% · ${bandLabel}` : `${Math.round(n)}%`
 }
 
 function bankReconCellValue(row, col) {
@@ -371,12 +385,29 @@ function bankReconCellValue(row, col) {
   if (col.id === 'invoice') {
     if (!row?.suggested_invoice) return 'Nessuna proposta'
     const inv = row.suggested_invoice
-    const quality = inv.match_quality === 'number' ? 'n. doc.' : inv.match_quality === 'exact' ? 'importo' : 'vicino'
-    return `${inv.supplier_name || '—'} · n. ${inv.invoice_number || '—'} · Residuo ${eur(inv.residuo)} (${quality})`
+    const quality =
+      inv.match_quality === 'number'
+        ? 'n. doc.'
+        : inv.match_quality === 'exact'
+          ? 'importo'
+          : inv.match_quality === 'near'
+            ? 'vicino'
+            : ''
+    const bits = [
+      inv.supplier_name || '—',
+      `n. ${inv.invoice_number || '—'}`,
+      `Residuo ${eur(inv.residuo)}`,
+    ]
+    if (quality) bits.push(quality)
+    return bits.join(' · ')
   }
+  if (col.id === 'score') return formatMatchScore(row)
   if (col.id === 'difference') return row?.suggested_invoice ? eur(row.suggested_invoice.difference) : '—'
   if (col.id === 'status') {
     if (row?.status === 'matched') return '✔ Riconciliato'
+    if (row?.match_band === 'probable' || (Number(row?.match_score) || 0) >= 70) {
+      return 'Da confermare'
+    }
     return reconciliationStatusLabel(row?.status)
   }
   return ''
@@ -395,6 +426,7 @@ function bankInvoiceStatusCellValue(row, col) {
     return '—'
   }
   if (col.id === 'residuo') return eur(row?.residuo)
+  if (col.id === 'score') return formatMatchScore(row)
   if (col.id === 'bank_hit') {
     const m = row?.matched_movement
     if (!m) {
@@ -415,6 +447,7 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'reason') {
     if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
     if (row?.match_reason === 'importo_in_movimento') return '✔ Importo in banca'
+    if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
       return '✔ Contanti'
@@ -2098,9 +2131,9 @@ export function BancaRiconciliazionePage() {
       setData(res)
       const n = Number(res?.auto_applied) || 0
       if (auto && n > 0) {
-        setSuccess(`Riconciliati automaticamente ${n} movimenti (n. documento o importo esatto).`)
+        setSuccess(`Riconciliati automaticamente ${n} movimenti (score ≥80).`)
       } else if (auto) {
-        setSuccess('Nessun nuovo match sicuro da applicare. Restano differenze e movimenti da riconciliare.')
+        setSuccess('Nessun nuovo match auto (score ≥80). Restano proposte 70–79 da confermare e movimenti senza match.')
       }
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
@@ -2347,7 +2380,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da pagare</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Fatture senza abbinamento ai movimenti (n. documento / importo / fornitore in causale) e senza pagamenti in CONTANTI nel file fornitori.
+                  Fatture senza abbinamento score ≥80 sui movimenti e senza pagamenti in CONTANTI nel file fornitori.
                 </p>
                 <WorkbookGrid
                   title="Fatture da pagare"
@@ -2379,7 +2412,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Fattura e movimento allineati: stesso n. documento e importo sul c/c della società, oppure riga PAGATO DARE nel file fornitori.
+                  Match automatici (score ≥80: importo + fornitore + n. fattura + data) oppure riga CONTANTI nel file Pagamenti.
                 </p>
                 <WorkbookGrid
                   title="Fatture pagate o abbinate"
@@ -2411,8 +2444,8 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da controllare (differenze / da riconciliare)</h2>
                 <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-                  Movimenti con importo diverso dalla fattura proposta (<strong>differenza</strong>) o
-                  senza fattura (<strong>da riconciliare</strong>) — conferma a mano se serve.
+                  Proposte con score 70–79 (<strong>da confermare</strong>) o sotto 70 / senza fattura (
+                  <strong>da riconciliare</strong>). Conferma a mano se serve.
                 </p>
                 <WorkbookGrid
                   title="Residui da controllare"
