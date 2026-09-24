@@ -393,6 +393,30 @@ def banca_riconciliazione_auto(
   return banca_service.auto_reconcile(db, company=company)
 
 
+@router.get("/riconciliazione/agent")
+def banca_riconciliazione_agent_status() -> Dict[str, Any]:
+  """Stato dell'agente che sincronizza movimenti e allinea fatture (banca + file fornitori)."""
+  from ..services import pagamenti_watch_agent
+
+  return pagamenti_watch_agent.read_status()
+
+
+@router.post("/riconciliazione/agent/run")
+def banca_riconciliazione_agent_run(
+  force: bool = Query(True, description="Esegui anche senza variazioni rilevate"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """
+  Agente automatico:
+  1) scarica movimenti Enable Banking
+  2) collega uscite ↔ fatture (n. in causale / importo / fornitore)
+  3) segna pagate; contanti da file Pagamenti
+  """
+  from ..services import pagamenti_watch_agent
+
+  return pagamenti_watch_agent.run_watch(db, force=force)
+
+
 @router.post("/movimenti/{movement_id}/riconcilia")
 def banca_riconcilia(movement_id: int, body: ReconcileBody, db: Session = Depends(get_db)) -> Dict[str, Any]:
   try:

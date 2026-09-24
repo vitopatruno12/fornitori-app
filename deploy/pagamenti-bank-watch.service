@@ -9,7 +9,7 @@
 #   sudo systemctl start pagamenti-bank-watch.service
 
 [Unit]
-Description=ATLAS agente Pagamenti + movimenti banca (controllo periodico)
+Description=ATLAS agente riconciliazione: sync movimenti banca e allinea fatture (bonifici + contanti file)
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
 

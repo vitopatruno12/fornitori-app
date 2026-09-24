@@ -114,6 +114,15 @@ export async function postBancaRiconciliazioneAuto(company) {
   return apiFetch(`/banca/riconciliazione/auto${q}`, { method: 'POST' })
 }
 
+export async function fetchBancaRiconciliazioneAgent() {
+  return apiFetch('/banca/riconciliazione/agent')
+}
+
+export async function runBancaRiconciliazioneAgent({ force = true } = {}) {
+  const q = new URLSearchParams({ force: force ? 'true' : 'false' })
+  return apiFetch(`/banca/riconciliazione/agent/run?${q}`, { method: 'POST' })
+}
+
 export async function postBancaRiconcilia(movementId, { invoice_id = null, status = 'matched' } = {}) {
   return apiFetch(`/banca/movimenti/${movementId}/riconcilia`, {
     method: 'POST',

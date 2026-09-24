@@ -21,9 +21,11 @@ import {
   fetchBancaDashboard,
   fetchBancaMovimenti,
   fetchBancaRiconciliazione,
+  fetchBancaRiconciliazioneAgent,
   importBanMovements,
   postBancaRiconcilia,
   postBancaRiconciliazioneAuto,
+  runBancaRiconciliazioneAgent,
   startEnableBankingAuth,
   syncBancaAccount,
   syncEnableBankingAccount,
@@ -2075,6 +2077,8 @@ export function BancaRiconciliazionePage() {
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [agentBusy, setAgentBusy] = useState(false)
+  const [agentStatus, setAgentStatus] = useState(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
@@ -2104,6 +2108,35 @@ export function BancaRiconciliazionePage() {
       setLoading(false)
     }
   }
+
+  async function loadAgentStatus() {
+    try {
+      const st = await fetchBancaRiconciliazioneAgent()
+      setAgentStatus(st)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function runAgent() {
+    setAgentBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await runBancaRiconciliazioneAgent({ force: true })
+      setAgentStatus(res)
+      if (res?.message) setSuccess(res.message)
+      if (companyId) await reload(companyId, { auto: true })
+    } catch (e) {
+      setError(e?.message || 'Agente riconciliazione non riuscito')
+    } finally {
+      setAgentBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadAgentStatus()
+  }, [])
 
   useEffect(() => {
     // Allinea subito fatture ↔ movimenti dei conti collegati alla società
@@ -2199,8 +2232,8 @@ export function BancaRiconciliazionePage() {
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName} abbinate ai movimenti dei conti collegati. Spunta verde ✔ = pagata e allineata (n. documento + importo).`
-          : 'Scegli la società nel banner: Atlas abbina automaticamente fatture e bonifici dei conti collegati.'
+          ? `Fatture ${companyName}: l'agente legge le causali dei bonifici (destinatario / n. fattura), collega i movimenti e per i contanti usa il file fornitori.`
+          : "L'agente sincronizza i movimenti banca e riconcilia automaticamente le fatture (bonifico + contanti da Pagamenti)."
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
@@ -2215,18 +2248,27 @@ export function BancaRiconciliazionePage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              onClick={() => void runAgent()}
+              disabled={agentBusy || loading}
+              title="Scarica movimenti, abbina fatture dalle causali e allinea i contanti dal file fornitori"
+            >
+              {agentBusy ? 'Agente in corso…' : 'Avvia agente automatico'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
               onClick={() => {
                 setSuccess('')
                 reload(companyId, { auto: true })
               }}
-              disabled={loading || !companyId}
+              disabled={loading || agentBusy || !companyId}
             >
               {loading ? 'Riconcilio…' : 'Aggiorna e riconcilia'}
             </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={loading || !companyId || (!schedaRows.length && !pendingSuggestions.length)}
+              disabled={loading || agentBusy || !companyId || (!schedaRows.length && !pendingSuggestions.length)}
               title="Apre la stampa: da lì puoi salvare come PDF"
               onClick={stampaSchedaRiconciliazione}
             >
@@ -2238,6 +2280,27 @@ export function BancaRiconciliazionePage() {
     >
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+
+      {agentStatus ? (
+        <section className="card fatture-panel" style={{ marginBottom: '1rem' }}>
+          <h2 className="fatture-panel-title">Agente riconciliazione</h2>
+          <p className="fatture-note" style={{ marginTop: 0 }}>
+            {agentStatus.message || '—'}
+          </p>
+          <p className="fatture-note" style={{ marginBottom: 0 }}>
+            Schedule: {agentStatus.schedule || '—'}
+            {agentStatus.last_run_at
+              ? ` · Ultimo run: ${String(agentStatus.last_run_at).replace('T', ' ').slice(0, 19)}`
+              : ''}
+            {agentStatus.linked_movements != null ? ` · Collegati: ${agentStatus.linked_movements}` : ''}
+            {agentStatus.marked_paid != null ? ` · Pagate: ${agentStatus.marked_paid}` : ''}
+            {agentStatus.marked_from_pagamenti != null
+              ? ` · Contanti file: ${agentStatus.marked_from_pagamenti}`
+              : ''}
+            {agentStatus.bank?.imported != null ? ` · Nuovi movimenti: ${agentStatus.bank.imported}` : ''}
+          </p>
+        </section>
+      ) : null}
 
       {!companyId ? (
         <p className="fatture-note">Seleziona una società dal menu nel banner verde per avviare la riconciliazione.</p>
@@ -2280,7 +2343,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da pagare</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Fatture senza abbinamento ai movimenti dei conti collegati (n. documento + importo) e senza PAGATO DARE nel file fornitori.
+                  Fatture senza abbinamento ai movimenti (n. documento / importo / fornitore in causale) e senza pagamenti in CONTANTI nel file fornitori.
                 </p>
                 <WorkbookGrid
                   title="Fatture da pagare"

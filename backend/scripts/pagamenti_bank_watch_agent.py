@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Agente ATLAS: controlla file Pagamenti e movimenti banca (2 volte a settimana).
+"""Agente ATLAS: sincronizza movimenti banca e riconcilia fatture in automatico.
+
+- Scarica i bonifici Enable Banking
+- Legge causale/descrizione (n. fattura, fornitore, importo) → Fattura collegata
+- Contanti: prova dal file fornitori (Pagamenti)
+- Timer tipico: martedì e venerdì 7:30 (systemd)
 
 Uso sul server:
   cd /opt/fornitori-app/backend
   ./venv/bin/python scripts/pagamenti_bank_watch_agent.py
 
-  # Forza l'aggiornamento anche senza variazioni:
+  # Forza anche senza variazioni:
   ./venv/bin/python scripts/pagamenti_bank_watch_agent.py --force
 """
 
