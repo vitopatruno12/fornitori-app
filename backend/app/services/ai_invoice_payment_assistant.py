@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..constants.sdi_companies import SDI_COMPANY_LABELS, SDI_COMPANY_ORDER
 from . import banca_service
 
-_MAX_LIST = 8
+_MAX_LIST = 15
 
 
 def wants_invoice_payment_control(question: str, module: str | None = None) -> bool:
@@ -33,6 +33,9 @@ def wants_invoice_payment_control(question: str, module: str | None = None) -> b
     "residuo",
     "quanto devo",
     "debiti fornitor",
+    "file contanti",
+    "file pagament",
+    "movimenti banc",
   )
   if any(k in q for k in keys):
     return True
@@ -90,11 +93,11 @@ def build_invoice_payment_control(
   module: str | None = None,
   context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-  """Risposta operativa con dati reali Atlas (pack riconciliazione banca)."""
+  """Risposta operativa con dati reali Atlas (movimenti banca + file pagamenti contanti)."""
   ctx = context or {}
-  company = (
-    extract_company_from_text(question)
-    or (str(ctx.get("company") or "").strip() or None)
+  # Preferisci società selezionata in UI, poi NLP sulla domanda
+  company = (str(ctx.get("company") or "").strip() or None) or extract_company_from_text(
+    question
   )
   if company and company not in SDI_COMPANY_ORDER and company != "non_classificata":
     company = None
@@ -117,24 +120,38 @@ def build_invoice_payment_control(
   unpaid_n = int(preview.get("open_invoices_count") or len(unpaid))
   paid_tot = _sum_field(paid, "total")
   unpaid_tot = _sum_field(unpaid, "residuo")
+  cash_n = sum(1 for r in paid if (r.get("reason") or "") == "file_contanti")
+  bank_n = max(0, paid_n - cash_n)
   label = SDI_COMPANY_LABELS.get(company or "", "") if company else "tutte le società"
   if company and not label:
     label = company
 
+  q = (question or "").lower()
+  asks_paid = any(k in q for k in ("pagat", "saldat", "abbinat"))
+  asks_unpaid = any(
+    k in q
+    for k in ("da pagare", "non pagat", "apert", "residuo", "quanto devo", "debit", "ancora da")
+  )
+  # Default operativo: elenca le da pagare; se chiede entrambe, mostra entrambe
+  if asks_paid and asks_unpaid:
+    show_paid = True
+    show_unpaid = True
+  elif asks_unpaid:
+    show_paid = False
+    show_unpaid = True
+  elif asks_paid:
+    show_paid = True
+    show_unpaid = True
+  else:
+    show_paid = False
+    show_unpaid = True
+
   lines: List[str] = [
     f"Controllo Atlas · {label}",
-    f"Pagate / abbinate in banca (o contanti file): {paid_n} · {_eur(paid_tot)}",
+    "Fonti: movimenti bancari + file Pagamenti (contanti/carta).",
+    f"Pagate / abbinate: {paid_n} · {_eur(paid_tot)} (banca {bank_n} · contanti {cash_n})",
     f"Da pagare (senza prova banca/contanti): {unpaid_n} · {_eur(unpaid_tot)}",
   ]
-
-  want_paid = any(k in (question or "").lower() for k in ("pagat", "saldat", "abbinat"))
-  want_unpaid = any(
-    k in (question or "").lower()
-    for k in ("da pagare", "non pagat", "apert", "residuo", "quanto devo", "debit")
-  )
-  show_both = not want_paid and not want_unpaid
-  show_paid = want_paid or show_both
-  show_unpaid = want_unpaid or show_both
 
   if show_unpaid:
     lines.append("")
@@ -143,7 +160,7 @@ def build_invoice_payment_control(
       for row in unpaid[:_MAX_LIST]:
         lines.append(_row_line(row))
       if unpaid_n > _MAX_LIST:
-        lines.append(f"… e altre {unpaid_n - _MAX_LIST}.")
+        lines.append(f"… e altre {unpaid_n - _MAX_LIST}. Apri Riconciliazione per l’elenco completo.")
     else:
       lines.append("Nessuna fattura da pagare secondo banca/contanti.")
 
@@ -152,7 +169,9 @@ def build_invoice_payment_control(
     if paid:
       lines.append(f"Pagate in Atlas (prime {_MAX_LIST}):")
       for row in paid[:_MAX_LIST]:
-        lines.append(_row_line(row))
+        reason = (row.get("reason") or "").strip()
+        tag = " · contanti" if reason == "file_contanti" else " · banca"
+        lines.append(_row_line(row) + tag)
       if paid_n > _MAX_LIST:
         lines.append(f"… e altre {paid_n - _MAX_LIST}.")
     else:
@@ -161,7 +180,8 @@ def build_invoice_payment_control(
   if not company:
     lines.append("")
     lines.append(
-      "Suggerimento: specifica la società (es. «Bar Momento», «Via Lattea», «Mediazione A»)."
+      "Suggerimento: seleziona la società in Fatture/Banca oppure specificala "
+      "(es. «Bar Momento», «Via Lattea», «Mediazione A»)."
     )
 
   actions = ["open_riconciliazione"]

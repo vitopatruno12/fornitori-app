@@ -61,6 +61,7 @@ import {
 } from './pages/FatturePages.jsx'
 import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
+import { readFattureCompany, resolveEmbeddedFattureCompany, companyLabel } from './utils/fattureCompany.js'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import AdeAgentOverlay from './components/AdeAgentOverlay.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
@@ -302,6 +303,65 @@ function App() {
     'gestione-locali-gazza': 'gestione-locali-gazza',
   }
 
+  function wantsInvoicePaymentControl(text: string) {
+    const q = String(text || '').toLowerCase()
+    const keys = [
+      'pagat',
+      'da pagare',
+      'non pagat',
+      'ancora da pagare',
+      'saldat',
+      'riconcil',
+      'bonific',
+      'stato pagament',
+      'controllo fattur',
+      'controlla fattur',
+      'quali fatture',
+      'fatture pagate',
+      'fatture aperte',
+      'residuo',
+      'quanto devo',
+      'debiti fornitor',
+      'file contanti',
+      'file pagament',
+      'movimenti banc',
+    ]
+    return keys.some((k) => q.includes(k))
+  }
+
+  function aiAskContext() {
+    const company =
+      resolveEmbeddedFattureCompany() || readFattureCompany() || ''
+    return {
+      page,
+      company: company || undefined,
+      companyLabel: company ? companyLabel(company) : undefined,
+    }
+  }
+
+  async function runAiAskPaymentOrGeneral(prompt: string) {
+    const r = await askAi(prompt, pageLabel[page], aiAskContext())
+    const title = 'Assistente operativo'
+    const rawAnswer = String(r?.answer || 'Nessuna risposta')
+    const lines = rawAnswer.split(/\r?\n/).map((x) => x.trimEnd()).filter((x) => x.length > 0)
+    const actions = r?.suggested_actions || []
+    setAiTitle(title)
+    setAiLines(lines.length ? lines : [rawAnswer])
+    setAiActions(actions)
+    setAiHistory((prev) => [
+      {
+        id: `${Date.now()}-${Math.random()}`,
+        page,
+        prompt,
+        title,
+        lines: lines.length ? lines : [rawAnswer],
+        actions,
+        at: Date.now(),
+      },
+      ...prev,
+    ].slice(0, 12))
+  }
+
   async function runAi(promptOverride?: string) {
     const prompt = (promptOverride ?? aiInput).trim()
     if (!prompt) return
@@ -316,6 +376,11 @@ function App() {
       setAiLines([])
       setAiActions([])
       setAiApplyPayload(null)
+      // Pagate / da pagare: sempre dati reali Atlas (banca + file contanti), anche dalle pagine fatture
+      if (wantsInvoicePaymentControl(prompt)) {
+        await runAiAskPaymentOrGeneral(prompt)
+        return
+      }
       if (page === 'suppliers') {
         const r = await suggestSupplierFields(prompt, {})
         const title = 'Suggerimento fornitore'
@@ -403,15 +468,7 @@ function App() {
         setAiHistory((prev) => [{ id: `${Date.now()}-${Math.random()}`, page, prompt, title, lines: lines as string[], actions: [], at: Date.now() }, ...prev].slice(0, 12))
         return
       }
-      const r = await askAi(prompt, pageLabel[page], { page })
-      const title = 'Assistente operativo'
-      const rawAnswer = String(r?.answer || 'Nessuna risposta')
-      const lines = rawAnswer.split(/\r?\n/).map((x) => x.trimEnd()).filter((x) => x.length > 0)
-      const actions = r?.suggested_actions || []
-      setAiTitle(title)
-      setAiLines(lines.length ? lines : [rawAnswer])
-      setAiActions(actions)
-      setAiHistory((prev) => [{ id: `${Date.now()}-${Math.random()}`, page, prompt, title, lines: lines.length ? lines : [rawAnswer], actions, at: Date.now() }, ...prev].slice(0, 12))
+      await runAiAskPaymentOrGeneral(prompt)
     } catch {
       setAiTitle('Assistente operativo')
       setAiLines(['Servizio AI non disponibile al momento'])
@@ -425,7 +482,7 @@ function App() {
       home: [
         'Mostrami le priorita operative di oggi',
         'Quale grafico devo controllare per capire i costi?',
-        'Quali fatture risultano pagate in Atlas e quali da pagare?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       analisi: [
         'Qual è il picco orario previsto per oggi?',
@@ -471,17 +528,17 @@ function App() {
       invoices: [
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
-        'Quali fatture risultano pagate e quali da pagare?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       fatture: [
         'Riassumimi i KPI fatture del mese',
         'Quante fatture ho da registrare?',
-        'Quali fatture sono pagate e quali da pagare in Atlas?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       amministrazione: [
         'Cosa trovo in Amministrazione?',
         'Apri la dashboard banca',
-        'Controlla fatture pagate e da pagare in Atlas',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'amministrazione-mastrini': [
         'Mostra i conti con saldo anomalo',
@@ -491,13 +548,13 @@ function App() {
       banca: [
         'Qual è il saldo banca attuale?',
         'Quante entrate e uscite ho oggi?',
-        'Quali fatture risultano pagate e quali da pagare?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'banca-conti': ['Come collego un conto corrente?', 'Come sincronizzo i movimenti?'],
       'banca-movimenti': ['Filtra i movimenti bancari del mese'],
       'banca-riconciliazione': [
         'Ci sono differenze da riconciliare?',
-        'Elenca fatture pagate e da pagare per questa società',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'fatture-passive': [
         'Come aggiorno l’inbox fatture SDI?',
@@ -514,22 +571,22 @@ function App() {
       'fatture-da-registrare': [
         'Come collego una fattura alla Prima Nota?',
         'Quali fatture mancano di movimento cassa?',
-        'Quali fatture sono ancora da pagare?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'fatture-pagate': [
         'Quali fatture risultano pagate dalla riconciliazione banca?',
         'Apri la scheda pagate di un fornitore',
-        'Confronta pagate e da pagare in Atlas',
+        'Quali fatture sono ancora da pagare? Controlla banca e contanti',
       ],
       'fatture-registrate': [
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
-        'Quali di queste risultano pagate in Atlas?',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'fatture-scadenziario': [
         'Quali scadenze ho nei prossimi 7 giorni?',
         'Come ignoro una fattura scaduta?',
-        'Quali scadute sono ancora da pagare?',
+        'Quali scadute sono ancora da pagare? Controlla banca e contanti',
       ],
       'fatture-sincronizzazione': [
         'Come funziona la sync Agenzia Entrate / SDI?',
@@ -542,7 +599,7 @@ function App() {
       pagamenti: [
         'Come leggo il foglio pagamenti fornitori?',
         'Dove trovo i totali mensili da pagare?',
-        'Controlla in Atlas cosa è pagato e cosa no',
+        'Quali fatture sono da pagare? Controlla banca e file contanti',
       ],
       'prima-nota': [
         'Filtra solo uscite e aiutami a trovare anomalie',
