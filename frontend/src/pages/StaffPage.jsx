@@ -1883,15 +1883,23 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     const from = toYMD(startDate)
     const to = toYMD(endDate)
     const memberList = Array.isArray(membersOverride) ? membersOverride : members
-    let sh =
-      operatorMode && operatorStationId
-        ? await fetchOperatorStationShifts(operatorStationId, from, to)
-        : await fetchStaffShifts(from, to)
-    // Gestionale: tieni i turni del locale anche se l'id dipendente postazione ≠ id Accedi (match per nome).
-    if (!(operatorMode && operatorStationId) && memberList.length) {
-      const memberIds = memberList.map((m) => m.id).filter((id) => id != null)
-      const packNameKeys = new Set(memberList.map((m) => memberNameKey(m.name)).filter(Boolean))
-      sh = filterShiftsForOperatorLocale(sh, { memberIds, packNameKeys })
+    const memberIds = memberList.map((m) => m.id).filter((id) => id != null)
+    const packNameKeys = new Set(memberList.map((m) => memberNameKey(m.name)).filter(Boolean))
+    let sh
+    if (operatorMode && operatorStationId) {
+      // Dopo Accedi passa i dipendenti appena caricati: non ignorarli (la cache postazione può essere ancora vuota).
+      if (memberList.length) {
+        const shiftsRaw = await fetchStaffShifts(from, to)
+        sh = filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
+      } else {
+        sh = await fetchOperatorStationShifts(operatorStationId, from, to)
+      }
+    } else {
+      sh = await fetchStaffShifts(from, to)
+      // Gestionale: tieni i turni del locale anche se l'id dipendente postazione ≠ id Accedi (match per nome).
+      if (memberList.length) {
+        sh = filterShiftsForOperatorLocale(sh, { memberIds, packNameKeys })
+      }
     }
     setShifts(normalizeShiftRows(sh, memberList))
   }, [members, operatorMode, operatorStationId])
@@ -2810,7 +2818,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     ;(async () => {
       try {
         const localeName = normalizeLocaleName(localeStaffName || stationStaffLocaleName)
-        if (!operatorMode && localeName && members.length === 0) {
+        if (localeName && members.length === 0) {
           const stored = await readStoredLocaleAccessCode(localeName)
           const code = isValidLocaleAccessCode(stored)
             ? stored
@@ -2819,6 +2827,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               : undefined
           const mem = await loadMembersFromLocalePackSilently(localeName, code)
           if (cancelled) return
+          if (operatorMode && operatorStationId && Array.isArray(mem) && mem.length) {
+            invalidateOperatorStationMembersCache(operatorStationId, localeName)
+          }
           await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
           return
         }
@@ -3204,11 +3215,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (localeName !== normalizeLocaleName(localeStaffName)) {
       setLocaleStaffName(localeName)
     }
-    if (isStaffLocaleSessionOpen(localeName)) {
-      setSuccess(`Locale «${localeName}» già aperto.`)
-      return
-    }
     const code = normalizeLocaleAccessCode(localeAccessCode)
+    const alreadyOpen = isStaffLocaleSessionOpen(localeName)
     setLocaleSessionBusy(true)
     setError('')
     try {
@@ -3220,9 +3228,20 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setStaffLocaleSessionOpen(localeName, true)
       setMembersBackupLocale(localeName)
       const mem = await loadMembersFromLocalePackSilently(localeName, code)
-      await reloadPlanning(Array.isArray(mem) ? mem : [])
+      if (operatorMode && operatorStationId) {
+        invalidateOperatorStationMembersCache(operatorStationId, localeName)
+        if (Array.isArray(mem) && mem.length) {
+          try {
+            await persistOperatorLocaleMembers(mem)
+          } catch {
+            /* pack locale aggiornato se possibile */
+          }
+        }
+      }
+      // Passa i dipendenti caricati: altrimenti i turni restano vuoti (cache/pack non allineati).
+      await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
       let savedOk = false
-      if (Array.isArray(mem) && mem.length > 0) {
+      if (Array.isArray(mem) && mem.length > 0 && !(operatorMode && operatorStationId)) {
         try {
           await handleSaveMembersByLocale({ members: mem, quiet: true })
           savedOk = true
@@ -3230,12 +3249,21 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           savedOk = false
         }
       }
-      setSuccess(
-        savedOk
-          ? `Locale «${localeName}» aperto. Piano caricato e dipendenti salvati automaticamente.`
-          : `Locale «${localeName}» aperto. Piano caricato.` +
-              (Array.isArray(mem) && mem.length === 0 ? ' Nessun dipendente nel pack locale.' : ''),
-      )
+      const memberCount = Array.isArray(mem) ? mem.length : 0
+      if (alreadyOpen) {
+        setSuccess(
+          memberCount > 0
+            ? `Locale «${localeName}» già aperto — piano ricaricato (${memberCount} dipendenti).`
+            : `Locale «${localeName}» già aperto — piano ricaricato. Nessun dipendente nel pack: usa «Carica dipendenti» o ripristina un backup.`,
+        )
+      } else {
+        setSuccess(
+          savedOk
+            ? `Locale «${localeName}» aperto. Piano caricato e dipendenti salvati automaticamente.`
+            : `Locale «${localeName}» aperto. Piano caricato.` +
+                (memberCount === 0 ? ' Nessun dipendente nel pack locale.' : ` (${memberCount} dipendenti)`),
+        )
+      }
     } finally {
       setLocaleSessionBusy(false)
     }
