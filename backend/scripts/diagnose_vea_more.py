@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Altre prove su VEA: descrizione codice documento, righe, confronti.
 
   cd C:\\AtlasSync
@@ -123,7 +124,7 @@ def main() -> int:
                     for c in tcols
                     if any(k in c.upper() for k in ("DESCR", "NOME", "MOVIMENTO", "NOTE"))
                 ][:4]
-                print(f"\n{tname}: cols={len(tcols)} code≈{code_cols} desc≈{desc_cols}")
+                print(f"\n{tname}: cols={len(tcols)} code~{code_cols} desc~{desc_cols}")
                 # scan for VEA / PREVENT / NON FISC
                 text_cols = [c for c in tcols if c.upper() not in ("LOGICDELETE", "SINCROFIELD", "SINCROSERVERFIELD", "INSTABLOG", "UPDTABLOG")]
                 # pull sample and filter in python (safer than many OR)
@@ -228,7 +229,7 @@ def main() -> int:
                 print(f"{lt}: ERRORE {exc}")
 
         # --- 3) Confronto BIL gemelli di VEA? ---
-        print("\n=== overlap VEA↔BIL (stesso € ±3s, qualsiasi POS) ===")
+        print("\n=== overlap VEA<->BIL (stesso EUR +/-3s, qualsiasi POS) ===")
         try:
             store = mapping.get("store") or col_u.get("NUMEROPOS")
             sql = (
@@ -265,19 +266,19 @@ def main() -> int:
                                 break
                         except Exception:
                             pass
-                print(f"  VEA con gemello {other} ±3s stesso €: {pairs}/{len(veas)}")
+                print(f"  VEA con gemello {other} +/-3s stesso EUR : {pairs}/{len(veas)}")
         except Exception as exc:
             print(f"  ERRORE: {exc}")
 
         # --- 4) Istruzioni prova manuale ---
         print("\n=== prova manuale (decisiva) ===")
         print("1) In cassa, annota ora esatta.")
-        print("2) Stampa UN preventivo / totale non fiscale di prova (es. 0,11 €).")
+        print("2) Stampa UN preventivo / totale non fiscale di prova (es. 0,11 EUR ).")
         print("3) Rilancia subito: py -u diagnose_vea_more.py")
-        print("4) Se compare un nuovo VEA con quell'importo/ora → VEA = quel tasto.")
-        print("5) Se non compare nulla → VEA è altro; i preventivi non si salvano.")
-        print("\nIn EasyRetail UI: Dettaglio scontrini → filtra Preventivo e apri")
-        print("uno dei NUMEROMOVIMENTO VEA sopra: se compare lì, conferma.")
+        print("4) Se compare un nuovo VEA con quell'importo/ora -> VEA = quel tasto.")
+        print("5) Se non compare nulla -> VEA e altro; i preventivi non si salvano.")
+        print("\nIn EasyRetail UI: Dettaglio scontrini -> filtra Preventivo e apri")
+        print("uno dei NUMEROMOVIMENTO VEA sopra: se compare li, conferma.")
         print("\n=== fine diagnose_vea_more ===")
         return 0
     finally:

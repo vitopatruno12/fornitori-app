@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: ascii -*-
 """Cerca PREVENTIVO / PRECONTO in MOVIMENTIT (non solo VEA).
 
   cd C:\\AtlasSync
@@ -52,7 +53,7 @@ def main() -> int:
         print("ERRORE: EASYRETAIL_GDB_PATH mancante", file=sys.stderr)
         return 2
 
-    hours = int(os.getenv("EASYRETAIL_GDB_LOOKBACK_HOURS") or "720")  # 30 giorni
+    hours = int(os.getenv("EASYRETAIL_GDB_LOOKBACK_HOURS") or "720")
     con = connect_gdb(
         dsn,
         user=os.getenv("EASYRETAIL_GDB_USER", "SYSDBA") or "SYSDBA",
@@ -74,29 +75,28 @@ def main() -> int:
         cm = col_u.get("CODICEMOVIMENTO")
         ncm = col_u.get("NUMEROCODICEMOVIMENTO")
 
-        print(f"dsn={dsn} lookback_h={hours}")
-        print(f"CODICEMOVIMENTO={cm} NUMEROCODICEMOVIMENTO={ncm}")
+        print("dsn=%s lookback_h=%s" % (dsn, hours))
+        print("CODICEMOVIMENTO=%s NUMEROCODICEMOVIMENTO=%s" % (cm, ncm))
 
         cutoff = datetime.now(timezone.utc) - timedelta(hours=max(24, hours))
         params = []
         where_ts = ""
         if ts and mapping.get("ts"):
-            where_ts = f"{ts} >= ?"
+            where_ts = "%s >= ?" % ts
             params = [cutoff.replace(tzinfo=None)]
         elif ts:
-            where_ts = f"{ts} >= ?"
+            where_ts = "%s >= ?" % ts
             params = [cutoff.date()]
 
-        # 1) Conteggio per CODICEMOVIMENTO
-        print(f"\n=== CODICEMOVIMENTO (ultimi {hours}h) ===")
+        print("\n=== CODICEMOVIMENTO (ultimi %sh) ===" % hours)
         if cm:
             try:
-                sql = f"SELECT FIRST 50000 {cm}, {doc}, {amt}"
+                sql = "SELECT FIRST 50000 %s, %s, %s" % (cm, doc, amt)
                 if store:
-                    sql += f", {store}"
-                sql += f" FROM {table}"
+                    sql += ", %s" % store
+                sql += " FROM %s" % table
                 if where_ts:
-                    sql += f" WHERE {where_ts}"
+                    sql += " WHERE %s" % where_ts
                 cur.execute(sql, params)
                 by = defaultdict(lambda: {"n": 0, "tot": 0.0, "docs": Counter(), "pos": Counter()})
                 for row in cur.fetchall():
@@ -112,76 +112,126 @@ def main() -> int:
                         by[code]["pos"][str(row[3]).strip() if row[3] is not None else "(vuoto)"] += 1
                 for code, hit in sorted(by.items(), key=lambda kv: -kv[1]["n"]):
                     print(
-                        f"  {code}: n={hit['n']} tot≈{hit['tot']:.2f} "
-                        f"docs={dict(hit['docs'])} pos={dict(hit['pos'].most_common(6))}"
+                        "  %s: n=%s tot~%.2f docs=%s pos=%s"
+                        % (
+                            code,
+                            hit["n"],
+                            hit["tot"],
+                            dict(hit["docs"]),
+                            dict(hit["pos"].most_common(6)),
+                        )
                     )
             except Exception as exc:
-                print(f"  ERRORE: {exc}")
+                print("  ERRORE: %s" % exc)
 
-        # 2) Focus PREVENTIVO / PRECONTO / VENDITA+VEA
         print("\n=== focus PREVENTIVO / PRECONTO / VEA ===")
-        for label, clause, extra_params in (
-            ("CODICEMOVIMENTO=PREVENTIVO", f"{cm} = 'PREVENTIVO'" if cm else "1=0", []),
-            ("CODICEMOVIMENTO=PRECONTO", f"{cm} = 'PRECONTO'" if cm else "1=0", []),
-            ("NUMEROCODICEMOVIMENTO=31 (PREVENTIVO)", f"{ncm} = 31" if ncm else "1=0", []),
-            ("NUMEROCODICEMOVIMENTO=19 (PRECONTO)", f"{ncm} = 19" if ncm else "1=0", []),
-            ("TIPODOCUMENTO=VEA", f"{doc} = 'VEA'", []),
+        for label, clause in (
+            ("CODICEMOVIMENTO=PREVENTIVO", ("%s = 'PREVENTIVO'" % cm) if cm else "1=0"),
+            ("CODICEMOVIMENTO=PRECONTO", ("%s = 'PRECONTO'" % cm) if cm else "1=0"),
+            ("NUMEROCODICEMOVIMENTO=31", ("%s = 31" % ncm) if ncm else "1=0"),
+            ("NUMEROCODICEMOVIMENTO=19", ("%s = 19" % ncm) if ncm else "1=0"),
+            ("TIPODOCUMENTO=VEA", ("%s = 'VEA'" % doc) if doc else "1=0"),
         ):
             try:
-                wh = []
-                p = []
-                if where_ts:
-                    wh.append(where_ts)
-                    p.extend(params)
-                wh.append(clause)
-                p.extend(extra_params)
-                wsql = " WHERE " + " AND ".join(wh)
                 parts = [c for c in (rid, doc, cm, ncm, store, ts, amt) if c]
-                # senza filtro data per PREVENTIVO/PRECONTO (possono essere rari)
-                if "PREVENT" in label or "PRECONTO" in label or "31" in label or "19" in label:
-                    # storico più ampio: FIRST 200 senza date se 0 nel lookback
-                    cur.execute(f"SELECT FIRST 50 {', '.join(parts)} FROM {table} WHERE {clause}")
+                if "PREVENT" in label or "PRECONTO" in label or "=31" in label or "=19" in label:
+                    cur.execute(
+                        "SELECT FIRST 50 %s FROM %s WHERE %s"
+                        % (", ".join(parts), table, clause)
+                    )
                     rows = cur.fetchall()
-                    print(f"\n{label} (storico FIRST 50, no date): n={len(rows)}")
+                    print("\n%s (storico FIRST 50, no date): n=%s" % (label, len(rows)))
                     print("cols:", ", ".join(parts))
                     for r in rows[:20]:
                         print(" ", r)
                 else:
-                    cur.execute(f"SELECT FIRST 50 {', '.join(parts)} FROM {table}{wsql}", p)
+                    wh = []
+                    p = []
+                    if where_ts:
+                        wh.append(where_ts)
+                        p.extend(params)
+                    wh.append(clause)
+                    wsql = " WHERE " + " AND ".join(wh)
+                    cur.execute(
+                        "SELECT FIRST 50 %s FROM %s%s" % (", ".join(parts), table, wsql),
+                        p,
+                    )
                     rows = cur.fetchall()
-                    print(f"\n{label} (lookback): n={len(rows)}")
+                    print("\n%s (lookback): n=%s" % (label, len(rows)))
                     for r in rows[:15]:
                         print(" ", r)
             except Exception as exc:
-                print(f"{label}: ERRORE {exc}")
+                print("%s: ERRORE %s" % (label, exc))
 
-        # 3) Cosa è VEA in rapporto ai codici
+        # Totals per day for VEA vs all non-VEN with amount > 0 (match Rapporto Complessivo)
+        print("\n=== per giorno: VEA vs altri non-VEN (con importo) ===")
+        if doc and ts and amt:
+            try:
+                sql = "SELECT FIRST 30000 %s, %s, %s" % (doc, ts, amt)
+                if store:
+                    sql += ", %s" % store
+                sql += " FROM %s" % table
+                if where_ts:
+                    sql += " WHERE %s" % where_ts
+                cur.execute(sql, params)
+                by = defaultdict(lambda: {"vea_n": 0, "vea_tot": 0.0, "other_n": 0, "other_tot": 0.0, "types": Counter()})
+                for row in cur.fetchall():
+                    dtype = "(vuoto)" if row[0] is None else str(row[0]).strip()
+                    day = str(row[1])[:10] if row[1] is not None else "?"
+                    try:
+                        val = float(row[2] or 0)
+                    except Exception:
+                        val = 0.0
+                    if dtype == "VEN":
+                        continue
+                    if val <= 0:
+                        continue
+                    by[day]["types"][dtype] += 1
+                    if dtype == "VEA":
+                        by[day]["vea_n"] += 1
+                        by[day]["vea_tot"] += val
+                    else:
+                        by[day]["other_n"] += 1
+                        by[day]["other_tot"] += val
+                for day in sorted(by.keys()):
+                    hit = by[day]
+                    print(
+                        "  %s: VEA n=%s EUR %.2f | altri-non-VEN n=%s EUR %.2f | types=%s"
+                        % (
+                            day,
+                            hit["vea_n"],
+                            hit["vea_tot"],
+                            hit["other_n"],
+                            hit["other_tot"],
+                            dict(hit["types"]),
+                        )
+                    )
+            except Exception as exc:
+                print("  ERRORE giorno: %s" % exc)
+
         print("\n=== VEA: distribuzione CODICEMOVIMENTO / NUMEROCODICEMOVIMENTO ===")
         try:
             parts = [c for c in (cm, ncm, doc) if c]
-            sql = f"SELECT FIRST 5000 {', '.join(parts)} FROM {table} WHERE {doc} = 'VEA'"
+            sql = "SELECT FIRST 5000 %s FROM %s WHERE %s = 'VEA'" % (", ".join(parts), table, doc)
             cur.execute(sql)
             cnt = Counter()
             for row in cur.fetchall():
                 cnt[tuple("" if x is None else str(x) for x in row)] += 1
             for k, n in cnt.most_common(20):
-                print(f"  {k}: {n}")
+                print("  %s: %s" % (k, n))
         except Exception as exc:
-            print(f"  ERRORE: {exc}")
+            print("  ERRORE: %s" % exc)
 
-        # 4) VENDITA + NUMDOC=0 + no NUMERODOCUMENTO → stesso pattern VEA?
         print("\n=== VENDITA con NUMDOC=0 (pattern tipo VEA) per TIPODOCUMENTO ===")
         try:
             numdoc = col_u.get("NUMDOC")
             if cm and numdoc and doc:
-                sql = (
-                    f"SELECT FIRST 20000 {doc}, {cm}, {numdoc}, {amt} FROM {table}"
-                )
+                sql = "SELECT FIRST 20000 %s, %s, %s, %s FROM %s" % (doc, cm, numdoc, amt, table)
                 if where_ts:
-                    sql += f" WHERE {where_ts} AND {cm} = 'VENDITA' AND {numdoc} = 0"
+                    sql += " WHERE %s AND %s = 'VENDITA' AND %s = 0" % (where_ts, cm, numdoc)
                     cur.execute(sql, params)
                 else:
-                    sql += f" WHERE {cm} = 'VENDITA' AND {numdoc} = 0"
+                    sql += " WHERE %s = 'VENDITA' AND %s = 0" % (cm, numdoc)
                     cur.execute(sql)
                 by = Counter()
                 tot = defaultdict(float)
@@ -192,15 +242,13 @@ def main() -> int:
                     except Exception:
                         pass
                 for dtype, n in by.most_common():
-                    print(f"  DOC={dtype}: n={n} tot≈{tot[dtype]:.2f}")
+                    print("  DOC=%s: n=%s tot~%.2f" % (dtype, n, tot[dtype]))
         except Exception as exc:
-            print(f"  ERRORE: {exc}")
+            print("  ERRORE: %s" % exc)
 
         print("\n=== lettura ===")
-        print("In CODICIMOVIMENTI esistono PREVENTIVO (31) e PRECONTO (19).")
-        print("Se MOVIMENTIT ha 0 righe PREVENTIVO/PRECONTO, quei documenti non vengono usati in cassa.")
-        print("VEA con CODICEMOVIMENTO=VENDITA = vendita salvata SENZA scontrino fiscale,")
-        print("non il documento anagrafico 'PREVENTIVO'.")
+        print("Confronta i totali VEA del giorno col Rapporto Complessivo Non fiscali+Preventivi.")
+        print("Se il rapporto e' piu' alto, EasyRetail conta altri tipi oltre VEA.")
         print("=== fine ===")
         return 0
     finally:

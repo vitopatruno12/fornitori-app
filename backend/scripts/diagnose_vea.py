@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Verifica se VEA = vendita/stampa non fiscale (vs VEN fiscale).
 
 Sul PC cassa:
@@ -142,8 +143,8 @@ def main() -> int:
                     if ven["n"] == 0 and vea["n"] == 0:
                         continue
                     print(
-                        f"    POS={pos}:  VEN n={ven['n']} €{ven['tot']:.2f}  |  "
-                        f"VEA n={vea['n']} €{vea['tot']:.2f}"
+                        f"    POS={pos}:  VEN n={ven['n']} EUR {ven['tot']:.2f}  |  "
+                        f"VEA n={vea['n']} EUR {vea['tot']:.2f}"
                     )
         except Exception as exc:
             print(f"  ERRORE confronto: {exc}")
@@ -247,7 +248,7 @@ def main() -> int:
                         matched += 1
                         pay_types[str(pt)] += 1
                         pay_amt += _f(pa)
-                print(f"  payment_lines matched={matched} tot_pay≈{pay_amt:.2f} types={dict(pay_types)}")
+                print(f"  payment_lines matched={matched} tot_pay~{pay_amt:.2f} types={dict(pay_types)}")
                 # lookup forme
                 if "FORMEPAGAMENTI" in tables and pay_types:
                     try:
@@ -265,7 +266,7 @@ def main() -> int:
                             )
                             print("  forme pagamento:")
                             for r in cur.fetchall():
-                                print(f"    {r[0]} → {r[1]}")
+                                print(f"    {r[0]} -> {r[1]}")
                     except Exception as exc:
                         print(f"  lookup forme: {exc}")
             except Exception as exc:
@@ -273,8 +274,8 @@ def main() -> int:
         else:
             print("  (tabella pagamenti non trovata)")
 
-        # --- 4) Overlap VEA ↔ VEN stesso importo entro 3s stesso POS ---
-        print("\n=== overlap VEA↔VEN (stesso POS, stesso €, ±3s) ===")
+        # --- 4) Overlap VEA <-> VEN stesso importo entro 3s stesso POS ---
+        print("\n=== overlap VEA<->VEN (stesso POS, stesso EUR , +/-3s) ===")
         try:
             sql = (
                 f"SELECT FIRST 15000 {doc}, {rid}, {store}, {ts_col}, {amt} FROM {table}"
@@ -321,7 +322,7 @@ def main() -> int:
                 else:
                     orphans += 1
             print(f"  VEA={len(vea_list)} VEN={len(ven_list)}")
-            print(f"  VEA con gemello VEN ±3s stesso €/POS: {pairs}")
+            print(f"  VEA con gemello VEN +/-3s stesso EUR /POS: {pairs}")
             print(f"  VEA senza gemello (candidato non fiscale puro): {orphans}")
             if orphans and vea_list:
                 print("  sample VEA senza gemello:")
@@ -335,7 +336,7 @@ def main() -> int:
                     )
                     if hit:
                         continue
-                    print(f"    id={a['id']} POS={a['pos']} {a['when']} €{a['amt']:.2f}")
+                    print(f"    id={a['id']} POS={a['pos']} {a['when']} EUR {a['amt']:.2f}")
                     shown += 1
                     if shown >= 12:
                         break
@@ -372,9 +373,9 @@ def main() -> int:
             print(f"  ERRORE elenco: {exc}")
 
         print("\n=== interpretazione rapida ===")
-        print("Se VEA ha pagamenti + nessun gemello VEN → quasi certo non fiscale / preventivo salvato.")
-        print("Se VEA ha sempre gemello VEN ±3s → è copia/annullo, NON preventivo.")
-        print("Confronta i totali VEA con la chiusura cassa: se NON sono in chiusura → non fiscali.")
+        print("Se VEA ha pagamenti + nessun gemello VEN -> quasi certo non fiscale / preventivo salvato.")
+        print("Se VEA ha sempre gemello VEN +/-3s -> e' copia/annullo, NON preventivo.")
+        print("Confronta i totali VEA con la chiusura cassa: se NON sono in chiusura -> non fiscali.")
         print("\n=== fine diagnose_vea ===")
         return 0
     finally:
