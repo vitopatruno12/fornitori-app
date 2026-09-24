@@ -21,7 +21,8 @@ WorkingDirectory=/opt/fornitori-app/backend
 EnvironmentFile=-/opt/fornitori-app/backend/.env
 EnvironmentFile=-/var/www/app-fornitori/fornitori-app/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/local/sbin/atlas-pagamenti-watch
+ExecStart=/usr/local/sbin/atlas-pagamenti-watch --force
+# --force: due volte a settimana riconcilia sempre (anche senza nuove variazioni rilevate)
 Nice=10
 NoNewPrivileges=true
 PrivateTmp=true
