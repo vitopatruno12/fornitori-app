@@ -77,7 +77,9 @@ def _run_sync(mode: str, lookback_days) -> int:
   # full = entrambe le fasi via sync_all
 
   # Su PC locale lo status file è locale; la coda è sul server.
-  # Marca avvio remoto:
+  # Marca avvio remoto (push su Atlas):
+  from app.integrations.ade.agent_status import report
+
   report("connecting", "Avvio scarico AdE richiesto da Atlas…", mode=m, progress=2)
 
   py = ROOT / ".venv" / "Scripts" / "python.exe"
