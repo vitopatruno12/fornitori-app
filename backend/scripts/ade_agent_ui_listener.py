@@ -98,11 +98,31 @@ def main() -> int:
   while True:
     try:
       st = _api_get("/ade/agent/status")
+      # Sblocca «running» rimasto appeso dopo un crash del listener
+      stuck = bool(st.get("running")) and str(st.get("phase") or "") in {
+        "connecting",
+        "queued",
+        "idle",
+        "done",
+        "error",
+      }
+      if stuck and not st.get("run_requested"):
+        # se finished_at c'è o phase done/error → non è davvero in corso
+        if st.get("phase") in ("done", "error", "idle") or st.get("finished_at"):
+          from app.integrations.ade.agent_status import write_status
+
+          write_status(
+            push_remote=True,
+            running=False,
+            phase=st.get("phase") or "idle",
+            message=st.get("message") or "Pronto",
+          )
+          st = {**st, "running": False}
+
       if st.get("run_requested") and not st.get("running"):
         mode = st.get("run_mode") or "download"
         days = st.get("run_lookback_days")
         print(f"Richiesta UI rilevata: mode={mode} days={days}")
-        # Ack remoto: cancella run_requested sul server
         from app.integrations.ade.agent_status import write_status
 
         write_status(
@@ -117,8 +137,19 @@ def main() -> int:
           ok=None,
           error="",
         )
-        code = _run_sync(mode, days)
-        print(f"Sync terminato exit={code}")
+        try:
+          code = _run_sync(mode, days)
+          print(f"Sync terminato exit={code}")
+        except Exception as exc:  # noqa: BLE001
+          print(f"Sync fallito: {exc}", file=sys.stderr)
+          write_status(
+            push_remote=True,
+            running=False,
+            phase="error",
+            ok=False,
+            error=str(exc)[:300],
+            message=f"Errore listener: {exc}"[:300],
+          )
       else:
         phase = st.get("phase") or "idle"
         print(f"  idle phase={phase} running={st.get('running')}", flush=True)
