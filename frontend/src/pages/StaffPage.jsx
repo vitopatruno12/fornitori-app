@@ -2452,6 +2452,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setError('Indica almeno nome o cognome')
       return
     }
+    if (!activeLocaleSessionOpen) {
+      setError('Apri il locale con Accedi prima di aggiungere o modificare dipendenti.')
+      return
+    }
     const section = normalizeSectionName(newMemberSection) || normalizeSectionName(activeSection) || null
     const payload = {
       name: `${fn} ${ln}`.trim(),
@@ -2472,31 +2476,31 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       if (editingMemberId) {
         const updated = await updateStaffMember(editingMemberId, payload)
         setSuccess('Dipendente aggiornato')
+        const nextMembers = members.map((m) =>
+          m.id === editingMemberId ? { ...m, ...payload, id: editingMemberId, ...(updated || {}) } : m,
+        )
+        setMembers(nextMembers)
         if (operatorMode && operatorStationId) {
-          const nextMembers = members.map((m) =>
-            m.id === editingMemberId ? { ...m, ...payload, id: editingMemberId, ...(updated || {}) } : m,
-          )
-          setMembers(nextMembers)
           await persistOperatorLocaleMembers(nextMembers)
-          resetMemberForm()
-          return
+        } else {
+          await handleSaveMembersByLocale({ quiet: true, members: nextMembers })
         }
+        resetMemberForm()
+        return
+      }
+      const created = await createStaffMember({
+        ...payload,
+        is_active: true,
+      })
+      setSuccess('Dipendente aggiunto')
+      const nextMembers = [...members, created]
+      setMembers(nextMembers)
+      if (operatorMode && operatorStationId) {
+        await persistOperatorLocaleMembers(nextMembers)
       } else {
-        const created = await createStaffMember({
-          ...payload,
-          is_active: true,
-        })
-        setSuccess('Dipendente aggiunto')
-        if (operatorMode && operatorStationId) {
-          const nextMembers = [...members, created]
-          setMembers(nextMembers)
-          await persistOperatorLocaleMembers(nextMembers)
-          resetMemberForm()
-          return
-        }
+        await handleSaveMembersByLocale({ quiet: true, members: nextMembers })
       }
       resetMemberForm()
-      await refreshMembers()
     } catch (err) {
       setError(err?.message || (editingMemberId ? 'Errore aggiornamento' : 'Errore salvataggio'))
     }
@@ -2519,13 +2523,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       await updateStaffMember(id, payload)
       setSuccess('Anagrafica aggiornata')
       setMemberInfoId(null)
+      const nextMembers = members.map((m) => (m.id === id ? { ...m, ...payload, id } : m))
+      setMembers(nextMembers)
       if (operatorMode && operatorStationId) {
-        const nextMembers = members.map((m) => (m.id === id ? { ...m, ...payload, id } : m))
-        setMembers(nextMembers)
         await persistOperatorLocaleMembers(nextMembers)
         return
       }
-      await refreshMembers()
+      await handleSaveMembersByLocale({ quiet: true, members: nextMembers })
     } catch (err) {
       const msg = String(err?.message || '')
       if (msg.includes('404') || msg.includes('non trovato') || msg.includes('Not Found')) {
@@ -2658,6 +2662,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setPayrollShifts((prev) => prev.filter((row) => !memberIdsEqual(row.staff_member_id, m.id)))
       if (operatorMode && operatorStationId) {
         await persistOperatorLocaleMembers(nextMembers)
+      } else {
+        // Gestionale: senza aggiornare il pack del locale, Accedi/refresh ripristinerebbe il dipendente
+        await handleSaveMembersByLocale({ quiet: true, members: nextMembers })
       }
       setFormMemberIds((prev) => {
         if (!prev.has(m.id)) return prev
@@ -2669,15 +2676,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         setSuccess(`Dipendente rimosso in locale: sincronizzazione automatica alla prossima connessione.`)
       } else {
         setSuccess('Dipendente rimosso')
-      }
-      if (!queuedOffline) {
-        try {
-          if (!(operatorMode && operatorStationId)) {
-            await refreshMembers()
-          }
-        } catch {
-          // Mantieni aggiornamento locale in memoria.
-        }
       }
     } catch (err) {
       setError(err?.message || 'Errore eliminazione')
@@ -2733,15 +2731,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setPayrollShifts([])
       if (operatorMode && operatorStationId) {
         await persistOperatorLocaleMembers([])
-      }
-      if (!queuedOffline) {
-        try {
-          if (!(operatorMode && operatorStationId)) {
-            await refreshMembers()
-          }
-        } catch {
-          // Mantieni elenco locale vuoto se il refresh fallisce dopo bulk delete.
-        }
+      } else {
+        await handleSaveMembersByLocale({ quiet: true, members: [] })
       }
       setHoursOverride({})
       setPayrollImporto({})
