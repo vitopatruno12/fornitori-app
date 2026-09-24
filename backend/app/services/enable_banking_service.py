@@ -483,6 +483,26 @@ def _extract_balances(balances_payload: Dict[str, Any]) -> Tuple[Decimal, Decima
   return available, booked
 
 
+def _party_display_name(party: Any) -> Optional[str]:
+  """Nome beneficiario/ordinante da payload Enable Banking (creditor/debtor)."""
+  if not isinstance(party, dict):
+    return None
+  name = str(party.get("name") or "").strip()
+  if name:
+    return name[:256]
+  addr = party.get("postal_address")
+  if isinstance(addr, dict):
+    lines = addr.get("address_line") or addr.get("addressLines") or []
+    if isinstance(lines, str):
+      lines = [lines]
+    if isinstance(lines, list):
+      for line in lines:
+        text = str(line or "").strip()
+        if text:
+          return text[:256]
+  return None
+
+
 def _tx_to_movement(tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
   if not isinstance(tx, dict):
     return None
@@ -505,14 +525,28 @@ def _tx_to_movement(tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     description = " · ".join(str(x) for x in remittance if x)[:512]
   else:
     description = str(remittance or "").strip()
+  note = str(tx.get("note") or "").strip()
+  if not description and note:
+    description = note[:512]
   if not description:
     btc = tx.get("bank_transaction_code") or {}
     description = str((btc.get("description") if isinstance(btc, dict) else None) or "Movimento Enable Banking")[:512]
   creditor = tx.get("creditor") if isinstance(tx.get("creditor"), dict) else {}
   debtor = tx.get("debtor") if isinstance(tx.get("debtor"), dict) else {}
-  counterparty = (creditor.get("name") if mov_type == "uscita" else debtor.get("name")) or None
+  counterparty = _party_display_name(creditor if mov_type == "uscita" else debtor)
+  # Bonifici disposti: spesso description="BONIFICO DISPOSTO" senza nome — metti il beneficiario in chiaro
   if counterparty:
-    counterparty = str(counterparty)[:256]
+    desc_l = description.lower()
+    who_l = counterparty.lower()
+    generic = (
+      "bonifico disposto",
+      "bonifico",
+      "pagamento",
+      "addebito",
+      "movimento enable banking",
+    )
+    if who_l not in desc_l and (not description or any(g in desc_l for g in generic) or len(description) < 24):
+      description = f"{counterparty} · {description}"[:512]
   tx_id = str(tx.get("transaction_id") or tx.get("entry_reference") or "").strip()
   notes = f"Enable Banking{f' · id={tx_id}' if tx_id else ''}"
   return {
@@ -752,6 +786,7 @@ def _import_transactions(
   txs = get_account_transactions(account_uid, date_from=date_from, date_to=date_to)
   existing_keys = set()
   existing_ext = set()
+  by_ext: Dict[str, BankMovement] = {}
   for m in (
     db.query(BankMovement)
     .filter(BankMovement.bank_account_id == account.id)
@@ -768,15 +803,33 @@ def _import_transactions(
       )
     )
     if m.notes and "id=" in m.notes:
-      existing_ext.add(m.notes.split("id=", 1)[-1].strip()[:120])
+      ext_id = m.notes.split("id=", 1)[-1].strip()[:120]
+      existing_ext.add(ext_id)
+      by_ext[ext_id] = m
 
   created = 0
+  updated = 0
   for tx in txs:
     mapped = _tx_to_movement(tx)
     if not mapped:
       continue
     ext = mapped.get("external_key")
-    if ext and ext in existing_ext:
+    if ext and ext in by_ext:
+      row = by_ext[ext]
+      changed = False
+      new_cp = mapped.get("counterparty")
+      if new_cp and not (row.counterparty or "").strip():
+        row.counterparty = new_cp
+        changed = True
+      new_desc = str(mapped.get("description") or "").strip()
+      old_desc = str(row.description or "").strip()
+      # Arricchisci "BONIFICO DISPOSTO" con beneficiario se ancora generico
+      if new_desc and new_cp and new_cp.lower() in new_desc.lower():
+        if new_cp.lower() not in old_desc.lower():
+          row.description = new_desc[:512]
+          changed = True
+      if changed:
+        updated += 1
       continue
     key = (
       mapped["movement_date"].isoformat(),
@@ -805,7 +858,7 @@ def _import_transactions(
     if ext:
       existing_ext.add(ext)
     created += 1
-  return created
+  return created + updated
 
 
 def frontend_error_redirect(

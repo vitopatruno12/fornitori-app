@@ -274,19 +274,32 @@ function bankAccountsCellValue(row, col) {
 }
 
 const BANK_MOVEMENTS_COLUMNS = [
-  { id: 'date', label: 'Data', width: 9, fluid: true },
-  { id: 'description', label: 'Descrizione', width: 22, fluid: true, emphasis: true },
-  { id: 'linked_invoice', label: 'Fattura collegata', width: 16, fluid: true },
-  { id: 'causale', label: 'Causale', width: 14, fluid: true },
-  { id: 'type', label: 'Entrata/Uscita', width: 9, fluid: true },
-  { id: 'amount', label: 'Importo', width: 11, fluid: true, numeric: true },
-  { id: 'account', label: 'Conto', width: 18, fluid: true },
+  { id: 'date', label: 'Data', width: 8, fluid: true },
+  { id: 'counterparty', label: 'Beneficiario', width: 16, fluid: true, emphasis: true },
+  { id: 'description', label: 'Descrizione / causale', width: 20, fluid: true },
+  { id: 'linked_invoice', label: 'Fattura collegata', width: 14, fluid: true },
+  { id: 'type', label: 'Entrata/Uscita', width: 8, fluid: true },
+  { id: 'amount', label: 'Importo', width: 10, fluid: true, numeric: true },
+  { id: 'account', label: 'Conto', width: 14, fluid: true },
   { id: 'status', label: 'Riconciliazione', width: 8, fluid: true },
 ]
 
 function bankMovementsCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement_date)
-  if (col.id === 'description') return row?.description || '—'
+  if (col.id === 'counterparty') {
+    const who = String(row?.counterparty || '').trim()
+    if (who) return who
+    // Fallback: molte banche mettono solo "BONIFICO DISPOSTO" in descrizione
+    return '—'
+  }
+  if (col.id === 'description') {
+    const desc = String(row?.description || '').trim()
+    const who = String(row?.counterparty || '').trim()
+    if (desc && who && !desc.toLowerCase().includes(who.toLowerCase())) {
+      return `${who} · ${desc}`
+    }
+    return desc || who || '—'
+  }
   if (col.id === 'linked_invoice') {
     const inv = row?.matched_invoice
     if (!inv) return row?.matched_invoice_id ? `Fattura #${row.matched_invoice_id}` : '—'
@@ -294,7 +307,6 @@ function bankMovementsCellValue(row, col) {
     const supplier = inv.supplier_name ? ` · ${inv.supplier_name}` : ''
     return `Fattura ${num}${supplier}`
   }
-  if (col.id === 'causale') return row?.causale || '—'
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
   if (col.id === 'account') {
@@ -379,7 +391,14 @@ function formatMatchScore(row) {
 
 function bankReconCellValue(row, col) {
   if (col.id === 'movement') {
-    return [formatDate(row?.movement?.movement_date), row?.movement?.description || '—'].filter(Boolean).join(' · ')
+    const m = row?.movement
+    const who = String(m?.counterparty || '').trim()
+    const desc = String(m?.description || '').trim()
+    const text =
+      who && desc && !desc.toLowerCase().includes(who.toLowerCase())
+        ? `${who} · ${desc}`
+        : who || desc || '—'
+    return [formatDate(m?.movement_date), text].filter(Boolean).join(' · ')
   }
   if (col.id === 'amount') return eur(row?.movement?.amount)
   if (col.id === 'invoice') {
@@ -436,13 +455,13 @@ function bankInvoiceStatusCellValue(row, col) {
       return invoiceIsAligned(row) ? 'Pagata' : '—'
     }
     const cro = m.bonifico_ref ? `CRO ${m.bonifico_ref}` : ''
-    return [
-      formatDate(m.movement_date),
-      cro,
-      m.description || m.causale || (m.id != null ? `BA-${m.id}` : ''),
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    const who = String(m.counterparty || '').trim()
+    const desc = String(m.description || m.causale || '').trim()
+    const text =
+      who && desc && !desc.toLowerCase().includes(who.toLowerCase())
+        ? `${who} · ${desc}`
+        : who || desc || (m.id != null ? `BA-${m.id}` : '')
+    return [formatDate(m.movement_date), cro, text].filter(Boolean).join(' · ')
   }
   if (col.id === 'reason') {
     if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
