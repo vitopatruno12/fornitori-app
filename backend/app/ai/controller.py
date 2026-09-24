@@ -67,8 +67,8 @@ def check_anomalies(dto: AnomalyCheckIn):
 
 
 @router.post("/ask", response_model=AskAiOut)
-def ask_ai(dto: AskAiIn):
-    return ai_service.ask_ai(dto.question, dto.module, dto.context)
+def ask_ai(dto: AskAiIn, db: Session = Depends(get_db)):
+    return ai_service.ask_ai(dto.question, dto.module, dto.context, db=db)
 
 
 @router.get("/manager/insights", response_model=ManagerInsightsOut)

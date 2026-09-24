@@ -1882,6 +1882,13 @@ def ask_ai(question: str, module: str | None = None, context: Dict[str, Any] | N
     mod = (module or "").lower().strip()
     _ = context or {}
 
+    if any(k in q for k in ["pagat", "da pagare", "non pagat", "riconcil", "stato pagament", "controllo fattur", "controlla fattur"]):
+        return {
+            "answer": "Posso controllare in Atlas quali fatture risultano pagate (banca/contanti) e quali da pagare. Chiedi es. «Quali fatture sono pagate e quali da pagare per Bar Momento?»",
+            "confidence": 0.8,
+            "suggested_actions": ["open_riconciliazione", "open_fatture_pagate", "open_da_pagare"],
+        }
+
     if any(k in q for k in ["scadut", "scadenz", "in scadenza", "ritardo"]):
         actions = ["open_invoices"]
         if "in scadenza" in q:

@@ -4,6 +4,8 @@ import os
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.orm import Session
+
 from ..services import ai_heuristics
 from . import gemini_client, ollama_client
 from .prompts import (
@@ -260,15 +262,26 @@ def check_anomalies(entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]
     return ai_heuristics.check_anomalies(entity_type, payload)
 
 
-def ask_ai(question: str, module: str | None = None, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    mod = module or ""
-    ctx = context or {}
-    user = f"Modulo attivo: {mod}\nDomanda: {question}\nContesto: {ctx}"
-    return _llm_or_fallback(
-        ASK_AI,
-        user,
-        lambda: ai_heuristics.ask_ai(question, module, context),
-    )
+def ask_ai(
+  question: str,
+  module: str | None = None,
+  context: Dict[str, Any] | None = None,
+  db: Session | None = None,
+) -> Dict[str, Any]:
+  mod = module or ""
+  ctx = context or {}
+  # Controllo reale fatture pagate / da pagare in Atlas (banca + contanti)
+  if db is not None:
+    from ..services import ai_invoice_payment_assistant as pay_ai
+
+    if pay_ai.wants_invoice_payment_control(question, mod):
+      return pay_ai.build_invoice_payment_control(db, question, mod, ctx)
+  user = f"Modulo attivo: {mod}\nDomanda: {question}\nContesto: {ctx}"
+  return _llm_or_fallback(
+    ASK_AI,
+    user,
+    lambda: ai_heuristics.ask_ai(question, module, context),
+  )
 
 
 def parse_command(user_input: str) -> Optional[Dict[str, Any]]:

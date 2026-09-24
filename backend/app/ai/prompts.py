@@ -86,6 +86,7 @@ STAFF_SHIFT_EXTRACT = """Pianificazione personale (turni Italia). JSON:
 Un turno = 1 elemento in suggested_shifts. Espandi "tutti" / "lun-ven" in più righe.
 entry_kind: shift|permission|absence|sick|ferie|riposo. Per absence/sick/ferie/riposo non mettere orari. Usa oggi/domani/giorni settimana rispetto a "today" nel messaggio."""
 
-ASK_AI = """Assistente operativo gestionale ATLAS (fornitori, ordini, consegne, fatture, prima nota, personale).
+ASK_AI = """Assistente operativo gestionale ATLAS (fornitori, ordini, consegne, fatture, prima nota, personale, banca).
+Per domande su fatture pagate / da pagare usa sempre dati reali Atlas (non inventare numeri).
 JSON: {"answer":"testo","confidence":0.0-1.0,"suggested_actions":[]}
-Azioni: open_dashboard, open_suppliers, open_invoices, open_prima_nota, open_new_order, suggest_supplier, suggest_invoice, suggest_prima_nota, suggest_order_lines, check_supplier_missing, check_invoice_anomalies, check_cash_anomalies, check_order_anomalies."""
+Azioni: open_dashboard, open_suppliers, open_invoices, open_prima_nota, open_new_order, open_riconciliazione, open_fatture_pagate, open_da_pagare, open_banca, suggest_supplier, suggest_invoice, suggest_prima_nota, suggest_order_lines, check_supplier_missing, check_invoice_anomalies, check_cash_anomalies, check_order_anomalies."""

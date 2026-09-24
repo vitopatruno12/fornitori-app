@@ -405,12 +405,13 @@ function App() {
       }
       const r = await askAi(prompt, pageLabel[page], { page })
       const title = 'Assistente operativo'
-      const lines = [r?.answer || 'Nessuna risposta']
+      const rawAnswer = String(r?.answer || 'Nessuna risposta')
+      const lines = rawAnswer.split(/\r?\n/).map((x) => x.trimEnd()).filter((x) => x.length > 0)
       const actions = r?.suggested_actions || []
       setAiTitle(title)
-      setAiLines(lines)
+      setAiLines(lines.length ? lines : [rawAnswer])
       setAiActions(actions)
-      setAiHistory((prev) => [{ id: `${Date.now()}-${Math.random()}`, page, prompt, title, lines, actions, at: Date.now() }, ...prev].slice(0, 12))
+      setAiHistory((prev) => [{ id: `${Date.now()}-${Math.random()}`, page, prompt, title, lines: lines.length ? lines : [rawAnswer], actions, at: Date.now() }, ...prev].slice(0, 12))
     } catch {
       setAiTitle('Assistente operativo')
       setAiLines(['Servizio AI non disponibile al momento'])
@@ -424,6 +425,7 @@ function App() {
       home: [
         'Mostrami le priorita operative di oggi',
         'Quale grafico devo controllare per capire i costi?',
+        'Quali fatture risultano pagate in Atlas e quali da pagare?',
       ],
       analisi: [
         'Qual è il picco orario previsto per oggi?',
@@ -469,14 +471,17 @@ function App() {
       invoices: [
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
+        'Quali fatture risultano pagate e quali da pagare?',
       ],
       fatture: [
         'Riassumimi i KPI fatture del mese',
         'Quante fatture ho da registrare?',
+        'Quali fatture sono pagate e quali da pagare in Atlas?',
       ],
       amministrazione: [
         'Cosa trovo in Amministrazione?',
         'Apri la dashboard banca',
+        'Controlla fatture pagate e da pagare in Atlas',
       ],
       'amministrazione-mastrini': [
         'Mostra i conti con saldo anomalo',
@@ -486,10 +491,14 @@ function App() {
       banca: [
         'Qual è il saldo banca attuale?',
         'Quante entrate e uscite ho oggi?',
+        'Quali fatture risultano pagate e quali da pagare?',
       ],
       'banca-conti': ['Come collego un conto corrente?', 'Come sincronizzo i movimenti?'],
       'banca-movimenti': ['Filtra i movimenti bancari del mese'],
-      'banca-riconciliazione': ['Ci sono differenze da riconciliare?'],
+      'banca-riconciliazione': [
+        'Ci sono differenze da riconciliare?',
+        'Elenca fatture pagate e da pagare per questa società',
+      ],
       'fatture-passive': [
         'Come aggiorno l’inbox fatture SDI?',
         'Come assegno una fattura a Via Abba?',
@@ -505,18 +514,22 @@ function App() {
       'fatture-da-registrare': [
         'Come collego una fattura alla Prima Nota?',
         'Quali fatture mancano di movimento cassa?',
+        'Quali fatture sono ancora da pagare?',
       ],
       'fatture-pagate': [
         'Quali fatture risultano pagate dalla riconciliazione banca?',
         'Apri la scheda pagate di un fornitore',
+        'Confronta pagate e da pagare in Atlas',
       ],
       'fatture-registrate': [
         'Mostrami subito le fatture scadute',
         'Mostra fatture ignorate da rivedere',
+        'Quali di queste risultano pagate in Atlas?',
       ],
       'fatture-scadenziario': [
         'Quali scadenze ho nei prossimi 7 giorni?',
         'Come ignoro una fattura scaduta?',
+        'Quali scadute sono ancora da pagare?',
       ],
       'fatture-sincronizzazione': [
         'Come funziona la sync Agenzia Entrate / SDI?',
@@ -529,6 +542,7 @@ function App() {
       pagamenti: [
         'Come leggo il foglio pagamenti fornitori?',
         'Dove trovo i totali mensili da pagare?',
+        'Controlla in Atlas cosa è pagato e cosa no',
       ],
       'prima-nota': [
         'Filtra solo uscite e aiutami a trovare anomalie',
@@ -584,6 +598,10 @@ function App() {
       open_invoices: 'Apri Fatture',
       open_prima_nota: 'Apri Prima Nota',
       open_suppliers: 'Apri Fornitori',
+      open_riconciliazione: 'Apri Riconciliazione',
+      open_fatture_pagate: 'Apri Fatture pagate',
+      open_da_pagare: 'Apri Da pagare / Riconciliazione',
+      open_banca: 'Apri Banca',
       suggest_supplier: 'Suggerisci campi fornitore',
       suggest_invoice: 'Suggerisci campi fattura',
       suggest_prima_nota: 'Suggerisci movimento',
@@ -606,6 +624,23 @@ function App() {
   function handleAiAction(a: string) {
     if (a === 'open_dashboard') {
       navigateTo('home')
+      setAiOpen(false)
+      return
+    }
+    if (a === 'open_riconciliazione' || a === 'open_da_pagare') {
+      navigateTo('banca-riconciliazione')
+      setAiToast('Apro Riconciliazione: pagate vs da pagare')
+      setAiOpen(false)
+      return
+    }
+    if (a === 'open_fatture_pagate') {
+      navigateTo('fatture-pagate')
+      setAiToast('Apro Fatture pagate')
+      setAiOpen(false)
+      return
+    }
+    if (a === 'open_banca') {
+      navigateTo('banca')
       setAiOpen(false)
       return
     }
