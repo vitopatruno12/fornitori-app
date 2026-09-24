@@ -261,10 +261,11 @@ export async function fetchAdeAgentStatus() {
 }
 
 /** Avvia scarico fatture da Agenzia delle Entrate (coda agent / runner locale). */
-export async function runAdeAgentSync({ mode = 'download', lookbackDays } = {}) {
+export async function runAdeAgentSync({ mode = 'download', lookbackDays, profileId } = {}) {
   const q = new URLSearchParams()
   if (mode) q.set('mode', String(mode))
   if (lookbackDays != null && lookbackDays !== '') q.set('lookback_days', String(lookbackDays))
+  if (profileId) q.set('profile_id', String(profileId))
   return apiFetch(`/ade/agent/run?${q}`, { method: 'POST' })
 }
 

@@ -146,7 +146,8 @@ class AdePlaywrightClient:
     self.login_timeout_sec = _env_int("ADE_LOGIN_TIMEOUT_SEC", 300)
     auth = (profile.auth_mode or "cns").lower()
     self.fast_login = _env_bool("ADE_FAST_LOGIN", auth == "fisconline")
-    self.step_delay_ms = _env_int("ADE_STEP_DELAY_MS", 200 if self.fast_login else 800)
+    # Velocità UI: ADE_STEP_DELAY_MS (default 80 in fast login)
+    self.step_delay_ms = _env_int("ADE_STEP_DELAY_MS", 80 if self.fast_login else 800)
     self.debug_screenshots = _env_bool("ADE_DEBUG_SCREENSHOTS", not self.fast_login)
     self.login_url = (
       _env("ADE_LOGIN_URL")
@@ -191,9 +192,17 @@ class AdePlaywrightClient:
 
   def _pause(self, page: Any, ms: Optional[int] = None) -> None:
     try:
-      page.wait_for_timeout(ms if ms is not None else self.step_delay_ms)
+      delay = self.step_delay_ms if ms is None else ms
+      if self.fast_login and ms is not None and ms > 200:
+        # Riduce le pause “lunghe” hardcoded in modalità veloce
+        delay = max(50, int(ms * 0.35))
+      page.wait_for_timeout(delay)
     except Exception:
       pass
+
+  def _wait_short(self, page: Any, ms: int = 400) -> None:
+    """Attesa breve (scalata se fast_login)."""
+    self._pause(page, ms)
 
   def _shot(self, page: Any, name: str, shots: List[str], *, force: bool = False) -> None:
     if not self.debug_screenshots and not force:

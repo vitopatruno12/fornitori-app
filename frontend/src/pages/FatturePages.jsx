@@ -289,12 +289,21 @@ export function AdeSdiInvoicesPanel({
   dateTo = '',
   refreshKey = 0,
 }) {
-  const [days, setDays] = useState('60')
+  const [days, setDays] = useState('15')
   const [loading, setLoading] = useState(false)
   const [adeBusy, setAdeBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [rows, setRows] = useState({ companies: {}, non_classificata: [] })
+
+  function adeProfileForCompany(cid) {
+    const id = String(cid || '').trim()
+    if (id === 'via_lattea') return 'via_lattea'
+    if (id === 'risacca') return 'risacca'
+    if (id === 'pg') return 'pg'
+    if (id === 'mediazione_a' || id === 'mediazione_z' || id === 'mediazione') return 'mediazione'
+    return ''
+  }
 
   async function load(daysOverride) {
     setLoading(true)
@@ -347,11 +356,16 @@ export function AdeSdiInvoicesPanel({
     setError('')
     setSuccess('')
     try {
-      const d = Number(days || 60)
-      const res = await runAdeAgentSync({ mode: 'download', lookbackDays: d })
+      const d = Number(days || 15)
+      const profileId = adeProfileForCompany(companyId)
+      const res = await runAdeAgentSync({
+        mode: 'download',
+        lookbackDays: d,
+        profileId: profileId || undefined,
+      })
       setSuccess(
         res?.message
-        || 'Scarico AdE avviato: collegamento all’Agenzia delle Entrate in corso…',
+        || 'Scarico AdE avviato (solo ricevute, periodo breve)…',
       )
       pushSyncLog({
         ok: true,
@@ -360,10 +374,9 @@ export function AdeSdiInvoicesPanel({
         company: companyId || null,
         message: res?.message || 'Richiesta scarico AdE inviata',
       })
-      // Attendi fine agent (max ~8 min) poi ricarica inbox
       const started = Date.now()
-      while (Date.now() - started < 8 * 60 * 1000) {
-        await new Promise((r) => setTimeout(r, 2500))
+      while (Date.now() - started < 6 * 60 * 1000) {
+        await new Promise((r) => setTimeout(r, 1200))
         let st = null
         try {
           st = await fetchAdeAgentStatus()
@@ -377,11 +390,9 @@ export function AdeSdiInvoicesPanel({
           setError(st.error || st.message || 'Errore scarico AdE')
           break
         }
-        // terminato o idle dopo coda
         if (st?.phase === 'done' || st?.finished_at || st?.phase === 'idle') {
           break
         }
-        // se non running e non queued, esci
         if (!st?.running && !st?.run_requested) break
       }
       await load(d)
@@ -488,9 +499,10 @@ export function AdeSdiInvoicesPanel({
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
             Ultimi giorni
             <select className="form-control" value={days} onChange={(e) => setDays(e.target.value)} style={{ minWidth: 100 }}>
+              <option value="7">7</option>
+              <option value="15">15</option>
               <option value="30">30</option>
               <option value="60">60</option>
-              <option value="90">90</option>
             </select>
           </label>
           <button type="button" className="btn btn-secondary" onClick={() => load()} disabled={loading || adeBusy || !companyId}>

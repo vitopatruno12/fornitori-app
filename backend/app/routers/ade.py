@@ -110,6 +110,7 @@ def get_ade_agent_status() -> Dict[str, Any]:
 def post_ade_agent_run(
   mode: str = "download",
   lookback_days: Optional[int] = None,
+  profile_id: Optional[str] = None,
   authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
   """
@@ -123,7 +124,12 @@ def post_ade_agent_run(
   # Opzionale: proteggi con lo stesso token SDI se impostato
   _optional_bearer(os.getenv("SDI_RECEIVE_TOKEN") if os.getenv("ADE_RUN_REQUIRE_TOKEN") else None, authorization)
 
-  status = request_run(mode=mode, lookback_days=lookback_days, requested_by="ui")
+  status = request_run(
+    mode=mode,
+    lookback_days=lookback_days,
+    requested_by="ui",
+    profile_id=profile_id,
+  )
   local = agent_runner.try_spawn_local()
   return {
     "ok": True,

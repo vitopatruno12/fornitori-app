@@ -41,6 +41,7 @@ def default_status() -> Dict[str, Any]:
     "run_requested": False,
     "run_mode": "",
     "run_lookback_days": None,
+    "run_profile_id": "",
     "run_requested_at": None,
     "run_requested_by": "",
   }
@@ -51,6 +52,7 @@ def request_run(
   mode: str = "download",
   lookback_days: Optional[int] = None,
   requested_by: str = "ui",
+  profile_id: Optional[str] = None,
 ) -> Dict[str, Any]:
   """Coda uno scarico AdE: l'agent PC (o il runner locale) lo esegue."""
   mode_norm = (mode or "download").strip().lower()
@@ -61,7 +63,8 @@ def request_run(
     try:
       days = max(7, min(365, int(lookback_days)))
     except (TypeError, ValueError):
-      days = 60
+      days = 15
+  profile = (profile_id or "").strip()
   current = read_status()
   if current.get("running"):
     return {
@@ -74,11 +77,17 @@ def request_run(
     run_requested=True,
     run_mode=mode_norm,
     run_lookback_days=days,
+    run_profile_id=profile,
     run_requested_at=_now_iso(),
     run_requested_by=(requested_by or "ui")[:80],
     phase="queued",
     mode=mode_norm,
-    message="Richiesta scarico AdE in coda — avvio a breve…",
+    message=(
+      f"Richiesta scarico AdE in coda"
+      + (f" ({profile})" if profile else "")
+      + (f" · {days} gg" if days else "")
+      + " — avvio a breve…"
+    ),
     running=False,
     ok=None,
     error="",
@@ -94,11 +103,13 @@ def consume_run_request() -> Optional[Dict[str, Any]]:
     return None
   mode = str(current.get("run_mode") or "download").strip().lower() or "download"
   days = current.get("run_lookback_days")
+  profile = str(current.get("run_profile_id") or "").strip()
   write_status(
     push_remote=False,
     run_requested=False,
     run_mode="",
     run_lookback_days=None,
+    run_profile_id="",
     run_requested_at=None,
     run_requested_by="",
     phase="connecting",
@@ -110,7 +121,7 @@ def consume_run_request() -> Optional[Dict[str, Any]]:
     finished_at=None,
     progress=1,
   )
-  return {"mode": mode, "lookback_days": days}
+  return {"mode": mode, "lookback_days": days, "profile_id": profile}
 
 
 def read_status() -> Dict[str, Any]:
