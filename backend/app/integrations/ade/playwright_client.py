@@ -136,6 +136,9 @@ class AdePlaywrightClient:
     self.profile = profile
     self.portal_url = _env("ADE_PORTAL_URL", DEFAULT_PORTAL)
     self.lookback_days = _env_int("ADE_LOOKBACK_DAYS", 60)
+    # Periodo fisso (priorità su lookback): ADE_DATE_FROM / ADE_DATE_TO = YYYY-MM-DD o DD/MM/YYYY
+    self.date_from_env = (_env("ADE_DATE_FROM") or "").strip()
+    self.date_to_env = (_env("ADE_DATE_TO") or "").strip()
     # CNS: meglio headed + Chrome di sistema
     self.headless = _env_bool("ADE_HEADLESS", False)
     self.use_system_chrome = _env_bool("ADE_USE_SYSTEM_CHROME", True)
@@ -163,6 +166,28 @@ class AdePlaywrightClient:
     self._xml_captures: List[DownloadedXml] = []
 
     self._active_page: Any = None
+
+  def _period_dal_al_it(self) -> tuple[str, str]:
+    """(Dal, Al) in DD/MM/YYYY per form AdE. Usa ADE_DATE_FROM/TO se impostati."""
+
+    def _parse(raw: str) -> Optional[datetime]:
+      s = (raw or "").strip()
+      if not s:
+        return None
+      for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+          return datetime.strptime(s[:10] if fmt == "%Y-%m-%d" else s, fmt)
+        except ValueError:
+          continue
+      return None
+
+    end = _parse(self.date_to_env) or datetime.now()
+    start = _parse(self.date_from_env)
+    if start is None:
+      start = end - timedelta(days=max(7, self.lookback_days))
+    if start > end:
+      start, end = end, start
+    return start.strftime("%d/%m/%Y"), end.strftime("%d/%m/%Y")
 
   def _pause(self, page: Any, ms: Optional[int] = None) -> None:
     try:
@@ -1700,10 +1725,7 @@ class AdePlaywrightClient:
         self._apply_invoice_search(page)
         # Forza date nei campi Dal/Al se presenti
         try:
-          end = datetime.now()
-          start = end - timedelta(days=max(7, self.lookback_days))
-          date_from = start.strftime("%d/%m/%Y")
-          date_to = end.strftime("%d/%m/%Y")
+          date_from, date_to = self._period_dal_al_it()
           page.evaluate(
             """([df, dt]) => {
               const inputs = Array.from(document.querySelectorAll('input'));
@@ -1723,6 +1745,7 @@ class AdePlaywrightClient:
             }""",
             [date_from, date_to],
           )
+          print(f"[{self.profile.id}] mass periodo={date_from}→{date_to}", flush=True)
         except Exception:
           pass
 
@@ -2616,10 +2639,7 @@ class AdePlaywrightClient:
 
   def _apply_invoice_search(self, page: Any) -> None:
     """Imposta intervallo date e avvia ricerca fatture."""
-    end = datetime.now()
-    start = end - timedelta(days=max(7, self.lookback_days))
-    date_from = start.strftime("%d/%m/%Y")
-    date_to = end.strftime("%d/%m/%Y")
+    date_from, date_to = self._period_dal_al_it()
 
     for label_re in (
       r"dal",
