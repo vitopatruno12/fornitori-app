@@ -13,6 +13,7 @@ import {
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
   assignSdiInvoiceSection,
+  fetchAdeAgentStatus,
   fetchAdeProfiles,
   fetchIncomingInvoice,
   fetchIncomingInvoices,
@@ -25,6 +26,7 @@ import {
   importInvoiceXml,
   markInvoicePaid,
   postSdiReceiveXml,
+  runAdeAgentSync,
   setInvoiceIgnored,
   updateAdeFisconlineCredentials,
   fetchIssuedInvoices,
@@ -289,6 +291,7 @@ export function AdeSdiInvoicesPanel({
 }) {
   const [days, setDays] = useState('60')
   const [loading, setLoading] = useState(false)
+  const [adeBusy, setAdeBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [rows, setRows] = useState({ companies: {}, non_classificata: [] })
@@ -336,6 +339,56 @@ export function AdeSdiInvoicesPanel({
       setError(msg)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function aggiornaDaAde() {
+    setAdeBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      const d = Number(days || 60)
+      const res = await runAdeAgentSync({ mode: 'download', lookbackDays: d })
+      setSuccess(
+        res?.message
+        || 'Scarico AdE avviato: collegamento all’Agenzia delle Entrate in corso…',
+      )
+      pushSyncLog({
+        ok: true,
+        days: d,
+        count: 0,
+        company: companyId || null,
+        message: res?.message || 'Richiesta scarico AdE inviata',
+      })
+      // Attendi fine agent (max ~8 min) poi ricarica inbox
+      const started = Date.now()
+      while (Date.now() - started < 8 * 60 * 1000) {
+        await new Promise((r) => setTimeout(r, 2500))
+        let st = null
+        try {
+          st = await fetchAdeAgentStatus()
+        } catch {
+          break
+        }
+        if (st?.message) setSuccess(String(st.message))
+        if (st?.running) continue
+        if (st?.phase === 'queued' || st?.run_requested) continue
+        if (st?.ok === false || st?.phase === 'error') {
+          setError(st.error || st.message || 'Errore scarico AdE')
+          break
+        }
+        // terminato o idle dopo coda
+        if (st?.phase === 'done' || st?.finished_at || st?.phase === 'idle') {
+          break
+        }
+        // se non running e non queued, esci
+        if (!st?.running && !st?.run_requested) break
+      }
+      await load(d)
+    } catch (e) {
+      setError(e?.message || 'Impossibile avviare lo scarico AdE')
+    } finally {
+      setAdeBusy(false)
     }
   }
 
@@ -440,8 +493,17 @@ export function AdeSdiInvoicesPanel({
               <option value="90">90</option>
             </select>
           </label>
-          <button type="button" className="btn btn-primary" onClick={() => load()} disabled={loading || !companyId}>
-            {loading ? 'Aggiornamento…' : 'Aggiorna inbox'}
+          <button type="button" className="btn btn-secondary" onClick={() => load()} disabled={loading || adeBusy || !companyId}>
+            {loading ? 'Aggiornamento…' : 'Ricarica inbox'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void aggiornaDaAde()}
+            disabled={loading || adeBusy || !companyId}
+            title="Scarica le fatture dall’Agenzia delle Entrate (Fisconline) e aggiorna Atlas"
+          >
+            {adeBusy ? 'Scarico AdE…' : 'Aggiorna da AdE'}
           </button>
           {!embeddedMode && !hideImportLink ? (
             <FattureLink className="btn btn-secondary" to="/fatture/importa-xml">
@@ -2172,6 +2234,11 @@ export function FattureSincronizzazionePage() {
           <li>
             Install: <code>pip install -r backend/requirements-ade-agent.txt</code> poi{' '}
             <code>playwright install chrome</code>
+          </li>
+          <li>
+            Da Atlas: in <strong>Fatture ricevute</strong> premi <strong>Aggiorna da AdE</strong> (coda sullo scarico).
+            Sul PC ufficio lascia attivo il listener:{' '}
+            <code>python scripts/ade_agent_ui_listener.py</code>
           </li>
           <li>
             Script ufficio: <code>backend/scripts/run_ade_sync_ufficio.ps1</code>

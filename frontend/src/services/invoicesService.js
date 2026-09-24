@@ -256,6 +256,18 @@ export async function fetchAdeProfiles() {
   return apiFetch('/ade/profiles')
 }
 
+export async function fetchAdeAgentStatus() {
+  return apiFetch('/ade/agent/status')
+}
+
+/** Avvia scarico fatture da Agenzia delle Entrate (coda agent / runner locale). */
+export async function runAdeAgentSync({ mode = 'download', lookbackDays } = {}) {
+  const q = new URLSearchParams()
+  if (mode) q.set('mode', String(mode))
+  if (lookbackDays != null && lookbackDays !== '') q.set('lookback_days', String(lookbackDays))
+  return apiFetch(`/ade/agent/run?${q}`, { method: 'POST' })
+}
+
 /**
  * Aggiorna password e/o PIN Fisconline per un profilo.
  * Campi undefined/null non vengono inviati (nessuna modifica).

@@ -106,6 +106,39 @@ def get_ade_agent_status() -> Dict[str, Any]:
     return default_status()
 
 
+@router.post("/agent/run")
+def post_ade_agent_run(
+  mode: str = "download",
+  lookback_days: Optional[int] = None,
+  authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+  """
+  Avvia (o mette in coda) lo scarico fatture da Agenzia delle Entrate.
+  - Se ADE_RUN_LOCAL=1 sul server: lancia l'agent in background.
+  - Altrimenti: il PC ufficio (listener) prende la coda e scarica con Fisconline.
+  """
+  from ..integrations.ade.agent_status import request_run
+  from ..integrations.ade import agent_runner
+
+  # Opzionale: proteggi con lo stesso token SDI se impostato
+  _optional_bearer(os.getenv("SDI_RECEIVE_TOKEN") if os.getenv("ADE_RUN_REQUIRE_TOKEN") else None, authorization)
+
+  status = request_run(mode=mode, lookback_days=lookback_days, requested_by="ui")
+  local = agent_runner.try_spawn_local()
+  return {
+    "ok": True,
+    "queued": bool(status.get("run_requested") or status.get("running") or local.get("started")),
+    "local": local,
+    "status": status,
+    "message": status.get("message")
+    or (
+      "Scarico AdE avviato sul server."
+      if local.get("started")
+      else "Richiesta in coda: il PC ufficio con l'agent AdE la eseguirà a breve."
+    ),
+  }
+
+
 @router.put("/agent/status")
 def put_ade_agent_status(
   body: AdeAgentStatusUpdate,

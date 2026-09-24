@@ -38,7 +38,79 @@ def default_status() -> Dict[str, Any]:
     "error": "",
     "updated_at": _now_iso(),
     "finished_at": None,
+    "run_requested": False,
+    "run_mode": "",
+    "run_lookback_days": None,
+    "run_requested_at": None,
+    "run_requested_by": "",
   }
+
+
+def request_run(
+  *,
+  mode: str = "download",
+  lookback_days: Optional[int] = None,
+  requested_by: str = "ui",
+) -> Dict[str, Any]:
+  """Coda uno scarico AdE: l'agent PC (o il runner locale) lo esegue."""
+  mode_norm = (mode or "download").strip().lower()
+  if mode_norm not in {"download", "request", "full"}:
+    mode_norm = "download"
+  days = None
+  if lookback_days is not None:
+    try:
+      days = max(7, min(365, int(lookback_days)))
+    except (TypeError, ValueError):
+      days = 60
+  current = read_status()
+  if current.get("running"):
+    return {
+      **current,
+      "queued": False,
+      "message": current.get("message") or "Scarico AdE già in corso.",
+    }
+  return write_status(
+    push_remote=False,
+    run_requested=True,
+    run_mode=mode_norm,
+    run_lookback_days=days,
+    run_requested_at=_now_iso(),
+    run_requested_by=(requested_by or "ui")[:80],
+    phase="queued",
+    mode=mode_norm,
+    message="Richiesta scarico AdE in coda — avvio a breve…",
+    running=False,
+    ok=None,
+    error="",
+    finished_at=None,
+    progress=0,
+  )
+
+
+def consume_run_request() -> Optional[Dict[str, Any]]:
+  """Se c'è una richiesta in coda, la consuma e restituisce {mode, lookback_days}."""
+  current = read_status()
+  if not current.get("run_requested"):
+    return None
+  mode = str(current.get("run_mode") or "download").strip().lower() or "download"
+  days = current.get("run_lookback_days")
+  write_status(
+    push_remote=False,
+    run_requested=False,
+    run_mode="",
+    run_lookback_days=None,
+    run_requested_at=None,
+    run_requested_by="",
+    phase="connecting",
+    mode=mode,
+    message="Avvio scarico Agenzia delle Entrate…",
+    running=True,
+    ok=None,
+    error="",
+    finished_at=None,
+    progress=1,
+  )
+  return {"mode": mode, "lookback_days": days}
 
 
 def read_status() -> Dict[str, Any]:
