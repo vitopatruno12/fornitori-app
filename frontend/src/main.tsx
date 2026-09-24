@@ -61,7 +61,7 @@ import {
 } from './pages/FatturePages.jsx'
 import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
-import { readFattureCompany, resolveEmbeddedFattureCompany, companyLabel } from './utils/fattureCompany.js'
+import { readFattureCompany, resolveEmbeddedFattureCompany, companyLabel } from './utils/fattureCompany'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import AdeAgentOverlay from './components/AdeAgentOverlay.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
