@@ -616,13 +616,6 @@ def begin_enable_banking_connect(
         "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
         "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
       )
-    if is_intesa and app_id and app_id != "a72e10f6-6d02-420f-842d-344b892f10e6":
-      raise RuntimeError(
-        f"Profilo Enable Banking sbagliato per Intesa Sanpaolo: Atlas userebbe app {app_id} "
-        f"(profilo {cfg.get('profile_id')}), ma il conto Risacca è legato all'app "
-        "a72e10f6-6d02-420f-842d-344b892f10e6. "
-        "Controlla bank_profiles.json (id intesa_risacca, IBAN IT88N0306979822100000008926)."
-      )
     if is_bppb and app_id and app_id != "b88c128a-68e1-4b2e-b999-e87cc80c13b8":
       # Via Lattea BPPB non deve finire sull'app BCC 4625919e…
       if app_id == "4625919e-22a1-4d40-8267-7587ff2360c0":
