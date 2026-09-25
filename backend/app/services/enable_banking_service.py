@@ -556,14 +556,29 @@ def _extract_balances(balances_payload: Dict[str, Any]) -> Tuple[Decimal, Decima
     if not isinstance(row, dict):
       continue
     bal_type = str(row.get("balance_type") or row.get("type") or "").upper()
+    name = str(row.get("name") or "").upper()
     amount_obj = row.get("balance_amount") or row.get("amount") or {}
     if isinstance(amount_obj, dict):
       amount = _dec(amount_obj.get("amount"))
     else:
       amount = _dec(amount_obj)
-    if "INTERIMAVAILABLE" in bal_type or "AVAILABLE" in bal_type or bal_type.endswith("AV"):
+    is_available = (
+      bal_type in {"CLAV", "ITAV", "OPAV", "FWAV"}
+      or "AVAILABLE" in bal_type
+      or bal_type.endswith("AV")
+      or "AUTHORIS" in name
+      or "DISPONIB" in name
+    )
+    is_booked = (
+      bal_type in {"CLBD", "ITBD", "OPBD"}
+      or "BOOKED" in bal_type
+      or "EXPECTED" in bal_type
+      or "ACCOUNTING" in name
+      or "CONTABIL" in name
+    )
+    if is_available:
       available = amount
-    if "CLOSINGBOOKED" in bal_type or "BOOKED" in bal_type or "EXPECTED" in bal_type:
+    if is_booked:
       booked = amount
   if available == 0 and booked != 0:
     available = booked
@@ -817,18 +832,45 @@ def sync_enable_banking_account(
     raise ValueError("Conto non collegato a Enable Banking: avvia prima Collega Enable Banking")
 
   with enable_banking_for_account(_account_dict(row)):
-    try:
-      bal = get_account_balances(row.eb_account_uid)
+    uid = str(row.eb_account_uid or "").strip()
+    candidate_uids = [uid] if uid else []
+    if row.eb_session_id:
+      try:
+        session = get_session(str(row.eb_session_id))
+        for extra in session.get("accounts") or []:
+          extra_uid = str(extra or "").strip()
+          if extra_uid and extra_uid not in candidate_uids:
+            candidate_uids.append(extra_uid)
+      except Exception:
+        logger.warning("Sessione Enable Banking non riletta per conto %s", account_id, exc_info=True)
+    best_uid = uid
+    best_available = Decimal("0.00")
+    best_booked = Decimal("0.00")
+    found = False
+    for candidate in candidate_uids:
+      try:
+        bal = get_account_balances(candidate)
+      except Exception:
+        logger.warning("Sync balances fallito uid %s", candidate, exc_info=True)
+        continue
       available, booked = _extract_balances(bal)
-      row.saldo_disponibile = available
-      row.saldo_contabile = booked
-    except Exception:
-      logger.warning("Sync balances fallito account %s", account_id, exc_info=True)
+      if not found or booked > best_booked or available > best_available:
+        found = True
+        best_uid = candidate
+        best_available = available
+        best_booked = booked
+        if booked > 0 or available > 0:
+          break
+    if found and (best_booked > 0 or best_available > 0 or not row.saldo_disponibile):
+      row.eb_account_uid = best_uid[:64]
+      row.saldo_disponibile = best_available
+      row.saldo_contabile = best_booked
+      uid = best_uid
 
     imported = _import_transactions(
       db,
       row,
-      row.eb_account_uid,
+      uid,
       date_from=date_from,
       date_to=date_to,
     )

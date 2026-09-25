@@ -167,6 +167,28 @@ function sortBankAccounts(list) {
   })
 }
 
+function bankAccountIbanKey(account) {
+  return String(account?.iban || '').replace(/\s/g, '').toUpperCase()
+}
+
+/** Stesso IBAN: tieni il conto collegato e nascondi il duplicato scollegato. */
+function preferConnectedDuplicates(list) {
+  const byIban = new Map()
+  const withoutIban = []
+  for (const account of sortBankAccounts(list)) {
+    const key = bankAccountIbanKey(account)
+    if (!key) {
+      withoutIban.push(account)
+      continue
+    }
+    const previous = byIban.get(key)
+    if (!previous || (account.enable_banking_connected && !previous.enable_banking_connected)) {
+      byIban.set(key, account)
+    }
+  }
+  return sortBankAccounts([...byIban.values(), ...withoutIban])
+}
+
 /** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
 function formatBankAccountOptionLabel(account) {
   if (account?.label) return String(account.label)
@@ -746,7 +768,7 @@ export function BancaContiPage() {
   }, [])
 
   useEffect(() => {
-    const bppb = items.filter(isBppbAccount)
+    const bppb = preferConnectedDuplicates(items.filter(isBppbAccount))
     if (!bppb.length) return
     const stillValid = bppb.some((a) => String(a.id) === String(bppbSelectedId))
     if (stillValid) return
@@ -758,7 +780,7 @@ export function BancaContiPage() {
   }, [items, bppbSelectedId])
 
   useEffect(() => {
-    const bcc = items.filter(isBccTerraOtrantoAccount)
+    const bcc = preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount))
     if (!bcc.length) return
     if (bcc.some((a) => String(a.id) === String(bccSelectedId))) return
     const prefer =
@@ -769,14 +791,14 @@ export function BancaContiPage() {
   }, [items, bccSelectedId])
 
   useEffect(() => {
-    const intesa = items.filter(isIntesaAccount)
+    const intesa = preferConnectedDuplicates(items.filter(isIntesaAccount))
     if (!intesa.length) return
     if (intesa.some((a) => String(a.id) === String(intesaSelectedId))) return
     setIntesaSelectedId(String(intesa[0].id))
   }, [items, intesaSelectedId])
 
   useEffect(() => {
-    const unicredit = items.filter(isUnicreditAccount)
+    const unicredit = preferConnectedDuplicates(items.filter(isUnicreditAccount))
     if (!unicredit.length) return
     if (unicredit.some((a) => String(a.id) === String(unicreditSelectedId))) return
     setUnicreditSelectedId(String(unicredit[0].id))
@@ -1488,7 +1510,7 @@ export function BancaContiPage() {
             {items.filter(isBppbAccount).length === 0 ? (
               <option value="">Via Lattea / Mediazione (crea al sync)</option>
             ) : (
-              sortBankAccounts(items.filter(isBppbAccount)).map((a) => (
+              sortBankAccounts(preferConnectedDuplicates(items.filter(isBppbAccount))).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
@@ -1545,7 +1567,7 @@ export function BancaContiPage() {
             {items.filter(isBccTerraOtrantoAccount).length === 0 ? (
               <option value="">Via Lattea / Mediazione (crea al sync)</option>
             ) : (
-              sortBankAccounts(items.filter(isBccTerraOtrantoAccount)).map((a) => (
+              sortBankAccounts(preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount))).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
@@ -1602,7 +1624,7 @@ export function BancaContiPage() {
             {items.filter(isIntesaAccount).length === 0 ? (
               <option value="">Risacca (crea al sync)</option>
             ) : (
-              items.filter(isIntesaAccount).map((a) => (
+              preferConnectedDuplicates(items.filter(isIntesaAccount)).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
@@ -1659,7 +1681,7 @@ export function BancaContiPage() {
             {items.filter(isUnicreditAccount).length === 0 ? (
               <option value="">Lecce Foscarini (crea al sync)</option>
             ) : (
-              items.filter(isUnicreditAccount).map((a) => (
+              preferConnectedDuplicates(items.filter(isUnicreditAccount)).map((a) => (
                 <option key={a.id} value={String(a.id)}>
                   {formatBankAccountOptionLabel(a)}
                   {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
