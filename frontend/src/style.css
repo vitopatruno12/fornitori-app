@@ -5630,6 +5630,35 @@ select.form-control {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.banca-hero-account-btn {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 100%;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.28rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.banca-hero-account-btn span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banca-hero-account-btn:hover,
+.banca-hero-account-btn.is-selected {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
 .banca-hero-company-moves li span:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;

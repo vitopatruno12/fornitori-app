@@ -2016,8 +2016,57 @@ export function BancaMovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
 
+  const companyGroups = []
+  const byCompany = new Map()
+  for (const account of accounts) {
+    const id = String(account?.company || '').trim().toLowerCase() || 'condiviso'
+    if (!byCompany.has(id)) byCompany.set(id, [])
+    byCompany.get(id).push(account)
+  }
+  const companyIds = [
+    ...FATTURE_COMPANY_ORDER.filter((id) => byCompany.has(id)),
+    ...[...byCompany.keys()].filter((id) => !FATTURE_COMPANY_ORDER.includes(id)),
+  ]
+  for (const id of companyIds) {
+    companyGroups.push({
+      id,
+      label: id === 'condiviso' ? 'Condiviso' : companyLabel(id),
+      accounts: byCompany.get(id) || [],
+    })
+  }
+  const banner = companyGroups.length ? (
+    <div className="banca-hero-companies" aria-label="Conti per società">
+      {companyGroups.map((group) => (
+        <article key={group.id} className="banca-hero-company">
+          <header className="banca-hero-company-head">
+            <h2>{group.label}</h2>
+            <strong>{group.accounts.length} conti</strong>
+          </header>
+          <ul className="banca-hero-company-accounts">
+            {group.accounts.map((account) => {
+              const selected = String(accountId) === String(account.id)
+              return (
+                <li key={account.id}>
+                  <button
+                    type="button"
+                    className={`banca-hero-account-btn${selected ? ' is-selected' : ''}`}
+                    onClick={() => setAccountId(selected ? '' : String(account.id))}
+                    title={formatBankAccountOptionLabel(account)}
+                  >
+                    <span>{account.bank_name || account.account_name || 'Conto'}</span>
+                    <span>{eur(account.saldo_disponibile)}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </article>
+      ))}
+    </div>
+  ) : null
+
   return (
-    <BancaPageShell title={pageTitle} lead={pageLead}>
+    <BancaPageShell title={pageTitle} lead={pageLead} banner={banner}>
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
       <section className="card fatture-panel">
