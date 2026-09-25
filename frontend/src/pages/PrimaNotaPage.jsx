@@ -26,6 +26,7 @@ import {
   primaNotaMovementTotalsLabel,
 } from '../utils/primaNotaMovementsWorkbook.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
+import { downloadVneTableExcel } from '../utils/vneTableExport.js'
 import {
   generateLocaleAccessCode,
   isValidLocaleAccessCode,
@@ -238,6 +239,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   )
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [excelBusy, setExcelBusy] = useState(false)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
   const [staffLocaleSummaries, setStaffLocaleSummaries] = useState([])
   const [protectedLocaleSummaries, setProtectedLocaleSummaries] = useState([])
@@ -1343,6 +1345,35 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
+  function handleExportMovementsExcel() {
+    if (!filteredMovementRows.length) {
+      setError('Nessun movimento da esportare nel periodo/filtri correnti.')
+      return
+    }
+    setExcelBusy(true)
+    setError('')
+    try {
+      const { from, to } = normalizedMovementPeriod()
+      const safeLocale = String(activeActivity || 'locale').replace(/[^\w.-]+/g, '_')
+      const range = from && to ? `${from}_${to}` : selectedDate
+      const periodLabel = movementsSectionHeading.replace(/^Movimenti /, '')
+      downloadVneTableExcel({
+        title: `prima-nota-movimenti-${safeLocale}-${range}`,
+        sheetName: 'Movimenti',
+        columns: PRIMA_NOTA_MOVEMENTS_COLUMNS,
+        rows: filteredMovementRows,
+        cellValue: primaNotaMovementCellValue,
+        totalsLabel: primaNotaMovementTotalsLabel,
+        totals: movementPeriodTotals,
+      })
+      setSuccess(`Excel movimenti generato · ${activeActivityLabel} · ${periodLabel}`)
+    } catch (err) {
+      setError(err?.message || 'Errore nella generazione del file Excel')
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
   function formatDate(value) {
     if (!value) return ''
     const d = new Date(value)
@@ -1415,7 +1446,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const stackerSvuotamento = stackerTag ? -Math.abs(amount) : 0
     const versamentoBanca = versamentoTag ? Math.abs(amount) : 0
-    const totaleMovimento = !nonFiscaleTag && !extraCassaTag && !versamentoTag ? entrata - uscita : 0
+    const fiscaleEntrata = !nonFiscaleTag && !extraCassaTag && !versamentoTag ? entrata : 0
+    const fiscaleUscita = !nonFiscaleTag && !extraCassaTag && !versamentoTag ? uscita : 0
+    const totaleMovimento = fiscaleEntrata - fiscaleUscita
     const affectsSaldo = !extraCassaTag
     const cashDelta = affectsSaldo ? entrata - uscita : 0
     const incasso = totaleMovimento + nonFiscale + pos + refill + stackerSvuotamento
@@ -1427,6 +1460,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       refill,
       stackerSvuotamento,
       versamentoBanca,
+      fiscaleEntrata,
+      fiscaleUscita,
       totaleMovimento,
       affectsSaldo,
       cashDelta,
@@ -1517,7 +1552,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       (acc, entry) => ({
         entrata: acc.entrata + Number(entry.entrata || 0),
         uscita: acc.uscita + Number(entry.uscita || 0),
-        fiscale: acc.fiscale + (entry.affectsSaldo ? Number(entry.totaleMovimento || 0) : 0),
+        fiscaleEntrata: acc.fiscaleEntrata + Number(entry.fiscaleEntrata || 0),
+        fiscaleUscita: acc.fiscaleUscita + Number(entry.fiscaleUscita || 0),
+        fiscale: acc.fiscale + Number(entry.totaleMovimento || 0),
         nonFiscale: acc.nonFiscale + Number(entry.nonFiscale || 0),
         pos: acc.pos + Number(entry.pos || 0),
         refill: acc.refill + Number(entry.refill || 0),
@@ -1526,7 +1563,20 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         incasso: acc.incasso + Number(entry.incasso || 0),
         count: acc.count + 1,
       }),
-      { entrata: 0, uscita: 0, fiscale: 0, nonFiscale: 0, pos: 0, refill: 0, stackerSvuotamento: 0, versamentoBanca: 0, incasso: 0, count: 0 },
+      {
+        entrata: 0,
+        uscita: 0,
+        fiscaleEntrata: 0,
+        fiscaleUscita: 0,
+        fiscale: 0,
+        nonFiscale: 0,
+        pos: 0,
+        refill: 0,
+        stackerSvuotamento: 0,
+        versamentoBanca: 0,
+        incasso: 0,
+        count: 0,
+      },
     )
   }
 
@@ -1913,11 +1963,25 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               <div className="btn-group" style={{ marginTop: 0 }}>
                 <button
                   type="button"
-                  className={formFlowTag === 'fiscale' ? 'btn btn-primary' : 'btn btn-secondary'}
-                  onClick={() => setFormFlowTag('fiscale')}
-                  title="Movimento fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero."
+                  className={formFlowTag === 'fiscale' && formType === 'entrata' && !versamentoUscitaOnly ? 'btn btn-primary' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('fiscale')
+                    setFormType('entrata')
+                  }}
+                  title="Entrata fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero (colonna Fiscale ent)."
                 >
-                  Fiscale
+                  Fiscale ent
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'fiscale' && formType === 'uscita' && !versamentoUscitaOnly ? 'btn btn-primary' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('fiscale')
+                    setFormType('uscita')
+                  }}
+                  title="Uscita fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero (colonna Fiscale usc)."
+                >
+                  Fiscale usc
                 </button>
                 <button
                   type="button"
@@ -2126,11 +2190,20 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={loading || pdfBusy || filteredMovementRows.length === 0}
+              disabled={loading || pdfBusy || excelBusy || filteredMovementRows.length === 0}
               onClick={handlePrintMovementsPdf}
               title="Scarica PDF dell'elenco movimenti visibile (periodo e filtri correnti)"
             >
               {pdfBusy ? 'Generazione…' : 'Stampa PDF'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loading || pdfBusy || excelBusy || filteredMovementRows.length === 0}
+              onClick={handleExportMovementsExcel}
+              title="Scarica Excel (.xlsx) dell'elenco movimenti visibile (periodo e filtri correnti)"
+            >
+              {excelBusy ? 'Generazione…' : 'Esporta Excel'}
             </button>
           </div>
         </div>
@@ -2140,7 +2213,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           formatBackupLabel={formatPrimaNotaBackupLabel}
           onBackup={handleBackupMovements}
           onRestore={handleRestoreMovementsBackup}
-          disabled={loading || saving || backupBusy || pdfBusy || deletingDay || deletingRange}
+          disabled={loading || saving || backupBusy || pdfBusy || excelBusy || deletingDay || deletingRange}
           busy={backupBusy}
         />
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 1rem 0.75rem' }}>
@@ -2155,7 +2228,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               Totali periodo ({movementPeriodTotals.count} movimenti)
             </span>
             <span className="pn-movement-totals-item">
-              Fiscale: <strong>€ {formatAmount(movementPeriodTotals.fiscale)}</strong>
+              Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
             </span>
             <span className="pn-movement-totals-item pn-movement-totals-item--nf">
               NC: <strong>€ {formatAmount(movementPeriodTotals.nonFiscale)}</strong>

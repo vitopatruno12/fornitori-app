@@ -12,7 +12,8 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'description', label: 'Operazioni', width: 260, emphasis: true },
   { id: 'entrata', label: 'Cassa entrata', numeric: true, width: 110 },
   { id: 'uscita', label: 'Cassa uscita', numeric: true, width: 110 },
-  { id: 'fiscale', label: 'Fiscale', numeric: true, width: 100 },
+  { id: 'fiscale_ent', label: 'Fiscale ent', numeric: true, width: 100 },
+  { id: 'fiscale_usc', label: 'Fiscale usc', numeric: true, width: 100 },
   { id: 'non_fiscale', label: 'NC', numeric: true, width: 110 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
@@ -116,8 +117,10 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return entry.entrata > 0 ? formatAmount(entry.entrata) : ''
     case 'uscita':
       return entry.uscita > 0 ? formatAmount(entry.uscita) : ''
-    case 'fiscale':
-      return entry.affectsSaldo ? formatAmountClean(entry.totaleMovimento) : ''
+    case 'fiscale_ent':
+      return formatAmountClean(entry.fiscaleEntrata)
+    case 'fiscale_usc':
+      return formatAmountClean(entry.fiscaleUscita)
     case 'non_fiscale':
       return formatAmountClean(entry.nonFiscale)
     case 'pos':
@@ -143,7 +146,8 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'description') return `TOTALI (${totals.count})`
   if (columnId === 'entrata') return formatAmount(totals.entrata)
   if (columnId === 'uscita') return formatAmount(totals.uscita)
-  if (columnId === 'fiscale') return formatAmount(totals.fiscale)
+  if (columnId === 'fiscale_ent') return formatAmount(totals.fiscaleEntrata)
+  if (columnId === 'fiscale_usc') return formatAmount(totals.fiscaleUscita)
   if (columnId === 'non_fiscale') return formatAmount(totals.nonFiscale)
   if (columnId === 'pos') return formatAmount(totals.pos)
   if (columnId === 'refill') return formatAmount(totals.refill)
