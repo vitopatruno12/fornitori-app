@@ -1038,9 +1038,13 @@ export function BancaContiPage() {
     try {
       const res = await syncEnableBankingAccount(accountId)
       const imported = Number(res?.imported || 0)
-      const saldo = res?.account?.saldo_disponibile
+      const saldoDisp = res?.account?.saldo_disponibile
+      const saldoCont = res?.account?.saldo_contabile
       const bits = []
-      if (Number.isFinite(saldo)) bits.push(`saldo ${eur(saldo)}`)
+      if (Number.isFinite(Number(saldoDisp))) bits.push(`disponibile ${eur(saldoDisp)}`)
+      if (Number.isFinite(Number(saldoCont)) && Number(saldoCont) !== Number(saldoDisp)) {
+        bits.push(`contabile ${eur(saldoCont)}`)
+      }
       bits.push(`${imported} nuovi movimenti`)
       setSuccess(res?.message || `Conti sincronizzati: ${bits.join(' · ')}. Vedi Movimenti banca.`)
       await reload()

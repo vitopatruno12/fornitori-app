@@ -382,6 +382,10 @@ def get_account_balances(account_uid: str) -> Dict[str, Any]:
   return _request("GET", f"/accounts/{account_uid}/balances")
 
 
+def get_account_details(account_uid: str) -> Dict[str, Any]:
+  return _request("GET", f"/accounts/{account_uid}")
+
+
 def _fetch_transactions(
   account_uid: str,
   *,
@@ -833,6 +837,7 @@ def sync_enable_banking_account(
 
   with enable_banking_for_account(_account_dict(row)):
     uid = str(row.eb_account_uid or "").strip()
+    prefer_iban = (row.iban or "").replace(" ", "").upper()
     candidate_uids = [uid] if uid else []
     if row.eb_session_id:
       try:
@@ -846,6 +851,7 @@ def sync_enable_banking_account(
     best_uid = uid
     best_available = Decimal("0.00")
     best_booked = Decimal("0.00")
+    best_score: Optional[Tuple[int, Decimal, Decimal, Decimal]] = None
     found = False
     for candidate in candidate_uids:
       try:
@@ -854,13 +860,23 @@ def sync_enable_banking_account(
         logger.warning("Sync balances fallito uid %s", candidate, exc_info=True)
         continue
       available, booked = _extract_balances(bal)
-      if not found or booked > best_booked or available > best_available:
+      iban_match = 0
+      if prefer_iban:
+        try:
+          details = get_account_details(candidate)
+          cand_iban = (_extract_iban(details) or "").replace(" ", "").upper()
+          if cand_iban and cand_iban == prefer_iban:
+            iban_match = 1
+        except Exception:
+          logger.debug("Dettagli conto EB non letti uid %s", candidate, exc_info=True)
+      # Preferisci IBAN del conto Atlas, poi il saldo più alto (evita di fermarsi su un altro Intesa a €934)
+      score = (iban_match, max(available, booked), booked, available)
+      if best_score is None or score > best_score:
         found = True
+        best_score = score
         best_uid = candidate
         best_available = available
         best_booked = booked
-        if booked > 0 or available > 0:
-          break
     if found and (best_booked > 0 or best_available > 0 or not row.saldo_disponibile):
       row.eb_account_uid = best_uid[:64]
       row.saldo_disponibile = best_available

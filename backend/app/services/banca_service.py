@@ -515,20 +515,22 @@ def sync_account_from_cash(db: Session, account_id: int) -> Dict[str, Any]:
     )
     created += 1
 
-  # Aggiorna saldi da movimenti
-  ent = (
-    db.query(func.coalesce(func.sum(BankMovement.amount), 0))
-    .filter(BankMovement.bank_account_id == account_id, BankMovement.movement_type == "entrata")
-    .scalar()
-  )
-  usc = (
-    db.query(func.coalesce(func.sum(BankMovement.amount), 0))
-    .filter(BankMovement.bank_account_id == account_id, BankMovement.movement_type == "uscita")
-    .scalar()
-  )
-  saldo = _dec(ent) - _dec(usc)
-  account.saldo_contabile = saldo
-  account.saldo_disponibile = saldo
+  # Aggiorna saldi da movimenti SOLO se il conto non è collegato a Enable Banking
+  # (altrimenti sovrascriverebbe il saldo reale Intesa, es. €12.000 → €934)
+  if not (account.eb_account_uid or "").strip():
+    ent = (
+      db.query(func.coalesce(func.sum(BankMovement.amount), 0))
+      .filter(BankMovement.bank_account_id == account_id, BankMovement.movement_type == "entrata")
+      .scalar()
+    )
+    usc = (
+      db.query(func.coalesce(func.sum(BankMovement.amount), 0))
+      .filter(BankMovement.bank_account_id == account_id, BankMovement.movement_type == "uscita")
+      .scalar()
+    )
+    saldo = _dec(ent) - _dec(usc)
+    account.saldo_contabile = saldo
+    account.saldo_disponibile = saldo
   account.connection_status = "connected"
   account.last_sync_at = datetime.now(timezone.utc)
   db.commit()
@@ -1670,6 +1672,9 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
 
 
 def _refresh_account_balances(db: Session, account: BankAccount) -> None:
+  # Non sovrascrivere saldi Enable Banking con Σ movimenti locali
+  if (account.eb_account_uid or "").strip():
+    return
   ent = (
     db.query(func.coalesce(func.sum(BankMovement.amount), 0))
     .filter(BankMovement.bank_account_id == account.id, BankMovement.movement_type == "entrata")
