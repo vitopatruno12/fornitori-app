@@ -120,6 +120,8 @@ def get_enable_banking_config(account: Optional[Dict[str, Any]] = None) -> Dict[
       "bcc" in bank_l and "otranto" in bank_l
     ):
       cfg["aspsp_name"] = "BCC Terra d'Otranto"
+    elif "intesa" in bank_l or "sanpaolo" in bank_l:
+      cfg["aspsp_name"] = "Intesa Sanpaolo"
     configured = bool(cfg["app_id"] and key_path.is_file() and cfg.get("redirect_url"))
     cfg["configured"] = configured
     cfg["message"] = (
@@ -280,13 +282,18 @@ def start_authorization(
   country = (aspsp_country or cfg["aspsp_country"] or "FI").strip().upper()
   valid_until = (datetime.now(timezone.utc) + timedelta(days=int(cfg["consent_days"]))).isoformat()
   state = build_state(account_id)
-  # Access minimo: BCC Terra d'Otranto (beta) spesso risponde server_error se si
-  # forzano accounts/balances/transactions nel consenso.
+  # Access minimo: ASPSP in beta (BCC, Intesa Sanpaolo) rispondono server_error
+  # se nel consenso si forzano accounts/balances/transactions.
   access: Dict[str, Any] = {"valid_until": valid_until}
-  # Per banche stabili (es. BPPB) si può richiedere l'IBAN; per BCC/beta no.
+  # Per banche stabili (es. BPPB) si può richiedere l'IBAN; per le beta no.
   bank_l = name.lower()
-  is_bcc_beta = "bcc" in bank_l or "otranto" in bank_l
-  if not is_bcc_beta:
+  is_beta_aspsp = (
+    "bcc" in bank_l
+    or "otranto" in bank_l
+    or "intesa" in bank_l
+    or "sanpaolo" in bank_l
+  )
+  if not is_beta_aspsp:
     access["balances"] = True
     access["transactions"] = True
     iban = (prefer_iban or "").replace(" ", "").upper()
@@ -589,6 +596,15 @@ def begin_enable_banking_connect(
       or iban_n in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
     )
   )
+  is_intesa = (
+    not is_bcc
+    and not is_bppb
+    and (
+      "intesa" in bank_l
+      or "sanpaolo" in bank_l
+      or iban_n == "IT88N0306979822100000008926"
+    )
+  )
   with enable_banking_for_account(_account_dict(row)):
     cfg = get_enable_banking_config()
     app_id = str(cfg.get("app_id") or "").strip()
@@ -599,6 +615,13 @@ def begin_enable_banking_connect(
         "4625919e-22a1-4d40-8267-7587ff2360c0. "
         "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
         "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
+      )
+    if is_intesa and app_id and app_id != "a72e10f6-6d02-420f-842d-344b892f10e6":
+      raise RuntimeError(
+        f"Profilo Enable Banking sbagliato per Intesa Sanpaolo: Atlas userebbe app {app_id} "
+        f"(profilo {cfg.get('profile_id')}), ma il conto Risacca è legato all'app "
+        "a72e10f6-6d02-420f-842d-344b892f10e6. "
+        "Controlla bank_profiles.json (id intesa_risacca, IBAN IT88N0306979822100000008926)."
       )
     if is_bppb and app_id and app_id != "b88c128a-68e1-4b2e-b999-e87cc80c13b8":
       # Via Lattea BPPB non deve finire sull'app BCC 4625919e…
@@ -618,6 +641,11 @@ def begin_enable_banking_connect(
     elif is_bppb:
       auth_aspsp = "Banca Popolare di Puglia e Basilicata"
       auth_country = "IT"
+    elif is_intesa:
+      auth_aspsp = "Intesa Sanpaolo"
+      auth_country = "IT"
+      # Conto Risacca S.r.l. (Business Insieme): il canale privato fa fallire Intesa.
+      psu_type = "business"
     auth = start_authorization(
       account_id=account_id,
       aspsp_name=auth_aspsp,
@@ -898,4 +926,6 @@ def _bank_kind_from_account(row: Optional[BankAccount]) -> str:
     or iban in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
   ):
     return "bppb"
+  if "intesa" in text or "sanpaolo" in text or iban == "IT88N0306979822100000008926":
+    return "intesa"
   return ""

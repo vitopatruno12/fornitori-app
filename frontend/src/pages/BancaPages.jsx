@@ -58,7 +58,7 @@ function resolveEnableBankingPayload(account) {
     return {
       aspsp_name: 'Intesa Sanpaolo',
       aspsp_country: 'IT',
-      psu_type: label.includes('business') || label.includes('s.r.l') ? 'business' : 'personal',
+      psu_type: 'business',
     }
   }
   if (
@@ -778,6 +778,11 @@ export function BancaContiPage() {
         || aspspL.includes('basilicata')
         || aspspL.includes('bppb')
         || appQ === 'b88c128a-68e1-4b2e-b999-e87cc80c13b8'
+      const isIntesa =
+        bankQ === 'intesa'
+        || aspspL.includes('intesa')
+        || aspspL.includes('sanpaolo')
+        || appQ === 'a72e10f6-6d02-420f-842d-344b892f10e6'
       if (low.includes('server_error')) {
         if (isBppb && !isBcc) {
           setError(
@@ -785,6 +790,12 @@ export function BancaContiPage() {
               + 'Non è BCC: stai collegando Banca Popolare di Puglia e Basilicata'
               + (appQ ? ` (app ${appQ})` : ' (app b88c128a…)')
               + '. Riprova Collega BPPB; se «Sincronizza conti BPPB» funziona, quel conto è già collegato e puoi usare solo Sincronizza.',
+          )
+        } else if (isIntesa) {
+          setError(
+            'Intesa Sanpaolo (Enable Banking beta): errore lato banca (server_error). '
+              + 'Il conto Risacca è un accesso IMPRESA. Riprova Collega; '
+              + 'se persiste, Control Panel → app a72e10f6… → Requests.',
           )
         } else if (isBcc) {
           setError(

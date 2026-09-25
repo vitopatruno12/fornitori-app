@@ -178,6 +178,8 @@ def banca_enable_banking_callback(
               aspsp_name = "BCC Terra d'Otranto"
             elif bank_kind == "bppb":
               aspsp_name = "Banca Popolare di Puglia e Basilicata"
+            elif bank_kind == "intesa":
+              aspsp_name = "Intesa Sanpaolo"
     except Exception:
       pass
     return RedirectResponse(
@@ -213,6 +215,8 @@ def banca_enable_banking_callback(
               aspsp_name = "BCC Terra d'Otranto"
             elif bank_kind == "bppb":
               aspsp_name = "Banca Popolare di Puglia e Basilicata"
+            elif bank_kind == "intesa":
+              aspsp_name = "Intesa Sanpaolo"
     except Exception:
       pass
     return RedirectResponse(

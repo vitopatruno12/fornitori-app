@@ -183,6 +183,8 @@ def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> Ban
       return "otranto" in b or ("bcc" in b and "terra" in b) or "bcc" in b and "otranto" in b
     if "bppb" in a or "puglia" in a or "basilicata" in a:
       return "bppb" in b or "puglia" in b or "basilicata" in b
+    if "intesa" in a or "sanpaolo" in a:
+      return "intesa" in b or "sanpaolo" in b
     return False
 
   # Preferisci match banca+società prima dell'app EB generica (evita Via Lattea BPPB → profilo BCC).
@@ -203,22 +205,22 @@ def resolve_profile_for_account(account: Optional[Dict[str, Any]] = None) -> Ban
         if "bppb" in bank_name or "puglia" in bank_name or "basilicata" in bank_name:
           if "bppb" in pid:
             return prof
-    if len(company_matches) == 1:
+        if "intesa" in bank_name or "sanpaolo" in bank_name:
+          if "intesa" in pid:
+            return prof
+      # Banca già nota: non ereditare il profilo Enable Banking di un'altra banca
+      # (es. BPPB Mediazione …512 non deve usare l'app BCC solo perché la società è mediazione_a).
+    elif len(company_matches) == 1:
       return company_matches[0]
-    # Più conti stessa società: preferisci match IBAN già fatto sopra; poi banca da id profilo.
-    if bank_name:
+    if not bank_name:
+      if len(company_matches) == 1:
+        return company_matches[0]
       for prof in company_matches:
-        pid = (prof.id or "").lower()
-        if ("bppb" in bank_name or "puglia" in bank_name) and "bppb" in pid:
+        if prof.username and prof.password:
           return prof
-        if ("bcc" in bank_name or "otranto" in bank_name) and "bcc" in pid:
+      for prof in company_matches:
+        if prof.enable_banking_app_id:
           return prof
-    for prof in company_matches:
-      if prof.username and prof.password:
-        return prof
-    for prof in company_matches:
-      if prof.enable_banking_app_id:
-        return prof
 
   fallback = _global_env_profile()
   if fallback.username and fallback.password:

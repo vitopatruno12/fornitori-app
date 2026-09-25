@@ -52,5 +52,19 @@
     "enable_banking_app_id": "4625919e-22a1-4d40-8267-7587ff2360c0",
     "enable_banking_key_path": "./keys/4625919e-22a1-4d40-8267-7587ff2360c0.pem",
     "enabled": true
+  },
+  {
+    "id": "intesa_risacca",
+    "label": "Intesa Sanpaolo — Risacca",
+    "company": "risacca",
+    "bank_name": "Intesa Sanpaolo",
+    "iban": "IT88N0306979822100000008926",
+    "account_number": "100000008926",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "",
+    "enable_banking_key_path": "",
+    "enabled": true
   }
 ]
