@@ -761,6 +761,76 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
   if mov_count == 0:
     avvisi.append("Nessun movimento bancario importato: usa Sincronizza sui conti o importa da Prima Nota")
 
+  company_labels = {
+    "mediazione_a": "Mediazione A · Mani in Pasta Abba",
+    "mediazione_z": "Mediazione Z · Mani in Pasta Zanardelli",
+    "via_lattea": "Via Lattea · Mucche Volanti",
+    "risacca": "Risacca · Bar Momento",
+    "pg": "PG · Gazza Ladra",
+    "condiviso": "Condiviso",
+  }
+  company_order = ["mediazione_a", "mediazione_z", "via_lattea", "risacca", "pg", "condiviso"]
+  grouped: Dict[str, List[Dict[str, Any]]] = {}
+  for account in accounts:
+    cid = str(account.get("company") or "").strip().lower() or "condiviso"
+    grouped.setdefault(cid, []).append(account)
+  societa = []
+  for cid in company_order:
+    rows = grouped.get(cid) or []
+    if not rows:
+      continue
+    ids = [int(a["id"]) for a in rows if a.get("id")]
+    id_set = set(ids)
+    ent_c = Decimal("0.00")
+    usc_c = Decimal("0.00")
+    ultimi_c: List[Dict[str, Any]] = []
+    if ids and mov_count:
+      ent_c = _dec(
+        db.query(func.coalesce(func.sum(BankMovement.amount), 0))
+        .filter(
+          BankMovement.bank_account_id.in_(ids),
+          BankMovement.movement_date == today,
+          BankMovement.movement_type == "entrata",
+        )
+        .scalar()
+      )
+      usc_c = _dec(
+        db.query(func.coalesce(func.sum(BankMovement.amount), 0))
+        .filter(
+          BankMovement.bank_account_id.in_(ids),
+          BankMovement.movement_date == today,
+          BankMovement.movement_type == "uscita",
+        )
+        .scalar()
+      )
+      ultimi_c = [
+        m
+        for m in list_movements(db, limit=80)
+        if int(m.get("bank_account_id") or 0) in id_set
+      ][:3]
+    saldo_c = sum((_dec(a.get("saldo_disponibile")) for a in rows), Decimal("0.00"))
+    societa.append(
+      {
+        "company": cid,
+        "label": company_labels.get(cid, cid),
+        "saldo": float(saldo_c),
+        "entrate_oggi": float(ent_c),
+        "uscite_oggi": float(usc_c),
+        "conti": [
+          {
+            "id": a.get("id"),
+            "label": a.get("label") or a.get("account_name") or a.get("bank_name"),
+            "bank_name": a.get("bank_name"),
+            "iban": a.get("iban"),
+            "saldo_disponibile": a.get("saldo_disponibile"),
+            "connection_status": a.get("connection_status"),
+          }
+          for a in rows
+        ],
+        "ultimi_movimenti": ultimi_c,
+      }
+    )
+
   return {
     "saldo_totale": float(saldo_totale),
     "entrate_oggi": float(ent_oggi),
@@ -772,6 +842,7 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
     "avvisi": avvisi,
     "accounts_count": len(accounts),
     "month_start": month_start.isoformat(),
+    "societa": societa,
   }
 
 

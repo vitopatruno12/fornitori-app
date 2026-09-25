@@ -5573,6 +5573,77 @@ select.form-control {
   color: #ecfdf5;
 }
 
+.banca-hero-companies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.1rem;
+}
+
+.banca-hero-company {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  color: #fff;
+}
+
+.banca-hero-company-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.banca-hero-company-head h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  color: #fff;
+}
+
+.banca-hero-company-head strong {
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.banca-hero-company-today,
+.banca-hero-company-accounts,
+.banca-hero-company-moves {
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.banca-hero-company-accounts li,
+.banca-hero-company-moves li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+}
+
+.banca-hero-company-accounts li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.banca-hero-company-moves li span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banca-hero-company-moves .is-in {
+  color: #bbf7d0;
+}
+
+.banca-hero-company-moves .is-out {
+  color: #fecaca;
+}
+
 .staff-page-hero-inner--with-locale {
   display: flex;
   flex-wrap: wrap;

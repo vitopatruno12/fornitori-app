@@ -589,8 +589,53 @@ export function BancaDashboardPage() {
     }
   }, [])
 
+  const societa = Array.isArray(data?.societa) ? data.societa : []
+  const banner = societa.length ? (
+    <div className="banca-hero-companies" aria-label="Saldi per società">
+      {societa.map((row) => (
+        <article key={row.company} className="banca-hero-company">
+          <header className="banca-hero-company-head">
+            <h2>{row.label}</h2>
+            <strong>{eur(row.saldo)}</strong>
+          </header>
+          <p className="banca-hero-company-today">
+            Oggi {eur(row.entrate_oggi)} entrate · {eur(row.uscite_oggi)} uscite
+          </p>
+          <ul className="banca-hero-company-accounts">
+            {(row.conti || []).map((conto) => (
+              <li key={conto.id}>
+                <span>{conto.bank_name || conto.label}</span>
+                <span>{eur(conto.saldo_disponibile)}</span>
+              </li>
+            ))}
+          </ul>
+          <ul className="banca-hero-company-moves">
+            {(row.ultimi_movimenti || []).length === 0 ? (
+              <li>Nessun movimento recente</li>
+            ) : (
+              row.ultimi_movimenti.map((mov) => (
+                <li key={mov.id}>
+                  <span>{formatDate(mov.movement_date)}</span>
+                  <span>{mov.description || '—'}</span>
+                  <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
+                    {mov.movement_type === 'uscita' ? '−' : '+'}
+                    {eur(mov.amount)}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+        </article>
+      ))}
+    </div>
+  ) : null
+
   return (
-    <BancaPageShell title="Dashboard bancaria" lead="Saldi, liquidità, flussi e ultimi movimenti.">
+    <BancaPageShell
+      title="Dashboard bancaria"
+      lead="Saldi e ultimi movimenti divisi per società e per conto collegato."
+      banner={banner}
+    >
       {error && <div className="alert alert-danger">{error}</div>}
       {loading && <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />}
       {!loading && data && (

@@ -141,7 +141,7 @@ export function AmministrazionePageShell({ title, lead, children, actions = null
   )
 }
 
-export function BancaPageShell({ title, lead, children, actions = null }) {
+export function BancaPageShell({ title, lead, children, actions = null, banner = null }) {
   return (
     <div className="fatture-page banca-page">
       <header className="fatture-header staff-page-hero">
@@ -160,6 +160,7 @@ export function BancaPageShell({ title, lead, children, actions = null }) {
           </div>
           {actions}
         </div>
+        {banner}
       </header>
       <BancaSubnav />
       {children}
