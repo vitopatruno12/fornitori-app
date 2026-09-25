@@ -267,6 +267,17 @@ def parse_state(state: Optional[str]) -> Optional[int]:
     return None
 
 
+def _aspsp_error(exc: BaseException) -> bool:
+  text = str(exc)
+  return "ASPSP_ERROR" in text or "Error interacting with ASPSP" in text
+
+
+def _consent_valid_until(days: int) -> str:
+  """Formato accettato dalle ASPSP beta: senza microsecondi né offset +00:00."""
+  moment = datetime.now(timezone.utc) + timedelta(days=max(1, days))
+  return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def start_authorization(
   *,
   account_id: int,
@@ -280,12 +291,7 @@ def start_authorization(
     raise RuntimeError(cfg["message"])
   name = (aspsp_name or cfg["aspsp_name"] or "Nordea").strip()
   country = (aspsp_country or cfg["aspsp_country"] or "FI").strip().upper()
-  valid_until = (datetime.now(timezone.utc) + timedelta(days=int(cfg["consent_days"]))).isoformat()
   state = build_state(account_id)
-  # Access minimo: ASPSP in beta (BCC, Intesa Sanpaolo) rispondono server_error
-  # se nel consenso si forzano accounts/balances/transactions.
-  access: Dict[str, Any] = {"valid_until": valid_until}
-  # Per banche stabili (es. BPPB) si può richiedere l'IBAN; per le beta no.
   bank_l = name.lower()
   is_beta_aspsp = (
     "bcc" in bank_l
@@ -293,20 +299,59 @@ def start_authorization(
     or "intesa" in bank_l
     or "sanpaolo" in bank_l
   )
-  if not is_beta_aspsp:
-    access["balances"] = True
-    access["transactions"] = True
+  raw_days = max(1, int(cfg["consent_days"]))
+  consent_days = min(89, raw_days) if is_beta_aspsp else raw_days
+  valid_until = _consent_valid_until(consent_days)
+  psu = psu_type if psu_type in {"personal", "business"} else "personal"
+  # Intesa/BCC in beta rispondono spesso ASPSP_ERROR se il consenso è troppo ricco
+  # o se il canale impresa/privato non è quello atteso. Si prova più di una forma.
+  attempts: List[tuple] = []
+  if is_beta_aspsp:
+    minimal = {"valid_until": valid_until}
+    with_books = {"valid_until": valid_until, "balances": True, "transactions": True}
+    other = "personal" if psu == "business" else "business"
+    attempts = [
+      (minimal, psu),
+      (with_books, psu),
+      (minimal, other),
+      (with_books, other),
+    ]
+  else:
+    access = {"valid_until": valid_until, "balances": True, "transactions": True}
     iban = (prefer_iban or "").replace(" ", "").upper()
     if iban:
       access["accounts"] = [{"iban": iban}]
-  body = {
-    "access": access,
-    "aspsp": {"name": name, "country": country},
-    "state": state,
-    "redirect_url": cfg["redirect_url"],
-    "psu_type": psu_type if psu_type in {"personal", "business"} else "personal",
-  }
-  data = _request("POST", "/auth", json_body=body)
+    attempts = [(access, psu)]
+
+  data: Dict[str, Any] = {}
+  used_psu = psu
+  last_error: Optional[Exception] = None
+  for access, attempt_psu in attempts:
+    body = {
+      "access": access,
+      "aspsp": {"name": name, "country": country},
+      "state": state,
+      "redirect_url": cfg["redirect_url"],
+      "psu_type": attempt_psu,
+    }
+    try:
+      data = _request("POST", "/auth", json_body=body)
+      used_psu = attempt_psu
+      last_error = None
+      break
+    except RuntimeError as exc:
+      last_error = exc
+      if not _aspsp_error(exc) or not is_beta_aspsp:
+        raise
+      logger.warning(
+        "Enable Banking ASPSP_ERROR su %s psu=%s, riprovo un'altra forma di consenso",
+        name,
+        attempt_psu,
+      )
+  if last_error is not None:
+    raise RuntimeError(
+      f"{name} ha rifiutato il consenso (ASPSP_ERROR). Riprova Collega tra poco."
+    ) from last_error
   url = (data.get("url") or "").strip()
   if not url:
     raise RuntimeError("Enable Banking /auth non ha restituito url di login")
@@ -317,7 +362,7 @@ def start_authorization(
     "aspsp_name": name,
     "aspsp_country": country,
     "redirect_url": cfg["redirect_url"],
-    "psu_type": body["psu_type"],
+    "psu_type": used_psu,
     "message": f"Apri il link per autenticarti su {name} ({country}).",
   }
 
@@ -337,19 +382,16 @@ def get_account_balances(account_uid: str) -> Dict[str, Any]:
   return _request("GET", f"/accounts/{account_uid}/balances")
 
 
-def get_account_transactions(
+def _fetch_transactions(
   account_uid: str,
   *,
-  date_from: Optional[date] = None,
-  date_to: Optional[date] = None,
-  max_pages: int = 20,
+  date_from: date,
+  date_to: Optional[date],
+  max_pages: int,
 ) -> List[Dict[str, Any]]:
-  if date_from is None:
-    date_from = (datetime.now(timezone.utc) - timedelta(days=90)).date()
   params: Dict[str, Any] = {"date_from": date_from.isoformat()}
   if date_to:
     params["date_to"] = date_to.isoformat()
-  # Intervalli lunghi: più pagine (Enable Banking pagina ~50-100 tx)
   span_days = max(0, ((date_to or datetime.now(timezone.utc).date()) - date_from).days)
   pages = max(max_pages, min(80, 10 + span_days // 7))
   out: List[Dict[str, Any]] = []
@@ -366,6 +408,46 @@ def get_account_transactions(
     if not continuation:
       break
   return out
+
+
+def get_account_transactions(
+  account_uid: str,
+  *,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+  max_pages: int = 20,
+) -> List[Dict[str, Any]]:
+  today = datetime.now(timezone.utc).date()
+  if date_from is None:
+    date_from = today - timedelta(days=90)
+  windows: List[tuple] = [(date_from, date_to)]
+  if date_to:
+    windows.append((date_from, None))
+  for days in (30, 7):
+    start = today - timedelta(days=days)
+    if start > date_from:
+      windows.append((start, None))
+  last_error: Optional[Exception] = None
+  seen = set()
+  for start, end in windows:
+    key = (start.isoformat(), end.isoformat() if end else "")
+    if key in seen:
+      continue
+    seen.add(key)
+    try:
+      return _fetch_transactions(account_uid, date_from=start, date_to=end, max_pages=max_pages)
+    except RuntimeError as exc:
+      last_error = exc
+      if not _aspsp_error(exc):
+        raise
+      logger.warning(
+        "Enable Banking ASPSP_ERROR movimenti %s → %s, finestra più corta",
+        start,
+        end or today,
+      )
+  if last_error:
+    raise last_error
+  return []
 
 
 def _normalize_session_accounts(session: Dict[str, Any]) -> List[Dict[str, Any]]:
