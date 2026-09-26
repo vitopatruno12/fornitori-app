@@ -327,12 +327,14 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
   if (!rows?.length) return <p className="empty-state">Nessun dato disponibile nel periodo.</p>
   const useSplit =
     splitPayments &&
-    rows.some((r) => Number(r.cash_eur || 0) > 0 || Number(r.card_eur || 0) > 0)
+    rows.some(
+      (r) => Number(r.cash_eur || 0) > 0 || Number(r.card_eur || 0) > 0 || Number(r.quote_eur || 0) > 0,
+    )
   const max = Math.max(
     1,
     ...rows.map((r) =>
       useSplit
-        ? Number(r.cash_eur || 0) + Number(r.card_eur || 0) || Number(r[valueKey] || 0)
+        ? Number(r.cash_eur || 0) + Number(r.card_eur || 0) + Number(r.quote_eur || 0) || Number(r[valueKey] || 0)
         : Number(r[valueKey] || 0),
     ),
   )
@@ -346,15 +348,20 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
           <span className="analisi-payment-legend-item">
             <span className="analisi-payment-swatch analisi-payment-swatch--card" /> Carta/POS
           </span>
+          <span className="analisi-payment-legend-item">
+            <span className="analisi-payment-swatch analisi-payment-swatch--quote" /> Preventivi non fiscali
+          </span>
         </div>
       ) : null}
       {rows.map((r, idx) => {
         const cash = Number(r.cash_eur || 0)
         const card = Number(r.card_eur || 0)
-        const v = useSplit ? cash + card || Number(r[valueKey] || 0) : Number(r[valueKey] || 0)
+        const quote = Number(r.quote_eur || 0)
+        const v = useSplit ? cash + card + quote || Number(r[valueKey] || 0) : Number(r[valueKey] || 0)
         const label = r[labelKey] || r.month_label || r.date || r.week_start || `#${idx + 1}`
-        const cashPct = useSplit && v > 0 ? (cash / max) * 100 : 0
-        const cardPct = useSplit && v > 0 ? (card / max) * 100 : 0
+        const cashPct = useSplit && max > 0 ? (cash / max) * 100 : 0
+        const cardPct = useSplit && max > 0 ? (card / max) * 100 : 0
+        const quotePct = useSplit && max > 0 ? (quote / max) * 100 : 0
         return (
           <div key={label + idx} className="analisi-bar-row">
             <div className="analisi-bar-label" title={label}>
@@ -363,14 +370,28 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
             <div className="analisi-bar-track">
               {useSplit ? (
                 <div className="analisi-bar-stack">
-                  <div className="analisi-bar-fill analisi-bar-fill--cash" style={{ width: `${cashPct}%` }} />
-                  <div className="analisi-bar-fill analisi-bar-fill--card" style={{ width: `${cardPct}%` }} />
+                  {cashPct > 0 ? (
+                    <div className="analisi-bar-fill analisi-bar-fill--cash" style={{ width: `${cashPct}%` }} />
+                  ) : null}
+                  {cardPct > 0 ? (
+                    <div className="analisi-bar-fill analisi-bar-fill--card" style={{ width: `${cardPct}%` }} />
+                  ) : null}
+                  {quotePct > 0 ? (
+                    <div className="analisi-bar-fill analisi-bar-fill--quote" style={{ width: `${quotePct}%` }} />
+                  ) : null}
                 </div>
               ) : (
                 <div className="analisi-bar-fill" style={{ width: `${(v / max) * 100}%` }} />
               )}
             </div>
-            <div className="analisi-bar-value" title={useSplit ? `Contanti ${eur(cash)} · Carta ${eur(card)}` : undefined}>
+            <div
+              className="analisi-bar-value"
+              title={
+                useSplit
+                  ? `Contanti ${eur(cash)} · Carta/POS ${eur(card)} · Preventivi ${eur(quote)} · Totale ${eur(v)}`
+                  : undefined
+              }
+            >
               {eur(v)}
             </div>
           </div>

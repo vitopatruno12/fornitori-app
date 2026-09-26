@@ -928,10 +928,24 @@ def payment_summary(
         lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0}
     )
     by_day: Dict[str, Dict[str, float]] = defaultdict(
-        lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0}
+        lambda: {
+            "receipts": 0.0,
+            "cash_eur": 0.0,
+            "card_eur": 0.0,
+            "quote_eur": 0.0,
+            "quote_receipts": 0.0,
+            "amount_eur": 0.0,
+        }
     )
     by_hour: Dict[int, Dict[str, float]] = defaultdict(
-        lambda: {"receipts": 0.0, "cash_eur": 0.0, "card_eur": 0.0, "amount_eur": 0.0, "movimenti": 0.0}
+        lambda: {
+            "receipts": 0.0,
+            "cash_eur": 0.0,
+            "card_eur": 0.0,
+            "quote_eur": 0.0,
+            "amount_eur": 0.0,
+            "movimenti": 0.0,
+        }
     )
 
     for r in q.all():
@@ -941,6 +955,11 @@ def payment_summary(
         if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
             totals["quote_receipts"] += 1
             totals["quote_eur"] += amount
+            day_key = r.receipt_at.date().isoformat() if r.receipt_at else "unknown"
+            by_day[day_key]["quote_eur"] += amount
+            by_day[day_key]["quote_receipts"] += 1
+            if r.receipt_at:
+                by_hour[int(r.receipt_at.hour)]["quote_eur"] += amount
             continue
 
         totals["receipts"] += 1
@@ -997,6 +1016,7 @@ def payment_summary(
                 "amount_eur": round(float(hit.get("amount_eur") or 0), 2),
                 "cash_eur": round(float(hit.get("cash_eur") or 0), 2),
                 "card_eur": round(float(hit.get("card_eur") or 0), 2),
+                "quote_eur": round(float(hit.get("quote_eur") or 0), 2),
             }
         )
 

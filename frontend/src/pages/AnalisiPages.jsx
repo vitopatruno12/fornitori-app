@@ -28,7 +28,7 @@ import {
 import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
 import { AnalisiMachineCard } from '../components/AnalisiMachineCard.jsx'
 
-const ANALISI_CACHE_PREFIX = 'analisi_cache_v3:'
+const ANALISI_CACHE_PREFIX = 'analisi_cache_v4:'
 const LOCALE_KPI_ALL = 'all'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
 const ANALISI_MORNING_HOUR = 7
@@ -461,8 +461,8 @@ export function AnalisiGiornalieroPage() {
           <AnalisiAttrTag>Attributo · Storico € per giorno</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultimi 30 giorni · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre sotto = storico giorno per giorno (non il totale di oggi sopra). Contanti / carta-POS;
-            i preventivi restano nell’attributo dedicato.
+            Storico giorno per giorno, anche dei giorni già chiusi. Verde contanti, blu carta/POS,
+            arancio preventivi non fiscali. Il numero a destra è il totale dei tre.
           </p>
           <SeriesBars
             splitPayments
@@ -524,7 +524,8 @@ export function AnalisiSettimanalePage() {
           <AnalisiAttrTag>Attributo · Storico € per settimana</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultime 12 settimane · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre = confronto settimane (non il totale della settimana corrente sopra).
+            Ogni settimana resta in storico: verde contanti, blu carta/POS, arancio preventivi non fiscali.
+            Il numero a destra è il totale.
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="label" />
         </section>
@@ -580,7 +581,8 @@ export function AnalisiMensilePage() {
           <AnalisiAttrTag>Attributo · Storico € per mese</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultimi 6 mesi · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Barre = confronto mesi (non il totale del mese corrente sopra).
+            Ogni mese resta in storico: verde contanti, blu carta/POS, arancio preventivi non fiscali.
+            Il numero a destra è il totale.
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="month_label" />
         </section>

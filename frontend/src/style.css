@@ -8050,16 +8050,35 @@ select.form-control {
   height: 100%;
 }
 
+.analisi-bar-fill--cash,
+.analisi-bar-fill--card,
+.analisi-bar-fill--quote {
+  min-width: 2px;
+  border-radius: 0;
+}
+
 .analisi-bar-fill--cash {
   background: #0f766e;
-  border-radius: 999px 0 0 999px;
-  min-width: 0;
 }
 
 .analisi-bar-fill--card {
   background: #1d4ed8;
+}
+
+.analisi-bar-fill--quote {
+  background: #c2410c;
+}
+
+.analisi-bar-stack > :first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.analisi-bar-stack > :last-child {
   border-radius: 0 999px 999px 0;
-  min-width: 0;
+}
+
+.analisi-bar-stack > :only-child {
+  border-radius: 999px;
 }
 
 .analisi-payment-legend {
@@ -8090,6 +8109,10 @@ select.form-control {
 
 .analisi-payment-swatch--card {
   background: #1d4ed8;
+}
+
+.analisi-payment-swatch--quote {
+  background: #c2410c;
 }
 
 .analisi-bar-value {

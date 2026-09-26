@@ -469,12 +469,16 @@ def _load_pos_daily_totals(
                         "movimenti": 0,
                         "cash_eur": Decimal("0.00"),
                         "card_eur": Decimal("0.00"),
+                        "quote_eur": Decimal("0.00"),
+                        "quote_receipts": 0,
                     },
                 )
                 slot["incasso"] = _dec(slot["incasso"] + _dec(hit.get("incasso", 0)))
                 slot["movimenti"] += int(hit.get("movimenti") or 0)
                 slot["cash_eur"] = _dec(slot["cash_eur"] + _dec(hit.get("cash_eur", 0)))
                 slot["card_eur"] = _dec(slot["card_eur"] + _dec(hit.get("card_eur", 0)))
+                slot["quote_eur"] = _dec(slot["quote_eur"] + _dec(hit.get("quote_eur", 0)))
+                slot["quote_receipts"] += int(hit.get("quote_receipts") or 0)
         return merged
 
     db = SessionLocal()
@@ -500,6 +504,11 @@ def _pos_day_cash(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
 def _pos_day_card(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
     hit = (pos_daily or {}).get(day) or {}
     return _dec(hit.get("card_eur", 0))
+
+
+def _pos_day_quote(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
+    hit = (pos_daily or {}).get(day) or {}
+    return _dec(hit.get("quote_eur", 0))
 
 
 def _payment_split_from_pos_daily(pos_daily: Dict[date, Dict[str, Any]]) -> dict:
@@ -697,7 +706,7 @@ def _snapshot_from_events(
         "movimenti_oggi": movimenti_oggi,
         "totale_fiscale": Decimal("0.00"),
         "totale_pos": incasso_pos_oggi,
-        "totale_non_fiscale": Decimal("0.00"),
+        "totale_non_fiscale": _pos_day_quote(pos_daily, today) if use_pos else Decimal("0.00"),
         "payment_split": pay_split,
         "machines": machines,
         "warnings": list(warnings or []),
@@ -744,6 +753,7 @@ def _weekly_from_events(
         movimenti = 0
         cash = Decimal("0.00")
         card = Decimal("0.00")
+        quote = Decimal("0.00")
         d = monday
         while d <= end:
             if revenue_mode == "pos":
@@ -757,6 +767,7 @@ def _weekly_from_events(
                 movimenti += _combined_day_movimenti(scoped, d, pos_daily)
             cash += _pos_day_cash(pos_daily, d)
             card += _pos_day_card(pos_daily, d)
+            quote += _pos_day_quote(pos_daily, d)
             d += timedelta(days=1)
         rows.append(
             {
@@ -767,6 +778,7 @@ def _weekly_from_events(
                 "movimenti": movimenti,
                 "cash_eur": _dec(cash),
                 "card_eur": _dec(card),
+                "quote_eur": _dec(quote),
             }
         )
     return {
@@ -1241,6 +1253,7 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
             movimenti = _combined_day_movimenti(scoped, d, pos_daily)
         cash = _pos_day_cash(pos_daily, d)
         card = _pos_day_card(pos_daily, d)
+        quote = _pos_day_quote(pos_daily, d)
         rows.append(
             {
                 "date": d.isoformat(),
@@ -1250,6 +1263,7 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
                 "movimenti": movimenti,
                 "cash_eur": cash,
                 "card_eur": card,
+                "quote_eur": quote,
             }
         )
     total = sum((r["incasso"] for r in rows), Decimal("0.00"))
@@ -1322,6 +1336,7 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
             "movimenti": 0,
             "cash_eur": Decimal("0.00"),
             "card_eur": Decimal("0.00"),
+            "quote_eur": Decimal("0.00"),
         }
         cm += 1
         if cm > 12:
@@ -1350,6 +1365,7 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
             buckets[key]["movimenti"] += mov
             buckets[key]["cash_eur"] = _dec(buckets[key]["cash_eur"] + _pos_day_cash(pos_daily, d))
             buckets[key]["card_eur"] = _dec(buckets[key]["card_eur"] + _pos_day_card(pos_daily, d))
+            buckets[key]["quote_eur"] = _dec(buckets[key]["quote_eur"] + _pos_day_quote(pos_daily, d))
         d += timedelta(days=1)
 
     rows = list(buckets.values())
@@ -1481,6 +1497,8 @@ def _merge_pos_daily(
                 "movimenti": 0,
                 "cash_eur": Decimal("0.00"),
                 "card_eur": Decimal("0.00"),
+                "quote_eur": Decimal("0.00"),
+                "quote_receipts": 0,
             }
         target[day]["incasso"] = _dec(
             Decimal(str(target[day].get("incasso") or 0)) + Decimal(str(hit.get("incasso") or 0))
@@ -1493,6 +1511,12 @@ def _merge_pos_daily(
         )
         target[day]["card_eur"] = _dec(
             Decimal(str(target[day].get("card_eur") or 0)) + Decimal(str(hit.get("card_eur") or 0))
+        )
+        target[day]["quote_eur"] = _dec(
+            Decimal(str(target[day].get("quote_eur") or 0)) + Decimal(str(hit.get("quote_eur") or 0))
+        )
+        target[day]["quote_receipts"] = int(target[day].get("quote_receipts") or 0) + int(
+            hit.get("quote_receipts") or 0
         )
     return target
 
