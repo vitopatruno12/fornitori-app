@@ -64,6 +64,7 @@ import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, sugge
 import { readFattureCompany, resolveEmbeddedFattureCompany, companyLabel } from './utils/fattureCompany'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
 import AdeAgentOverlay from './components/AdeAgentOverlay.jsx'
+import AdePasswordAlertPopup from './components/AdePasswordAlertPopup.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
 import PwaInstallPrompt from './components/PwaInstallPrompt.jsx'
 import AtlasUpdateButton from './components/AtlasUpdateButton.jsx'
@@ -1193,6 +1194,7 @@ function App() {
       {aiToast && <div className={`ai-toast ${aiToastClosing ? 'is-closing' : 'is-open'}`}>{aiToast}</div>}
       <AiManagerPopups enabled={isAuthenticated} />
       <AdeAgentOverlay enabled={isAuthenticated} />
+      <AdePasswordAlertPopup enabled={isAuthenticated} />
     </div>
   )
 }

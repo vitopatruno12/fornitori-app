@@ -94,7 +94,58 @@ def put_ade_profile_credentials(profile_id: str, body: FisconlineCredentialsUpda
     raise HTTPException(status_code=400, detail=str(e)) from e
   except Exception as e:
     raise HTTPException(status_code=500, detail=f"Salvataggio credenziali fallito: {e}") from e
+  if body.fisconline_password is not None:
+    from ..integrations.ade.password_alerts import dismiss_alert
+
+    dismiss_alert(profile_id)
   return {"ok": True, **result}
+
+
+class AdePasswordAlertIn(BaseModel):
+  profile_id: str
+  label: str = ""
+  level: str = "expiring"
+  message: str = ""
+  days_left: Optional[int] = None
+
+
+@router.get("/password-alerts")
+def get_ade_password_alerts() -> Dict[str, Any]:
+  """Avvisi password Fisconline letti dal sito Agenzia delle Entrate."""
+  from ..integrations.ade.password_alerts import list_alerts
+
+  items = list_alerts()
+  return {"items": items, "count": len(items)}
+
+
+@router.post("/password-alerts")
+def post_ade_password_alert(
+  body: AdePasswordAlertIn,
+  authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+  """L'agent AdE registra l'avviso letto sulla pagina di login."""
+  from ..integrations.ade.password_alerts import upsert_alert
+
+  _optional_bearer(os.getenv("SDI_RECEIVE_TOKEN"), authorization)
+  try:
+    row = upsert_alert(
+      profile_id=body.profile_id,
+      label=body.label,
+      level=body.level,
+      message=body.message,
+      days_left=body.days_left,
+    )
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e)) from e
+  return {"ok": True, "item": row}
+
+
+@router.post("/password-alerts/{profile_id}/dismiss")
+def dismiss_ade_password_alert(profile_id: str) -> Dict[str, Any]:
+  from ..integrations.ade.password_alerts import dismiss_alert
+
+  dismiss_alert(profile_id)
+  return {"ok": True, "profile_id": profile_id}
 
 
 @router.get("/agent/status")

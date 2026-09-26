@@ -726,6 +726,87 @@ export function BancaDashboardPage() {
   )
 }
 
+function BankSyncCard({
+  tone,
+  kicker,
+  title,
+  accounts,
+  emptyLabel,
+  selectedId,
+  onSelect,
+  busy,
+  syncing,
+  onSync,
+  onUnsync,
+  syncEnabled,
+  selectTitle,
+  syncTitle,
+}) {
+  const selected = accounts.find((a) => String(a.id) === String(selectedId))
+  const connected = Boolean(selected?.enable_banking_connected)
+  const status = accounts.length === 0 ? 'In attesa' : connected ? 'Collegato' : 'Non collegato'
+  const syncLabel = syncing ? 'Sincronizzo…' : connected ? 'Sincronizza conto' : 'Collega e sincronizza'
+  return (
+    <section className={`banca-sync-card banca-sync-card--${tone}`}>
+      <header className="banca-sync-card-head">
+        <div>
+          <p className="banca-sync-kicker">{kicker}</p>
+          <h2>{title}</h2>
+          {selected && Number.isFinite(Number(selected.saldo_disponibile)) ? (
+            <p className="banca-sync-saldo">{eur(selected.saldo_disponibile)}</p>
+          ) : null}
+        </div>
+        <span className={`banca-sync-status${connected ? ' is-on' : ''}`}>{status}</span>
+      </header>
+      <label className="banca-sync-field">
+        <span>Conto</span>
+        <select
+          className="form-control"
+          value={selectedId}
+          disabled={busy}
+          onChange={(e) => onSelect(e.target.value)}
+          title={selectTitle}
+        >
+          {accounts.length === 0 ? (
+            <option value="">{emptyLabel}</option>
+          ) : (
+            accounts.map((a) => (
+              <option key={a.id} value={String(a.id)}>
+                {formatBankAccountOptionLabel(a)}
+                {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+      <div className="banca-sync-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy || !syncEnabled}
+          onClick={onSync}
+          title={syncTitle}
+        >
+          {syncLabel}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={busy || !selectedId}
+          onClick={onUnsync}
+          title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
+        >
+          Scollega e svuota
+        </button>
+        <Link className="btn btn-secondary" to="/banca/movimenti">
+          Movimenti
+        </Link>
+      </div>
+      {!syncEnabled ? <p className="banca-sync-note">Enable Banking non configurato sul server.</p> : null}
+    </section>
+  )
+}
+
 export function BancaContiPage() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1500,233 +1581,72 @@ export function BancaContiPage() {
         </section>
       )}
 
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">BPPB — Sincronizza conti</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            className="form-control"
-            style={{ minWidth: 260, maxWidth: 420 }}
-            value={bppbSelectedId}
-            disabled={busyId != null}
-            onChange={(e) => setBppbSelectedId(e.target.value)}
-            title="Scegli quale conto BPPB importare"
-          >
-            {items.filter(isBppbAccount).length === 0 ? (
-              <option value="">Via Lattea / Mediazione (crea al sync)</option>
-            ) : (
-              sortBankAccounts(preferConnectedDuplicates(items.filter(isBppbAccount))).map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {formatBankAccountOptionLabel(a)}
-                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
-                </option>
-              ))
-            )}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncSelectedBppbAccount}
-            title="Collega o sincronizza solo il conto BPPB selezionato"
-          >
-            {busyId != null && (busyId === -2 || items.some((a) => a.id === busyId && isBppbAccount(a)))
-              ? 'Sincronizzo…'
-              : (() => {
-                  const sel = items.find((a) => String(a.id) === String(bppbSelectedId) && isBppbAccount(a))
-                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
-                  return 'Collega e sincronizza'
-                })()}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busyId != null || !bppbSelectedId}
-            onClick={unsyncSelectedBppbAccount}
-            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
-          >
-            Scollega / svuota movimenti
-          </button>
-          <Link className="btn btn-secondary" to="/banca/movimenti">
-            Vedi movimenti
-          </Link>
-        </div>
-        {!connectProfile?.enable_banking?.configured ? (
-          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-            Enable Banking non configurato sul server.
-          </p>
-        ) : null}
-      </section>
-
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">BCC — Sincronizza conti</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            className="form-control"
-            style={{ minWidth: 260, maxWidth: 420 }}
-            value={bccSelectedId}
-            disabled={busyId != null}
-            onChange={(e) => setBccSelectedId(e.target.value)}
-            title="Scegli quale conto BCC importare"
-          >
-            {items.filter(isBccTerraOtrantoAccount).length === 0 ? (
-              <option value="">Via Lattea / Mediazione (crea al sync)</option>
-            ) : (
-              sortBankAccounts(preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount))).map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {formatBankAccountOptionLabel(a)}
-                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
-                </option>
-              ))
-            )}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncSelectedBccAccount}
-            title="Collega o sincronizza solo il conto BCC selezionato"
-          >
-            {busyId != null && (busyId === -1 || items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a)))
-              ? 'Sincronizzo…'
-              : (() => {
-                  const sel = items.find((a) => String(a.id) === String(bccSelectedId) && isBccTerraOtrantoAccount(a))
-                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
-                  return 'Collega e sincronizza'
-                })()}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busyId != null || !bccSelectedId}
-            onClick={unsyncSelectedBccAccount}
-            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
-          >
-            Scollega / svuota movimenti
-          </button>
-          <Link className="btn btn-secondary" to="/banca/movimenti">
-            Vedi movimenti
-          </Link>
-        </div>
-        {!connectProfile?.enable_banking?.configured ? (
-          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-            Enable Banking non configurato sul server.
-          </p>
-        ) : null}
-      </section>
-
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Intesa Sanpaolo — Sincronizza conti</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            className="form-control"
-            style={{ minWidth: 260, maxWidth: 420 }}
-            value={intesaSelectedId}
-            disabled={busyId != null}
-            onChange={(e) => setIntesaSelectedId(e.target.value)}
-            title="Scegli quale conto Intesa Sanpaolo importare"
-          >
-            {items.filter(isIntesaAccount).length === 0 ? (
-              <option value="">Risacca (crea al sync)</option>
-            ) : (
-              preferConnectedDuplicates(items.filter(isIntesaAccount)).map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {formatBankAccountOptionLabel(a)}
-                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
-                </option>
-              ))
-            )}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncSelectedIntesaAccount}
-            title="Collega o sincronizza solo il conto Intesa selezionato"
-          >
-            {busyId != null && (busyId === -3 || items.some((a) => a.id === busyId && isIntesaAccount(a)))
-              ? 'Sincronizzo…'
-              : (() => {
-                  const sel = items.find((a) => String(a.id) === String(intesaSelectedId) && isIntesaAccount(a))
-                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
-                  return 'Collega e sincronizza'
-                })()}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busyId != null || !intesaSelectedId}
-            onClick={unsyncSelectedIntesaAccount}
-            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
-          >
-            Scollega / svuota movimenti
-          </button>
-          <Link className="btn btn-secondary" to="/banca/movimenti">
-            Vedi movimenti
-          </Link>
-        </div>
-        {!connectProfile?.enable_banking?.configured ? (
-          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-            Enable Banking non configurato sul server.
-          </p>
-        ) : null}
-      </section>
-
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">UniCredit — Sincronizza conti</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            className="form-control"
-            style={{ minWidth: 260, maxWidth: 420 }}
-            value={unicreditSelectedId}
-            disabled={busyId != null}
-            onChange={(e) => setUnicreditSelectedId(e.target.value)}
-            title="Scegli quale conto UniCredit importare"
-          >
-            {items.filter(isUnicreditAccount).length === 0 ? (
-              <option value="">Lecce Foscarini (crea al sync)</option>
-            ) : (
-              preferConnectedDuplicates(items.filter(isUnicreditAccount)).map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {formatBankAccountOptionLabel(a)}
-                  {a.enable_banking_connected ? ' · collegato' : ' · non collegato'}
-                </option>
-              ))
-            )}
-          </select>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busyId != null || !connectProfile?.enable_banking?.configured}
-            onClick={syncSelectedUnicreditAccount}
-            title="Collega o sincronizza solo il conto UniCredit selezionato"
-          >
-            {busyId != null && (busyId === -4 || items.some((a) => a.id === busyId && isUnicreditAccount(a)))
-              ? 'Sincronizzo…'
-              : (() => {
-                  const sel = items.find((a) => String(a.id) === String(unicreditSelectedId) && isUnicreditAccount(a))
-                  if (sel?.enable_banking_connected) return 'Sincronizza conto'
-                  return 'Collega e sincronizza'
-                })()}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busyId != null || !unicreditSelectedId}
-            onClick={unsyncSelectedUnicreditAccount}
-            title="Scollega Enable Banking e cancella i movimenti importati del conto selezionato"
-          >
-            Scollega / svuota movimenti
-          </button>
-          <Link className="btn btn-secondary" to="/banca/movimenti">
-            Vedi movimenti
-          </Link>
-        </div>
-        {!connectProfile?.enable_banking?.configured ? (
-          <p className="fatture-note" style={{ marginTop: '0.6rem' }}>
-            Enable Banking non configurato sul server.
-          </p>
-        ) : null}
-      </section>
+      <div className="banca-sync-grid">
+        <BankSyncCard
+          tone="bppb"
+          kicker="Popolare Puglia e Basilicata"
+          title="BPPB"
+          accounts={sortBankAccounts(preferConnectedDuplicates(items.filter(isBppbAccount)))}
+          emptyLabel="Via Lattea / Mediazione (crea al sync)"
+          selectedId={bppbSelectedId}
+          onSelect={setBppbSelectedId}
+          busy={busyId != null}
+          syncing={busyId != null && (busyId === -2 || items.some((a) => a.id === busyId && isBppbAccount(a)))}
+          onSync={syncSelectedBppbAccount}
+          onUnsync={unsyncSelectedBppbAccount}
+          syncEnabled={Boolean(connectProfile?.enable_banking?.configured)}
+          selectTitle="Scegli quale conto BPPB importare"
+          syncTitle="Collega o sincronizza solo il conto BPPB selezionato"
+        />
+        <BankSyncCard
+          tone="bcc"
+          kicker="Terra d'Otranto"
+          title="BCC"
+          accounts={sortBankAccounts(preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount)))}
+          emptyLabel="Via Lattea / Mediazione (crea al sync)"
+          selectedId={bccSelectedId}
+          onSelect={setBccSelectedId}
+          busy={busyId != null}
+          syncing={busyId != null && (busyId === -1 || items.some((a) => a.id === busyId && isBccTerraOtrantoAccount(a)))}
+          onSync={syncSelectedBccAccount}
+          onUnsync={unsyncSelectedBccAccount}
+          syncEnabled={Boolean(connectProfile?.enable_banking?.configured)}
+          selectTitle="Scegli quale conto BCC importare"
+          syncTitle="Collega o sincronizza solo il conto BCC selezionato"
+        />
+        <BankSyncCard
+          tone="intesa"
+          kicker="Intesa Sanpaolo"
+          title="Intesa"
+          accounts={preferConnectedDuplicates(items.filter(isIntesaAccount))}
+          emptyLabel="Risacca (crea al sync)"
+          selectedId={intesaSelectedId}
+          onSelect={setIntesaSelectedId}
+          busy={busyId != null}
+          syncing={busyId != null && (busyId === -3 || items.some((a) => a.id === busyId && isIntesaAccount(a)))}
+          onSync={syncSelectedIntesaAccount}
+          onUnsync={unsyncSelectedIntesaAccount}
+          syncEnabled={Boolean(connectProfile?.enable_banking?.configured)}
+          selectTitle="Scegli quale conto Intesa Sanpaolo importare"
+          syncTitle="Collega o sincronizza solo il conto Intesa selezionato"
+        />
+        <BankSyncCard
+          tone="unicredit"
+          kicker="UniCredit"
+          title="UniCredit"
+          accounts={preferConnectedDuplicates(items.filter(isUnicreditAccount))}
+          emptyLabel="Lecce Foscarini (crea al sync)"
+          selectedId={unicreditSelectedId}
+          onSelect={setUnicreditSelectedId}
+          busy={busyId != null}
+          syncing={busyId != null && (busyId === -4 || items.some((a) => a.id === busyId && isUnicreditAccount(a)))}
+          onSync={syncSelectedUnicreditAccount}
+          onUnsync={unsyncSelectedUnicreditAccount}
+          syncEnabled={Boolean(connectProfile?.enable_banking?.configured)}
+          selectTitle="Scegli quale conto UniCredit importare"
+          syncTitle="Collega o sincronizza solo il conto UniCredit selezionato"
+        />
+      </div>
 
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Collega conto</h2>

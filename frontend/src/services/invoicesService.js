@@ -273,6 +273,14 @@ export async function runAdeAgentSync({ mode = 'download', lookbackDays, profile
  * Aggiorna password e/o PIN Fisconline per un profilo.
  * Campi undefined/null non vengono inviati (nessuna modifica).
  */
+export async function fetchAdePasswordAlerts() {
+  return apiFetch('/ade/password-alerts')
+}
+
+export async function dismissAdePasswordAlert(profileId) {
+  return apiFetch(`/ade/password-alerts/${encodeURIComponent(profileId)}/dismiss`, { method: 'POST' })
+}
+
 export async function updateAdeFisconlineCredentials(profileId, { password, pin } = {}) {
   const body = {}
   if (password != null && String(password).length > 0) body.fisconline_password = String(password)

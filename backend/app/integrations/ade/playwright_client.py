@@ -472,6 +472,27 @@ class AdePlaywrightClient:
       except Exception:
         continue
 
+  def _report_password_notice(self, body: str) -> None:
+    """Registra l'avviso di scadenza password letto dalla pagina AdE."""
+    if getattr(self, "_password_notice_sent", False):
+      return
+    try:
+      from .password_alerts import notice_from_page_text, publish_password_alert
+
+      notice = notice_from_page_text(body or "")
+      if not notice:
+        return
+      self._password_notice_sent = True
+      publish_password_alert(
+        profile_id=self.profile.id,
+        label=self.profile.label or self.profile.id,
+        level=str(notice.get("level") or "expiring"),
+        message=str(notice.get("message") or ""),
+        days_left=notice.get("days_left") if isinstance(notice.get("days_left"), int) else None,
+      )
+    except Exception:
+      return
+
   def _login_fisconline(self, page: Any, shots: List[str]) -> bool:
     """
     Login Fisconline/Entratel (form web): CF + password + PIN — completamente automatico.
@@ -606,6 +627,7 @@ class AdePlaywrightClient:
       except Exception:
         body = ""
 
+      self._report_password_notice(body)
       if "credenziali errate" in body or "autenticazione fallita" in body:
         self._shot(page, "01_bad_credentials", shots, force=True)
         return False
@@ -669,6 +691,7 @@ class AdePlaywrightClient:
         )
       ) or "ivaservizi.agenziaentrate.gov.it" in url
       if logged and "entra con cns" not in body and "accedi all" not in body[:120]:
+        self._report_password_notice(body)
         self._post_login_cleanup(page)
         self._shot(page, "02_logged_in", shots)
         return True

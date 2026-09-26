@@ -4444,6 +4444,104 @@ select.form-control {
   text-align: right;
 }
 
+.ade-password-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.ade-password-alert-card {
+  width: min(560px, 100%);
+  max-height: min(86vh, 720px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 1.1rem 1.15rem 1rem;
+}
+
+.ade-password-alert-head h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.ade-password-alert-head p {
+  margin: 0 0 0.85rem;
+  color: #475569;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.ade-password-alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ade-password-alert-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem 0.85rem;
+  background: #fffbeb;
+}
+
+.ade-password-alert-item.is-expired {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.ade-password-alert-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+}
+
+.ade-password-alert-item-head span {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #b45309;
+}
+
+.ade-password-alert-item.is-expired .ade-password-alert-item-head span {
+  color: #b91c1c;
+}
+
+.ade-password-alert-quote {
+  margin: 0 0 0.7rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+.ade-password-alert-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+.ade-password-alert-ok {
+  margin: 0;
+  color: #166534;
+  font-size: 0.9rem;
+}
+
+.ade-password-alert-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
 .ai-suggestions {
   margin-top: 0.6rem;
   display: flex;
@@ -8605,6 +8703,109 @@ select.form-control {
 
 .fatture-panel {
   margin-bottom: 1rem;
+}
+
+.banca-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.banca-sync-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 0.95rem 1rem 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-top: 3px solid #0f766e;
+}
+
+.banca-sync-card--bcc { border-top-color: #0369a1; }
+.banca-sync-card--intesa { border-top-color: #15803d; }
+.banca-sync-card--unicredit { border-top-color: #be123c; }
+
+.banca-sync-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.banca-sync-kicker {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.banca-sync-card h2 {
+  margin: 0.1rem 0 0;
+  font-size: 1.2rem;
+  color: #0f172a;
+}
+
+.banca-sync-saldo {
+  margin: 0.2rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #0f766e;
+}
+
+.banca-sync-status {
+  flex: none;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.banca-sync-status.is-on {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.banca-sync-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.banca-sync-field span {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.banca-sync-field .form-control {
+  width: 100%;
+  min-width: 0;
+}
+
+.banca-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.banca-sync-actions .btn-primary {
+  flex: 1 1 9rem;
+}
+
+.banca-sync-note {
+  margin: 0.65rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+@media (max-width: 860px) {
+  .banca-sync-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fatture-panel-title {
