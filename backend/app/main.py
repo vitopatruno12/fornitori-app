@@ -261,6 +261,15 @@ async def _sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
             "sudo APP_DIR=/opt/fornitori-app bash /opt/fornitori-app/deploy/ensure-conservation-tables.sh "
             "&& sudo systemctl restart fornitori-api"
         )
+    elif "bolla_verified" in err_text:
+        detail = (
+            "Manca la colonna invoices.bolla_verified. "
+            "Sul server esegui: "
+            "sudo -u postgres psql -d fornitori_db -c "
+            "\"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS bolla_verified BOOLEAN DEFAULT FALSE;\" "
+            "poi sudo systemctl restart fornitori-api "
+            "oppure: sudo bash deploy/aggiorna-tutto.sh"
+        )
     elif "does not exist" in err_text or "undefinedtable" in err_text or "undefinedcolumn" in err_text:
         detail = (
             "Tabella o colonna mancante nel database"

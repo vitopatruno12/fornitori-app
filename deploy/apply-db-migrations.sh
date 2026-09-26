@@ -70,6 +70,11 @@ done
 
 log "Migrazioni completate."
 
+if [[ -f "$APP_DIR/deploy/ensure-invoices-bolla-verified.sh" ]]; then
+  log "Assicuro colonna invoices.bolla_verified"
+  DB_NAME="$DB_NAME" APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/ensure-invoices-bolla-verified.sh" || warn "ensure bolla_verified fallito"
+fi
+
 if [[ -f "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh" ]]; then
   log "Permessi e tabella codici Prima Nota (owner app user)"
   DB_NAME="$DB_NAME" bash "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh"

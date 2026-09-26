@@ -2,9 +2,12 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Literal, Optional
 from pathlib import Path
+import logging
 import re
 
 from fastapi import UploadFile
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import (
@@ -13,6 +16,7 @@ from ..constants.sdi_companies import (
   normalize_company_section,
   pick_company,
 )
+from ..database import engine
 from ..models.bank_movement import BankMovement
 from ..models.cash_entry import CashEntry
 from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice
@@ -23,8 +27,12 @@ from ..models.supplier import Supplier
 from ..schemas.invoice import InvoiceCreate, InvoiceDetailOut, InvoiceListOut, InvoiceRead, InvoiceRowOut
 from .vat_service import calculate_vat
 
+logger = logging.getLogger(__name__)
+
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "invoices"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+_bolla_col_ready = False
 
 # Prima Nota activity → società fatture (Mediazione A = Abba, Mediazione Z = Zanardelli)
 _ACTIVITY_TO_COMPANY = {
@@ -37,6 +45,39 @@ _ACTIVITY_TO_COMPANY = {
   "risacca": "risacca",
   "pg": "pg",
 }
+
+
+def ensure_invoices_bolla_verified_column(*, force: bool = False) -> bool:
+  """Aggiunge invoices.bolla_verified se manca (deploy senza migrazione)."""
+  global _bolla_col_ready
+  if _bolla_col_ready and not force:
+    return True
+  try:
+    with engine.begin() as conn:
+      conn.execute(
+        text(
+          "ALTER TABLE invoices "
+          "ADD COLUMN IF NOT EXISTS bolla_verified BOOLEAN DEFAULT FALSE"
+        )
+      )
+      conn.execute(
+        text(
+          "UPDATE invoices SET bolla_verified = FALSE "
+          "WHERE bolla_verified IS NULL"
+        )
+      )
+    _bolla_col_ready = True
+    return True
+  except SQLAlchemyError:
+    logger.exception("Impossibile assicurare colonna invoices.bolla_verified")
+    return False
+
+
+def _rollback_db(db: Session) -> None:
+  try:
+    db.rollback()
+  except SQLAlchemyError:
+    pass
 
 
 def payment_status_label(inv: Invoice) -> Literal["paid", "unpaid", "partial"]:
@@ -85,6 +126,41 @@ def resolve_invoice_company(
 
 
 def list_invoices(
+  db: Session,
+  supplier_id: Optional[int] = None,
+  due_filter: Optional[str] = None,
+  include_ignored: bool = False,
+  company: Optional[str] = None,
+  activity: Optional[str] = None,
+) -> List[InvoiceListOut]:
+  ensure_invoices_bolla_verified_column()
+  try:
+    return _list_invoices_impl(
+      db,
+      supplier_id=supplier_id,
+      due_filter=due_filter,
+      include_ignored=include_ignored,
+      company=company,
+      activity=activity,
+    )
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "bolla_verified" not in err:
+      raise
+    _rollback_db(db)
+    if not ensure_invoices_bolla_verified_column(force=True):
+      raise
+    return _list_invoices_impl(
+      db,
+      supplier_id=supplier_id,
+      due_filter=due_filter,
+      include_ignored=include_ignored,
+      company=company,
+      activity=activity,
+    )
+
+
+def _list_invoices_impl(
   db: Session,
   supplier_id: Optional[int] = None,
   due_filter: Optional[str] = None,
@@ -370,13 +446,29 @@ def set_invoice_ignored(db: Session, invoice_id: int, ignored: bool) -> Optional
 
 
 def set_invoice_bolla_verified(db: Session, invoice_id: int, verified: bool) -> Optional[Invoice]:
-  inv = get_invoice(db, invoice_id)
-  if not inv:
-    return None
-  inv.bolla_verified = bool(verified)
-  db.commit()
-  db.refresh(inv)
-  return inv
+  ensure_invoices_bolla_verified_column()
+  try:
+    inv = get_invoice(db, invoice_id)
+    if not inv:
+      return None
+    inv.bolla_verified = bool(verified)
+    db.commit()
+    db.refresh(inv)
+    return inv
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "bolla_verified" not in err:
+      raise
+    _rollback_db(db)
+    if not ensure_invoices_bolla_verified_column(force=True):
+      raise
+    inv = get_invoice(db, invoice_id)
+    if not inv:
+      return None
+    inv.bolla_verified = bool(verified)
+    db.commit()
+    db.refresh(inv)
+    return inv
 
 
 def ignore_misrouted_our_emesse(db: Session, *, dry_run: bool = False) -> dict:
