@@ -126,6 +126,7 @@ export default function WorkbookGrid({
                     return (
                       <td
                         key={col.id}
+                        data-label={col.label}
                         className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
                       >
                         {col.multiline ? (
@@ -165,6 +166,7 @@ export default function WorkbookGrid({
                   {columns.map((col) => (
                     <td
                       key={`tot-${col.id}`}
+                      data-label={col.label}
                       className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
                     >
                       <input

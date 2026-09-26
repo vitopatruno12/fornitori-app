@@ -1844,6 +1844,21 @@ select.form-control {
   font-weight: 600;
 }
 
+.workbook-grid .excel-cell.recon-spunta-on {
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #15803d;
+}
+
+.workbook-grid .workbook-grid-row.recon-row-paid .excel-cell {
+  background: #ecfdf5;
+}
+
+.workbook-grid .workbook-grid-row.recon-row-paid:hover .excel-cell {
+  background: #d1fae5;
+}
+
 .workbook-cell-alert,
 .suppliers-cell-alert {
   color: #b91c1c;
@@ -7174,6 +7189,12 @@ select.form-control {
     font-size: 14px;
   }
 
+  .form-control,
+  .atlas-login-input,
+  .dashboard-kpi-locale-select {
+    font-size: 16px;
+  }
+
   .app-nav-inner {
     padding-left: max(0.85rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.85rem, env(safe-area-inset-right, 0px));
@@ -7301,14 +7322,187 @@ select.form-control {
 
 @media (max-width: 480px) {
   .app-main {
-    padding: 0.85rem 0.65rem;
+    padding: 0.75rem 0.7rem max(5.75rem, calc(env(safe-area-inset-bottom, 0px) + 5.25rem));
+  }
+
+  .atlas-nav-logo {
+    height: 28px;
+    max-width: min(46vw, 168px);
+  }
+
+  .app-nav-links {
+    width: 100%;
+    padding-bottom: 1rem;
+  }
+
+  body:has(.app-nav-links.is-open) .ai-global-fab,
+  body:has(.app-nav-links.is-open) .ai-manager-fab {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .app-version-strip {
+    padding: 0.12rem 0.7rem 0.2rem;
+    font-size: 0.7rem;
+  }
+
+  .staff-page-hero {
+    padding: 0.95rem 0.9rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .page-header {
+    font-size: 1.2rem;
+  }
+
+  .dashboard-subtitle,
+  .staff-page-lead {
+    font-size: 0.9rem;
+  }
+
+  .dashboard-kpi {
+    min-height: 0;
+    padding: 0.8rem 0.85rem;
+  }
+
+  .dashboard-kpi-value {
+    font-size: 1.28rem;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-kpi-label-row {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-kpi-locale-label {
+    max-width: 100%;
+    flex: 1 1 8rem;
+  }
+
+  .card {
+    padding: 0.85rem;
+  }
+
+  .fatture-subnav,
+  .analisi-subnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-right: -0.15rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .fatture-subnav::-webkit-scrollbar,
+  .analisi-subnav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .fatture-subnav-link,
+  .analisi-subnav-link {
+    flex-shrink: 0;
+  }
+
+  .fatture-creds-grid,
+  .analisi-home-metrics,
+  .analisi-home-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash-chart-vbars {
+    min-height: 150px;
+    gap: 0.25rem;
+  }
+
+  .dash-chart-vbar-stack {
+    height: 120px;
+  }
+
+  .dash-hbar-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .dash-hbar-label {
+    white-space: normal;
+  }
+
+  .dash-hbar-track {
+    grid-column: 1 / -1;
+  }
+
+  .dash-line-svg {
+    width: 100%;
+    height: auto;
   }
 
   .ai-global-fab {
-    max-width: calc(100vw - 5.5rem);
+    left: auto;
+    right: max(0.65rem, env(safe-area-inset-right, 0px));
+    bottom: calc(max(0.55rem, env(safe-area-inset-bottom, 0px)) + 56px);
+    width: 46px;
+    height: 46px;
+    max-width: 46px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 0;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+
+  .ai-global-fab::after {
+    content: "AI";
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .ai-manager-fab {
+    right: max(0.65rem, env(safe-area-inset-right, 0px));
+    bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+    width: 46px;
+    height: 46px;
+    font-size: 1.3rem;
+  }
+
+  .ui-drawer {
+    width: 100vw;
+    max-width: 100%;
+  }
+
+  .atlas-login-page {
+    padding: max(0.75rem, env(safe-area-inset-top, 0px)) 0.75rem max(0.85rem, env(safe-area-inset-bottom, 0px));
+    align-content: start;
+  }
+
+  .atlas-login-shell {
+    width: 100%;
+  }
+
+  .atlas-login-hero {
+    width: 100%;
+    max-height: 38vh;
+    object-fit: cover;
+    object-position: center 18%;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .atlas-login-form {
+    width: 100%;
+    margin: 0.75rem auto 0;
+    box-sizing: border-box;
+  }
+
+  .atlas-login-input {
+    min-height: 2.75rem;
+    font-size: 16px;
+  }
+
+  .atlas-password-toggle {
+    min-height: 2rem;
+    padding: 0.3rem 0.55rem;
   }
 
   .sup-table-wrap .app-table {
@@ -9742,4 +9936,143 @@ select.form-control {
 .banca-recon-row-open .excel-cell,
 .banca-recon-row-open .pagamenti-cell-readonly {
   background: #fffbeb !important;
+}
+
+/* Telefono 5–6 pollici: in fondo al file, così queste regole vincono sulle sezioni sopra. */
+@media (max-width: 480px) {
+  .fatture-subnav,
+  .analisi-subnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 0.2rem;
+  }
+
+  .fatture-subnav::-webkit-scrollbar,
+  .analisi-subnav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .fatture-subnav-link,
+  .analisi-subnav-link {
+    flex-shrink: 0;
+  }
+
+  .fatture-creds-grid,
+  .analisi-home-metrics,
+  .analisi-home-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .analisi-machine-filter-select,
+  .staff-gestionale-locale-select-field {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .pagamenti-workbook-card:has(.dashboard-movements-grid) .workbook-grid-wrap {
+    overflow-x: hidden;
+    max-height: none;
+  }
+
+  .dashboard-movements-grid {
+    min-width: 0;
+    width: 100%;
+    display: block;
+  }
+
+  .dashboard-movements-grid colgroup,
+  .dashboard-movements-grid thead {
+    display: none;
+  }
+
+  .dashboard-movements-grid tbody {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dashboard-movements-grid tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.1rem 0.65rem;
+    align-items: baseline;
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dashboard-movements-grid td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .dashboard-movements-grid .workbook-col-sticky-left {
+    position: static;
+  }
+
+  .dashboard-movements-grid td[data-label="#"],
+  .dashboard-movements-grid td:has(input[value=""]),
+  .dashboard-movements-grid td[data-label="Conto"]:has(input[value="—"]) {
+    display: none;
+  }
+
+  .dashboard-movements-grid td[data-label="Data"] {
+    grid-column: 1;
+  }
+
+  .dashboard-movements-grid td[data-label="Tipo"] {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .dashboard-movements-grid td[data-label="Tipo"] .excel-cell {
+    width: auto;
+    text-align: right;
+    font-weight: 700;
+  }
+
+  .dashboard-movements-grid td[data-label="Importo"],
+  .dashboard-movements-grid td[data-label="Descrizione"],
+  .dashboard-movements-grid td[data-label="Conto"] {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-movements-grid .excel-cell {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.92rem;
+    line-height: 1.35;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .dashboard-movements-grid td[data-label="Importo"] .excel-cell {
+    font-size: 1.05rem;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .dashboard-movements-grid td[data-label="Descrizione"] .excel-cell {
+    font-weight: 600;
+    color: var(--text-heading);
+  }
+
+  .dashboard-movements-grid td[data-label="Conto"] .excel-cell {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .dashboard-movements-grid tr.workbook-row-totals {
+    background: #f8fafc;
+  }
 }
