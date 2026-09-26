@@ -456,3 +456,15 @@ def toggle_invoice_ignore(
   if not inv:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
   return inv
+
+
+@router.post("/{invoice_id}/bolla-verified", response_model=InvoiceRead)
+def toggle_invoice_bolla_verified(
+  invoice_id: int,
+  verified: bool = Query(True, description="True = bolla verificata, False = togli spunta"),
+  db: Session = Depends(get_db),
+):
+  inv = invoice_service.set_invoice_bolla_verified(db, invoice_id, verified=verified)
+  if not inv:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
+  return inv

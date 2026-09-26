@@ -49,6 +49,7 @@ SAFE_MIGRATIONS=(
   20260812_electronic_invoices.sql
   20260812_sdi_electronic_invoice_link.sql
   20260816_pos_receipts.sql
+  20260926_invoices_bolla_verified.sql
 )
 
 log "Migrazioni SQL su database $DB_NAME"

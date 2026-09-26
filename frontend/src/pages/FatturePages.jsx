@@ -28,6 +28,7 @@ import {
   postSdiReceiveXml,
   runAdeAgentSync,
   setInvoiceIgnored,
+  setInvoiceBollaVerified,
   updateAdeFisconlineCredentials,
   fetchIssuedInvoices,
   uploadIssuedInvoice,
@@ -93,7 +94,7 @@ const DA_REGISTRARE_COLUMNS = [
   { id: 'imponibile', label: 'Imponibile', width: 12, fluid: true, numeric: true },
   { id: 'vat_amount', label: 'IVA', width: 10, fluid: true, numeric: true },
   { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true, emphasis: true },
-  { id: 'due_date', label: 'Scadenza', width: 11, fluid: true },
+  { id: 'bolla_d', label: 'Bolla d.', width: 10, fluid: true },
   { id: 'payment_status', label: 'Stato', width: 10, fluid: true },
 ]
 
@@ -1434,6 +1435,28 @@ export function FattureDaRegistrarePage() {
   const [appliedSupplier, setAppliedSupplier] = useState('')
   const [appliedDateFrom, setAppliedDateFrom] = useState('')
   const [appliedDateTo, setAppliedDateTo] = useState('')
+  const [bollaBusyId, setBollaBusyId] = useState(null)
+
+  async function toggleBollaVerified(row) {
+    if (!row?.id || bollaBusyId != null) return
+    const next = !Boolean(row.bolla_verified)
+    setBollaBusyId(row.id)
+    setError('')
+    try {
+      const updated = await setInvoiceBollaVerified(row.id, next)
+      setInvoices((prev) =>
+        (prev || []).map((inv) =>
+          Number(inv.id) === Number(row.id)
+            ? { ...inv, bolla_verified: Boolean(updated?.bolla_verified ?? next) }
+            : inv,
+        ),
+      )
+    } catch (err) {
+      setError(err?.message || 'Impossibile aggiornare la spunta bolla')
+    } finally {
+      setBollaBusyId(null)
+    }
+  }
 
   function changeScopeMode(next) {
     setScopeMode(next)
@@ -1581,11 +1604,42 @@ export function FattureDaRegistrarePage() {
           rows={scopeReady ? filteredInvoices : []}
           rowKey={(row) => row.id}
           cellValue={(row, col) => {
-            if (col.id === 'invoice_date' || col.id === 'due_date') return formatDate(row[col.id])
+            if (col.id === 'invoice_date') return formatDate(row[col.id])
+            if (col.id === 'bolla_d') return row.bolla_verified ? '✔ Verificato' : '○'
             if (col.id === 'imponibile' || col.id === 'vat_amount' || col.id === 'total') return eur(row[col.id])
             if (col.id === 'payment_status') return paymentStatusText(row.payment_status, row.ignored)
             return row[col.id] || '—'
           }}
+          renderCell={(row, col) => {
+            if (col.id !== 'bolla_d') return null
+            const verified = Boolean(row.bolla_verified)
+            const busy = Number(bollaBusyId) === Number(row.id)
+            return (
+              <button
+                type="button"
+                className={[
+                  'excel-cell',
+                  'pagamenti-cell-readonly',
+                  'fatture-bolla-check',
+                  verified ? 'fatture-bolla-check--on' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                disabled={busy || loading}
+                title={verified ? 'Bolla verificata — clic per togliere' : 'Clic per segnare bolla verificata'}
+                aria-pressed={verified}
+                aria-label={verified ? 'Bolla verificata' : 'Segna bolla verificata'}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  void toggleBollaVerified(row)
+                }}
+              >
+                {busy ? '…' : verified ? '✔' : '○'}
+              </button>
+            )
+          }}
+          getRowClassName={(row) => (row.bolla_verified ? 'fatture-row-bolla-ok' : '')}
           totals={
             filteredInvoices.length
               ? {

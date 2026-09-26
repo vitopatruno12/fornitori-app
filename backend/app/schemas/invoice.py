@@ -17,6 +17,7 @@ class InvoiceBase(BaseModel):
   amount_paid: Decimal = Decimal("0")
   cash_entry_id: Optional[int] = None
   ignored: bool = False
+  bolla_verified: bool = False
 
 
 class InvoiceCreate(InvoiceBase):

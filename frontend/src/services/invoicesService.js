@@ -73,6 +73,17 @@ export async function setInvoiceIgnored(id, ignored) {
   return response.json()
 }
 
+export async function setInvoiceBollaVerified(id, verified) {
+  const response = await fetch(
+    apiUrl(`/invoices/${id}/bolla-verified?verified=${verified ? 'true' : 'false'}`),
+    { method: 'POST' },
+  )
+  if (!response.ok) {
+    throw new Error('Errore aggiornamento spunta bolla')
+  }
+  return response.json()
+}
+
 export function getInvoicesExportUrl(supplierId) {
   const params = new URLSearchParams()
   if (supplierId) params.append('supplier_id', String(supplierId))

@@ -262,6 +262,7 @@ async def create_invoice(
     amount_paid=amount_paid,
     cash_entry_id=payload.get("cash_entry_id"),
     ignored=bool(payload.get("ignored") or False),
+    bolla_verified=bool(payload.get("bolla_verified") or False),
     is_paid=False,
   )
   sync_invoice_paid_flag(invoice)
@@ -363,6 +364,16 @@ def set_invoice_ignored(db: Session, invoice_id: int, ignored: bool) -> Optional
   if not inv:
     return None
   inv.ignored = bool(ignored)
+  db.commit()
+  db.refresh(inv)
+  return inv
+
+
+def set_invoice_bolla_verified(db: Session, invoice_id: int, verified: bool) -> Optional[Invoice]:
+  inv = get_invoice(db, invoice_id)
+  if not inv:
+    return None
+  inv.bolla_verified = bool(verified)
   db.commit()
   db.refresh(inv)
   return inv

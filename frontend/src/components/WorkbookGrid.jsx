@@ -28,6 +28,7 @@ export default function WorkbookGrid({
   getRowId,
   getTotalsCellClassName,
   actionsColWidth = '9.5rem',
+  renderCell,
 }) {
   const showTotals = totals != null && typeof totalsLabel === 'function' && rows.length > 0
   const hasActions = Boolean(actionsHeader && typeof renderActions === 'function')
@@ -120,6 +121,10 @@ export default function WorkbookGrid({
                       tone,
                     ].filter(Boolean).join(' ')
                     const cellValueText = cellValue(row, col, { rowIndex })
+                    const customCell =
+                      typeof renderCell === 'function'
+                        ? renderCell(row, col, { rowIndex, value: cellValueText })
+                        : null
                     const multilineRows = col.multiline
                       ? Math.min(10, Math.max(2, String(cellValueText).split('\n').length))
                       : undefined
@@ -129,7 +134,9 @@ export default function WorkbookGrid({
                         data-label={col.label}
                         className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
                       >
-                        {col.multiline ? (
+                        {customCell != null ? (
+                          customCell
+                        ) : col.multiline ? (
                           <textarea
                             className={cellClasses}
                             value={cellValueText}
