@@ -34,6 +34,8 @@ import {
 const DASHBOARD_CACHE_PATH = '/dashboard/summary'
 const HOME_CASSA_LOCALE_STORAGE_KEY = 'homeSaldoCassaLocale'
 const HOME_CASSA_LOCALE_TUTTI = 'tutti'
+const HOME_SOCIETA_STORAGE_KEY = 'homeKpiSocieta'
+const HOME_SOCIETA_TUTTE = 'tutte'
 
 /** Locali mostrati nel KPI Saldo cassa (slug Prima Nota → etichetta Home). */
 const HOME_CASSA_LOCALI = [
@@ -41,6 +43,15 @@ const HOME_CASSA_LOCALI = [
   { id: 'via_abba', label: 'Mani_In_Pasta_Abba' },
   { id: 'via_zanardelli', label: 'Mani_in_pasta_Z.delli' },
   { id: 'via_lattea', label: 'La Via Lattea Registro' },
+]
+
+/** Società per Saldo banca / Entrate / Uscite del mese. */
+const HOME_SOCIETA = [
+  { id: 'mediazione_a', label: 'Mediazione A' },
+  { id: 'mediazione_z', label: 'Mediazione Z' },
+  { id: 'via_lattea', label: 'Via Lattea' },
+  { id: 'risacca', label: 'Risacca' },
+  { id: 'pg', label: 'PG' },
 ]
 
 function readStoredCassaLocale() {
@@ -54,6 +65,18 @@ function readStoredCassaLocale() {
   }
   // Default Risacca: il saldo storico globale nasce da movimenti risacca / senza activity.
   return 'risacca'
+}
+
+function readStoredSocieta() {
+  try {
+    const raw = sessionStorage.getItem(HOME_SOCIETA_STORAGE_KEY)
+    if (!raw) return HOME_SOCIETA_TUTTE
+    if (raw === HOME_SOCIETA_TUTTE) return HOME_SOCIETA_TUTTE
+    if (HOME_SOCIETA.some((s) => s.id === raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  return HOME_SOCIETA_TUTTE
 }
 
 function formatCachedAt(ts) {
@@ -196,6 +219,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   const [windowMonths, setWindowMonths] = useState('6')
   const [analisiSnap, setAnalisiSnap] = useState(null)
   const [cassaLocale, setCassaLocale] = useState(readStoredCassaLocale)
+  const [societaKpi, setSocietaKpi] = useState(readStoredSocieta)
 
   const saldiCassaLocali = useMemo(() => {
     const fromApi = Array.isArray(data?.saldi_cassa_locali) ? data.saldi_cassa_locali : []
@@ -210,12 +234,49 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     })
   }, [data])
 
+  const kpiPerSocieta = useMemo(() => {
+    const fromApi = Array.isArray(data?.kpi_per_societa) ? data.kpi_per_societa : []
+    const byId = new Map(fromApi.map((row) => [String(row.company || '').toLowerCase(), row]))
+    return HOME_SOCIETA.map((soc) => {
+      const hit = byId.get(soc.id)
+      return {
+        id: soc.id,
+        label: hit?.label || soc.label,
+        saldo_banca: hit?.saldo_banca != null ? Number(hit.saldo_banca) : 0,
+        entrate_mese: hit?.entrate_mese != null ? Number(hit.entrate_mese) : 0,
+        uscite_mese: hit?.uscite_mese != null ? Number(hit.uscite_mese) : 0,
+      }
+    })
+  }, [data])
+
   const saldoCassaDisplayed = useMemo(() => {
     if (!data) return null
     if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) return data.saldo_cassa
     const hit = saldiCassaLocali.find((l) => l.id === cassaLocale)
     return hit?.saldo != null ? hit.saldo : data.saldo_cassa
   }, [data, cassaLocale, saldiCassaLocali])
+
+  const societaKpiDisplayed = useMemo(() => {
+    if (!data) {
+      return { saldo_banca: null, entrate_mese: null, uscite_mese: null, hint: '' }
+    }
+    if (societaKpi === HOME_SOCIETA_TUTTE) {
+      return {
+        saldo_banca: data.saldo_banca,
+        entrate_mese: data.entrate_mese,
+        uscite_mese: data.uscite_mese,
+        hint: 'Totale tutte le società',
+      }
+    }
+    const hit = kpiPerSocieta.find((s) => s.id === societaKpi)
+    const label = hit?.label || HOME_SOCIETA.find((s) => s.id === societaKpi)?.label || societaKpi
+    return {
+      saldo_banca: hit?.saldo_banca ?? 0,
+      entrate_mese: hit?.entrate_mese ?? 0,
+      uscite_mese: hit?.uscite_mese ?? 0,
+      hint: `Società · ${label}`,
+    }
+  }, [data, societaKpi, kpiPerSocieta])
 
   const cassaLocaleHint = useMemo(() => {
     if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) {
@@ -232,6 +293,36 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     } catch {
       /* ignore */
     }
+  }
+
+  function onSocietaKpiChange(next) {
+    setSocietaKpi(next)
+    try {
+      sessionStorage.setItem(HOME_SOCIETA_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function SocietaSelect({ id }) {
+    return (
+      <label className="dashboard-kpi-locale-label" htmlFor={id}>
+        <span className="sr-only">Società</span>
+        <select
+          id={id}
+          className="dashboard-kpi-locale-select"
+          value={societaKpi}
+          onChange={(e) => onSocietaKpiChange(e.target.value)}
+        >
+          <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
+          {HOME_SOCIETA.map((soc) => (
+            <option key={soc.id} value={soc.id}>
+              {soc.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
   }
 
   useEffect(() => {
@@ -412,17 +503,28 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               <div className="dashboard-kpi-hint">{cassaLocaleHint}</div>
             </div>
             <div className="dashboard-kpi dashboard-kpi--secondary">
-              <div className="dashboard-kpi-label">Saldo banca</div>
-              <div className="dashboard-kpi-value">{eur(data.saldo_banca)}</div>
-              <div className="dashboard-kpi-hint">Conti con banca, bonifico, IBAN, ecc.</div>
+              <div className="dashboard-kpi-label-row">
+                <div className="dashboard-kpi-label">Saldo banca</div>
+                <SocietaSelect id="home-saldo-banca-societa" />
+              </div>
+              <div className="dashboard-kpi-value">{eur(societaKpiDisplayed.saldo_banca)}</div>
+              <div className="dashboard-kpi-hint">{societaKpiDisplayed.hint || 'Conti Enable Banking per società'}</div>
             </div>
             <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Entrate del mese</div>
-              <div className="dashboard-kpi-value dashboard-kpi-value--pos">{eur(data.entrate_mese)}</div>
+              <div className="dashboard-kpi-label-row">
+                <div className="dashboard-kpi-label">Entrate del mese</div>
+                <SocietaSelect id="home-entrate-mese-societa" />
+              </div>
+              <div className="dashboard-kpi-value dashboard-kpi-value--pos">{eur(societaKpiDisplayed.entrate_mese)}</div>
+              <div className="dashboard-kpi-hint">{societaKpiDisplayed.hint}</div>
             </div>
             <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Uscite del mese</div>
-              <div className="dashboard-kpi-value dashboard-kpi-value--neg">{eur(data.uscite_mese)}</div>
+              <div className="dashboard-kpi-label-row">
+                <div className="dashboard-kpi-label">Uscite del mese</div>
+                <SocietaSelect id="home-uscite-mese-societa" />
+              </div>
+              <div className="dashboard-kpi-value dashboard-kpi-value--neg">{eur(societaKpiDisplayed.uscite_mese)}</div>
+              <div className="dashboard-kpi-hint">{societaKpiDisplayed.hint}</div>
             </div>
             <div className="dashboard-kpi dashboard-kpi--warn">
               <div className="dashboard-kpi-label">Fatture da pagare</div>

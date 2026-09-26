@@ -69,6 +69,16 @@ class DashboardLocaleSaldo(BaseModel):
     saldo: Decimal
 
 
+class DashboardCompanyKpi(BaseModel):
+    """KPI Home divisi per società (banca + flussi mese Prima Nota)."""
+
+    company: str
+    label: str
+    saldo_banca: Decimal
+    entrate_mese: Decimal
+    uscite_mese: Decimal
+
+
 class DashboardSummary(BaseModel):
     month_label: str
     saldo_cassa: Decimal
@@ -89,3 +99,4 @@ class DashboardSummary(BaseModel):
     andamento_spese_6_mesi: List[DashboardBreakdownItem]
     ordini_consegna_in_ritardo: List[DashboardPendingOrderSnippet] = []
     saldi_cassa_locali: List[DashboardLocaleSaldo] = []
+    kpi_per_societa: List[DashboardCompanyKpi] = []

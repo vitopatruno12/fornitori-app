@@ -14,6 +14,7 @@ from ..models.supplier import Supplier
 from ..schemas.dashboard import (
     DashboardBreakdownItem,
     DashboardCashMovement,
+    DashboardCompanyKpi,
     DashboardDeliveryRow,
     DashboardInvoiceSnippet,
     DashboardLocaleSaldo,
@@ -32,6 +33,15 @@ HOME_CASSA_LOCALI = (
     ("via_abba", "Mani_In_Pasta_Abba"),
     ("via_zanardelli", "Mani_in_pasta_Z.delli"),
     ("via_lattea", "La Via Lattea Registro"),
+)
+
+# Società SDI → attività Prima Nota + etichetta Home.
+HOME_SOCIETA = (
+    ("mediazione_a", "Mediazione A", ("via_abba",)),
+    ("mediazione_z", "Mediazione Z", ("via_zanardelli",)),
+    ("via_lattea", "Via Lattea", ("via_lattea",)),
+    ("risacca", "Risacca", ("risacca",)),
+    ("pg", "PG", ("pg",)),
 )
 
 
@@ -120,31 +130,63 @@ def _month_bounds(now: datetime) -> Tuple[datetime, datetime, str]:
     return start, end, label
 
 
-def _month_entrate_uscite(db: Session, start: datetime, end: datetime) -> Tuple[Decimal, Decimal]:
-    ent = (
-        db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(
-            _fiscale_filter(),
-            CashEntry.type == "entrata",
-            CashEntry.entry_date >= start,
-            CashEntry.entry_date <= end,
-        )
-        .scalar()
+def _month_entrate_uscite(
+  db: Session,
+  start: datetime,
+  end: datetime,
+  *,
+  activities: Optional[Tuple[str, ...]] = None,
+) -> Tuple[Decimal, Decimal]:
+    ent_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+        _fiscale_filter(),
+        CashEntry.type == "entrata",
+        CashEntry.entry_date >= start,
+        CashEntry.entry_date <= end,
     )
-    usc = (
-        db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(
-            _fiscale_filter(),
-            CashEntry.type == "uscita",
-            CashEntry.entry_date >= start,
-            CashEntry.entry_date <= end,
-        )
-        .scalar()
+    usc_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+        _fiscale_filter(),
+        CashEntry.type == "uscita",
+        CashEntry.entry_date >= start,
+        CashEntry.entry_date <= end,
     )
+    if activities:
+        act_clause = or_(*[_activity_filter(a) for a in activities])
+        ent_q = ent_q.filter(act_clause)
+        usc_q = usc_q.filter(act_clause)
+    ent = ent_q.scalar()
+    usc = usc_q.scalar()
     return (
         Decimal(str(ent or 0)).quantize(Decimal("0.01")),
         Decimal(str(usc or 0)).quantize(Decimal("0.01")),
     )
+
+
+def _saldo_banca_per_company(db: Session, company: Optional[str] = None) -> Decimal:
+    """Saldo disponibile conti Enable Banking / Atlas, filtrabile per società."""
+    from ..models.bank_account import BankAccount
+
+    q = db.query(func.coalesce(func.sum(BankAccount.saldo_disponibile), 0)).filter(
+        BankAccount.is_active.is_(True),
+    )
+    if company:
+        q = q.filter(func.lower(func.coalesce(BankAccount.company, "")) == company.lower())
+    return Decimal(str(q.scalar() or 0)).quantize(Decimal("0.01"))
+
+
+def _kpi_per_societa(db: Session, start: datetime, end: datetime) -> List[DashboardCompanyKpi]:
+    rows: List[DashboardCompanyKpi] = []
+    for company_id, label, activities in HOME_SOCIETA:
+        ent, usc = _month_entrate_uscite(db, start, end, activities=activities)
+        rows.append(
+            DashboardCompanyKpi(
+                company=company_id,
+                label=label,
+                saldo_banca=_saldo_banca_per_company(db, company_id),
+                entrate_mese=ent,
+                uscite_mese=usc,
+            )
+        )
+    return rows
 
 
 def _iter_months_back(now: datetime, count: int) -> List[Tuple[int, int]]:
@@ -184,9 +226,12 @@ def get_summary(db: Session) -> DashboardSummary:
     start_m, end_m, month_label = _month_bounds(now)
 
     saldo_cassa = _saldo_bucket(db, banca=False)
-    saldo_banca = _saldo_bucket(db, banca=True)
+    # Preferisci saldi conti banca reali (Enable Banking); fallback Prima Nota «banca»
+    saldo_banca_conti = _saldo_banca_per_company(db)
+    saldo_banca = saldo_banca_conti if saldo_banca_conti != 0 else _saldo_bucket(db, banca=True)
     saldi_cassa_locali = _saldi_cassa_per_locale(db)
     entrate_mese, uscite_mese = _month_entrate_uscite(db, start_m, end_m)
+    kpi_per_societa = _kpi_per_societa(db, start_m, end_m)
 
     all_inv = list_invoices(db)
     da_pagare_residuo = Decimal("0")
@@ -423,4 +468,5 @@ def get_summary(db: Session) -> DashboardSummary:
         andamento_spese_6_mesi=andamento_spese_6_mesi,
         ordini_consegna_in_ritardo=ordini_ritardo,
         saldi_cassa_locali=saldi_cassa_locali,
+        kpi_per_societa=kpi_per_societa,
     )
