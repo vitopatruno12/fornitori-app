@@ -79,6 +79,17 @@ class DashboardCompanyKpi(BaseModel):
     uscite_mese: Decimal
 
 
+class DashboardCompanyCharts(BaseModel):
+    """Serie grafici Home filtrate per società (attività Prima Nota)."""
+
+    company: str
+    label: str
+    flussi_mensili: List[DashboardMonthlyFlow]
+    costi_per_categoria: List[DashboardBreakdownItem]
+    costi_per_fornitore: List[DashboardBreakdownItem]
+    andamento_spese_6_mesi: List[DashboardBreakdownItem]
+
+
 class DashboardSummary(BaseModel):
     month_label: str
     saldo_cassa: Decimal
@@ -100,3 +111,4 @@ class DashboardSummary(BaseModel):
     ordini_consegna_in_ritardo: List[DashboardPendingOrderSnippet] = []
     saldi_cassa_locali: List[DashboardLocaleSaldo] = []
     kpi_per_societa: List[DashboardCompanyKpi] = []
+    grafici_per_societa: List[DashboardCompanyCharts] = []

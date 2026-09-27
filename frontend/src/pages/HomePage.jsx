@@ -380,16 +380,50 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     }
   }, [online, operatorMode])
 
+  const chartsBundle = useMemo(() => {
+    if (!data) {
+      return { flussi: [], costiCategoria: [], costiFornitore: [], label: 'Tutte le società' }
+    }
+    if (societaKpi === HOME_SOCIETA_TUTTE) {
+      return {
+        flussi: data.flussi_mensili || [],
+        costiCategoria: data.costi_per_categoria || [],
+        costiFornitore: data.costi_per_fornitore || [],
+        label: 'Tutte le società',
+      }
+    }
+    const fromApi = Array.isArray(data.grafici_per_societa) ? data.grafici_per_societa : []
+    const hit = fromApi.find((row) => String(row.company || '').toLowerCase() === societaKpi)
+    const fallbackLabel = HOME_SOCIETA.find((s) => s.id === societaKpi)?.label || societaKpi
+    return {
+      flussi: hit?.flussi_mensili || [],
+      costiCategoria: hit?.costi_per_categoria || [],
+      costiFornitore: hit?.costi_per_fornitore || [],
+      label: hit?.label || fallbackLabel,
+    }
+  }, [data, societaKpi])
+
   const monthlyRows = useMemo(() => {
-    const all = data?.flussi_mensili || []
+    const all = chartsBundle.flussi || []
     const n = Number(windowMonths) || 6
     return all.slice(-n)
-  }, [data, windowMonths])
+  }, [chartsBundle, windowMonths])
 
   const spendTrendRows = useMemo(() => {
     return monthlyRows.map((r) => ({ label: r.month_label, monthKey: r.month_key, amount: r.uscite }))
   }, [monthlyRows])
 
+  const chartActivity = useMemo(() => {
+    if (societaKpi === HOME_SOCIETA_TUTTE) return ''
+    const map = {
+      mediazione_a: 'via_abba',
+      mediazione_z: 'via_zanardelli',
+      via_lattea: 'via_lattea',
+      risacca: 'risacca',
+      pg: 'pg',
+    }
+    return map[societaKpi] || ''
+  }, [societaKpi])
   const pendingOrders = data?.ordini_consegna_in_ritardo || []
   const latestMovements = data?.ultimi_movimenti || []
   const recentDeliveries = data?.consegne_recenti || []
@@ -424,7 +458,15 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   function openPrimaNotaWithFilter(monthKey, movementKind = 'all', search = '') {
     if (!monthKey && !operatorMode) return
     if (monthKey) {
-      sessionStorage.setItem('primaNotaDashboardFilter', JSON.stringify({ monthKey, movementKind, search }))
+      sessionStorage.setItem(
+        'primaNotaDashboardFilter',
+        JSON.stringify({
+          monthKey,
+          movementKind,
+          search,
+          ...(chartActivity ? { activity: chartActivity } : {}),
+        }),
+      )
     }
     if (operatorMode) {
       onOperatorNavigate?.('prima-nota')
@@ -622,15 +664,43 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           )}
 
           <section className="card" style={{ marginBottom: '1rem' }}>
-            <div className="ui-toolbar-one" style={{ marginBottom: 0 }}>
-              <div className="form-group">
-                <label>Periodo grafici</label>
-                <select className="form-control" value={windowMonths} onChange={(e) => setWindowMonths(e.target.value)} style={{ minWidth: 140 }}>
+            <div className="ui-toolbar-one" style={{ marginBottom: 0, display: 'flex', flexWrap: 'wrap', gap: '0.75rem 1.25rem', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="home-charts-societa">Società grafici</label>
+                <select
+                  id="home-charts-societa"
+                  className="form-control"
+                  value={societaKpi}
+                  onChange={(e) => onSocietaKpiChange(e.target.value)}
+                  style={{ minWidth: 180 }}
+                >
+                  <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
+                  {HOME_SOCIETA.map((soc) => (
+                    <option key={soc.id} value={soc.id}>
+                      {soc.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="home-charts-periodo">Periodo grafici</label>
+                <select
+                  id="home-charts-periodo"
+                  className="form-control"
+                  value={windowMonths}
+                  onChange={(e) => setWindowMonths(e.target.value)}
+                  style={{ minWidth: 140 }}
+                >
                   <option value="3">Ultimi 3 mesi</option>
                   <option value="6">Ultimi 6 mesi</option>
                   <option value="12">Ultimi 12 mesi</option>
                 </select>
               </div>
+              {societaKpi !== HOME_SOCIETA_TUTTE ? (
+                <p className="dashboard-hint" style={{ margin: 0 }}>
+                  Grafici · {chartsBundle.label}
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -653,14 +723,14 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
             <section className="card dashboard-panel">
               <h2 className="page-subheader">Costi per categoria</h2>
               <BreakdownBars
-                rows={data.costi_per_categoria || []}
+                rows={chartsBundle.costiCategoria}
                 onSelect={(r) => openPrimaNotaWithFilter(latestMonthKey, 'uscita', r.label)}
               />
             </section>
             <section className="card dashboard-panel">
               <h2 className="page-subheader">Costi per fornitore</h2>
               <BreakdownBars
-                rows={data.costi_per_fornitore || []}
+                rows={chartsBundle.costiFornitore}
                 onSelect={operatorMode ? undefined : (r) => openInvoicesWithFilter(latestMonthKey, r.label)}
               />
             </section>

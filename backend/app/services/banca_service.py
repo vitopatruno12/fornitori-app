@@ -157,6 +157,7 @@ def list_accounts(db: Session) -> List[Dict[str, Any]]:
   ensure_default_account(db)
   ensure_canonical_bank_accounts(db)
   ensure_known_account_companies(db)
+  deactivate_unlinked_duplicate_accounts(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   return [_account_out(r) for r in rows]
 
@@ -164,10 +165,16 @@ def list_accounts(db: Session) -> List[Dict[str, Any]]:
 def create_account(db: Session, payload: Dict[str, Any]) -> Dict[str, Any]:
   company = (payload.get("company") or "").strip() or None
   ledger_code = (payload.get("ledger_code") or "1100").strip() or "1100"
+  iban_n = normalize_iban(payload.get("iban"))
+  if iban_n:
+    for existing in db.query(BankAccount).order_by(BankAccount.id.asc()).all():
+      if normalize_iban(existing.iban) == iban_n:
+        # Non ricreare seed già presenti (anche se disattivati come duplicati).
+        return _account_out(existing)
   row = BankAccount(
     bank_name=(payload.get("bank_name") or "Banca").strip() or "Banca",
     account_name=(payload.get("account_name") or "Conto corrente").strip() or "Conto corrente",
-    iban=(payload.get("iban") or "").strip() or None,
+    iban=iban_n or ((payload.get("iban") or "").strip() or None),
     company=company,
     ledger_code=ledger_code,
     saldo_disponibile=_dec(payload.get("saldo_disponibile")),
@@ -302,7 +309,8 @@ _CANONICAL_BANK_SEEDS: List[Dict[str, Any]] = [
 
 def ensure_canonical_bank_accounts(db: Session) -> int:
   """Crea i conti canonici (Via Lattea BPPB/BCC, Mediazione, Risacca) se l'IBAN non esiste."""
-  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).all()
+  # Include anche is_active=False: altrimenti un seed disattivato (duplicato) verrebbe ricreato.
+  rows = db.query(BankAccount).all()
   existing = {normalize_iban(r.iban) for r in rows if r.iban}
   created = 0
   for seed in _CANONICAL_BANK_SEEDS:
@@ -330,11 +338,72 @@ def ensure_canonical_bank_accounts(db: Session) -> int:
   return created
 
 
+def _bank_family_key(row: BankAccount) -> str:
+  bank = f"{row.bank_name or ''} {row.account_name or ''} {row.notes or ''}".lower()
+  iban = normalize_iban(row.iban)
+  if (
+    "bppb" in bank
+    or "puglia" in bank
+    or "basilicata" in bank
+    or iban in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+  ):
+    return "bppb"
+  if (
+    "bcc" in bank
+    or "terra d" in bank
+    or "bellegra" in bank
+    or iban in {"IT37M0844516000000000967252", "IT06B0844516000000000972450"}
+  ):
+    return "bcc"
+  if "intesa" in bank or "sanpaolo" in bank or iban == "IT88N0306979822100000008926":
+    return "intesa"
+  if "unicredit" in bank or iban == "IT48Q0200816005000105294153":
+    return "unicredit"
+  return f"iban:{iban}" if iban else f"id:{row.id}"
+
+
+def deactivate_unlinked_duplicate_accounts(db: Session) -> int:
+  """Disattiva seed non collegati a saldo 0 se esiste già un conto collegato stessa società+banca."""
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
+  connected_keys: set[str] = set()
+  connected_ibans: set[str] = set()
+  for row in rows:
+    connected = bool(getattr(row, "eb_account_uid", None)) or (row.connection_status or "") == "connected"
+    if not connected:
+      continue
+    company = (row.company or "").strip().lower() or "condiviso"
+    connected_keys.add(f"{company}|{_bank_family_key(row)}")
+    iban = normalize_iban(row.iban)
+    if iban:
+      connected_ibans.add(iban)
+
+  deactivated = 0
+  for row in rows:
+    connected = bool(getattr(row, "eb_account_uid", None)) or (row.connection_status or "") == "connected"
+    if connected:
+      continue
+    saldo = abs(_dec(row.saldo_disponibile))
+    if saldo > Decimal("0.009"):
+      continue
+    company = (row.company or "").strip().lower() or "condiviso"
+    iban = normalize_iban(row.iban)
+    twin = (iban and iban in connected_ibans) or (f"{company}|{_bank_family_key(row)}" in connected_keys)
+    if not twin:
+      continue
+    row.is_active = False
+    row.connection_status = "disconnected"
+    deactivated += 1
+  if deactivated:
+    db.commit()
+  return deactivated
+
+
 def accounts_for_company(db: Session, company: Optional[str] = None) -> List[Dict[str, Any]]:
   """Conti per società: IBAN/tag noti — niente fallback su tutti i conti condivisi."""
   ensure_default_account(db)
   ensure_canonical_bank_accounts(db)
   ensure_known_account_companies(db)
+  deactivate_unlinked_duplicate_accounts(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   company_id = (company or "").strip()
   if not company_id:

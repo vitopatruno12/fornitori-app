@@ -171,6 +171,39 @@ function bankAccountIbanKey(account) {
   return String(account?.iban || '').replace(/\s/g, '').toUpperCase()
 }
 
+/** Famiglia banca (BPPB / BCC / Intesa / …) per deduplicare seed scollegati. */
+function bankFamilyKey(account) {
+  const bank = `${account?.bank_name || ''} ${account?.account_name || ''} ${account?.notes || ''}`.toLowerCase()
+  const iban = bankAccountIbanKey(account)
+  if (
+    bank.includes('bppb')
+    || bank.includes('puglia')
+    || bank.includes('basilicata')
+    || ['IT25D0538516000CC1410004514', 'IT55B0538516000CC1410004512', 'IT25D0538516000CC410004514'].includes(iban)
+  ) {
+    return 'bppb'
+  }
+  if (
+    bank.includes('bcc')
+    || bank.includes("terra d'otranto")
+    || bank.includes('bellegra')
+    || ['IT37M0844516000000000967252', 'IT06B0844516000000000972450'].includes(iban)
+  ) {
+    return 'bcc'
+  }
+  if (bank.includes('intesa') || bank.includes('sanpaolo') || iban === 'IT88N0306979822100000008926') {
+    return 'intesa'
+  }
+  if (bank.includes('unicredit') || iban === 'IT48Q0200816005000105294153') {
+    return 'unicredit'
+  }
+  return iban ? `iban:${iban}` : `id:${account?.id || '?'}`
+}
+
+function isBankAccountConnected(account) {
+  return Boolean(account?.enable_banking_connected || account?.connection_status === 'connected')
+}
+
 /** Stesso IBAN: tieni il conto collegato e nascondi il duplicato scollegato. */
 function preferConnectedDuplicates(list) {
   const byIban = new Map()
@@ -182,11 +215,32 @@ function preferConnectedDuplicates(list) {
       continue
     }
     const previous = byIban.get(key)
-    if (!previous || (account.enable_banking_connected && !previous.enable_banking_connected)) {
+    if (!previous || (isBankAccountConnected(account) && !isBankAccountConnected(previous))) {
       byIban.set(key, account)
     }
   }
   return sortBankAccounts([...byIban.values(), ...withoutIban])
+}
+
+/**
+ * Nasconde seed non collegati a €0 se esiste già un conto collegato
+ * della stessa società e famiglia banca (es. BCC 0,00 con BCC già sync).
+ */
+function visibleBankAccounts(list) {
+  const deduped = preferConnectedDuplicates(list)
+  const connectedKeys = new Set()
+  for (const account of deduped) {
+    if (!isBankAccountConnected(account)) continue
+    const company = String(account?.company || '').trim().toLowerCase() || 'condiviso'
+    connectedKeys.add(`${company}|${bankFamilyKey(account)}`)
+  }
+  return deduped.filter((account) => {
+    if (isBankAccountConnected(account)) return true
+    const saldo = Math.abs(Number(account?.saldo_disponibile) || 0)
+    if (saldo > 0.009) return true
+    const company = String(account?.company || '').trim().toLowerCase() || 'condiviso'
+    return !connectedKeys.has(`${company}|${bankFamilyKey(account)}`)
+  })
 }
 
 /** Etichetta chiara in filtri/elenchi: banca · società · IBAN corto. */
@@ -835,7 +889,7 @@ export function BancaContiPage() {
     setError('')
     try {
       const [res, profile] = await Promise.all([fetchBancaAccounts(), fetchBancaConnectProfile().catch(() => null)])
-      setItems(Array.isArray(res?.items) ? res.items : [])
+      setItems(visibleBankAccounts(Array.isArray(res?.items) ? res.items : []))
       if (profile) setConnectProfile(profile)
     } catch (e) {
       setError(e?.message || 'Errore caricamento conti')
@@ -1180,7 +1234,7 @@ export function BancaContiPage() {
       }
       if (created || oldVl?.id || (viaLattea?.id && String(viaLattea.company || '').toLowerCase() !== 'via_lattea')) {
         const res = await fetchBancaAccounts()
-        list = Array.isArray(res?.items) ? res.items : []
+        list = visibleBankAccounts(Array.isArray(res?.items) ? res.items : [])
         setItems(list)
       }
       return list.filter(isBppbAccount)
@@ -1291,7 +1345,7 @@ export function BancaContiPage() {
       }
       if (created) {
         const res = await fetchBancaAccounts()
-        list = Array.isArray(res?.items) ? res.items : []
+        list = visibleBankAccounts(Array.isArray(res?.items) ? res.items : [])
         setItems(list)
       }
       return list.filter(filterFn)
@@ -1586,7 +1640,7 @@ export function BancaContiPage() {
           tone="bppb"
           kicker="Popolare Puglia e Basilicata"
           title="BPPB"
-          accounts={sortBankAccounts(preferConnectedDuplicates(items.filter(isBppbAccount)))}
+          accounts={visibleBankAccounts(items.filter(isBppbAccount))}
           emptyLabel="Via Lattea / Mediazione (crea al sync)"
           selectedId={bppbSelectedId}
           onSelect={setBppbSelectedId}
@@ -1602,7 +1656,7 @@ export function BancaContiPage() {
           tone="bcc"
           kicker="Terra d'Otranto"
           title="BCC"
-          accounts={sortBankAccounts(preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount)))}
+          accounts={visibleBankAccounts(items.filter(isBccTerraOtrantoAccount))}
           emptyLabel="Via Lattea / Mediazione (crea al sync)"
           selectedId={bccSelectedId}
           onSelect={setBccSelectedId}
@@ -1618,7 +1672,7 @@ export function BancaContiPage() {
           tone="intesa"
           kicker="Intesa Sanpaolo"
           title="Intesa"
-          accounts={preferConnectedDuplicates(items.filter(isIntesaAccount))}
+          accounts={visibleBankAccounts(items.filter(isIntesaAccount))}
           emptyLabel="Risacca (crea al sync)"
           selectedId={intesaSelectedId}
           onSelect={setIntesaSelectedId}
@@ -1634,7 +1688,7 @@ export function BancaContiPage() {
           tone="unicredit"
           kicker="UniCredit"
           title="UniCredit"
-          accounts={preferConnectedDuplicates(items.filter(isUnicreditAccount))}
+          accounts={visibleBankAccounts(items.filter(isUnicreditAccount))}
           emptyLabel="Lecce Foscarini (crea al sync)"
           selectedId={unicreditSelectedId}
           onSelect={setUnicreditSelectedId}
@@ -1891,7 +1945,7 @@ export function BancaMovimentiPage() {
         fetchBancaAccounts(),
       ])
       setItems(Array.isArray(mov?.items) ? mov.items : [])
-      setAccounts(Array.isArray(acc?.items) ? acc.items : [])
+      setAccounts(visibleBankAccounts(Array.isArray(acc?.items) ? acc.items : []))
     } catch (e) {
       setError(e?.message || 'Errore caricamento movimenti')
     } finally {

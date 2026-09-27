@@ -689,6 +689,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         setMovementSearch(String(data.search))
         applied = true
       }
+      if (data?.activity && !operatorMode) {
+        const nextAct = normalizePrimaNotaActivity(String(data.activity), locales)
+        setActiveActivity(nextAct)
+        try {
+          sessionStorage.setItem('primaNotaActivity', nextAct)
+        } catch {
+          // ignore
+        }
+        applied = true
+      }
       setDashboardFilterActive(applied)
       setSuccess('Filtro dashboard applicato')
     } catch {

@@ -14,6 +14,7 @@ from ..models.supplier import Supplier
 from ..schemas.dashboard import (
     DashboardBreakdownItem,
     DashboardCashMovement,
+    DashboardCompanyCharts,
     DashboardCompanyKpi,
     DashboardDeliveryRow,
     DashboardInvoiceSnippet,
@@ -221,6 +222,141 @@ def _month_label_it(year: int, month: int) -> str:
     return f"{months_it[month - 1]} {year}"
 
 
+def _activities_clause(activities: Optional[Tuple[str, ...]]):
+    if not activities:
+        return None
+    return or_(*[_activity_filter(a) for a in activities])
+
+
+def _flussi_mensili(
+    db: Session,
+    now: datetime,
+    *,
+    months: int = 12,
+    activities: Optional[Tuple[str, ...]] = None,
+) -> List[DashboardMonthlyFlow]:
+    month_pairs = _iter_months_back(now, months)
+    month_set = {f"{y:04d}-{m:02d}" for y, m in month_pairs}
+    first_y, first_m = month_pairs[0]
+    min_chart_date = datetime(first_y, first_m, 1, 0, 0, 0, tzinfo=timezone.utc)
+    monthly_rollup: Dict[str, Dict[str, Decimal]] = {
+        key: {"entrate": Decimal("0"), "uscite": Decimal("0")} for key in month_set
+    }
+    yr_expr = extract("year", CashEntry.entry_date)
+    mo_expr = extract("month", CashEntry.entry_date)
+    q = (
+        db.query(yr_expr, mo_expr, CashEntry.type, func.coalesce(func.sum(CashEntry.amount), 0))
+        .filter(
+            _fiscale_filter(),
+            CashEntry.entry_date.isnot(None),
+            CashEntry.entry_date >= min_chart_date,
+        )
+    )
+    act = _activities_clause(activities)
+    if act is not None:
+        q = q.filter(act)
+    cash_monthly = q.group_by(yr_expr, mo_expr, CashEntry.type).all()
+    for yr, mo, typ, tot in cash_monthly:
+        key = f"{int(yr)}-{int(mo):02d}"
+        if key not in monthly_rollup:
+            continue
+        amount = Decimal(str(tot or 0)).quantize(Decimal("0.01"))
+        if typ == "entrata":
+            monthly_rollup[key]["entrate"] += amount
+        elif typ == "uscita":
+            monthly_rollup[key]["uscite"] += amount
+
+    flussi: List[DashboardMonthlyFlow] = []
+    for y, m in month_pairs:
+        key = f"{y:04d}-{m:02d}"
+        vals = monthly_rollup[key]
+        flussi.append(
+            DashboardMonthlyFlow(
+                month_key=key,
+                month_label=_month_label_it(y, m),
+                entrate=vals["entrate"].quantize(Decimal("0.01")),
+                uscite=vals["uscite"].quantize(Decimal("0.01")),
+            )
+        )
+    return flussi
+
+
+def _costi_per_categoria(
+    db: Session,
+    *,
+    activities: Optional[Tuple[str, ...]] = None,
+    limit: int = 8,
+) -> List[DashboardBreakdownItem]:
+    q = (
+        db.query(Category.name, func.coalesce(func.sum(CashEntry.amount), 0))
+        .join(Category, CashEntry.category_id == Category.id)
+        .filter(_fiscale_filter(), CashEntry.type == "uscita")
+    )
+    act = _activities_clause(activities)
+    if act is not None:
+        q = q.filter(act)
+    category_rows = q.group_by(Category.name).order_by(desc(func.sum(CashEntry.amount))).limit(limit).all()
+    return [
+        DashboardBreakdownItem(
+            label=(name or "Senza categoria"),
+            amount=Decimal(str(total or 0)).quantize(Decimal("0.01")),
+        )
+        for name, total in category_rows
+    ]
+
+
+def _costi_per_fornitore(
+    db: Session,
+    *,
+    activities: Optional[Tuple[str, ...]] = None,
+    limit: int = 8,
+) -> List[DashboardBreakdownItem]:
+    q = (
+        db.query(Supplier.name, func.coalesce(func.sum(CashEntry.amount), 0))
+        .join(Supplier, CashEntry.supplier_id == Supplier.id)
+        .filter(_fiscale_filter(), CashEntry.type == "uscita")
+    )
+    act = _activities_clause(activities)
+    if act is not None:
+        q = q.filter(act)
+    supplier_rows = q.group_by(Supplier.name).order_by(desc(func.sum(CashEntry.amount))).limit(limit).all()
+    return [
+        DashboardBreakdownItem(
+            label=(name or "Senza fornitore"),
+            amount=Decimal(str(total or 0)).quantize(Decimal("0.01")),
+        )
+        for name, total in supplier_rows
+    ]
+
+
+def _charts_for_activities(
+    db: Session,
+    now: datetime,
+    *,
+    company: str,
+    label: str,
+    activities: Tuple[str, ...],
+) -> DashboardCompanyCharts:
+    flussi = _flussi_mensili(db, now, months=12, activities=activities)
+    return DashboardCompanyCharts(
+        company=company,
+        label=label,
+        flussi_mensili=flussi,
+        costi_per_categoria=_costi_per_categoria(db, activities=activities),
+        costi_per_fornitore=_costi_per_fornitore(db, activities=activities),
+        andamento_spese_6_mesi=[
+            DashboardBreakdownItem(label=row.month_label, amount=row.uscite) for row in flussi[-6:]
+        ],
+    )
+
+
+def _grafici_per_societa(db: Session, now: datetime) -> List[DashboardCompanyCharts]:
+    return [
+        _charts_for_activities(db, now, company=company_id, label=label, activities=activities)
+        for company_id, label, activities in HOME_SOCIETA
+    ]
+
+
 def get_summary(db: Session) -> DashboardSummary:
     now = datetime.now(timezone.utc)
     start_m, end_m, month_label = _month_bounds(now)
@@ -355,86 +491,14 @@ def get_summary(db: Session) -> DashboardSummary:
     increases.sort(key=lambda x: x.latest_date, reverse=True)
     increases = increases[:12]
 
-    month_pairs = _iter_months_back(now, 12)
-    month_set = {f"{y:04d}-{m:02d}" for y, m in month_pairs}
-    first_y, first_m = month_pairs[0]
-    min_chart_date = datetime(first_y, first_m, 1, 0, 0, 0, tzinfo=timezone.utc)
-    monthly_rollup: Dict[str, Dict[str, Decimal]] = {
-        key: {"entrate": Decimal("0"), "uscite": Decimal("0")} for key in month_set
-    }
-    yr_expr = extract("year", CashEntry.entry_date)
-    mo_expr = extract("month", CashEntry.entry_date)
-    cash_monthly = (
-        db.query(yr_expr, mo_expr, CashEntry.type, func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(
-            _fiscale_filter(),
-            CashEntry.entry_date.isnot(None),
-            CashEntry.entry_date >= min_chart_date,
-        )
-        .group_by(yr_expr, mo_expr, CashEntry.type)
-        .all()
-    )
-    for yr, mo, typ, tot in cash_monthly:
-        key = f"{int(yr)}-{int(mo):02d}"
-        if key not in monthly_rollup:
-            continue
-        amount = Decimal(str(tot or 0)).quantize(Decimal("0.01"))
-        if typ == "entrata":
-            monthly_rollup[key]["entrate"] += amount
-        elif typ == "uscita":
-            monthly_rollup[key]["uscite"] += amount
-
-    flussi_mensili: List[DashboardMonthlyFlow] = []
-    for y, m in month_pairs:
-        key = f"{y:04d}-{m:02d}"
-        vals = monthly_rollup[key]
-        flussi_mensili.append(
-            DashboardMonthlyFlow(
-                month_key=key,
-                month_label=_month_label_it(y, m),
-                entrate=vals["entrate"].quantize(Decimal("0.01")),
-                uscite=vals["uscite"].quantize(Decimal("0.01")),
-            )
-        )
-
-    category_rows = (
-        db.query(Category.name, func.coalesce(func.sum(CashEntry.amount), 0))
-        .join(Category, CashEntry.category_id == Category.id)
-        .filter(_fiscale_filter(), CashEntry.type == "uscita")
-        .group_by(Category.name)
-        .order_by(desc(func.sum(CashEntry.amount)))
-        .limit(8)
-        .all()
-    )
-    costi_per_categoria = [
-        DashboardBreakdownItem(
-            label=(name or "Senza categoria"),
-            amount=Decimal(str(total or 0)).quantize(Decimal("0.01")),
-        )
-        for name, total in category_rows
-    ]
-
-    supplier_rows = (
-        db.query(Supplier.name, func.coalesce(func.sum(CashEntry.amount), 0))
-        .join(Supplier, CashEntry.supplier_id == Supplier.id)
-        .filter(_fiscale_filter(), CashEntry.type == "uscita")
-        .group_by(Supplier.name)
-        .order_by(desc(func.sum(CashEntry.amount)))
-        .limit(8)
-        .all()
-    )
-    costi_per_fornitore = [
-        DashboardBreakdownItem(
-            label=(name or "Senza fornitore"),
-            amount=Decimal(str(total or 0)).quantize(Decimal("0.01")),
-        )
-        for name, total in supplier_rows
-    ]
-
+    flussi_mensili = _flussi_mensili(db, now, months=12)
+    costi_per_categoria = _costi_per_categoria(db)
+    costi_per_fornitore = _costi_per_fornitore(db)
     andamento_spese_6_mesi = [
         DashboardBreakdownItem(label=row.month_label, amount=row.uscite)
         for row in flussi_mensili[-6:]
     ]
+    grafici_per_societa = _grafici_per_societa(db, now)
 
     overdue_orders = supplier_order_service.list_pending_overdue_expected_delivery(db, limit=10)
     ordini_ritardo = [
@@ -469,4 +533,5 @@ def get_summary(db: Session) -> DashboardSummary:
         ordini_consegna_in_ritardo=ordini_ritardo,
         saldi_cassa_locali=saldi_cassa_locali,
         kpi_per_societa=kpi_per_societa,
+        grafici_per_societa=grafici_per_societa,
     )
