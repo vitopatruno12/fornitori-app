@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from ..constants.sdi_companies import (
@@ -268,10 +269,17 @@ def list_sdi_received_invoices(
 ) -> Dict[str, Any]:
   since = datetime.now(timezone.utc) - timedelta(days=days)
   since_date = since.date()
+  # Filtra in SQL: altrimenti .limit(2000) sulle più recenti esclude fatture di inizio anno.
   rows = (
     db.query(SdiInvoice)
-    .order_by(SdiInvoice.created_at.desc(), SdiInvoice.id.desc())
-    .limit(2000)
+    .filter(
+      or_(
+        SdiInvoice.invoice_date >= since_date,
+        and_(SdiInvoice.invoice_date.is_(None), SdiInvoice.created_at >= since),
+      )
+    )
+    .order_by(SdiInvoice.invoice_date.desc().nullslast(), SdiInvoice.id.desc())
+    .limit(8000)
     .all()
   )
   manual = _read_manual_assignments()

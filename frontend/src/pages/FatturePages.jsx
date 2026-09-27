@@ -291,7 +291,7 @@ export function AdeSdiInvoicesPanel({
   dateTo = '',
   refreshKey = 0,
 }) {
-  const [days, setDays] = useState('15')
+  const [days, setDays] = useState('270')
   const [loading, setLoading] = useState(false)
   const [adeBusy, setAdeBusy] = useState(false)
   const [error, setError] = useState('')
@@ -312,7 +312,7 @@ export function AdeSdiInvoicesPanel({
     setError('')
     setSuccess('')
     try {
-      const d = Number(daysOverride || days || 60)
+      const d = Number(daysOverride || days || 270)
       const data = await fetchSdiReceivedInvoices({ days: d, company: companyId || undefined })
       const companies = data?.companies && typeof data.companies === 'object' ? data.companies : {}
       const nextCompanies = {}
@@ -358,7 +358,7 @@ export function AdeSdiInvoicesPanel({
     setError('')
     setSuccess('')
     try {
-      const d = Number(days || 15)
+      const d = Number(days || 270)
       const profileId = adeProfileForCompany(companyId)
       const res = await runAdeAgentSync({
         mode: 'download',
@@ -367,7 +367,9 @@ export function AdeSdiInvoicesPanel({
       })
       setSuccess(
         res?.message
-        || 'Scarico AdE avviato (solo ricevute, periodo breve)…',
+        || (d >= 180
+          ? `Scarico AdE avviato (ricevute, ultimi ${d} giorni)…`
+          : 'Scarico AdE avviato (solo ricevute, periodo breve)…'),
       )
       pushSyncLog({
         ok: true,
@@ -406,7 +408,7 @@ export function AdeSdiInvoicesPanel({
   }
 
   useEffect(() => {
-    if (autoLoad) load(60)
+    if (autoLoad) load(Number(days) || 270)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLoad, companyId])
 
@@ -500,11 +502,23 @@ export function AdeSdiInvoicesPanel({
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
             Ultimi giorni
-            <select className="form-control" value={days} onChange={(e) => setDays(e.target.value)} style={{ minWidth: 100 }}>
-              <option value="7">7</option>
-              <option value="15">15</option>
-              <option value="30">30</option>
-              <option value="60">60</option>
+            <select
+              className="form-control"
+              value={days}
+              onChange={(e) => {
+                const next = e.target.value
+                setDays(next)
+                void load(Number(next) || 270)
+              }}
+              style={{ minWidth: 150 }}
+            >
+              <option value="7">Ultimi 7 giorni</option>
+              <option value="15">Ultimi 15 giorni</option>
+              <option value="30">Ultimi 30 giorni</option>
+              <option value="60">Ultimi 60 giorni</option>
+              <option value="180">Ultimi 180 giorni</option>
+              <option value="270">Da inizio anno</option>
+              <option value="365">Ultimi 365 giorni</option>
             </select>
           </label>
           <button type="button" className="btn btn-secondary" onClick={() => load()} disabled={loading || adeBusy || !companyId}>

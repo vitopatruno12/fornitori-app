@@ -2486,7 +2486,8 @@ class AdePlaywrightClient:
     got = False
     downloaded_ids: List[str] = []
     skip_ids: List[str] = []  # già scaricati + id senza ZIP (non riprovare)
-    max_zips = 6 if risposte_only else 3
+    # Periodo lungo (YTD): scarica più ZIP; le richieste odierne possono essere in coda.
+    max_zips = _env_int("ADE_MAX_RISPOSTE_ZIPS", 12 if risposte_only else 6)
     for attempt in range(attempts):
       if len(downloaded_ids) >= max_zips:
         break
