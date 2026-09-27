@@ -67,6 +67,13 @@ $env:ATLAS_API_BASE = if ($env:ATLAS_API_BASE) { $env:ATLAS_API_BASE } else { "h
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUNBUFFERED = "1"
 $env:ADE_MASS_KINDS = if ($env:ADE_MASS_KINDS) { $env:ADE_MASS_KINDS } else { "ricevute,emesse" }
+# Rinnovo automatico password Fisconline se scaduta / in scadenza (tutte le società)
+$env:ADE_AUTO_ROTATE_PASSWORD = if ($env:ADE_AUTO_ROTATE_PASSWORD) { $env:ADE_AUTO_ROTATE_PASSWORD } else { "1" }
+$env:ADE_AUTO_ROTATE_DAYS = if ($env:ADE_AUTO_ROTATE_DAYS) { $env:ADE_AUTO_ROTATE_DAYS } else { "7" }
+if (-not $env:ADE_PROFILES_PATH) {
+  $defaultProfiles = Join-Path $Backend "uploads\ade\profiles.json"
+  if (Test-Path $defaultProfiles) { $env:ADE_PROFILES_PATH = $defaultProfiles }
+}
 
 Remove-Item Env:ADE_ONLY_PROFILE -ErrorAction SilentlyContinue
 Remove-Item Env:ADE_RISPOSTE_ONLY -ErrorAction SilentlyContinue

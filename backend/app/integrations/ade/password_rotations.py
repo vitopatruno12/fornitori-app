@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import string
 import urllib.error
@@ -101,27 +102,25 @@ def record_rotation(
 
 def generate_fisconline_password(*, old_password: str = "", codice_fiscale: str = "") -> str:
   """
-  Genera password conforme alle regole tipiche Fisconline/AdE:
-  lunghezza 12–14, maiuscole, minuscole, cifre, simbolo; diversa dalla precedente.
+  Genera password conforme alle regole Fisconline/AdE (pagina Cambio Password):
+  8–15 caratteri, solo lettere non accentate e/o numeri (niente simboli).
   """
-  specials = "!@#$%&*?"
   lower = string.ascii_lowercase
   upper = string.ascii_uppercase
   digits = string.digits
-  alphabet = lower + upper + digits + specials
+  alphabet = lower + upper + digits
   old = (old_password or "").strip()
   cf = (codice_fiscale or "").strip().upper()
 
   for _ in range(40):
-    length = secrets.choice((12, 13, 14))
+    length = secrets.choice((10, 11, 12, 13, 14))
     chars = [
       secrets.choice(lower),
       secrets.choice(upper),
       secrets.choice(digits),
-      secrets.choice(specials),
+      secrets.choice(lower),
     ]
     chars.extend(secrets.choice(alphabet) for _ in range(length - 4))
-    # mescola
     for i in range(len(chars) - 1, 0, -1):
       j = secrets.randbelow(i + 1)
       chars[i], chars[j] = chars[j], chars[i]
@@ -130,9 +129,10 @@ def generate_fisconline_password(*, old_password: str = "", codice_fiscale: str 
       continue
     if cf and cf.lower() in pwd.lower():
       continue
+    if not re.fullmatch(r"[A-Za-z0-9]{8,15}", pwd):
+      continue
     return pwd
-  # fallback estremamente improbabile
-  return f"Ad{secrets.token_urlsafe(8)}!1a"
+  return f"Ad{secrets.token_hex(4)}x1"
 
 
 def auto_rotate_enabled() -> bool:

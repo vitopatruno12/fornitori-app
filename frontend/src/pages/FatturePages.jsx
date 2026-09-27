@@ -2796,7 +2796,6 @@ export function FattureLogPage() {
 
 export function FattureImpostazioniPage() {
   const [profiles, setProfiles] = useState([])
-  const [profilesPath, setProfilesPath] = useState('')
   const [rotations, setRotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -2815,7 +2814,6 @@ export function FattureImpostazioniPage() {
       ])
       const items = Array.isArray(res?.items) ? res.items : []
       setProfiles(items)
-      setProfilesPath(String(res?.profiles_path || res?.resolved_path || ''))
       setRotations(Array.isArray(rot?.items) ? rot.items : [])
       setDrafts((prev) => {
         const next = { ...prev }
@@ -2933,7 +2931,7 @@ export function FattureImpostazioniPage() {
   return (
     <FatturePageShell
       title="Impostazioni"
-      lead="Aggiorna password e PIN Fisconline per le società: l’agent AdE le rinnova da solo su Fisconline prima della scadenza e le ricopia qui."
+      lead="L’agent AdE lavora in background per tutte le società: rinnova le password Fisconline prima della scadenza, le ricopia qui, e scarica le fatture (richieste + risposte)."
       heroExtra={agentMirror}
     >
       {loading && <AnalisiLoadingBar active label="Caricamento impostazioni" variant="subtle" />}
@@ -2944,8 +2942,8 @@ export function FattureImpostazioniPage() {
         <h2 className="fatture-panel-title">Credenziali Fisconline (Agenzia Entrate)</h2>
         <p className="fatture-note" style={{ marginTop: 0 }}>
           L’agent cambia automaticamente la password sul sito Fisconline quando sta per scadere (o è scaduta),
-          poi la salva qui. Nelle card vedi solo se è configurata; nello specchietto verde sopra trovi quelle
-          rinnovate dall’agent.
+          per ogni società, durante i sync in background; poi la salva qui. Nelle card vedi solo se è configurata;
+          nello specchietto verde sopra trovi quelle rinnovate dall’agent.
         </p>
         {rotations.length > 0 ? (
           <div className="ade-pwd-mirror-panel">
@@ -3053,34 +3051,9 @@ export function FattureImpostazioniPage() {
             )
           })}
           {!loading && profiles.length === 0 ? (
-            <p className="empty-state">
-              Nessun profilo AdE trovato.
-              {profilesPath ? (
-                <>
-                  {' '}
-                  Path: <code>{profilesPath}</code>
-                </>
-              ) : (
-                <> Controlla ADE_PROFILES_PATH o crea <code>backend/uploads/ade/profiles.json</code>.</>
-              )}
-            </p>
+            <p className="empty-state">Nessun profilo AdE trovato.</p>
           ) : null}
         </div>
-        {profilesPath && profiles.length > 0 ? (
-          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
-            File profili: <code>{profilesPath}</code>
-          </p>
-        ) : null}
-      </section>
-
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Canale tecnico</h2>
-        <ul className="fatture-suggestions">
-          <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
-          <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received · PUT /ade/profiles/…/credentials</li>
-          <li>Agent: backend/scripts/ade_sync_agent.py · auto-rinnovo password (ADE_AUTO_ROTATE_PASSWORD=1)</li>
-          {profilesPath ? <li>ADE profiles: {profilesPath}</li> : null}
-        </ul>
       </section>
     </FatturePageShell>
   )

@@ -673,7 +673,7 @@ class AdePlaywrightClient:
     self._shot(page, "01_password_change_filled", shots)
 
     submitted = False
-    for btn_name in (r"Conferma", r"Salva", r"Aggiorna", r"Cambia password", r"Invia", r"Prosegui"):
+    for btn_name in (r"^OK$", r"Conferma", r"Salva", r"Aggiorna", r"Cambia password", r"Invia", r"Prosegui"):
       try:
         page.get_by_role("button", name=re.compile(btn_name, re.I)).first.click(timeout=5000)
         submitted = True
@@ -687,6 +687,12 @@ class AdePlaywrightClient:
           continue
     if not submitted:
       try:
+        page.locator('input[type="submit"][value="OK"], input[type="button"][value="OK"]').first.click(timeout=5000)
+        submitted = True
+      except Exception:
+        pass
+    if not submitted:
+      try:
         page.keyboard.press("Enter")
         submitted = True
       except Exception:
@@ -698,7 +704,7 @@ class AdePlaywrightClient:
       page.wait_for_load_state("domcontentloaded", timeout=15000)
     except Exception:
       pass
-    self._pause(page, 1200)
+    self._pause(page, 1500)
     self._shot(page, "01_password_change_submit", shots)
 
     try:
@@ -712,8 +718,10 @@ class AdePlaywrightClient:
       "non conforme",
       "già utilizzata",
       "gia utilizzata",
-      "errore",
+      "solo lettere",
+      "solo di lettere",
       "non coincid",
+      "errata",
     )
     ok_hints = (
       "password modificata",
@@ -723,23 +731,30 @@ class AdePlaywrightClient:
       "operazione completata",
       "cambio password effettuato",
       "effettuato con successo",
+      "password è stata cambiata",
+      "password e' stata cambiata",
     )
+    still_on_form = (
+      "password corrente" in body
+      and "nuova password" in body
+      and ("conferma nuova" in body or "conferma" in body)
+    )
+    if any(h in body for h in fail_hints):
+      return False
+    if still_on_form:
+      return False
     if any(h in body for h in ok_hints):
       return True
-    if any(h in body for h in fail_hints) and "password" in body:
-      # Se compare un errore esplicito sul form, fallisci
-      if any(h in body for h in fail_hints[:6]):
-        return False
-    # Nessun messaggio chiaro: se il form password è sparito, considera ok
     try:
       still = page.locator('input[type="password"]').count()
       if still == 0:
         return True
     except Exception:
       pass
-    # Conservativo: se siamo ancora in area autenticata senza form, ok
-    if "utente connesso" in body or "esci" in body or "area riservata" in body:
+    if "utente connesso" in body or "esci" in body:
       return True
+    if "credenziali errate" in body:
+      return False
     return False
 
   def _login_fisconline(self, page: Any, shots: List[str]) -> bool:
@@ -893,7 +908,98 @@ class AdePlaywrightClient:
         body = ""
 
       self._report_password_notice(body)
-      if "credenziali errate" in body or "autenticazione fallita" in body:
+      # Password scaduta: AdE mostra «Autenticazione fallita» + link cambio password
+      pwd_expired = (
+        "password" in body
+        and ("scaduta" in body or "cambio password" in body)
+        and ("autenticazione fallita" in body or "operazione di cambio password" in body)
+      )
+      if pwd_expired and not getattr(self, "_password_rotated", False):
+        self._shot(page, "01_password_expired_gate", shots, force=True)
+        notice = getattr(self, "_pending_password_notice", None) or {
+          "level": "expired",
+          "message": "La password del tuo account è scaduta. Effettua l'operazione di cambio password.",
+          "days_left": 0,
+        }
+        try:
+          # Link «Per gli utenti Fisconline/Entratel Clicca qui»
+          clicked = False
+          try:
+            href = page.evaluate(
+              """() => {
+                const nodes = Array.from(document.querySelectorAll('a'));
+                const hit = nodes.find((el) => {
+                  const block = el.closest('p,div,li,td,span') || el.parentElement;
+                  const t = ((block && block.innerText) || '') + ' ' + (el.innerText || '');
+                  return /fisconline/i.test(t) && /clicca\\s*qui|password/i.test(t);
+                });
+                return hit ? (hit.href || '') : '';
+              }"""
+            )
+            if href and str(href).lower().startswith("http"):
+              page.goto(str(href), wait_until="domcontentloaded", timeout=30000)
+              clicked = True
+          except Exception:
+            pass
+          if not clicked:
+            try:
+              row = page.get_by_text(re.compile(r"Per gli utenti Fisconline/Entratel", re.I))
+              if row.count() > 0:
+                link = row.first.locator("xpath=ancestor::*[self::p or self::div or self::li][1]//a").first
+                if link.count() > 0:
+                  with page.expect_popup(timeout=4000) as pop:
+                    link.click(timeout=5000)
+                  try:
+                    page = pop.value
+                    self._remember_page_context(page, shots)
+                  except Exception:
+                    pass
+                  clicked = True
+            except Exception:
+              pass
+          if not clicked:
+            for pat in (
+              r"Fisconline/Entratel",
+              r"Cambio\s+password",
+              r"Clicca qui",
+            ):
+              try:
+                loc = page.get_by_role("link", name=re.compile(pat, re.I))
+                if loc.count() > 0:
+                  href2 = ""
+                  try:
+                    href2 = (loc.first.get_attribute("href") or "").strip()
+                  except Exception:
+                    href2 = ""
+                  if href2 and href2.lower().startswith("http"):
+                    page.goto(href2, wait_until="domcontentloaded", timeout=30000)
+                  else:
+                    loc.first.click(timeout=5000)
+                  clicked = True
+                  break
+              except Exception:
+                pass
+          if clicked:
+            try:
+              page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+              pass
+            self._pause(page, 1500)
+            self._shot(page, "01_password_change_opened", shots, force=True)
+          if self._try_auto_rotate_password(page, shots, notice):
+            if getattr(self, "_password_relogin_attempted", False):
+              return False
+            self._password_relogin_attempted = True
+            # Ripeti login con la password nuova
+            return self._login_fisconline(page, shots)
+        except Exception:
+          pass
+        self._shot(page, "01_password_expired_rotate_failed", shots, force=True)
+        return False
+
+      if "credenziali errate" in body or (
+        "autenticazione fallita" in body and "scaduta" not in body
+      ):
         self._shot(page, "01_bad_credentials", shots, force=True)
         return False
 
@@ -964,6 +1070,16 @@ class AdePlaywrightClient:
 
             if should_auto_rotate(notice):
               self._try_auto_rotate_password(page, shots, notice)
+          except Exception:
+            pass
+        if _env_bool("ADE_FORCE_PASSWORD_ROTATE", False) and not getattr(self, "_password_rotated", False):
+          try:
+            force_notice = notice or {
+              "level": "expired",
+              "message": "Rinnovo password forzato (ADE_FORCE_PASSWORD_ROTATE).",
+              "days_left": 0,
+            }
+            self._try_auto_rotate_password(page, shots, force_notice)
           except Exception:
             pass
         self._post_login_cleanup(page)

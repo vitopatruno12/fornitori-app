@@ -68,6 +68,8 @@ def _run_sync(mode: str, lookback_days, profile_id: str = "") -> int:
   env["ADE_KEEP_SESSION"] = "1"
   env["ADE_DEBUG_SCREENSHOTS"] = "0"
   env["ADE_STEP_DELAY_MS"] = env.get("ADE_STEP_DELAY_MS") or "60"
+  env["ADE_AUTO_ROTATE_PASSWORD"] = env.get("ADE_AUTO_ROTATE_PASSWORD") or "1"
+  env["ADE_AUTO_ROTATE_DAYS"] = env.get("ADE_AUTO_ROTATE_DAYS") or "7"
   # UI: solo ricevute (emesse raddoppiano il tempo)
   env["ADE_MASS_KINDS"] = env.get("ADE_MASS_KINDS") or "ricevute"
   if lookback_days:
