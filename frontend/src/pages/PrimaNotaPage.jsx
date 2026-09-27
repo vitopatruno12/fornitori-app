@@ -69,6 +69,8 @@ const MOVEMENT_KIND_OPTIONS = [
   'uscita',
   'fiscale',
   'nf',
+  'nf_ent',
+  'nf_usc',
   'pos',
   'refill',
   'stacker_svuotamento',
@@ -1451,7 +1453,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const isEntrata = entry.type === 'entrata'
     const entrata = !extraCassaTag && isEntrata ? amount : 0
     const uscita = !extraCassaTag && entry.type === 'uscita' ? amount : 0
-    const nonFiscale = nonFiscaleTag ? (isEntrata ? amount : -amount) : 0
+    const nonFiscaleEntrata = nonFiscaleTag && isEntrata ? amount : 0
+    const nonFiscaleUscita = nonFiscaleTag && !isEntrata ? amount : 0
+    const nonFiscale = nonFiscaleEntrata - nonFiscaleUscita
     const pos = posTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const stackerSvuotamento = stackerTag ? -Math.abs(amount) : 0
@@ -1466,6 +1470,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       entrata,
       uscita,
       nonFiscale,
+      nonFiscaleEntrata,
+      nonFiscaleUscita,
       pos,
       refill,
       stackerSvuotamento,
@@ -1547,6 +1553,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'uscita' && (isExtraCassa(entry) || entry.type !== 'uscita')) return false
       if (movementKind === 'fiscale' && (isNonFiscale(entry) || isExtraCassa(entry))) return false
       if (movementKind === 'nf' && !isNonFiscale(entry)) return false
+      if (movementKind === 'nf_ent' && (!isNonFiscale(entry) || entry.type !== 'entrata')) return false
+      if (movementKind === 'nf_usc' && (!isNonFiscale(entry) || entry.type !== 'uscita')) return false
       if (movementKind === 'pos' && (!isPos(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
@@ -1566,6 +1574,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         fiscaleUscita: acc.fiscaleUscita + Number(entry.fiscaleUscita || 0),
         fiscale: acc.fiscale + Number(entry.totaleMovimento || 0),
         nonFiscale: acc.nonFiscale + Number(entry.nonFiscale || 0),
+        nonFiscaleEntrata: acc.nonFiscaleEntrata + Number(entry.nonFiscaleEntrata || 0),
+        nonFiscaleUscita: acc.nonFiscaleUscita + Number(entry.nonFiscaleUscita || 0),
         pos: acc.pos + Number(entry.pos || 0),
         refill: acc.refill + Number(entry.refill || 0),
         stackerSvuotamento: acc.stackerSvuotamento + Number(entry.stackerSvuotamento || 0),
@@ -1580,6 +1590,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         fiscaleUscita: 0,
         fiscale: 0,
         nonFiscale: 0,
+        nonFiscaleEntrata: 0,
+        nonFiscaleUscita: 0,
         pos: 0,
         refill: 0,
         stackerSvuotamento: 0,
@@ -1896,7 +1908,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <option value="fiscale">Fiscale</option>
             <option value="entrata">Solo entrate</option>
             <option value="uscita">Solo uscite</option>
-            <option value="nf">NC</option>
+            <option value="nf">NC (tutti)</option>
+            <option value="nf_ent">NC ent</option>
+            <option value="nf_usc">NC usc</option>
             <option value="pos">POS</option>
             <option value="refill">Refill</option>
             <option value="stacker_svuotamento">Svuotamento stacker</option>
@@ -1995,11 +2009,25 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 </button>
                 <button
                   type="button"
-                  className={formFlowTag === 'non_fiscale' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
-                  onClick={() => setFormFlowTag('non_fiscale')}
-                  title="Movimento NC (non contabilizzato): compare in cassa entrata/uscita e nel riepilogo vendite (escluso dal totale fiscale)."
+                  className={formFlowTag === 'non_fiscale' && formType === 'entrata' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('non_fiscale')
+                    setFormType('entrata')
+                  }}
+                  title="NC entrata (non contabilizzato): colonna NC ent; entra in cassa e nel riepilogo vendite (escluso dal totale fiscale)."
                 >
-                  NC
+                  NC ent
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'non_fiscale' && formType === 'uscita' ? 'btn btn-outline-danger' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('non_fiscale')
+                    setFormType('uscita')
+                  }}
+                  title="NC uscita (non contabilizzato): colonna NC usc; entra in cassa e nel riepilogo vendite (escluso dal totale fiscale)."
+                >
+                  NC usc
                 </button>
                 <button
                   type="button"
@@ -2244,7 +2272,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
             </span>
             <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-              NC: <strong>€ {formatAmount(movementPeriodTotals.nonFiscale)}</strong>
+              NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
+            </span>
+            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+              NC usc: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleUscita)}</strong>
             </span>
             <span className="pn-movement-totals-item">
               POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
@@ -2287,7 +2318,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               : ''
           }
           getTotalsCellClassName={(columnId) =>
-            columnId === 'non_fiscale' ? 'pn-table-totals-nf' : ''
+            columnId === 'non_fiscale_ent' || columnId === 'non_fiscale_usc' ? 'pn-table-totals-nf' : ''
           }
           actionsHeader="Azioni"
           renderActions={(entry) => (
@@ -2506,7 +2537,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <div className="ui-drawer-body">
               <p style={{ marginTop: 0 }}>
                 {isNonFiscale(drawerEntry) ? (
-                  <span className="badge-pn badge-pn--nf">NC</span>
+                  <span className="badge-pn badge-pn--nf">
+                    {drawerEntry.type === 'uscita' ? 'NC usc' : 'NC ent'}
+                  </span>
                 ) : isPos(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">POS</span>
                 ) : isRefill(drawerEntry) ? (
