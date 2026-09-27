@@ -483,6 +483,7 @@ class AdePlaywrightClient:
       if not notice:
         return
       self._password_notice_sent = True
+      self._pending_password_notice = notice
       publish_password_alert(
         profile_id=self.profile.id,
         label=self.profile.label or self.profile.id,
@@ -493,11 +494,260 @@ class AdePlaywrightClient:
     except Exception:
       return
 
+  def _remember_page_context(self, page: Any, shots: List[str]) -> None:
+    self._active_page = page
+    self._active_shots = shots
+
+  def _try_auto_rotate_password(self, page: Any, shots: List[str], notice: Dict[str, Any]) -> bool:
+    """
+    Cambia la password su Fisconline prima che scada (o se già scaduta),
+    poi la ricopia in Impostazioni Atlas / profiles.json.
+    """
+    if getattr(self, "_password_rotated", False):
+      return True
+    from .password_alerts import dismiss_alert
+    from .password_rotations import (
+      apply_rotated_password_locally,
+      generate_fisconline_password,
+      publish_rotation,
+      push_remote_credentials,
+    )
+
+    old_password = (self.profile.fisconline_password or _env("ADE_FISCONLINE_PASSWORD")).strip()
+    if not old_password:
+      return False
+
+    new_password = generate_fisconline_password(
+      old_password=old_password,
+      codice_fiscale=self.profile.codice_fiscale or self.profile.partita_iva or "",
+    )
+    ok = self._change_fisconline_password_on_site(page, shots, old_password=old_password, new_password=new_password)
+    if not ok:
+      print(
+        f"[{self.profile.id}] Auto-rinnovo password Fisconline non riuscito "
+        f"(form cambio password non trovato o rifiutato).",
+        flush=True,
+      )
+      return False
+
+    self.profile.fisconline_password = new_password
+    try:
+      apply_rotated_password_locally(profile_id=self.profile.id, password=new_password)
+    except Exception as exc:
+      print(f"[{self.profile.id}] Salvataggio password locale fallito: {exc}", flush=True)
+    push_remote_credentials(profile_id=self.profile.id, password=new_password)
+    try:
+      publish_rotation(
+        profile_id=self.profile.id,
+        label=self.profile.label or self.profile.id,
+        password=new_password,
+        source="agent",
+        message=str(notice.get("message") or "Password rinnovata automaticamente dall'agent AdE."),
+        days_left=notice.get("days_left") if isinstance(notice.get("days_left"), int) else None,
+      )
+    except Exception as exc:
+      print(f"[{self.profile.id}] Specchietto rotazione non salvato: {exc}", flush=True)
+    try:
+      dismiss_alert(self.profile.id)
+    except Exception:
+      pass
+    self._password_rotated = True
+    print(
+      f"[{self.profile.id}] Password Fisconline rinnovata dall'agent e copiata in Impostazioni.",
+      flush=True,
+    )
+    self._shot(page, "01_password_rotated", shots, force=True)
+    return True
+
+  def _change_fisconline_password_on_site(
+    self,
+    page: Any,
+    shots: List[str],
+    *,
+    old_password: str,
+    new_password: str,
+  ) -> bool:
+    """Best-effort sul form «Cambio password» AdE / IAM."""
+    self._shot(page, "01_password_change_start", shots)
+
+    # 1) Apri link/pulsante cambio password se presente
+    opened = False
+    for pat in (
+      r"Cambio\s+password",
+      r"Cambia\s+password",
+      r"Modifica\s+password",
+      r"Effettua\s+l['’]?operazione\s+di\s+cambio\s+password",
+      r"cambio\s+della\s+password",
+    ):
+      try:
+        loc = page.get_by_role("link", name=re.compile(pat, re.I))
+        if loc.count() > 0:
+          loc.first.click(timeout=5000)
+          opened = True
+          break
+      except Exception:
+        pass
+      try:
+        loc = page.get_by_role("button", name=re.compile(pat, re.I))
+        if loc.count() > 0:
+          loc.first.click(timeout=5000)
+          opened = True
+          break
+      except Exception:
+        pass
+      try:
+        loc = page.get_by_text(re.compile(pat, re.I))
+        if loc.count() > 0:
+          loc.first.click(timeout=5000)
+          opened = True
+          break
+      except Exception:
+        pass
+
+    if opened:
+      try:
+        page.wait_for_load_state("domcontentloaded", timeout=12000)
+      except Exception:
+        pass
+      self._pause(page, 800)
+
+    def _fill_by_labels(patterns: tuple[str, ...], value: str) -> bool:
+      for pat in patterns:
+        try:
+          loc = page.get_by_label(re.compile(pat, re.I))
+          if loc.count() > 0:
+            el = loc.first
+            el.click(timeout=3000)
+            el.fill("")
+            el.fill(value, timeout=5000)
+            return True
+        except Exception:
+          continue
+      return False
+
+    def _fill_password_inputs_fallback() -> bool:
+      """Se le label non matchano: tipicamente 3 input password in ordine."""
+      try:
+        inputs = page.locator('input[type="password"]')
+        n = inputs.count()
+        if n < 2:
+          return False
+        # 2 campi = nuova + conferma (password scaduta forzata)
+        # 3 campi = attuale + nuova + conferma
+        if n >= 3:
+          inputs.nth(0).fill(old_password, timeout=5000)
+          inputs.nth(1).fill(new_password, timeout=5000)
+          inputs.nth(2).fill(new_password, timeout=5000)
+        else:
+          inputs.nth(0).fill(new_password, timeout=5000)
+          inputs.nth(1).fill(new_password, timeout=5000)
+        return True
+      except Exception:
+        return False
+
+    filled_old = _fill_by_labels(
+      (r"password\s+attual", r"password\s+corrent", r"vecchia\s+password", r"password\s+in\s+uso"),
+      old_password,
+    )
+    filled_new = _fill_by_labels(
+      (r"nuova\s+password", r"password\s+nuova"),
+      new_password,
+    )
+    filled_confirm = _fill_by_labels(
+      (r"conferma.*password", r"ripeti.*password", r"conferma\s+nuova"),
+      new_password,
+    )
+    if not (filled_new and filled_confirm):
+      if not _fill_password_inputs_fallback():
+        self._shot(page, "01_password_change_form_missing", shots, force=True)
+        return False
+    elif not filled_old:
+      # Form a 2 campi (solo nuova+conferma) ok; altrimenti prova a riempire il primo password rimasto
+      try:
+        inputs = page.locator('input[type="password"]')
+        if inputs.count() >= 3:
+          inputs.nth(0).fill(old_password, timeout=5000)
+      except Exception:
+        pass
+
+    self._shot(page, "01_password_change_filled", shots)
+
+    submitted = False
+    for btn_name in (r"Conferma", r"Salva", r"Aggiorna", r"Cambia password", r"Invia", r"Prosegui"):
+      try:
+        page.get_by_role("button", name=re.compile(btn_name, re.I)).first.click(timeout=5000)
+        submitted = True
+        break
+      except Exception:
+        try:
+          page.get_by_text(re.compile(btn_name, re.I)).first.click(timeout=3000)
+          submitted = True
+          break
+        except Exception:
+          continue
+    if not submitted:
+      try:
+        page.keyboard.press("Enter")
+        submitted = True
+      except Exception:
+        pass
+    if not submitted:
+      return False
+
+    try:
+      page.wait_for_load_state("domcontentloaded", timeout=15000)
+    except Exception:
+      pass
+    self._pause(page, 1200)
+    self._shot(page, "01_password_change_submit", shots)
+
+    try:
+      body = (page.inner_text("body") or "")[:2500].lower()
+    except Exception:
+      body = ""
+    fail_hints = (
+      "password non valida",
+      "password non corretta",
+      "non soddisfa",
+      "non conforme",
+      "già utilizzata",
+      "gia utilizzata",
+      "errore",
+      "non coincid",
+    )
+    ok_hints = (
+      "password modificata",
+      "password aggiornata",
+      "password cambiata",
+      "operazione conclusa",
+      "operazione completata",
+      "cambio password effettuato",
+      "effettuato con successo",
+    )
+    if any(h in body for h in ok_hints):
+      return True
+    if any(h in body for h in fail_hints) and "password" in body:
+      # Se compare un errore esplicito sul form, fallisci
+      if any(h in body for h in fail_hints[:6]):
+        return False
+    # Nessun messaggio chiaro: se il form password è sparito, considera ok
+    try:
+      still = page.locator('input[type="password"]').count()
+      if still == 0:
+        return True
+    except Exception:
+      pass
+    # Conservativo: se siamo ancora in area autenticata senza form, ok
+    if "utente connesso" in body or "esci" in body or "area riservata" in body:
+      return True
+    return False
+
   def _login_fisconline(self, page: Any, shots: List[str]) -> bool:
     """
     Login Fisconline/Entratel (form web): CF + password + PIN — completamente automatico.
     Non usa la chiavetta CNS.
     """
+    self._remember_page_context(page, shots)
     cf = (self.profile.codice_fiscale or self.profile.partita_iva or "").strip()
     password = (self.profile.fisconline_password or _env("ADE_FISCONLINE_PASSWORD")).strip()
     pin = (self.profile.fisconline_pin or _env("ADE_FISCONLINE_PIN")).strip()
@@ -572,6 +822,20 @@ class AdePlaywrightClient:
       pass
     self._pause(page, 600 if self.fast_login else 2500)
     self._shot(page, "01c_fisconline_submit", shots)
+
+    # Password scaduta: form cambio obbligatoria subito dopo login
+    try:
+      body_chk = (page.inner_text("body") or "")[:2500]
+    except Exception:
+      body_chk = ""
+    self._report_password_notice(body_chk)
+    notice = getattr(self, "_pending_password_notice", None)
+    if notice:
+      from .password_rotations import should_auto_rotate
+
+      if should_auto_rotate(notice) and not getattr(self, "_password_rotated", False):
+        self._try_auto_rotate_password(page, shots, notice)
+
     return self._wait_logged_in(page, shots, skip_cns_click=True)
 
   def _login_cns(self, page: Any, shots: List[str]) -> bool:
@@ -602,6 +866,7 @@ class AdePlaywrightClient:
 
   def _wait_logged_in(self, page: Any, shots: List[str], *, skip_cns_click: bool = False) -> bool:
     """Attende area autenticata dopo CNS/SPID/CIE/Fisconline."""
+    self._remember_page_context(page, shots)
     deadline = time.time() + max(60, self.login_timeout_sec)
     pin_deadline = time.time() + max(120, self.cns_pin_wait_sec)
     poll_ms = 350 if self.fast_login else 1200
@@ -692,6 +957,15 @@ class AdePlaywrightClient:
       ) or "ivaservizi.agenziaentrate.gov.it" in url
       if logged and "entra con cns" not in body and "accedi all" not in body[:120]:
         self._report_password_notice(body)
+        notice = getattr(self, "_pending_password_notice", None)
+        if notice and not getattr(self, "_password_rotated", False):
+          try:
+            from .password_rotations import should_auto_rotate
+
+            if should_auto_rotate(notice):
+              self._try_auto_rotate_password(page, shots, notice)
+          except Exception:
+            pass
         self._post_login_cleanup(page)
         self._shot(page, "02_logged_in", shots)
         return True

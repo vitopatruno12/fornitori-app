@@ -4591,6 +4591,120 @@ select.form-control {
   margin-top: 0.85rem;
 }
 
+.ade-pwd-mirror-banner {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #ecfdf5;
+}
+
+.ade-pwd-mirror-banner-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  align-items: baseline;
+  margin-bottom: 0.55rem;
+}
+
+.ade-pwd-mirror-banner-head strong {
+  font-size: 0.95rem;
+}
+
+.ade-pwd-mirror-banner-head span {
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+
+.ade-pwd-mirror-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.ade-pwd-mirror-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.ade-pwd-mirror-item-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.ade-pwd-mirror-item-main strong {
+  font-size: 0.88rem;
+}
+
+.ade-pwd-mirror-pwd {
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  word-break: break-all;
+}
+
+.ade-pwd-mirror-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.78rem;
+  opacity: 0.95;
+}
+
+.ade-pwd-mirror-item-meta .btn-sm {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.ade-pwd-mirror-panel {
+  margin: 0 0 1rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid #86efac;
+  background: linear-gradient(180deg, #ecfdf5 0%, #f0fdf4 100%);
+}
+
+.ade-pwd-mirror-panel-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.98rem;
+  color: #166534;
+}
+
+.ade-pwd-mirror-list--panel .ade-pwd-mirror-item {
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  color: #14532d;
+}
+
+.ade-pwd-mirror-list--panel .ade-pwd-mirror-pwd {
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.fatture-creds-agent-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: #15803d;
+  font-weight: 600;
+}
+
 .ai-suggestions {
   margin-top: 0.6rem;
   display: flex;

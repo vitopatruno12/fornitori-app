@@ -116,7 +116,7 @@ export function FattureSubnav() {
   )
 }
 
-export function FatturePageShell({ title, lead, children, actions = null }) {
+export function FatturePageShell({ title, lead, children, actions = null, heroExtra = null }) {
   return (
     <div className="fatture-page">
       <header className="fatture-header staff-page-hero">
@@ -130,6 +130,7 @@ export function FatturePageShell({ title, lead, children, actions = null }) {
           </div>
           {actions}
         </div>
+        {heroExtra}
       </header>
       <FattureSubnav />
       {children}

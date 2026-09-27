@@ -102,7 +102,10 @@ export default function AdePasswordAlertPopup({ enabled = true }) {
       <div className="ade-password-alert-card">
         <header className="ade-password-alert-head">
           <h2 id="ade-password-alert-title">Password Agenzia delle Entrate</h2>
-          <p>Avviso letto dal sito dell’Agenzia delle Entrate. Aggiorna la password qui: Atlas la userà al prossimo scarico.</p>
+          <p>
+            Avviso letto dal sito Fisconline. L’agent prova a cambiare la password da solo e a ricopiarla in
+            Impostazioni; se non ci riesce, aggiornala qui.
+          </p>
         </header>
         {error ? <div className="alert alert-danger">{error}</div> : null}
         <ul className="ade-password-alert-list">

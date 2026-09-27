@@ -148,6 +148,58 @@ def dismiss_ade_password_alert(profile_id: str) -> Dict[str, Any]:
   return {"ok": True, "profile_id": profile_id}
 
 
+class AdePasswordRotationIn(BaseModel):
+  profile_id: str
+  label: str = ""
+  password: str = Field(..., min_length=1, max_length=128)
+  source: str = "agent"
+  message: str = ""
+  days_left: Optional[int] = None
+  changed_at: Optional[str] = None
+
+
+@router.get("/password-rotations")
+def get_ade_password_rotations() -> Dict[str, Any]:
+  """Specchietto password Fisconline cambiate automaticamente dall'agent."""
+  from ..integrations.ade.password_rotations import list_rotations
+
+  items = list_rotations()
+  return {"items": items, "count": len(items)}
+
+
+@router.post("/password-rotations")
+def post_ade_password_rotation(
+  body: AdePasswordRotationIn,
+  authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+  """L'agent registra la password rinnovata su Fisconline (e la tiene nello specchietto)."""
+  from ..integrations.ade.password_alerts import dismiss_alert
+  from ..integrations.ade.password_rotations import record_rotation
+  from ..integrations.ade.profiles import update_fisconline_credentials
+
+  _optional_bearer(os.getenv("SDI_RECEIVE_TOKEN"), authorization)
+  try:
+    row = record_rotation(
+      profile_id=body.profile_id,
+      label=body.label,
+      password=body.password,
+      source=body.source or "agent",
+      message=body.message,
+      days_left=body.days_left,
+    )
+    update_fisconline_credentials(body.profile_id, password=body.password)
+    dismiss_alert(body.profile_id)
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e)) from e
+  except KeyError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
+  except FileNotFoundError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=f"Salvataggio rotazione fallito: {e}") from e
+  return {"ok": True, "item": row}
+
+
 @router.get("/agent/status")
 def get_ade_agent_status() -> Dict[str, Any]:
   """Stato sync AdE (barra caricamento / toast assistente)."""

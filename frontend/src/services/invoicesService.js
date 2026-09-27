@@ -292,6 +292,11 @@ export async function dismissAdePasswordAlert(profileId) {
   return apiFetch(`/ade/password-alerts/${encodeURIComponent(profileId)}/dismiss`, { method: 'POST' })
 }
 
+/** Password rinnovate automaticamente dall'agent AdE (specchietto Impostazioni). */
+export async function fetchAdePasswordRotations() {
+  return apiFetch('/ade/password-rotations')
+}
+
 export async function updateAdeFisconlineCredentials(profileId, { password, pin } = {}) {
   const body = {}
   if (password != null && String(password).length > 0) body.fisconline_password = String(password)

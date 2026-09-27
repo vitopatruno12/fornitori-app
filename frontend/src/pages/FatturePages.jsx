@@ -30,6 +30,7 @@ import {
   setInvoiceIgnored,
   setInvoiceBollaVerified,
   updateAdeFisconlineCredentials,
+  fetchAdePasswordRotations,
   fetchIssuedInvoices,
   uploadIssuedInvoice,
   getIssuedInvoiceFileUrl,
@@ -2796,20 +2797,26 @@ export function FattureLogPage() {
 export function FattureImpostazioniPage() {
   const [profiles, setProfiles] = useState([])
   const [profilesPath, setProfilesPath] = useState('')
+  const [rotations, setRotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [drafts, setDrafts] = useState({})
   const [savingId, setSavingId] = useState('')
+  const [revealed, setRevealed] = useState({})
 
   async function loadProfiles() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetchAdeProfiles()
+      const [res, rot] = await Promise.all([
+        fetchAdeProfiles(),
+        fetchAdePasswordRotations().catch(() => ({ items: [] })),
+      ])
       const items = Array.isArray(res?.items) ? res.items : []
       setProfiles(items)
       setProfilesPath(String(res?.profiles_path || res?.resolved_path || ''))
+      setRotations(Array.isArray(rot?.items) ? rot.items : [])
       setDrafts((prev) => {
         const next = { ...prev }
         for (const p of items) {
@@ -2861,10 +2868,73 @@ export function FattureImpostazioniPage() {
     }
   }
 
+  function formatChangedAt(iso) {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return String(iso)
+    return d.toLocaleString('it-IT', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  async function copyPassword(text) {
+    try {
+      await navigator.clipboard.writeText(String(text || ''))
+      setSuccess('Password copiata negli appunti.')
+    } catch {
+      setError('Copia password non riuscita')
+    }
+  }
+
+  const agentMirror = rotations.length > 0 ? (
+    <div className="ade-pwd-mirror-banner" role="region" aria-label="Password rinnovate dall’agent">
+      <div className="ade-pwd-mirror-banner-head">
+        <strong>Password società rinnovate dall’agent</strong>
+        <span>Cambiate su Fisconline e ricopiate in Impostazioni</span>
+      </div>
+      <ul className="ade-pwd-mirror-list">
+        {rotations.map((row) => {
+          const pid = row.profile_id
+          const show = Boolean(revealed[pid])
+          return (
+            <li key={pid} className="ade-pwd-mirror-item">
+              <div className="ade-pwd-mirror-item-main">
+                <strong>{row.label || pid}</strong>
+                <code className="ade-pwd-mirror-pwd">{show ? row.password : '••••••••••••'}</code>
+              </div>
+              <div className="ade-pwd-mirror-item-meta">
+                <span>{formatChangedAt(row.changed_at)}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setRevealed((prev) => ({ ...prev, [pid]: !prev[pid] }))}
+                >
+                  {show ? 'Nascondi' : 'Mostra'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void copyPassword(row.password)}
+                >
+                  Copia
+                </button>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  ) : null
+
   return (
     <FatturePageShell
       title="Impostazioni"
-      lead="Aggiorna password e PIN Fisconline per le società: l’agent AdE userà queste credenziali al prossimo sync."
+      lead="Aggiorna password e PIN Fisconline per le società: l’agent AdE le rinnova da solo su Fisconline prima della scadenza e le ricopia qui."
+      heroExtra={agentMirror}
     >
       {loading && <AnalisiLoadingBar active label="Caricamento impostazioni" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
@@ -2873,12 +2943,53 @@ export function FattureImpostazioniPage() {
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Credenziali Fisconline (Agenzia Entrate)</h2>
         <p className="fatture-note" style={{ marginTop: 0 }}>
-          Quando la password scade, aggiornala qui. Non viene mostrata in chiaro: vedi solo se è già configurata.
+          L’agent cambia automaticamente la password sul sito Fisconline quando sta per scadere (o è scaduta),
+          poi la salva qui. Nelle card vedi solo se è configurata; nello specchietto verde sopra trovi quelle
+          rinnovate dall’agent.
         </p>
+        {rotations.length > 0 ? (
+          <div className="ade-pwd-mirror-panel">
+            <h3 className="ade-pwd-mirror-panel-title">Specchietto password agent</h3>
+            <ul className="ade-pwd-mirror-list ade-pwd-mirror-list--panel">
+              {rotations.map((row) => {
+                const pid = row.profile_id
+                const show = Boolean(revealed[`panel-${pid}`])
+                return (
+                  <li key={`panel-${pid}`} className="ade-pwd-mirror-item">
+                    <div className="ade-pwd-mirror-item-main">
+                      <strong>{row.label || pid}</strong>
+                      <code className="ade-pwd-mirror-pwd">{show ? row.password : '••••••••••••'}</code>
+                    </div>
+                    <div className="ade-pwd-mirror-item-meta">
+                      <span>{formatChangedAt(row.changed_at)}</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() =>
+                          setRevealed((prev) => ({ ...prev, [`panel-${pid}`]: !prev[`panel-${pid}`] }))
+                        }
+                      >
+                        {show ? 'Nascondi' : 'Mostra'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => void copyPassword(row.password)}
+                      >
+                        Copia
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
         <div className="fatture-creds-grid">
           {profiles.map((p) => {
             const draft = drafts[p.id] || { password: '', pin: '' }
             const busy = savingId === p.id
+            const agentRow = rotations.find((r) => String(r.profile_id) === String(p.id))
             return (
               <article key={p.id} className="fatture-creds-card">
                 <header className="fatture-creds-card-head">
@@ -2889,6 +3000,11 @@ export function FattureImpostazioniPage() {
                       {p.codice_fiscale ? ` · CF ${p.codice_fiscale}` : ''}
                       {p.enabled ? '' : ' · disabilitato'}
                     </p>
+                    {agentRow ? (
+                      <p className="fatture-creds-agent-note">
+                        Rinnovata dall’agent · {formatChangedAt(agentRow.changed_at)}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="fatture-creds-badges">
                     <span className={`fatture-creds-badge${p.password_set ? ' is-ok' : ''}`}>
@@ -2962,7 +3078,7 @@ export function FattureImpostazioniPage() {
         <ul className="fatture-suggestions">
           <li>SDI_RECEIVE_TOKEN (opzionale su POST /sdi/receive)</li>
           <li>Endpoint: POST /sdi/receive · GET /sdi/invoices/received · PUT /ade/profiles/…/credentials</li>
-          <li>Agent: backend/scripts/ade_sync_agent.py</li>
+          <li>Agent: backend/scripts/ade_sync_agent.py · auto-rinnovo password (ADE_AUTO_ROTATE_PASSWORD=1)</li>
           {profilesPath ? <li>ADE profiles: {profilesPath}</li> : null}
         </ul>
       </section>
