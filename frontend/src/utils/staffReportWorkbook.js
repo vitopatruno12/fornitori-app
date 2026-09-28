@@ -137,9 +137,13 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
 
   const ferieShifts = filtered.filter((s) => s.entry_kind === 'ferie')
   const ferieRows = [STAFF_REPORT_VOCI_HEADERS]
+  const ferieShiftIds = []
   for (const shift of ferieShifts) {
     ferieRows.push(shiftToVociRow(shift, members))
+    ferieShiftIds.push(shift.id != null ? Number(shift.id) : null)
   }
+
+  const vociShiftIds = filtered.map((shift) => (shift.id != null ? Number(shift.id) : null))
 
   const stats = aggregateWeeklyStaffStats(members, shifts, from, to)
   const riepilogoRows = [
@@ -180,8 +184,8 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     dateFrom: from,
     dateTo: to,
     sheets: [
-      { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows },
-      { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows },
+      { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows, shiftIds: vociShiftIds },
+      { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows, shiftIds: ferieShiftIds },
       { name: STAFF_REPORT_SHEET_RIEPILOGO, rows: riepilogoRows },
       { name: STAFF_REPORT_SHEET_TOTALI, rows: totaliRows },
     ],
@@ -259,7 +263,13 @@ function totaliRowFromArray(row) {
 export function staffReportGridRows(sheet) {
   const body = staffReportSheetBodyRows(sheet)
   const name = sheet?.name
-  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) return body.map(vociRowFromArray)
+  const shiftIds = Array.isArray(sheet?.shiftIds) ? sheet.shiftIds : []
+  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) {
+    return body.map((row, index) => ({
+      ...vociRowFromArray(row),
+      shiftId: shiftIds[index] != null ? Number(shiftIds[index]) : null,
+    }))
+  }
   if (name === STAFF_REPORT_SHEET_RIEPILOGO) return body.map(riepilogoRowFromArray)
   if (name === STAFF_REPORT_SHEET_TOTALI) return body.map(totaliRowFromArray)
   return body.map((row, rowIndex) => {

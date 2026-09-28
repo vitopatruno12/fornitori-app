@@ -3089,6 +3089,49 @@ select.form-control {
   min-width: 10.5rem;
 }
 
+.staff-report-ferie-card {
+  margin-bottom: 0.85rem;
+  padding: 0.9rem 1rem 1rem;
+}
+
+.staff-report-ferie-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.staff-report-ferie-lead {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.staff-report-ferie-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.75rem;
+  align-items: flex-end;
+}
+
+.staff-report-ferie-form .form-group {
+  margin: 0;
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+.staff-report-ferie-notes {
+  flex: 2 1 200px;
+}
+
+.staff-report-ferie-actions {
+  flex: 0 0 auto;
+}
+
+.staff-report-ferie-empty {
+  margin: 0.65rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
 .staff-report-print-heading {
   display: none;
 }

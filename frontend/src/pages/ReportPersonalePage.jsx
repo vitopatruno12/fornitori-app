@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import GestionaleStaffLocaleGate from '../components/GestionaleStaffLocaleGate.jsx'
-import { fetchStaffShifts } from '../services/staffService.js'
+import { createStaffShift, deleteStaffShift, fetchStaffShifts } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import {
   fetchOperatorStationShifts,
@@ -15,6 +15,7 @@ import { isOperatorStationStaffSessionOpen } from '../utils/operatorStationStaff
 import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   buildStaffReportWorkbook,
+  STAFF_REPORT_SHEET_FERIE,
   staffReportCellValue,
   staffReportColumnsForSheet,
   staffReportGridRows,
@@ -61,12 +62,25 @@ function defaultPeriod(operatorMode = false) {
 }
 
 const MAX_OPERATOR_REPORT_DAYS = 31
+const MAX_FERIE_RANGE_DAYS = 60
 
 function daysInclusive(fromYmd, toYmdValue) {
   const from = new Date(`${fromYmd}T12:00:00`)
   const to = new Date(`${toYmdValue}T12:00:00`)
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 0
   return Math.max(0, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
+}
+
+function eachYmdInRange(fromYmd, toYmdValue) {
+  const out = []
+  let cur = new Date(`${fromYmd}T12:00:00`)
+  const end = new Date(`${toYmdValue}T12:00:00`)
+  if (Number.isNaN(cur.getTime()) || Number.isNaN(end.getTime()) || end < cur) return out
+  while (cur <= end) {
+    out.push(toYmd(cur))
+    cur = addDays(cur, 1)
+  }
+  return out
 }
 
 export default function ReportPersonalePage({ operatorMode = false, stationId = null }) {
@@ -86,26 +100,34 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     buildStaffReportWorkbook({ members: [], shifts: [], dateFrom: initial.from, dateTo: initial.to }),
   )
   const [activeSheet, setActiveSheet] = useState('VOCI')
+  const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [generatedAt, setGeneratedAt] = useState('')
+  const [ferieMemberId, setFerieMemberId] = useState('')
+  const [ferieFrom, setFerieFrom] = useState(initial.from)
+  const [ferieTo, setFerieTo] = useState(initial.from)
+  const [ferieNotes, setFerieNotes] = useState('')
+  const [ferieBusy, setFerieBusy] = useState(false)
   const dateFromRef = useRef(dateFrom)
   const dateToRef = useRef(dateTo)
   dateFromRef.current = dateFrom
   dateToRef.current = dateTo
 
+  const sessionReady = operatorMode ? operatorSessionOpen : gestionaleSessionOpen
+
   const loadReportData = useCallback(
     async (from, to) => {
       if (operatorMode && operatorStationId) {
-        const { members } = await resolveOperatorStationMembers(operatorStationId)
+        const { members: mem } = await resolveOperatorStationMembers(operatorStationId)
         const shifts = await fetchOperatorStationShifts(operatorStationId, from, to)
-        return { members, shifts }
+        return { members: mem, shifts }
       }
       if (!gestionaleLocale || !gestionaleSessionOpen) {
         return { members: [], shifts: [] }
       }
-      const { members, memberIds, packNameKeys } = await resolveGestionaleLocaleMembers(gestionaleLocale, {
+      const { members: mem, memberIds, packNameKeys } = await resolveGestionaleLocaleMembers(gestionaleLocale, {
         accessCode: gestionaleAccessCode,
       })
       let shifts = []
@@ -113,7 +135,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
         const shiftsRaw = await fetchStaffShifts(from, to, { memberIds })
         shifts = filterShiftsForOperatorLocale(shiftsRaw, { memberIds, packNameKeys })
       }
-      return { members, shifts }
+      return { members: mem, shifts }
     },
     [operatorMode, operatorStationId, gestionaleLocale, gestionaleSessionOpen, gestionaleAccessCode],
   )
@@ -152,12 +174,13 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     setError('')
     setSuccess('')
     try {
-      const { members, shifts } = await loadReportData(from, to)
+      const { members: mem, shifts } = await loadReportData(from, to)
+      setMembers(Array.isArray(mem) ? mem : [])
       try {
-        const next = buildStaffReportWorkbook({ members, shifts, dateFrom: from, dateTo: to })
+        const next = buildStaffReportWorkbook({ members: mem, shifts, dateFrom: from, dateTo: to })
         setWorkbook(next)
         setGeneratedAt(new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }))
-        if (!members.length) {
+        if (!mem.length) {
           setSuccess('Report generato: nessun dipendente registrato nel periodo.')
         } else if (!shifts.length) {
           setSuccess('Report generato: nessuna voce di pianificazione nel periodo selezionato.')
@@ -209,6 +232,119 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     [currentSheet],
   )
 
+  const activeMembers = useMemo(
+    () => (members || []).filter((m) => m && m.is_active !== false).slice().sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''), 'it'),
+    ),
+    [members],
+  )
+
+  async function handleRegisterFerie(e) {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    const memberId = Number(ferieMemberId)
+    const from = String(ferieFrom || '').slice(0, 10)
+    const to = String(ferieTo || '').slice(0, 10)
+    if (!memberId) {
+      setError('Seleziona il dipendente per le ferie.')
+      return
+    }
+    if (!from || !to) {
+      setError('Indica le date di inizio e fine ferie.')
+      return
+    }
+    if (to < from) {
+      setError('La data fine ferie deve essere uguale o successiva alla data inizio.')
+      return
+    }
+    const days = eachYmdInRange(from, to)
+    if (!days.length) {
+      setError('Intervallo ferie non valido.')
+      return
+    }
+    if (days.length > MAX_FERIE_RANGE_DAYS) {
+      setError(`Massimo ${MAX_FERIE_RANGE_DAYS} giorni di ferie per registrazione.`)
+      return
+    }
+    setFerieBusy(true)
+    try {
+      let created = 0
+      let skipped = 0
+      const notes = String(ferieNotes || '').trim() || null
+      let existing = []
+      try {
+        existing = await fetchStaffShifts(from, to, { memberIds: [memberId] })
+      } catch {
+        existing = []
+      }
+      const existingFerieDays = new Set(
+        (existing || [])
+          .filter((s) => Number(s.staff_member_id) === memberId && s.entry_kind === 'ferie')
+          .map((s) => String(s.work_date || '').slice(0, 10)),
+      )
+      for (const ymd of days) {
+        if (existingFerieDays.has(ymd)) {
+          skipped += 1
+          continue
+        }
+        await createStaffShift({
+          staff_member_id: memberId,
+          work_date: ymd,
+          time_start: null,
+          time_end: null,
+          entry_kind: 'ferie',
+          notes,
+        })
+        created += 1
+        existingFerieDays.add(ymd)
+      }
+      const reportFrom = from < dateFromRef.current ? from : dateFromRef.current
+      const reportTo = to > dateToRef.current ? to : dateToRef.current
+      if (reportFrom !== dateFromRef.current) setDateFrom(reportFrom)
+      if (reportTo !== dateToRef.current) setDateTo(reportTo)
+      dateFromRef.current = reportFrom
+      dateToRef.current = reportTo
+      setActiveSheet(STAFF_REPORT_SHEET_FERIE)
+      await runRefresh()
+      const memberName = activeMembers.find((m) => Number(m.id) === memberId)?.name || 'dipendente'
+      setSuccess(
+        created > 0
+          ? `Ferie registrate per ${memberName}: ${created} giorn${created === 1 ? 'o' : 'i'}${skipped ? ` (${skipped} già presenti)` : ''}.`
+          : skipped
+            ? `Nessuna nuova ferie: ${skipped} giorn${skipped === 1 ? 'o' : 'i'} già registrat${skipped === 1 ? 'o' : 'i'}.`
+            : 'Nessuna ferie registrata.',
+      )
+      setFerieNotes('')
+    } catch (err) {
+      setError(err?.message || 'Impossibile registrare le ferie')
+    } finally {
+      setFerieBusy(false)
+    }
+  }
+
+  async function handleDeleteFerie(row) {
+    const id = Number(row?.shiftId)
+    if (!id) {
+      setError('Voce ferie non eliminabile (id mancante).')
+      return
+    }
+    const label = [row.employee, row.date].filter(Boolean).join(' · ')
+    if (!window.confirm(`Eliminare le ferie${label ? ` di ${label}` : ''}?`)) return
+    setFerieBusy(true)
+    setError('')
+    try {
+      await deleteStaffShift(id)
+      await runRefresh()
+      setSuccess('Ferie eliminate.')
+      setActiveSheet(STAFF_REPORT_SHEET_FERIE)
+    } catch (err) {
+      setError(err?.message || 'Eliminazione ferie non riuscita')
+    } finally {
+      setFerieBusy(false)
+    }
+  }
+
   function handleDownloadExcel() {
     setError('')
     try {
@@ -230,7 +366,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           <h1 className="page-header staff-page-title">Report personale</h1>
           <p className="staff-page-lead">
             Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
-            Puoi stampare il report o scaricarlo in Excel.
+            Puoi stampare il report o scaricarlo in Excel. Nel foglio <strong>FERIE</strong> puoi anche registrare le ferie a mano.
             {operatorMode ? (
               <>
                 {' '}
@@ -248,10 +384,93 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     </section>
   )
 
+  const ferieForm = sessionReady ? (
+    <section className="card staff-report-ferie-card staff-report-no-print" aria-label="Registra ferie manuali">
+      <h2 className="staff-report-ferie-title">Registra ferie</h2>
+      <p className="staff-report-ferie-lead">
+        Seleziona il dipendente e il periodo: viene creata una voce ferie per ogni giorno (senza orari).
+      </p>
+      <form className="staff-report-ferie-form" onSubmit={(e) => void handleRegisterFerie(e)}>
+        <div className="form-group">
+          <label htmlFor="report-ferie-member">Dipendente</label>
+          <select
+            id="report-ferie-member"
+            className="form-control"
+            value={ferieMemberId}
+            onChange={(e) => setFerieMemberId(e.target.value)}
+            disabled={ferieBusy || loading || !activeMembers.length}
+            required
+          >
+            <option value="">— Seleziona —</option>
+            {activeMembers.map((m) => (
+              <option key={m.id} value={String(m.id)}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label htmlFor="report-ferie-from">Dal</label>
+          <input
+            id="report-ferie-from"
+            type="date"
+            className="form-control"
+            value={ferieFrom}
+            onChange={(e) => {
+              const v = e.target.value
+              setFerieFrom(v)
+              if (ferieTo && v && ferieTo < v) setFerieTo(v)
+            }}
+            disabled={ferieBusy || loading}
+            required
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="report-ferie-to">Al</label>
+          <input
+            id="report-ferie-to"
+            type="date"
+            className="form-control"
+            value={ferieTo}
+            onChange={(e) => setFerieTo(e.target.value)}
+            disabled={ferieBusy || loading}
+            required
+          />
+        </div>
+        <div className="form-group staff-report-ferie-notes">
+          <label htmlFor="report-ferie-notes">Note (opzionale)</label>
+          <input
+            id="report-ferie-notes"
+            className="form-control"
+            value={ferieNotes}
+            onChange={(e) => setFerieNotes(e.target.value)}
+            placeholder="Es. ferie estive"
+            disabled={ferieBusy || loading}
+          />
+        </div>
+        <div className="form-group staff-report-ferie-actions">
+          <label>&nbsp;</label>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={ferieBusy || loading || !activeMembers.length}
+          >
+            {ferieBusy ? 'Salvataggio…' : 'Registra ferie'}
+          </button>
+        </div>
+      </form>
+      {!activeMembers.length ? (
+        <p className="staff-report-ferie-empty">Nessun dipendente nel locale: carica il personale prima di registrare le ferie.</p>
+      ) : null}
+    </section>
+  ) : null
+
   const reportBody = (
     <div className="pagamenti-page staff-report-page">
       {error && <div className="alert alert-danger staff-report-no-print">{error}</div>}
       {success && <div className="alert alert-success staff-report-no-print">{success}</div>}
+
+      {ferieForm}
 
       <section className="card pagamenti-workbook-card staff-report-print-area">
         <div className="pagamenti-workbook-toolbar staff-report-no-print">
@@ -284,7 +503,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={loading}
+              disabled={loading || ferieBusy}
               onClick={() => void runRefresh()}
             >
               {loading ? 'Aggiornamento…' : 'Aggiorna'}
@@ -292,12 +511,12 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={loading}
+              disabled={loading || ferieBusy}
               onClick={handleDownloadExcel}
             >
               Download Excel
             </button>
-            <button type="button" className="btn btn-primary btn-sm" disabled={loading} onClick={handlePrint}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={loading || ferieBusy} onClick={handlePrint}>
               Stampa
             </button>
           </div>
@@ -329,13 +548,31 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           loading={loading}
           hideToolbar
           emptyMessage="Nessuna voce nel periodo selezionato."
-          rowKey={(row, rowIndex) => `${currentSheet?.name || 'sheet'}-${rowIndex}-${row.employee || row.label || row.date || ''}`}
+          rowKey={(row, rowIndex) =>
+            `${currentSheet?.name || 'sheet'}-${row.shiftId || rowIndex}-${row.employee || row.label || row.date || ''}`
+          }
           getCellTitle={(row, col) => {
             if (col.id === 'notes' || col.id === 'value') {
               return String(row?.[col.id] || '')
             }
             return ''
           }}
+          actionsHeader={currentSheet?.name === STAFF_REPORT_SHEET_FERIE ? 'Azioni' : ''}
+          renderActions={
+            currentSheet?.name === STAFF_REPORT_SHEET_FERIE
+              ? (row) =>
+                  row?.shiftId ? (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      disabled={ferieBusy || loading}
+                      onClick={() => void handleDeleteFerie(row)}
+                    >
+                      Elimina
+                    </button>
+                  ) : null
+              : undefined
+          }
         />
 
         <div className="pagamenti-sheet-tabs staff-report-no-print" role="tablist" aria-label="Fogli report personale">
@@ -382,6 +619,8 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
         setGestionaleLocale(open ? String(locale || '') : '')
         setGestionaleAccessCode(open ? String(code || '') : '')
         if (!open) {
+          setMembers([])
+          setFerieMemberId('')
           setWorkbook(
             buildStaffReportWorkbook({
               members: [],
