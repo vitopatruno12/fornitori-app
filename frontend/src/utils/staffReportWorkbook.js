@@ -253,6 +253,7 @@ function ferieRangeToRow(range) {
     employee: range.employee,
     kind: range.kind,
     days: String(range.days),
+    hours: String(range.days),
     notes: range.notes || '',
     dateFrom: range.dateFrom,
     dateTo: range.dateTo,
