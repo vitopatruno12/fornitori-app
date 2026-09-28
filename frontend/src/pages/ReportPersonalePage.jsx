@@ -16,6 +16,7 @@ import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 import {
   buildStaffReportWorkbook,
   STAFF_REPORT_SHEET_FERIE,
+  STAFF_REPORT_SHEET_VOCI,
   staffReportCellValue,
   staffReportColumnsForSheet,
   staffReportGridRows,
