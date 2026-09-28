@@ -625,7 +625,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           </p>
         </div>
 
-        {activeSheet === 'FERIE' && ferieEdit ? (
+        {(activeSheet === 'FERIE' || activeSheet === 'VOCI') && ferieEdit ? (
           <form
             className="staff-report-ferie-edit staff-report-no-print"
             onSubmit={(e) => {
@@ -693,30 +693,35 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           loading={loading}
           hideToolbar
           emptyMessage="Nessuna voce nel periodo selezionato."
-          actionsHeader={currentSheet?.name === STAFF_REPORT_SHEET_FERIE ? 'Azioni' : ''}
+          actionsHeader={
+            currentSheet?.name === STAFF_REPORT_SHEET_FERIE || currentSheet?.name === STAFF_REPORT_SHEET_VOCI
+              ? 'Azioni'
+              : ''
+          }
           actionsColWidth="13rem"
           renderActions={
-            currentSheet?.name === STAFF_REPORT_SHEET_FERIE
-              ? (row) => (
-                  <div className="staff-report-row-actions staff-report-no-print">
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={ferieBusy || loading || !row.staffMemberId}
-                      onClick={() => openFerieEdit(row)}
-                    >
-                      Modifica
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-danger btn-sm"
-                      disabled={ferieBusy || loading || !row.shiftIds?.length}
-                      onClick={() => void deleteFerieRange(row)}
-                    >
-                      Elimina
-                    </button>
-                  </div>
-                )
+            currentSheet?.name === STAFF_REPORT_SHEET_FERIE || currentSheet?.name === STAFF_REPORT_SHEET_VOCI
+              ? (row) =>
+                  row?.entryKind === 'ferie' || row?.kind === 'Ferie' ? (
+                    <div className="staff-report-row-actions staff-report-no-print">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={ferieBusy || loading || !row.staffMemberId}
+                        onClick={() => openFerieEdit(row)}
+                      >
+                        Modifica
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        disabled={ferieBusy || loading || !row.shiftIds?.length}
+                        onClick={() => void deleteFerieRange(row)}
+                      >
+                        Elimina
+                      </button>
+                    </div>
+                  ) : null
               : undefined
           }
           rowKey={(row, rowIndex) =>

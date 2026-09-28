@@ -18,15 +18,7 @@ export const STAFF_REPORT_SHEET_FERIE = 'FERIE'
 export const STAFF_REPORT_SHEET_RIEPILOGO = 'RIEPILOGO'
 export const STAFF_REPORT_SHEET_TOTALI = 'TOTALI'
 
-export const STAFF_REPORT_VOCI_HEADERS = [
-  'Data',
-  'Dipendente',
-  'Tipo',
-  'Ora inizio',
-  'Ora fine',
-  'Ore',
-  'Note',
-]
+export const STAFF_REPORT_VOCI_HEADERS = ['Dipendente', 'Dal', 'Al', 'Tipo', 'Ore', 'Note']
 
 export const STAFF_REPORT_RIEPILOGO_HEADERS = [
   'Dipendente',
@@ -40,13 +32,12 @@ export const STAFF_REPORT_RIEPILOGO_HEADERS = [
 ]
 
 export const STAFF_REPORT_VOCI_COLUMNS = [
-  { id: 'date', label: 'Data', width: 11, fluid: true },
-  { id: 'employee', label: 'Dipendente', width: 18, emphasis: true, fluid: true },
+  { id: 'employee', label: 'Dipendente', width: 24, emphasis: true, fluid: true },
+  { id: 'dal', label: 'Dal', width: 14, fluid: true },
+  { id: 'al', label: 'Al', width: 14, fluid: true },
   { id: 'kind', label: 'Tipo', width: 12, fluid: true },
-  { id: 'timeStart', label: 'Ora inizio', width: 10, fluid: true },
-  { id: 'timeEnd', label: 'Ora fine', width: 10, fluid: true },
-  { id: 'hours', label: 'Ore', numeric: true, width: 8, fluid: true },
-  { id: 'notes', label: 'Note', width: 31, multiline: true, fluid: true },
+  { id: 'hours', label: 'Ore', numeric: true, width: 10, fluid: true },
+  { id: 'notes', label: 'Note', width: 26, multiline: true, fluid: true },
 ]
 
 export const STAFF_REPORT_FERIE_HEADERS = ['Dipendente', 'Dal', 'Al', 'Tipo', 'Giorni', 'Note']
@@ -272,18 +263,30 @@ function ferieRangeToRow(range) {
   }
 }
 
-function shiftToVociRow(shift, members) {
-  const kind = KIND_LABELS[shift.entry_kind] || shift.entry_kind || 'Turno'
+function shiftToVociRecord(shift, members) {
+  const ymd = ymdKey(shift.work_date)
   const hours = hoursBetween(shift.time_start, shift.time_end)
-  return [
-    formatYmdIt(shift.work_date),
-    memberNameForShift(shift, members),
-    kind,
-    formatTimeShort(shift.time_start),
-    formatTimeShort(shift.time_end),
-    formatHoursCell(hours),
-    shift.notes || '',
-  ]
+  const id = Number(shift.id)
+  return {
+    employee: memberNameForShift(shift, members),
+    dal: formatYmdIt(ymd),
+    al: formatYmdIt(ymd),
+    kind: KIND_LABELS[shift.entry_kind] || shift.entry_kind || 'Turno',
+    timeStart: formatTimeShort(shift.time_start),
+    timeEnd: formatTimeShort(shift.time_end),
+    hours: formatHoursCell(hours),
+    notes: shift.notes || '',
+    dateFrom: ymd,
+    dateTo: ymd,
+    staffMemberId: Number(shift.staff_member_id),
+    entryKind: shift.entry_kind || 'shift',
+    shiftIds: Number.isFinite(id) ? [id] : [],
+    byDate: { [ymd]: Number.isFinite(id) ? [id] : [] },
+  }
+}
+
+function vociRecordToExcel(record) {
+  return [record.employee, record.dal, record.al, record.kind, record.hours || '', record.notes || '']
 }
 
 /**
@@ -299,21 +302,22 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     .slice()
     .sort((a, b) => compareShifts(a, b, members))
 
-  const vociRows = [STAFF_REPORT_VOCI_HEADERS]
-  for (const shift of filtered) {
-    vociRows.push(shiftToVociRow(shift, members))
-  }
-
   const ferieRanges = collapseFerieRanges(filtered, members)
-  const ferieRows = [STAFF_REPORT_FERIE_HEADERS]
-  const ferieRecords = []
-  for (const range of ferieRanges) {
-    const record = ferieRangeToRow(range)
-    ferieRecords.push(record)
-    ferieRows.push([record.employee, record.dal, record.al, record.kind, record.days, record.notes])
-  }
+  const ferieRecords = ferieRanges.map((range) => ferieRangeToRow(range))
+  const ferieRows = [
+    STAFF_REPORT_FERIE_HEADERS,
+    ...ferieRecords.map((record) => [record.employee, record.dal, record.al, record.kind, record.days, record.notes]),
+  ]
 
-  const vociShiftIds = filtered.map((shift) => (shift.id != null ? Number(shift.id) : null))
+  const otherRecords = filtered
+    .filter((shift) => shift.entry_kind !== 'ferie')
+    .map((shift) => shiftToVociRecord(shift, members))
+  const vociRecords = [...otherRecords, ...ferieRecords].sort((a, b) => {
+    const byName = String(a.employee || '').localeCompare(String(b.employee || ''), 'it')
+    if (byName !== 0) return byName
+    return String(a.dateFrom || '').localeCompare(String(b.dateFrom || ''))
+  })
+  const vociRows = [STAFF_REPORT_VOCI_HEADERS, ...vociRecords.map(vociRecordToExcel)]
 
   const stats = aggregateWeeklyStaffStats(members, shifts, from, to)
   const riepilogoRows = [
@@ -356,7 +360,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     dateFrom: from,
     dateTo: to,
     sheets: [
-      { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows, shiftIds: vociShiftIds },
+      { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows, records: vociRecords },
       { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows, records: ferieRecords },
       { name: STAFF_REPORT_SHEET_RIEPILOGO, rows: riepilogoRows },
       { name: STAFF_REPORT_SHEET_TOTALI, rows: totaliRows },
@@ -414,13 +418,12 @@ function ferieRowFromArray(row) {
 
 function vociRowFromArray(row) {
   return {
-    date: row?.[0] ?? '',
-    employee: row?.[1] ?? '',
-    kind: row?.[2] ?? '',
-    timeStart: row?.[3] ?? '',
-    timeEnd: row?.[4] ?? '',
-    hours: row?.[5] ?? '',
-    notes: row?.[6] ?? '',
+    employee: row?.[0] ?? '',
+    dal: row?.[1] ?? '',
+    al: row?.[2] ?? '',
+    kind: row?.[3] ?? '',
+    hours: row?.[4] ?? '',
+    notes: row?.[5] ?? '',
   }
 }
 
@@ -451,11 +454,7 @@ export function staffReportGridRows(sheet) {
     return Array.isArray(sheet.records) ? sheet.records : body.map(ferieRowFromArray)
   }
   if (name === STAFF_REPORT_SHEET_VOCI) {
-    const shiftIds = Array.isArray(sheet?.shiftIds) ? sheet.shiftIds : []
-    return body.map((row, index) => ({
-      ...vociRowFromArray(row),
-      shiftId: shiftIds[index] != null ? Number(shiftIds[index]) : null,
-    }))
+    return Array.isArray(sheet.records) ? sheet.records : body.map(vociRowFromArray)
   }
   if (name === STAFF_REPORT_SHEET_RIEPILOGO) return body.map(riepilogoRowFromArray)
   if (name === STAFF_REPORT_SHEET_TOTALI) return body.map(totaliRowFromArray)
