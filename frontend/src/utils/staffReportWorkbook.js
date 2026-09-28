@@ -49,12 +49,12 @@ export const STAFF_REPORT_VOCI_COLUMNS = [
   { id: 'notes', label: 'Note', width: 31, multiline: true, fluid: true },
 ]
 
-export const STAFF_REPORT_FERIE_HEADERS = ['Dal', 'Al', 'Dipendente', 'Tipo', 'Giorni', 'Note']
+export const STAFF_REPORT_FERIE_HEADERS = ['Dipendente', 'Dal', 'Al', 'Tipo', 'Giorni', 'Note']
 
 export const STAFF_REPORT_FERIE_COLUMNS = [
+  { id: 'employee', label: 'Dipendente', width: 24, emphasis: true, fluid: true },
   { id: 'dal', label: 'Dal', width: 14, fluid: true },
   { id: 'al', label: 'Al', width: 14, fluid: true },
-  { id: 'employee', label: 'Dipendente', width: 24, emphasis: true, fluid: true },
   { id: 'kind', label: 'Tipo', width: 12, fluid: true },
   { id: 'days', label: 'Giorni', numeric: true, width: 10, fluid: true },
   { id: 'notes', label: 'Note', width: 26, multiline: true, fluid: true },
@@ -248,9 +248,9 @@ export function collapseFerieRanges(shifts, members) {
   }
 
   merged.sort((a, b) => {
-    const byDate = a.dateFrom.localeCompare(b.dateFrom)
-    if (byDate !== 0) return byDate
-    return a.employee.localeCompare(b.employee, 'it')
+    const byName = a.employee.localeCompare(b.employee, 'it')
+    if (byName !== 0) return byName
+    return a.dateFrom.localeCompare(b.dateFrom)
   })
   return merged
 }
@@ -310,7 +310,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
   for (const range of ferieRanges) {
     const record = ferieRangeToRow(range)
     ferieRecords.push(record)
-    ferieRows.push([record.dal, record.al, record.employee, record.kind, record.days, record.notes])
+    ferieRows.push([record.employee, record.dal, record.al, record.kind, record.days, record.notes])
   }
 
   const vociShiftIds = filtered.map((shift) => (shift.id != null ? Number(shift.id) : null))
@@ -403,9 +403,9 @@ export function staffReportColumnsForSheet(sheet) {
 
 function ferieRowFromArray(row) {
   return {
-    dal: row?.[0] ?? '',
-    al: row?.[1] ?? '',
-    employee: row?.[2] ?? '',
+    employee: row?.[0] ?? '',
+    dal: row?.[1] ?? '',
+    al: row?.[2] ?? '',
     kind: row?.[3] ?? '',
     days: row?.[4] ?? '',
     notes: row?.[5] ?? '',

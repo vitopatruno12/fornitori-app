@@ -19,7 +19,6 @@ import {
   staffReportCellValue,
   staffReportColumnsForSheet,
   staffReportGridRows,
-  staffReportTotalsLabel,
 } from '../utils/staffReportWorkbook.js'
 
 function toYmd(d) {
@@ -690,8 +689,6 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           columns={columns}
           rows={gridRows}
           cellValue={staffReportCellValue}
-          totalsLabel={staffReportTotalsLabel}
-          totals={gridRows}
           gridClassName="staff-report-grid workbook-grid"
           loading={loading}
           hideToolbar
