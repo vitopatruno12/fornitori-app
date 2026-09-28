@@ -286,22 +286,43 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     setFerieBusy(true)
     try {
       let created = 0
-      let skipped = 0
-      const notes = String(ferieNotes || '').trim() || null
+      let updated = 0
+      const typedNotes = String(ferieNotes || '').trim()
       let existing = []
       try {
         existing = await fetchStaffShifts(from, to, { memberIds: [memberId] })
       } catch {
         existing = []
       }
-      const existingFerieDays = new Set(
-        (existing || [])
-          .filter((s) => Number(s.staff_member_id) === memberId && s.entry_kind === 'ferie')
-          .map((s) => String(s.work_date || '').slice(0, 10)),
-      )
+      const ferieByDate = new Map()
+      for (const shift of existing || []) {
+        if (Number(shift.staff_member_id) !== memberId || shift.entry_kind !== 'ferie') continue
+        const ymd = String(shift.work_date || '').slice(0, 10)
+        if (!ymd) continue
+        if (!ferieByDate.has(ymd)) ferieByDate.set(ymd, [])
+        ferieByDate.get(ymd).push(shift)
+      }
+      const existingNote = [...ferieByDate.values()]
+        .flat()
+        .map((shift) => String(shift.notes || '').trim())
+        .find(Boolean)
+      const notes = typedNotes || existingNote || null
       for (const ymd of days) {
-        if (existingFerieDays.has(ymd)) {
-          skipped += 1
+        const hits = ferieByDate.get(ymd) || []
+        if (hits.length) {
+          const current = String(hits[0].notes || '').trim()
+          if (current !== String(notes || '').trim()) {
+            await updateStaffShift(hits[0].id, {
+              notes,
+              entry_kind: 'ferie',
+              time_start: null,
+              time_end: null,
+            })
+            updated += 1
+          }
+          for (const extra of hits.slice(1)) {
+            await deleteStaffShift(extra.id)
+          }
           continue
         }
         await createStaffShift({
@@ -313,7 +334,6 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           notes,
         })
         created += 1
-        existingFerieDays.add(ymd)
       }
       const reportFrom = from < dateFromRef.current ? from : dateFromRef.current
       const reportTo = to > dateToRef.current ? to : dateToRef.current
@@ -325,11 +345,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       await runRefresh()
       const memberName = activeMembers.find((m) => Number(m.id) === memberId)?.name || 'dipendente'
       setSuccess(
-        created > 0
-          ? `Ferie registrate per ${memberName}: ${created} giorn${created === 1 ? 'o' : 'i'}${skipped ? ` (${skipped} già presenti)` : ''}.`
-          : skipped
-            ? `Nessuna nuova ferie: ${skipped} giorn${skipped === 1 ? 'o' : 'i'} già registrat${skipped === 1 ? 'o' : 'i'}.`
-            : 'Nessuna ferie registrata.',
+        `Ferie di ${memberName}: ${from.split('-').reverse().join('/')} – ${to.split('-').reverse().join('/')}, ${days.length} giorni${created ? `, ${created} aggiunti` : ''}${updated ? `, ${updated} aggiornati` : ''}.`,
       )
       setFerieNotes('')
     } catch (err) {
@@ -413,29 +429,66 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
       return
     }
     const notes = String(ferieEdit.notes || '').trim()
-    const notesChanged = notes !== String(ferieEdit.originalNotes || '').trim()
     const byDate = ferieEdit.byDate || {}
-    const idsToDelete = []
-    const idsToUpdate = []
-    for (const [ymd, rawIds] of Object.entries(byDate)) {
-      const ids = (Array.isArray(rawIds) ? rawIds : [rawIds]).filter((id) => id != null)
-      if (!wanted.includes(ymd)) idsToDelete.push(...ids)
-      else if (notesChanged) idsToUpdate.push(...ids)
-    }
-    const datesToCreate = wanted.filter((ymd) => !byDate[ymd] || (Array.isArray(byDate[ymd]) && byDate[ymd].length === 0))
+    const memberId = Number(ferieEdit.staffMemberId)
+    const idsOnDate = (raw) =>
+      (Array.isArray(raw) ? raw : raw != null ? [raw] : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id))
     setFerieBusy(true)
     setError('')
     setSuccess('')
     try {
+      let existing = []
+      try {
+        existing = await fetchStaffShifts(from, to, { memberIds: [memberId] })
+      } catch {
+        existing = []
+      }
+      const ferieByDate = new Map()
+      for (const shift of existing || []) {
+        if (Number(shift.staff_member_id) !== memberId || shift.entry_kind !== 'ferie') continue
+        const ymd = String(shift.work_date || '').slice(0, 10)
+        if (!ymd) continue
+        if (!ferieByDate.has(ymd)) ferieByDate.set(ymd, [])
+        const id = Number(shift.id)
+        if (Number.isFinite(id)) ferieByDate.get(ymd).push(id)
+      }
+      for (const [ymd, rawIds] of Object.entries(byDate)) {
+        if (!ferieByDate.has(ymd)) ferieByDate.set(ymd, [])
+        for (const id of idsOnDate(rawIds)) {
+          if (!ferieByDate.get(ymd).includes(id)) ferieByDate.get(ymd).push(id)
+        }
+      }
+
+      const idsToDelete = []
+      const idsToUpdate = []
+      const datesToCreate = []
+      const wantedSet = new Set(wanted)
+      for (const [ymd, ids] of ferieByDate.entries()) {
+        if (wantedSet.has(ymd)) continue
+        if (!byDate[ymd]) continue
+        idsToDelete.push(...ids)
+      }
+      for (const ymd of wanted) {
+        const ids = ferieByDate.get(ymd) || []
+        if (!ids.length) {
+          datesToCreate.push(ymd)
+          continue
+        }
+        idsToUpdate.push(ids[0])
+        if (ids.length > 1) idsToDelete.push(...ids.slice(1))
+      }
+
       for (const id of idsToDelete) {
-        await deleteStaffShift(id)
+        if (!idsToUpdate.includes(id)) await deleteStaffShift(id)
       }
       for (const id of idsToUpdate) {
         await updateStaffShift(id, { notes: notes || null, entry_kind: 'ferie', time_start: null, time_end: null })
       }
       for (const ymd of datesToCreate) {
         await createStaffShift({
-          staff_member_id: ferieEdit.staffMemberId,
+          staff_member_id: memberId,
           work_date: ymd,
           time_start: null,
           time_end: null,
@@ -444,7 +497,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
         })
       }
       setFerieEdit(null)
-      setSuccess(`Ferie aggiornate: ${ferieEdit.employee}, ${wanted.length} giorni.`)
+      setSuccess(`Intervallo aggiornato: ${ferieEdit.employee}, ${wanted.length} giorni.`)
       await runRefresh()
     } catch (err) {
       setError(err?.message || 'Salvataggio ferie non riuscito')

@@ -143,7 +143,7 @@ function gapIsWeekendOnly(leftTo, rightFrom) {
 }
 
 /**
- * Giorni di ferie consecutivi dello stesso dipendente (stesse note) diventano un solo intervallo.
+ * Giorni di ferie consecutivi dello stesso dipendente diventano un solo intervallo.
  * @param {object[]} shifts
  * @param {object[]} members
  */
@@ -153,8 +153,7 @@ export function collapseFerieRanges(shifts, members) {
     if (!shift || shift.entry_kind !== 'ferie') continue
     const ymd = ymdKey(shift.work_date)
     if (!ymd) continue
-    const notes = String(shift.notes || '').trim()
-    const key = `${Number(shift.staff_member_id)}|${notes}`
+    const key = String(Number(shift.staff_member_id))
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(shift)
   }
@@ -181,7 +180,9 @@ export function collapseFerieRanges(shifts, members) {
         }
         continue
       }
+      const note = String(shift.notes || '').trim()
       if (ymd === current.dateTo) {
+        if (!current.notes && note) current.notes = note
         if (Number.isFinite(id)) {
           current.shiftIds.push(id)
           current.byDate[ymd].push(id)
@@ -189,6 +190,7 @@ export function collapseFerieRanges(shifts, members) {
         continue
       }
       if (ymd === addDaysYmd(current.dateTo, 1)) {
+        if (!current.notes && note) current.notes = note
         current.dateTo = ymd
         current.days += 1
         current.byDate[ymd] = Number.isFinite(id) ? [id] : []
@@ -215,8 +217,6 @@ export function collapseFerieRanges(shifts, members) {
   ranges.sort((a, b) => {
     const byMember = a.staffMemberId - b.staffMemberId
     if (byMember !== 0) return byMember
-    const byNotes = a.notes.localeCompare(b.notes, 'it')
-    if (byNotes !== 0) return byNotes
     return a.dateFrom.localeCompare(b.dateFrom)
   })
 
@@ -226,9 +226,9 @@ export function collapseFerieRanges(shifts, members) {
     if (
       prev &&
       prev.staffMemberId === range.staffMemberId &&
-      prev.notes === range.notes &&
       gapIsWeekendOnly(prev.dateTo, range.dateFrom)
     ) {
+      if (!prev.notes && range.notes) prev.notes = range.notes
       prev.dateTo = range.dateTo
       prev.days = inclusiveDayCount(prev.dateFrom, prev.dateTo)
       prev.shiftIds.push(...range.shiftIds)
