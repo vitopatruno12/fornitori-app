@@ -398,7 +398,7 @@ function bankMovementsCellValue(row, col) {
 
 const BANK_RECON_COLUMNS = [
   { id: 'date', label: 'Data', width: 10, fluid: true },
-  { id: 'doc_ref', label: 'N. nel bonifico', width: 14, fluid: true, emphasis: true },
+  { id: 'bonifico_ref', label: 'N. bonifico', width: 14, fluid: true, emphasis: true },
   { id: 'beneficiary', label: 'Beneficiario', width: 18, fluid: true },
   { id: 'invoice_number', label: 'N. fattura', width: 12, fluid: true, emphasis: true },
   { id: 'issuer', label: 'Emittente', width: 18, fluid: true },
@@ -420,7 +420,7 @@ const BANK_RECON_COLUMNS = [
 const BANK_INVOICE_STATUS_COLUMNS = [
   { id: 'invoice_number', label: 'N. fattura', width: 12, fluid: true, emphasis: true },
   { id: 'supplier_name', label: 'Emittente', width: 18, fluid: true },
-  { id: 'doc_ref', label: 'N. nel bonifico', width: 14, fluid: true, emphasis: true },
+  { id: 'bonifico_ref', label: 'N. bonifico', width: 14, fluid: true, emphasis: true },
   { id: 'beneficiary', label: 'Beneficiario', width: 18, fluid: true },
   { id: 'total', label: 'Importo', width: 10, fluid: true, numeric: true },
   { id: 'amount_paid', label: 'Pagato', width: 10, fluid: true, numeric: true },
@@ -432,7 +432,7 @@ const BANK_INVOICE_STATUS_COLUMNS = [
     fluid: true,
     tone: (row) => (invoiceIsAligned(row) ? 'banca-recon-ok-cell' : 'banca-recon-open-cell'),
   },
-  { id: 'reason', label: 'Esito', width: 10, fluid: true },
+  { id: 'reason', label: 'Esito', width: 12, fluid: true },
 ]
 
 function invoiceIsAligned(row) {
@@ -457,7 +457,8 @@ function invoiceIsAligned(row) {
 
 function bankReconCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement?.movement_date)
-  if (col.id === 'doc_ref') return row?.movement?.doc_ref || '—'
+  if (col.id === 'bonifico_ref') return row?.movement?.bonifico_ref || '—'
+  if (col.id === 'doc_ref') return row?.movement?.doc_ref || row?.movement?.bonifico_ref || '—'
   if (col.id === 'beneficiary') {
     return row?.movement?.counterparty || row?.movement?.beneficiary || '—'
   }
@@ -478,10 +479,20 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'ok') return invoiceIsAligned(row) ? '✔' : '○'
   if (col.id === 'invoice_number') return row?.invoice_number || '—'
   if (col.id === 'supplier_name') return row?.supplier_name || '—'
-  if (col.id === 'doc_ref') return row?.matched_movement?.doc_ref || '—'
+  if (col.id === 'bonifico_ref') {
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') return '—'
+    return row?.matched_movement?.bonifico_ref || '—'
+  }
+  if (col.id === 'doc_ref') {
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') return '—'
+    return row?.matched_movement?.bonifico_ref || row?.matched_movement?.doc_ref || '—'
+  }
   if (col.id === 'beneficiary') {
     const m = row?.matched_movement
-    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') return 'Contanti'
+    // Contanti = match da file Pagamenti, non un beneficiario di bonifico
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
+      return '—'
+    }
     return m?.counterparty || m?.beneficiary || '—'
   }
   if (col.id === 'total') return eur(row?.total)
@@ -494,7 +505,7 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
-      return '✔ Contanti'
+      return '✔ Pagato (file Pagamenti)'
     }
     if (row?.match_reason === 'da_pagare') return 'Da pagare'
     return row?.match_reason || '—'

@@ -657,10 +657,13 @@ def _tx_to_movement(tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
       description = f"{counterparty} · {description}"[:512]
   tx_id = str(tx.get("transaction_id") or tx.get("entry_reference") or "").strip()
   notes = f"Enable Banking{f' · id={tx_id}' if tx_id else ''}"
+  btc_code = str((tx.get("bank_transaction_code") or {}).get("code") or "").strip()
+  # Conserva l'id bonifico anche in causale (leggibile in riconciliazione)
+  causale_parts = [p for p in (btc_code, f"id={tx_id}" if tx_id else "") if p]
   return {
     "movement_date": mov_date,
     "description": description,
-    "causale": (str((tx.get("bank_transaction_code") or {}).get("code") or "").strip() or None),
+    "causale": (" · ".join(causale_parts)[:256] if causale_parts else None),
     "movement_type": mov_type,
     "amount": amount,
     "counterparty": counterparty,

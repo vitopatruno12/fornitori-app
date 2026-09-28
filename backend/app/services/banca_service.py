@@ -1125,20 +1125,29 @@ def _extract_doc_ref(blob: str) -> str:
 
 
 def _extract_bonifico_ref(blob: str) -> Optional[str]:
-  """Ricava CRO / CRI / ID bonifico dalla causale se presente."""
+  """Ricava CRO / CRI / TRN / ID bonifico (anche Enable Banking) dalla causale/note."""
   text = str(blob or "")
+  if not text.strip():
+    return None
   patterns = (
-    r"\bCRO[\s.:/-]*([A-Z0-9]{6,22})\b",
-    r"\bCRI[\s.:/-]*([A-Z0-9]{6,22})\b",
-    r"\bTRN[\s.:/-]*([A-Z0-9]{6,22})\b",
-    r"\bID[\s.:/-]*BON(?:IFICO)?[\s.:/-]*([A-Z0-9]{6,22})\b",
-    r"\bBON(?:IFICO)?[\s.:/-]*N?[°.]?\s*([A-Z0-9]{6,22})\b",
+    r"\bCRO[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bCRI[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bTRN[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bE2E[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bEND[\s\-]?TO[\s\-]?END(?:[\s\-]?ID)?[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bID[\s.:/-]*BON(?:IFICO)?[\s.:/-]*([A-Z0-9]{6,35})\b",
+    r"\bBON(?:IFICO)?[\s.:/-]*N?[°.]?\s*([A-Z0-9]{6,35})\b",
+    r"\bRIF(?:ERIMENTO)?[\s.:/-]*(?:BON(?:IFICO)?)?[\s.:/-]*([A-Z0-9]{6,35})\b",
+    # Sync Enable Banking: notes = "Enable Banking · id=…"
+    r"(?:Enable Banking\s*[·•\-]?\s*)?id=([A-Za-z0-9._\-]{6,64})",
   )
   up = text.upper()
   for pat in patterns:
     m = re.search(pat, up, re.IGNORECASE)
     if m:
-      return m.group(1)
+      ref = str(m.group(1) or "").strip(" .-_/")
+      if len(ref) >= 6:
+        return ref[:40]
   return None
 
 
