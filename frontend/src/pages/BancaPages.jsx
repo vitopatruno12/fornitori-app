@@ -397,9 +397,10 @@ function bankMovementsCellValue(row, col) {
 }
 
 const BANK_RECON_COLUMNS = [
-  { id: 'movement', label: 'Movimento', width: 28, fluid: true, emphasis: true },
+  { id: 'movement', label: 'Movimento', width: 22, fluid: true, emphasis: true },
+  { id: 'beneficiary', label: 'Beneficiario', width: 18, fluid: true },
   { id: 'amount', label: 'Importo', width: 11, fluid: true, numeric: true },
-  { id: 'invoice', label: 'Proposta fattura', width: 28, fluid: true },
+  { id: 'invoice', label: 'Fornitore fattura', width: 24, fluid: true },
   { id: 'score', label: 'Score', width: 9, fluid: true, numeric: true },
   { id: 'difference', label: 'Differenza', width: 11, fluid: true, numeric: true },
   {
@@ -419,7 +420,8 @@ const BANK_RECON_COLUMNS = [
 const BANK_INVOICE_STATUS_COLUMNS = [
   { id: 'invoice_number', label: 'N. doc.', width: 10, fluid: true, emphasis: true },
   { id: 'invoice_date', label: 'Data', width: 8, fluid: true },
-  { id: 'supplier_name', label: 'Fornitore', width: 18, fluid: true },
+  { id: 'supplier_name', label: 'Fornitore fattura', width: 16, fluid: true },
+  { id: 'beneficiary', label: 'Beneficiario', width: 16, fluid: true },
   { id: 'total', label: 'Totale fattura', width: 10, fluid: true, numeric: true },
   { id: 'bank_amount', label: 'Importo banca', width: 10, fluid: true, numeric: true },
   { id: 'residuo', label: 'Residuo', width: 9, fluid: true, numeric: true },
@@ -476,6 +478,9 @@ function bankReconCellValue(row, col) {
         : who || desc || '—'
     return [formatDate(m?.movement_date), text].filter(Boolean).join(' · ')
   }
+  if (col.id === 'beneficiary') {
+    return row?.movement?.counterparty || row?.movement?.beneficiary || '—'
+  }
   if (col.id === 'amount') return eur(row?.movement?.amount)
   if (col.id === 'invoice') {
     if (!row?.suggested_invoice) return 'Nessuna proposta'
@@ -513,6 +518,10 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'invoice_number') return row?.invoice_number || '—'
   if (col.id === 'invoice_date') return formatDate(row?.invoice_date)
   if (col.id === 'supplier_name') return row?.supplier_name || '—'
+  if (col.id === 'beneficiary') {
+    const m = row?.matched_movement
+    return m?.counterparty || m?.beneficiary || '—'
+  }
   if (col.id === 'total') return eur(row?.total)
   if (col.id === 'bank_amount') {
     const m = row?.matched_movement
@@ -2536,7 +2545,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
                 <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Match automatici (score ≥80: importo + fornitore + n. fattura + data) oppure riga CONTANTI nel file Pagamenti.
+                  Match automatici (score ≥80: importo + beneficiario del bonifico uguale al fornitore + data) oppure riga CONTANTI nel file Pagamenti.
                 </p>
                 <WorkbookGrid
                   title="Fatture pagate o abbinate"
@@ -2568,6 +2577,7 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da controllare (differenze / da riconciliare)</h2>
                 <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+                  Il beneficiario è lo stesso della colonna Beneficiario in Movimenti, accanto al fornitore della fattura.
                   Proposte con score 70–79 (<strong>da confermare</strong>) o sotto 70 / senza fattura (
                   <strong>da riconciliare</strong>). Conferma a mano se serve.
                 </p>

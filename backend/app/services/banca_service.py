@@ -1004,6 +1004,108 @@ def _dates_compatible(inv: Any, mov: Any, *, max_days: int = 120) -> bool:
   return -3 <= delta <= max_days
 
 
+_BENE_LABEL_RE = re.compile(
+  r"(?:"
+  r"A\s+FAVORE\s+DI|"
+  r"IN\s+FAVORE\s+DI|"
+  r"A\s+FAV\.?\s+DI|"
+  r"VS\.?\s*FAV(?:ORE)?\.?|"
+  r"BENEFICIARI[OA]|"
+  r"BENEF\.?|"
+  r"BEN\.|"
+  r"DESTINATARIO|"
+  r"CREDITORE|"
+  r"FORNITORE"
+  r")\s*[:\-]?\s*",
+  re.IGNORECASE,
+)
+_BENE_STOP_RE = re.compile(
+  r"\b(?:IBAN|CRO|CRI|TRN|CAUSALE|CAUS\.|IMPORTO|EUR|EURO|COMMISSION\w*|"
+  r"RIF(?:ERIMENTO)?\.?|FATT(?:URA)?|FT\.?|COD(?:ICE)?|SEPA|ISTANTANEO|"
+  r"DISPOSTO|ADDEBITO|BONIFICO|PAGAMENTO)\b",
+  re.IGNORECASE,
+)
+_BENE_GENERIC_RE = re.compile(
+  r"^(?:bonifico|pagamento|addebito|sepa|disposizione|movimento|storno|commissione)\b",
+  re.IGNORECASE,
+)
+
+
+def _trim_beneficiary(raw: str) -> str:
+  text = re.sub(r"\s+", " ", str(raw or "")).strip(" ·|-:;,.\"'")
+  if not text:
+    return ""
+  cut = _BENE_STOP_RE.search(text)
+  if cut and cut.start() >= 3:
+    text = text[: cut.start()]
+  text = re.sub(r"\s+", " ", text).strip(" ·|-:;,.\"'")
+  words = text.split()
+  if len(words) > 8:
+    text = " ".join(words[:8])
+  letters = re.sub(r"[^A-Za-zÀ-ÿ]", "", text)
+  if len(letters) < 4 or _BENE_GENERIC_RE.match(text):
+    return ""
+  return text[:120]
+
+
+def _extract_beneficiary_name(text: str) -> str:
+  """Nome beneficiario del bonifico, dalla causale del movimento."""
+  flat = re.sub(r"\s+", " ", str(text or "")).strip()
+  if not flat:
+    return ""
+  labeled = _BENE_LABEL_RE.search(flat)
+  if labeled:
+    name = _trim_beneficiary(flat[labeled.end() :])
+    if name:
+      return name
+  parts = [p.strip() for p in re.split(r"\s+[·|]\s+", flat) if p.strip()]
+  for part in parts:
+    if _BENE_GENERIC_RE.match(part):
+      continue
+    name = _trim_beneficiary(part)
+    if name and not _BENE_LABEL_RE.match(name):
+      return name
+  return ""
+
+
+def _movement_beneficiary(mov: Any = None, blob: str = "") -> str:
+  """Stesso nominativo della colonna Beneficiario in Movimenti (counterparty)."""
+  stored = str(getattr(mov, "counterparty", "") or "").strip() if mov is not None else ""
+  if stored and not _BENE_GENERIC_RE.match(stored):
+    return _trim_beneficiary(stored) or stored[:120]
+  raw = blob
+  if not raw and mov is not None:
+    raw = _movement_search_blob(mov)
+  return _extract_beneficiary_name(raw)
+
+
+def _party_name_tokens(name: Optional[str]) -> List[str]:
+  raw = re.sub(r"[^A-Z0-9]+", " ", (name or "").upper())
+  extra_stop = {"dei", "del", "della", "delle", "degli", "di", "da", "the", "and"}
+  return [
+    t
+    for t in raw.split()
+    if len(t) >= 3 and t.lower() not in _BANK_NAME_STOPWORDS and t.lower() not in extra_stop and not t.isdigit()
+  ]
+
+
+def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
+  left = _party_name_tokens(supplier_name)
+  right = _party_name_tokens(beneficiary)
+  if not left or not right:
+    return False
+  shared = set(left) & set(right)
+  if shared:
+    shorter = left if len(left) <= len(right) else right
+    if len(shared) >= max(1, (len(shorter) + 1) // 2):
+      return True
+    if max(len(token) for token in shared) >= 6:
+      return True
+  joined_l = "".join(left)
+  joined_r = "".join(right)
+  return len(joined_l) >= 5 and (joined_l in joined_r or joined_r in joined_l)
+
+
 def _extract_bonifico_ref(blob: str) -> Optional[str]:
   """Ricava CRO / CRI / ID bonifico dalla causale se presente."""
   text = str(blob or "")
@@ -1083,7 +1185,12 @@ def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
       breakdown["amount"] = 15  # acconto / parziale
       partial = True
 
-  if _supplier_in_blob(getattr(inv, "supplier_name", None), blob):
+  beneficiary = _movement_beneficiary(mov, blob)
+  supplier_name = getattr(inv, "supplier_name", None)
+  party_hit = bool(beneficiary) and _party_names_align(supplier_name, beneficiary)
+  if not party_hit and not beneficiary:
+    party_hit = _supplier_in_blob(supplier_name, blob)
+  if party_hit:
     breakdown["party"] = _SCORE_PARTY
   else:
     # P.IVA in causale
@@ -1147,15 +1254,19 @@ def _bank_movement_pays_invoice(inv: Any, mov: Any, blob: str) -> bool:
 
 
 def _enrich_movement_out(out: Dict[str, Any], mov: Any = None, blob: str = "") -> Dict[str, Any]:
-  """Aggiunge n. bonifico/CRO se ricavabile dalla causale."""
+  """Aggiunge beneficiario e n. bonifico/CRO ricavati dalla causale."""
   raw = blob
   if not raw and mov is not None:
     raw = _movement_search_blob(mov)
-  ref = _extract_bonifico_ref(raw)
-  if not ref:
-    return out
   enriched = dict(out)
-  enriched["bonifico_ref"] = ref
+  beneficiary = _movement_beneficiary(mov, raw)
+  if beneficiary:
+    enriched["beneficiary"] = beneficiary
+    if not str(enriched.get("counterparty") or "").strip():
+      enriched["counterparty"] = beneficiary
+  ref = _extract_bonifico_ref(raw)
+  if ref:
+    enriched["bonifico_ref"] = ref
   return enriched
 
 
