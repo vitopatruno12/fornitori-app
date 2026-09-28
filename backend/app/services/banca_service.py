@@ -1106,6 +1106,24 @@ def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
   return len(joined_l) >= 5 and (joined_l in joined_r or joined_r in joined_l)
 
 
+_DOC_REF_RE = re.compile(
+  r"(?:FATTURA|FATT\.?|FT\.?|N\.?\s*FATT\.?|DOC(?:UMENTO)?|N\.?\s*DOC)\s*[:.\-]?\s*"
+  r"([A-Z0-9][A-Z0-9/\-]{2,24})",
+  re.IGNORECASE,
+)
+
+
+def _extract_doc_ref(blob: str) -> str:
+  """Numero fattura citato nella causale del bonifico."""
+  match = _DOC_REF_RE.search(str(blob or ""))
+  if not match:
+    return ""
+  token = match.group(1).strip(" .-")
+  if len(_normalize_doc_token(token)) < 3:
+    return ""
+  return token[:40]
+
+
 def _extract_bonifico_ref(blob: str) -> Optional[str]:
   """Ricava CRO / CRI / ID bonifico dalla causale se presente."""
   text = str(blob or "")
@@ -1267,6 +1285,9 @@ def _enrich_movement_out(out: Dict[str, Any], mov: Any = None, blob: str = "") -
   ref = _extract_bonifico_ref(raw)
   if ref:
     enriched["bonifico_ref"] = ref
+  doc_ref = _extract_doc_ref(raw)
+  if doc_ref:
+    enriched["doc_ref"] = doc_ref
   return enriched
 
 
@@ -1418,6 +1439,9 @@ def reconciliation_preview(
       if found_score and found_score.get("band") == "auto":
         reason = "score_auto" if reason != "matched" else reason
       mov_out = _enrich_movement_out(found["out"], found["mov"], found["blob"])
+      if has_num and num:
+        mov_out = dict(mov_out)
+        mov_out["doc_ref"] = num
       paid_by_bank.append(
         _invoice_row_out(
           inv,
@@ -1494,6 +1518,16 @@ def reconciliation_preview(
           "match_breakdown": sc["breakdown"],
           "partial": sc.get("partial"),
         }
+
+    linked_number = str((best or {}).get("invoice_number") or "").strip()
+    if linked_number and _invoice_number_in_text(linked_number, blob):
+      mov_out = dict(mov_out)
+      mov_out["doc_ref"] = linked_number
+    elif not mov_out.get("doc_ref"):
+      found_doc = _extract_doc_ref(blob)
+      if found_doc:
+        mov_out = dict(mov_out)
+        mov_out["doc_ref"] = found_doc
 
     if best:
       used_invoices.add(best["invoice_id"])
