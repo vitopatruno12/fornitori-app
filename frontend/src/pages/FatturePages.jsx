@@ -54,7 +54,12 @@ import {
   printVneTable,
 } from '../utils/vneTableExport.js'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
-import { companyLabel, FATTURE_COMPANY_ORDER, isGestionaleFattureContext } from '../utils/fattureCompany.js'
+import {
+  carrierChoosesFattureCompany,
+  companyLabel,
+  FATTURE_COMPANY_ORDER,
+  isGestionaleFattureContext,
+} from '../utils/fattureCompany.js'
 import { fetchBancaRiconciliazione, postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import {
   buildConservationPackage,
@@ -657,7 +662,10 @@ export function FattureDashboardPage() {
 export function FattureRicevutePage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const companyPicker = gestionaleMode || carrierChoosesFattureCompany()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(companyPicker, {
+    defaultCompany: companyPicker && !gestionaleMode ? 'risacca' : '',
+  })
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(gestionaleMode)
   const [error, setError] = useState('')
@@ -672,8 +680,8 @@ export function FattureRicevutePage() {
   const [sdiRefreshKey, setSdiRefreshKey] = useState(0)
   const importInputRef = React.useRef(null)
 
-  const ricevuteLead = gestionaleMode
-    ? 'Fatture dal canale SDI / Agenzia Entrate, suddivise per società (P.IVA destinatario). Società e import XML nel banner.'
+  const ricevuteLead = companyPicker
+    ? 'Fatture dal canale SDI / Agenzia Entrate, suddivise per società (P.IVA destinatario). Scegli la società nel banner.'
     : companyId
       ? `Fatture ricevute del registro locale: ${companyLabel(companyId)}.`
       : 'Fatture ricevute del registro locale di questa postazione.'
@@ -770,7 +778,7 @@ export function FattureRicevutePage() {
       lead={ricevuteLead}
       actions={
         <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e import XML">
-          {gestionaleMode ? (
+          {companyPicker ? (
             <FattureCompanySelect
               className="mastrini-hero-tools-company"
               companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
@@ -838,7 +846,7 @@ export function FattureRicevutePage() {
         showAssign={gestionaleMode && companyId === 'non_classificata'}
         autoLoad={Boolean(companyId)}
         companyId={companyId}
-        embeddedMode={!gestionaleMode}
+        embeddedMode={!companyPicker}
         hideImportLink
         nameQuery={nameQuery}
         dateFrom={dateFrom}
@@ -976,7 +984,10 @@ export function FattureRicevutePage() {
 export function FattureEmessePage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const companyPicker = gestionaleMode || carrierChoosesFattureCompany()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(companyPicker, {
+    defaultCompany: companyPicker && !gestionaleMode ? 'risacca' : '',
+  })
   const [searchParams, setSearchParams] = useSearchParams()
   const [uploadKind, setUploadKind] = useState('pdf')
   const [importBusy, setImportBusy] = useState(false)
@@ -1042,7 +1053,7 @@ export function FattureEmessePage() {
     if (focusAppliedRef.current === key) return
     focusAppliedRef.current = key
 
-    if (qCompany && gestionaleMode && companyId !== qCompany) {
+    if (qCompany && companyPicker && companyId !== qCompany) {
       setCompanyId(qCompany)
     }
     if (qFrom) setDateFrom(qFrom)
@@ -1057,7 +1068,7 @@ export function FattureEmessePage() {
     if (qId) cleaned.set('id', qId)
     if (qNum) cleaned.set('n', qNum)
     setSearchParams(cleaned, { replace: true })
-  }, [searchParams, gestionaleMode, companyId, setCompanyId, setSearchParams])
+  }, [searchParams, companyPicker, companyId, setCompanyId, setSearchParams])
 
   const filteredIssued = useMemo(
     () =>
@@ -1127,7 +1138,7 @@ export function FattureEmessePage() {
       if (warns.length) {
         setError(warns.join(' · '))
       }
-      if (row?.company && row.company !== companyId && gestionaleMode) {
+      if (row?.company && row.company !== companyId && companyPicker) {
         setCompanyId(row.company)
       } else {
         await reload()
@@ -1205,15 +1216,15 @@ export function FattureEmessePage() {
     <FatturePageShell
       title="Fatture emesse"
       lead={
-        gestionaleMode
-          ? 'Fatture attive / emesse per società. Mediazione A = Via Abba · Mediazione Z = Via Zanardelli. Usa «Separa A/Z» per riallineare.'
+        companyPicker
+          ? 'Fatture attive / emesse per società. Scegli la società nel banner: Mediazione A, Mediazione Z, Via Lattea, Risacca, PG.'
           : companyId
             ? `Fatture emesse del registro ${companyLabel(companyId)}.`
             : 'Fatture emesse del registro locale.'
       }
       actions={
         <aside className="mastrini-hero-tools fatture-hero-tools" aria-label="Società e caricamento documento">
-          {gestionaleMode ? (
+          {companyPicker ? (
             <FattureCompanySelect
               className="mastrini-hero-tools-company"
               companies={companies}

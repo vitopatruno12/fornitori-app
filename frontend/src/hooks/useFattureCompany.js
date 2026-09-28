@@ -9,14 +9,16 @@ import {
 } from '../utils/fattureCompany.js'
 
 /**
- * @param {boolean} gestionaleMode — true = gestionale grande (menu società); false = postazione operativa (società fissa).
+ * @param {boolean} gestionaleMode — true = menu società; false = postazione operativa (società fissa).
+ * @param {{ defaultCompany?: string }} [options]
  */
-export function useFattureCompany(gestionaleMode = true) {
+export function useFattureCompany(gestionaleMode = true, options = {}) {
+  const defaultCompany = String(options.defaultCompany || '').trim()
   const embeddedCompanyId = gestionaleMode ? '' : resolveEmbeddedFattureCompany()
   const [companies, setCompanies] = useState([])
   const [companyId, setCompanyIdState] = useState(() => {
     if (!gestionaleMode) return embeddedCompanyId
-    return readFattureCompany()
+    return readFattureCompany() || defaultCompany
   })
   const [loadingCompanies, setLoadingCompanies] = useState(Boolean(gestionaleMode))
 
@@ -42,15 +44,22 @@ export function useFattureCompany(gestionaleMode = true) {
       } else if (stored && !ordered.some((r) => r.id === stored)) {
         setCompanyIdState('')
         writeFattureCompany('')
+      } else if (!stored && defaultCompany && ordered.some((r) => r.id === defaultCompany)) {
+        setCompanyIdState(defaultCompany)
+        writeFattureCompany(defaultCompany)
       }
       return ordered.length ? ordered : rows
     } catch {
       setCompanies(FATTURE_COMPANY_ORDER.map((id) => ({ id, label: companyLabel(id) })))
+      if (!readFattureCompany() && defaultCompany) {
+        setCompanyIdState(defaultCompany)
+        writeFattureCompany(defaultCompany)
+      }
       return []
     } finally {
       setLoadingCompanies(false)
     }
-  }, [gestionaleMode])
+  }, [gestionaleMode, defaultCompany])
 
   useEffect(() => {
     void refreshCompanies()

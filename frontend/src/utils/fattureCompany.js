@@ -53,6 +53,11 @@ export function isGestionaleFattureContext(fattureBase = '/fatture') {
   return String(fattureBase || '/fatture').replace(/\/+$/, '') === '/fatture'
 }
 
+/** Il guidatore (postazione trasportatore) sceglie la società nelle fatture. */
+export function carrierChoosesFattureCompany() {
+  return isOperatorDeliveryMode()
+}
+
 /** Società SDI fissa per postazione operativa (nessun menu a tendina). */
 export function stationIdToFattureCompany(stationId) {
   const slug = getOperatorStationActivitySlug(stationId)
