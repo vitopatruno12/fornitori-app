@@ -3046,11 +3046,17 @@ select.form-control {
   padding: 1.25rem 1rem;
 }
 
+.staff-report-page {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 .staff-report-page .workbook-card-nested {
   margin-top: 0.75rem;
   border: none;
   border-radius: 0;
-  overflow: visible;
+  overflow: hidden;
+  max-width: 100%;
 }
 
 .staff-report-page .staff-report-grid.workbook-grid {
@@ -3059,14 +3065,39 @@ select.form-control {
   table-layout: fixed;
 }
 
-.staff-report-page .workbook-grid-wrap {
+.staff-report-page .workbook-grid-wrap,
+.staff-report-page .pagamenti-grid-wrap {
   max-height: min(70vh, 720px);
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.staff-report-page .workbook-grid th {
+  white-space: normal;
+  line-height: 1.15;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.28rem;
+}
+
+.staff-report-page .workbook-grid .excel-cell {
+  min-width: 0;
+  padding: 0.28rem 0.32rem;
 }
 
 .staff-report-page .workbook-grid .excel-cell-multiline {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.35;
+  line-height: 1.25;
+  overflow: hidden;
+  max-height: 2.6rem;
+}
+
+.staff-report-page .workbook-grid .sup-actions-col {
+  position: static;
+  min-width: 0;
+  width: 7.6rem;
+  box-shadow: none;
 }
 
 .staff-report-period-actions {
@@ -3119,7 +3150,9 @@ select.form-control {
 }
 
 .staff-report-ferie-notes {
-  flex: 2 1 200px;
+  flex: 1 1 7rem;
+  max-width: 11rem;
+  min-width: 0;
 }
 
 .staff-report-ferie-actions {
@@ -3157,14 +3190,21 @@ select.form-control {
 }
 
 .staff-report-ferie-edit-notes {
-  flex: 1 1 12rem;
+  flex: 1 1 7rem;
+  max-width: 11rem;
+  min-width: 0;
 }
 
 .staff-report-row-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.25rem;
   justify-content: flex-end;
+}
+
+.staff-report-row-actions .btn {
+  padding: 0.12rem 0.38rem;
+  font-size: 0.75rem;
 }
 
 @media print {

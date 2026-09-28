@@ -37,18 +37,27 @@ export const STAFF_REPORT_VOCI_COLUMNS = [
   { id: 'al', label: 'Al', width: 14, fluid: true },
   { id: 'kind', label: 'Tipo', width: 12, fluid: true },
   { id: 'hours', label: 'Ore', numeric: true, width: 10, fluid: true },
-  { id: 'notes', label: 'Note', width: 26, multiline: true, fluid: true },
+  { id: 'notes', label: 'Note', width: 12, multiline: true, fluid: true },
 ]
 
-export const STAFF_REPORT_FERIE_HEADERS = ['Dipendente', 'Dal', 'Al', 'Tipo', 'Giorni', 'Note']
+export const STAFF_REPORT_FERIE_HEADERS = [
+  'Dipendente',
+  'Dal',
+  'Al',
+  'Tipo',
+  'Giorni goduti',
+  'Giorni rimanenti',
+  'Note',
+]
 
 export const STAFF_REPORT_FERIE_COLUMNS = [
-  { id: 'employee', label: 'Dipendente', width: 24, emphasis: true, fluid: true },
-  { id: 'dal', label: 'Dal', width: 14, fluid: true },
-  { id: 'al', label: 'Al', width: 14, fluid: true },
-  { id: 'kind', label: 'Tipo', width: 12, fluid: true },
-  { id: 'days', label: 'Giorni', numeric: true, width: 10, fluid: true },
-  { id: 'notes', label: 'Note', width: 26, multiline: true, fluid: true },
+  { id: 'employee', label: 'Dipendente', width: 20, emphasis: true, fluid: true },
+  { id: 'dal', label: 'Dal', width: 12, fluid: true },
+  { id: 'al', label: 'Al', width: 12, fluid: true },
+  { id: 'kind', label: 'Tipo', width: 10, fluid: true },
+  { id: 'daysUsed', label: 'Giorni goduti', numeric: true, width: 14, fluid: true },
+  { id: 'daysLeft', label: 'Giorni rimanenti', numeric: true, width: 16, fluid: true },
+  { id: 'notes', label: 'Note', width: 10, multiline: true, fluid: true },
 ]
 
 export const STAFF_REPORT_RIEPILOGO_COLUMNS = [
@@ -117,6 +126,25 @@ function addDaysYmd(ymd, days) {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+function todayYmdLocal() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Giorni del periodo già trascorsi e giorni ancora da fare, rispetto a oggi. */
+function splitFerieDays(from, to, today = todayYmdLocal()) {
+  if (!from || !to || to < from) return { used: 0, left: 0 }
+  if (today < from) return { used: 0, left: inclusiveDayCount(from, to) }
+  if (today >= to) return { used: inclusiveDayCount(from, to), left: 0 }
+  return {
+    used: inclusiveDayCount(from, today),
+    left: inclusiveDayCount(addDaysYmd(today, 1), to),
+  }
 }
 
 function inclusiveDayCount(from, to) {
@@ -247,12 +275,15 @@ export function collapseFerieRanges(shifts, members) {
 }
 
 function ferieRangeToRow(range) {
+  const split = splitFerieDays(range.dateFrom, range.dateTo)
   return {
     dal: formatYmdIt(range.dateFrom),
     al: formatYmdIt(range.dateTo),
     employee: range.employee,
     kind: range.kind,
     days: String(range.days),
+    daysUsed: String(split.used),
+    daysLeft: String(split.left),
     hours: String(range.days),
     notes: range.notes || '',
     dateFrom: range.dateFrom,
@@ -307,7 +338,15 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
   const ferieRecords = ferieRanges.map((range) => ferieRangeToRow(range))
   const ferieRows = [
     STAFF_REPORT_FERIE_HEADERS,
-    ...ferieRecords.map((record) => [record.employee, record.dal, record.al, record.kind, record.days, record.notes]),
+    ...ferieRecords.map((record) => [
+      record.employee,
+      record.dal,
+      record.al,
+      record.kind,
+      record.daysUsed,
+      record.daysLeft,
+      record.notes,
+    ]),
   ]
 
   const otherRecords = filtered
@@ -412,8 +451,9 @@ function ferieRowFromArray(row) {
     dal: row?.[1] ?? '',
     al: row?.[2] ?? '',
     kind: row?.[3] ?? '',
-    days: row?.[4] ?? '',
-    notes: row?.[5] ?? '',
+    daysUsed: row?.[4] ?? '',
+    daysLeft: row?.[5] ?? '',
+    notes: row?.[6] ?? '',
   }
 }
 

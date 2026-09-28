@@ -752,7 +752,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
               ? 'Azioni'
               : ''
           }
-          actionsColWidth="13rem"
+          actionsColWidth="7.6rem"
           renderActions={
             currentSheet?.name === STAFF_REPORT_SHEET_FERIE || currentSheet?.name === STAFF_REPORT_SHEET_VOCI
               ? (row) =>
