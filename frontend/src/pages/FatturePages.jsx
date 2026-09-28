@@ -277,6 +277,33 @@ function flattenSdi(rows) {
   return [...(rows.abba || []), ...(rows.zanardelli || []), ...(rows.non_classificata || [])]
 }
 
+function adeProfileForCompany(companyId) {
+  const id = String(companyId || '').trim()
+  if (id === 'via_lattea') return 'via_lattea'
+  if (id === 'risacca') return 'risacca'
+  if (id === 'pg') return 'pg'
+  if (id === 'mediazione_a' || id === 'mediazione_z' || id === 'mediazione') return 'mediazione'
+  return ''
+}
+
+function ymdLocal(date) {
+  const d = new Date(date)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function lookbackDaysForChoice(value) {
+  if (value === 'ytd') {
+    const now = new Date()
+    now.setHours(12, 0, 0, 0)
+    const start = new Date(now.getFullYear(), 0, 1, 12, 0, 0, 0)
+    return Math.max(7, Math.round((now.getTime() - start.getTime()) / 86400000) + 1)
+  }
+  return Math.max(7, Number(value) || 270)
+}
+
 function sdiListForCompany(rows, companyId) {
   if (!companyId) return []
   if (rows?.companies?.[companyId]) return rows.companies[companyId]
@@ -302,15 +329,6 @@ export function AdeSdiInvoicesPanel({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [rows, setRows] = useState({ companies: {}, non_classificata: [] })
-
-  function adeProfileForCompany(cid) {
-    const id = String(cid || '').trim()
-    if (id === 'via_lattea') return 'via_lattea'
-    if (id === 'risacca') return 'risacca'
-    if (id === 'pg') return 'pg'
-    if (id === 'mediazione_a' || id === 'mediazione_z' || id === 'mediazione') return 'mediazione'
-    return ''
-  }
 
   async function load(daysOverride) {
     setLoading(true)
@@ -496,13 +514,9 @@ export function AdeSdiInvoicesPanel({
     <section className="card fatture-panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
         <div>
-          <h2 className="fatture-panel-title" style={{ marginBottom: '0.25rem' }}>
+          <h2 className="fatture-panel-title" style={{ marginBottom: 0 }}>
             {panelTitle}
           </h2>
-          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            Inbox SDI / Agenzia Entrate. Classificazione automatica dalla P.IVA destinatario nell&apos;XML
-            {companyId ? ` (${companyLabel(companyId)})` : ''}.
-          </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
@@ -1001,6 +1015,8 @@ export function FattureEmessePage() {
   const [focusIssuedId, setFocusIssuedId] = useState('')
   const [focusIssuedNumber, setFocusIssuedNumber] = useState('')
   const [reclassifyBusy, setReclassifyBusy] = useState(false)
+  const [issuedDays, setIssuedDays] = useState('ytd')
+  const [adeBusy, setAdeBusy] = useState(false)
   const importInputRef = React.useRef(null)
   const focusAppliedRef = React.useRef('')
 
@@ -1105,6 +1121,55 @@ export function FattureEmessePage() {
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, filteredIssued, focusIssuedId, focusIssuedNumber])
+
+  async function recuperaEmesseDaAde() {
+    if (!companyId) {
+      setError('Seleziona prima la società nel banner.')
+      return
+    }
+    setAdeBusy(true)
+    setError('')
+    setImportMsg('')
+    try {
+      const d = lookbackDaysForChoice(issuedDays)
+      const profileId = adeProfileForCompany(companyId)
+      const res = await runAdeAgentSync({
+        mode: 'download',
+        lookbackDays: d,
+        profileId: profileId || undefined,
+      })
+      setImportMsg(res?.message || `Scarico AdE avviato: fatture emesse, ultimi ${d} giorni fino a oggi.`)
+      const started = Date.now()
+      while (Date.now() - started < 6 * 60 * 1000) {
+        await new Promise((r) => setTimeout(r, 1200))
+        let st = null
+        try {
+          st = await fetchAdeAgentStatus()
+        } catch {
+          break
+        }
+        if (st?.message) setImportMsg(String(st.message))
+        if (st?.running) continue
+        if (st?.phase === 'queued' || st?.run_requested) continue
+        if (st?.ok === false || st?.phase === 'error') {
+          setError(st.error || st.message || 'Errore scarico AdE')
+          break
+        }
+        if (st?.phase === 'done' || st?.finished_at || st?.phase === 'idle') break
+        if (!st?.running && !st?.run_requested) break
+      }
+      const end = new Date()
+      const start = new Date(end)
+      start.setDate(start.getDate() - (d - 1))
+      setDateFrom(ymdLocal(start))
+      setDateTo(ymdLocal(end))
+      await reload()
+    } catch (e) {
+      setError(e?.message || 'Impossibile avviare lo scarico AdE')
+    } finally {
+      setAdeBusy(false)
+    }
+  }
 
   async function handleBannerImport(ev) {
     const file = ev.target.files?.[0]
@@ -1310,6 +1375,31 @@ export function FattureEmessePage() {
             <h2 className="fatture-panel-title" style={{ margin: 0 }}>
               Emesse · {companyLabel(companyId)}
             </h2>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)' }}>
+              Periodo
+              <select
+                className="form-control"
+                value={issuedDays}
+                disabled={adeBusy || loading}
+                onChange={(e) => setIssuedDays(e.target.value)}
+                style={{ minWidth: 150 }}
+              >
+                <option value="ytd">Da inizio anno</option>
+                <option value="30">Ultimi 30 giorni</option>
+                <option value="60">Ultimi 60 giorni</option>
+                <option value="180">Ultimi 180 giorni</option>
+                <option value="365">Ultimi 365 giorni</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={adeBusy || loading || !companyId}
+              onClick={() => void recuperaEmesseDaAde()}
+              title="Scarica dall’Agenzia delle Entrate le fatture emesse del periodo, fino a oggi"
+            >
+              {adeBusy ? 'Scarico AdE…' : 'Aggiorna da AdE'}
+            </button>
             {nameQuery || dateFrom || dateTo || focusIssuedId || focusIssuedNumber ? (
               <button
                 type="button"
