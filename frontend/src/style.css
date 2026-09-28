@@ -3136,6 +3136,37 @@ select.form-control {
   display: none;
 }
 
+.staff-report-ferie-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.staff-report-ferie-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #64748b);
+}
+
+.staff-report-ferie-edit-notes {
+  flex: 1 1 12rem;
+}
+
+.staff-report-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
 @media print {
   .staff-report-no-print {
     display: none !important;
@@ -3149,6 +3180,10 @@ select.form-control {
   .staff-report-page .workbook-grid-wrap {
     max-height: none;
     overflow: visible;
+  }
+
+  .staff-report-page .sup-actions-col {
+    display: none !important;
   }
 }
 

@@ -49,6 +49,17 @@ export const STAFF_REPORT_VOCI_COLUMNS = [
   { id: 'notes', label: 'Note', width: 31, multiline: true, fluid: true },
 ]
 
+export const STAFF_REPORT_FERIE_HEADERS = ['Dal', 'Al', 'Dipendente', 'Tipo', 'Giorni', 'Note']
+
+export const STAFF_REPORT_FERIE_COLUMNS = [
+  { id: 'dal', label: 'Dal', width: 14, fluid: true },
+  { id: 'al', label: 'Al', width: 14, fluid: true },
+  { id: 'employee', label: 'Dipendente', width: 24, emphasis: true, fluid: true },
+  { id: 'kind', label: 'Tipo', width: 12, fluid: true },
+  { id: 'days', label: 'Giorni', numeric: true, width: 10, fluid: true },
+  { id: 'notes', label: 'Note', width: 26, multiline: true, fluid: true },
+]
+
 export const STAFF_REPORT_RIEPILOGO_COLUMNS = [
   { id: 'employee', label: 'Dipendente', width: 22, emphasis: true, fluid: true },
   { id: 'shiftHours', label: 'Ore turno', width: 14, fluid: true },
@@ -103,6 +114,164 @@ function compareShifts(a, b, members) {
   return String(a.time_start || '').localeCompare(String(b.time_start || ''))
 }
 
+function ymdKey(value) {
+  return String(value || '').slice(0, 10)
+}
+
+function addDaysYmd(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return ymd
+  d.setDate(d.getDate() + days)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function inclusiveDayCount(from, to) {
+  const a = new Date(`${from}T12:00:00`)
+  const b = new Date(`${to}T12:00:00`)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0
+  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1
+}
+
+function isWeekendYmd(ymd) {
+  const day = new Date(`${ymd}T12:00:00`).getDay()
+  return day === 0 || day === 6
+}
+
+/** Tra due blocchi di ferie manca solo sabato e/o domenica: è lo stesso periodo. */
+function gapIsWeekendOnly(leftTo, rightFrom) {
+  let cursor = addDaysYmd(leftTo, 1)
+  if (!cursor || cursor >= rightFrom) return false
+  while (cursor < rightFrom) {
+    if (!isWeekendYmd(cursor)) return false
+    cursor = addDaysYmd(cursor, 1)
+  }
+  return true
+}
+
+/**
+ * Giorni di ferie consecutivi dello stesso dipendente (stesse note) diventano un solo intervallo.
+ * @param {object[]} shifts
+ * @param {object[]} members
+ */
+export function collapseFerieRanges(shifts, members) {
+  const groups = new Map()
+  for (const shift of shifts || []) {
+    if (!shift || shift.entry_kind !== 'ferie') continue
+    const ymd = ymdKey(shift.work_date)
+    if (!ymd) continue
+    const notes = String(shift.notes || '').trim()
+    const key = `${Number(shift.staff_member_id)}|${notes}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(shift)
+  }
+
+  const ranges = []
+  for (const list of groups.values()) {
+    list.sort((a, b) => ymdKey(a.work_date).localeCompare(ymdKey(b.work_date)) || Number(a.id) - Number(b.id))
+    let current = null
+    for (const shift of list) {
+      const ymd = ymdKey(shift.work_date)
+      const id = Number(shift.id)
+      if (!current) {
+        current = {
+          staffMemberId: Number(shift.staff_member_id),
+          employee: memberNameForShift(shift, members),
+          kind: 'Ferie',
+          entryKind: 'ferie',
+          notes: String(shift.notes || '').trim(),
+          dateFrom: ymd,
+          dateTo: ymd,
+          days: 1,
+          shiftIds: Number.isFinite(id) ? [id] : [],
+          byDate: { [ymd]: Number.isFinite(id) ? [id] : [] },
+        }
+        continue
+      }
+      if (ymd === current.dateTo) {
+        if (Number.isFinite(id)) {
+          current.shiftIds.push(id)
+          current.byDate[ymd].push(id)
+        }
+        continue
+      }
+      if (ymd === addDaysYmd(current.dateTo, 1)) {
+        current.dateTo = ymd
+        current.days += 1
+        current.byDate[ymd] = Number.isFinite(id) ? [id] : []
+        if (Number.isFinite(id)) current.shiftIds.push(id)
+        continue
+      }
+      ranges.push(current)
+      current = {
+        staffMemberId: Number(shift.staff_member_id),
+        employee: memberNameForShift(shift, members),
+        kind: 'Ferie',
+        entryKind: 'ferie',
+        notes: String(shift.notes || '').trim(),
+        dateFrom: ymd,
+        dateTo: ymd,
+        days: 1,
+        shiftIds: Number.isFinite(id) ? [id] : [],
+        byDate: { [ymd]: Number.isFinite(id) ? [id] : [] },
+      }
+    }
+    if (current) ranges.push(current)
+  }
+
+  ranges.sort((a, b) => {
+    const byMember = a.staffMemberId - b.staffMemberId
+    if (byMember !== 0) return byMember
+    const byNotes = a.notes.localeCompare(b.notes, 'it')
+    if (byNotes !== 0) return byNotes
+    return a.dateFrom.localeCompare(b.dateFrom)
+  })
+
+  const merged = []
+  for (const range of ranges) {
+    const prev = merged[merged.length - 1]
+    if (
+      prev &&
+      prev.staffMemberId === range.staffMemberId &&
+      prev.notes === range.notes &&
+      gapIsWeekendOnly(prev.dateTo, range.dateFrom)
+    ) {
+      prev.dateTo = range.dateTo
+      prev.days = inclusiveDayCount(prev.dateFrom, prev.dateTo)
+      prev.shiftIds.push(...range.shiftIds)
+      Object.assign(prev.byDate, range.byDate)
+      continue
+    }
+    merged.push(range)
+  }
+
+  merged.sort((a, b) => {
+    const byDate = a.dateFrom.localeCompare(b.dateFrom)
+    if (byDate !== 0) return byDate
+    return a.employee.localeCompare(b.employee, 'it')
+  })
+  return merged
+}
+
+function ferieRangeToRow(range) {
+  return {
+    dal: formatYmdIt(range.dateFrom),
+    al: formatYmdIt(range.dateTo),
+    employee: range.employee,
+    kind: range.kind,
+    days: String(range.days),
+    notes: range.notes || '',
+    dateFrom: range.dateFrom,
+    dateTo: range.dateTo,
+    staffMemberId: range.staffMemberId,
+    entryKind: range.entryKind,
+    shiftIds: range.shiftIds,
+    byDate: range.byDate,
+  }
+}
+
 function shiftToVociRow(shift, members) {
   const kind = KIND_LABELS[shift.entry_kind] || shift.entry_kind || 'Turno'
   const hours = hoursBetween(shift.time_start, shift.time_end)
@@ -135,12 +304,13 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     vociRows.push(shiftToVociRow(shift, members))
   }
 
-  const ferieShifts = filtered.filter((s) => s.entry_kind === 'ferie')
-  const ferieRows = [STAFF_REPORT_VOCI_HEADERS]
-  const ferieShiftIds = []
-  for (const shift of ferieShifts) {
-    ferieRows.push(shiftToVociRow(shift, members))
-    ferieShiftIds.push(shift.id != null ? Number(shift.id) : null)
+  const ferieRanges = collapseFerieRanges(filtered, members)
+  const ferieRows = [STAFF_REPORT_FERIE_HEADERS]
+  const ferieRecords = []
+  for (const range of ferieRanges) {
+    const record = ferieRangeToRow(range)
+    ferieRecords.push(record)
+    ferieRows.push([record.dal, record.al, record.employee, record.kind, record.days, record.notes])
   }
 
   const vociShiftIds = filtered.map((shift) => (shift.id != null ? Number(shift.id) : null))
@@ -161,7 +331,8 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
   ]
 
   const totals = aggregateShiftPeriodTotals(shifts, from, to)
-  const nFerie = ferieShifts.length
+  const nFerie = ferieRanges.length
+  const giorniFerie = ferieRanges.reduce((sum, range) => sum + Number(range.days || 0), 0)
   const turniStr = totals.turniEquivalenti.toLocaleString('it-IT', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
@@ -175,7 +346,8 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     [`Equivalente turni (${totals.orePerTurnoRiferimento} h)`, turniStr],
     ['Media ore nei giorni con turno', formatHoursLabel(totals.oreMedieGiornoTurno)],
     ['Numero voci nel foglio VOCI', String(Math.max(0, vociRows.length - 1))],
-    ['Numero voci ferie', String(nFerie)],
+    ['Numero periodi ferie', String(nFerie)],
+    ['Giorni di ferie', String(giorniFerie)],
     ['Numero dipendenti', String(stats.length)],
   ]
 
@@ -185,7 +357,7 @@ export function buildStaffReportWorkbook({ members = [], shifts = [], dateFrom, 
     dateTo: to,
     sheets: [
       { name: STAFF_REPORT_SHEET_VOCI, rows: vociRows, shiftIds: vociShiftIds },
-      { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows, shiftIds: ferieShiftIds },
+      { name: STAFF_REPORT_SHEET_FERIE, rows: ferieRows, records: ferieRecords },
       { name: STAFF_REPORT_SHEET_RIEPILOGO, rows: riepilogoRows },
       { name: STAFF_REPORT_SHEET_TOTALI, rows: totaliRows },
     ],
@@ -216,7 +388,8 @@ export function staffReportColumnCount(sheet) {
 
 export function staffReportColumnsForSheet(sheet) {
   const name = sheet?.name
-  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) return STAFF_REPORT_VOCI_COLUMNS
+  if (name === STAFF_REPORT_SHEET_FERIE) return STAFF_REPORT_FERIE_COLUMNS
+  if (name === STAFF_REPORT_SHEET_VOCI) return STAFF_REPORT_VOCI_COLUMNS
   if (name === STAFF_REPORT_SHEET_RIEPILOGO) return STAFF_REPORT_RIEPILOGO_COLUMNS
   if (name === STAFF_REPORT_SHEET_TOTALI) return STAFF_REPORT_TOTALI_COLUMNS
   const headers = staffReportSheetHeaders(sheet)
@@ -226,6 +399,17 @@ export function staffReportColumnsForSheet(sheet) {
     width: 14,
     fluid: true,
   }))
+}
+
+function ferieRowFromArray(row) {
+  return {
+    dal: row?.[0] ?? '',
+    al: row?.[1] ?? '',
+    employee: row?.[2] ?? '',
+    kind: row?.[3] ?? '',
+    days: row?.[4] ?? '',
+    notes: row?.[5] ?? '',
+  }
 }
 
 function vociRowFromArray(row) {
@@ -263,8 +447,11 @@ function totaliRowFromArray(row) {
 export function staffReportGridRows(sheet) {
   const body = staffReportSheetBodyRows(sheet)
   const name = sheet?.name
-  const shiftIds = Array.isArray(sheet?.shiftIds) ? sheet.shiftIds : []
-  if (name === STAFF_REPORT_SHEET_VOCI || name === STAFF_REPORT_SHEET_FERIE) {
+  if (name === STAFF_REPORT_SHEET_FERIE) {
+    return Array.isArray(sheet.records) ? sheet.records : body.map(ferieRowFromArray)
+  }
+  if (name === STAFF_REPORT_SHEET_VOCI) {
+    const shiftIds = Array.isArray(sheet?.shiftIds) ? sheet.shiftIds : []
     return body.map((row, index) => ({
       ...vociRowFromArray(row),
       shiftId: shiftIds[index] != null ? Number(shiftIds[index]) : null,

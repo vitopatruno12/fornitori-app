@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import GestionaleStaffLocaleGate from '../components/GestionaleStaffLocaleGate.jsx'
-import { createStaffShift, deleteStaffShift, fetchStaffShifts } from '../services/staffService.js'
+import { createStaffShift, deleteStaffShift, fetchStaffShifts, updateStaffShift } from '../services/staffService.js'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import {
   fetchOperatorStationShifts,
@@ -64,6 +64,21 @@ function defaultPeriod(operatorMode = false) {
 const MAX_OPERATOR_REPORT_DAYS = 31
 const MAX_FERIE_RANGE_DAYS = 60
 
+function eachYmd(fromYmd, toYmdValue) {
+  const out = []
+  let cursor = String(fromYmd || '').slice(0, 10)
+  const end = String(toYmdValue || '').slice(0, 10)
+  let guard = 0
+  while (cursor && end && cursor <= end && guard < 400) {
+    out.push(cursor)
+    const d = new Date(`${cursor}T12:00:00`)
+    d.setDate(d.getDate() + 1)
+    cursor = toYmd(d)
+    guard += 1
+  }
+  return out
+}
+
 function daysInclusive(fromYmd, toYmdValue) {
   const from = new Date(`${fromYmd}T12:00:00`)
   const to = new Date(`${toYmdValue}T12:00:00`)
@@ -109,6 +124,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const [ferieFrom, setFerieFrom] = useState(initial.from)
   const [ferieTo, setFerieTo] = useState(initial.from)
   const [ferieNotes, setFerieNotes] = useState('')
+  const [ferieEdit, setFerieEdit] = useState(null)
   const [ferieBusy, setFerieBusy] = useState(false)
   const dateFromRef = useRef(dateFrom)
   const dateToRef = useRef(dateTo)
@@ -323,28 +339,6 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     }
   }
 
-  async function handleDeleteFerie(row) {
-    const id = Number(row?.shiftId)
-    if (!id) {
-      setError('Voce ferie non eliminabile (id mancante).')
-      return
-    }
-    const label = [row.employee, row.date].filter(Boolean).join(' · ')
-    if (!window.confirm(`Eliminare le ferie${label ? ` di ${label}` : ''}?`)) return
-    setFerieBusy(true)
-    setError('')
-    try {
-      await deleteStaffShift(id)
-      await runRefresh()
-      setSuccess('Ferie eliminate.')
-      setActiveSheet(STAFF_REPORT_SHEET_FERIE)
-    } catch (err) {
-      setError(err?.message || 'Eliminazione ferie non riuscita')
-    } finally {
-      setFerieBusy(false)
-    }
-  }
-
   function handleDownloadExcel() {
     setError('')
     try {
@@ -359,6 +353,107 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     window.print()
   }
 
+  function openFerieEdit(row) {
+    if (!row?.staffMemberId || !row.dateFrom || !row.dateTo) return
+    setError('')
+    setFerieEdit({
+      staffMemberId: row.staffMemberId,
+      employee: row.employee || '',
+      dateFrom: row.dateFrom,
+      dateTo: row.dateTo,
+      notes: row.notes || '',
+      originalNotes: row.notes || '',
+      byDate: row.byDate || {},
+    })
+  }
+
+  async function deleteFerieRange(row) {
+    const ids = Array.isArray(row?.shiftIds) ? row.shiftIds.filter((id) => id != null) : []
+    if (!ids.length) {
+      setError('Questa riga non ha voci da eliminare.')
+      return
+    }
+    const label = row.employee || 'questo dipendente'
+    const dal = row.dal || row.dateFrom
+    const al = row.al || row.dateTo
+    if (!window.confirm(`Eliminare le ferie di ${label} dal ${dal} al ${al}?`)) return
+    setFerieBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      for (const id of ids) {
+        await deleteStaffShift(id)
+      }
+      setFerieEdit(null)
+      setSuccess(`Ferie eliminate: ${label}, ${dal} – ${al}.`)
+      await runRefresh()
+    } catch (err) {
+      setError(err?.message || 'Eliminazione ferie non riuscita')
+      await runRefresh()
+    } finally {
+      setFerieBusy(false)
+    }
+  }
+
+  async function saveFerieRange() {
+    if (!ferieEdit) return
+    const from = String(ferieEdit.dateFrom || '').slice(0, 10)
+    const to = String(ferieEdit.dateTo || '').slice(0, 10)
+    if (!from || !to) {
+      setError('Indica le date dal e al')
+      return
+    }
+    if (to < from) {
+      setError('La data «Al» deve essere uguale o successiva a «Dal»')
+      return
+    }
+    const wanted = eachYmd(from, to)
+    if (!wanted.length || wanted.length > 366) {
+      setError('Intervallo ferie non valido')
+      return
+    }
+    const notes = String(ferieEdit.notes || '').trim()
+    const notesChanged = notes !== String(ferieEdit.originalNotes || '').trim()
+    const byDate = ferieEdit.byDate || {}
+    const idsToDelete = []
+    const idsToUpdate = []
+    for (const [ymd, rawIds] of Object.entries(byDate)) {
+      const ids = (Array.isArray(rawIds) ? rawIds : [rawIds]).filter((id) => id != null)
+      if (!wanted.includes(ymd)) idsToDelete.push(...ids)
+      else if (notesChanged) idsToUpdate.push(...ids)
+    }
+    const datesToCreate = wanted.filter((ymd) => !byDate[ymd] || (Array.isArray(byDate[ymd]) && byDate[ymd].length === 0))
+    setFerieBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      for (const id of idsToDelete) {
+        await deleteStaffShift(id)
+      }
+      for (const id of idsToUpdate) {
+        await updateStaffShift(id, { notes: notes || null, entry_kind: 'ferie', time_start: null, time_end: null })
+      }
+      for (const ymd of datesToCreate) {
+        await createStaffShift({
+          staff_member_id: ferieEdit.staffMemberId,
+          work_date: ymd,
+          time_start: null,
+          time_end: null,
+          entry_kind: 'ferie',
+          notes: notes || null,
+        })
+      }
+      setFerieEdit(null)
+      setSuccess(`Ferie aggiornate: ${ferieEdit.employee}, ${wanted.length} giorni.`)
+      await runRefresh()
+    } catch (err) {
+      setError(err?.message || 'Salvataggio ferie non riuscito')
+      await runRefresh()
+    } finally {
+      setFerieBusy(false)
+    }
+  }
+
   const reportHero = (
     <section className="staff-page-hero staff-report-no-print">
       <div className="staff-page-hero-inner staff-page-hero-inner--with-locale">
@@ -366,7 +461,8 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           <h1 className="page-header staff-page-title">Report personale</h1>
           <p className="staff-page-lead">
             Foglio Excel con tutte le voci di pianificazione del periodo scelto: turni, permessi, assenze, malattia, ferie e riposo.
-            Puoi stampare il report o scaricarlo in Excel. Nel foglio <strong>FERIE</strong> puoi anche registrare le ferie a mano.
+            Puoi stampare il report o scaricarlo in Excel. Nel foglio <strong>FERIE</strong> registri un periodo dal/al:
+            in elenco compare una sola riga, con Modifica ed Elimina.
             {operatorMode ? (
               <>
                 {' '}
@@ -388,7 +484,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     <section className="card staff-report-ferie-card staff-report-no-print" aria-label="Registra ferie manuali">
       <h2 className="staff-report-ferie-title">Registra ferie</h2>
       <p className="staff-report-ferie-lead">
-        Seleziona il dipendente e il periodo: viene creata una voce ferie per ogni giorno (senza orari).
+        Seleziona il dipendente e il periodo. In elenco il mese di ferie resta una sola riga, dal al.
       </p>
       <form className="staff-report-ferie-form" onSubmit={(e) => void handleRegisterFerie(e)}>
         <div className="form-group">
@@ -530,6 +626,58 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           </p>
         </div>
 
+        {activeSheet === 'FERIE' && ferieEdit ? (
+          <form
+            className="staff-report-ferie-edit staff-report-no-print"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void saveFerieRange()
+            }}
+          >
+            <strong>Modifica ferie · {ferieEdit.employee}</strong>
+            <label>
+              Dal
+              <input
+                type="date"
+                className="form-control form-control-sm"
+                value={ferieEdit.dateFrom}
+                disabled={ferieBusy}
+                onChange={(e) => setFerieEdit((prev) => (prev ? { ...prev, dateFrom: e.target.value } : prev))}
+              />
+            </label>
+            <label>
+              Al
+              <input
+                type="date"
+                className="form-control form-control-sm"
+                value={ferieEdit.dateTo}
+                disabled={ferieBusy}
+                onChange={(e) => setFerieEdit((prev) => (prev ? { ...prev, dateTo: e.target.value } : prev))}
+              />
+            </label>
+            <label className="staff-report-ferie-edit-notes">
+              Note
+              <input
+                className="form-control form-control-sm"
+                value={ferieEdit.notes}
+                disabled={ferieBusy}
+                onChange={(e) => setFerieEdit((prev) => (prev ? { ...prev, notes: e.target.value } : prev))}
+              />
+            </label>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={ferieBusy}>
+              {ferieBusy ? 'Salvataggio…' : 'Salva'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={ferieBusy}
+              onClick={() => setFerieEdit(null)}
+            >
+              Annulla
+            </button>
+          </form>
+        ) : null}
+
         <WorkbookGrid
           title={workbook.title}
           sheetLabel={
@@ -548,8 +696,34 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
           loading={loading}
           hideToolbar
           emptyMessage="Nessuna voce nel periodo selezionato."
+          actionsHeader={currentSheet?.name === STAFF_REPORT_SHEET_FERIE ? 'Azioni' : ''}
+          actionsColWidth="13rem"
+          renderActions={
+            currentSheet?.name === STAFF_REPORT_SHEET_FERIE
+              ? (row) => (
+                  <div className="staff-report-row-actions staff-report-no-print">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={ferieBusy || loading || !row.staffMemberId}
+                      onClick={() => openFerieEdit(row)}
+                    >
+                      Modifica
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      disabled={ferieBusy || loading || !row.shiftIds?.length}
+                      onClick={() => void deleteFerieRange(row)}
+                    >
+                      Elimina
+                    </button>
+                  </div>
+                )
+              : undefined
+          }
           rowKey={(row, rowIndex) =>
-            `${currentSheet?.name || 'sheet'}-${row.shiftId || rowIndex}-${row.employee || row.label || row.date || ''}`
+            `${currentSheet?.name || 'sheet'}-${row.dateFrom || row.shiftId || rowIndex}-${row.employee || row.label || row.date || ''}`
           }
           getCellTitle={(row, col) => {
             if (col.id === 'notes' || col.id === 'value') {
@@ -557,22 +731,6 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             }
             return ''
           }}
-          actionsHeader={currentSheet?.name === STAFF_REPORT_SHEET_FERIE ? 'Azioni' : ''}
-          renderActions={
-            currentSheet?.name === STAFF_REPORT_SHEET_FERIE
-              ? (row) =>
-                  row?.shiftId ? (
-                    <button
-                      type="button"
-                      className="btn btn-outline-danger btn-sm"
-                      disabled={ferieBusy || loading}
-                      onClick={() => void handleDeleteFerie(row)}
-                    >
-                      Elimina
-                    </button>
-                  ) : null
-              : undefined
-          }
         />
 
         <div className="pagamenti-sheet-tabs staff-report-no-print" role="tablist" aria-label="Fogli report personale">
