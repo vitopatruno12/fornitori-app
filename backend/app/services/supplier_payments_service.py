@@ -670,12 +670,14 @@ def find_paid_row_for_invoice(
   supplier_name: Optional[str] = None,
   supplier_vat: Optional[str] = None,
   invoice_total: Optional[float] = None,
+  invoice_amount_paid: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
   """Abbina una fattura Atlas a una riga PAGATO (DARE) del file Pagamenti.
 
   Match valido solo su colonna PAGATO (DARE) > 0, con stesso n. documento e almeno uno tra:
   - stesso fornitore (P.IVA o denominazione)
   - importo PAGATO (DARE) ≈ totale fattura (±0,05 €)
+  - importo PAGATO (DARE) ≈ importo già pagato in Atlas (±0,05 €)
 
   Se l'importo è solo in PAGARE (AVERE) → non è pagata (non entra in paid_rows).
   Il solo numero non basta (i fornitori riutilizzano 125, 18, 274/2026, ecc.).
@@ -690,6 +692,10 @@ def find_paid_row_for_invoice(
     total = float(invoice_total) if invoice_total is not None else None
   except (TypeError, ValueError):
     total = None
+  try:
+    already_paid = float(invoice_amount_paid) if invoice_amount_paid is not None else None
+  except (TypeError, ValueError):
+    already_paid = None
 
   best = None
   for row in paid_rows:
@@ -705,6 +711,12 @@ def find_paid_row_for_invoice(
     if name_norm and _names_overlap(name_norm, row.get("supplier_name_norm")):
       score += 1
     if total is not None and total > 0.009 and abs(pagato - total) <= 0.05:
+      score += 2
+    elif (
+      already_paid is not None
+      and already_paid > 0.009
+      and abs(pagato - already_paid) <= 0.05
+    ):
       score += 2
     if score < 4:
       continue

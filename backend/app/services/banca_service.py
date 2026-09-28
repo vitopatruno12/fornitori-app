@@ -1147,10 +1147,16 @@ def _movement_amount_matches_invoice(inv: Any, mov: Any) -> bool:
   amt = abs(_dec(getattr(mov, "amount", 0)))
   if total <= Decimal("0.009") or amt <= Decimal("1.00"):
     return False
-  residuo = abs(total - _dec(getattr(inv, "amount_paid", 0)))
+  paid = abs(_dec(getattr(inv, "amount_paid", 0)))
+  residuo = abs(total - paid)
   if residuo <= Decimal("0.009"):
     residuo = total
-  return abs(total - amt) <= Decimal("0.05") or abs(residuo - amt) <= Decimal("0.05")
+  if abs(total - amt) <= Decimal("0.05") or abs(residuo - amt) <= Decimal("0.05"):
+    return True
+  # Anche match diretto sull'importo già registrato come pagato
+  if paid > Decimal("0.009") and abs(paid - amt) <= Decimal("0.05"):
+    return True
+  return False
 
 
 # Pesi score riconciliazione (totale 100)
@@ -1172,10 +1178,56 @@ def _invoice_residuo(inv: Any) -> Decimal:
   return residuo
 
 
+def _score_amount_vs_targets(amt: Decimal, targets: List[tuple[str, Decimal]]) -> Dict[str, Any]:
+  """Confronta l'importo banca con residuo / totale / importo pagato.
+
+  Ritorna points (0–40), partial, best diff e quale target ha vinto.
+  """
+  best_points = 0
+  best_diff: Optional[Decimal] = None
+  best_label = ""
+  partial = False
+  if amt <= Decimal("1.00"):
+    return {"points": 0, "partial": False, "diff": None, "matched_as": None}
+
+  for label, target in targets:
+    if target is None or target <= Decimal("0.009"):
+      continue
+    diff = abs(target - amt)
+    if best_diff is None or diff < best_diff:
+      best_diff = diff
+    points = 0
+    is_partial = False
+    if diff <= Decimal("0.05"):
+      points = _SCORE_AMOUNT
+    elif diff <= _AMOUNT_FEE_TOLERANCE:
+      points = 25
+    elif amt < target - Decimal("0.05") and amt >= target * Decimal("0.4"):
+      points = 15
+      is_partial = True
+    if points > best_points:
+      best_points = points
+      best_label = label
+      partial = is_partial
+      best_diff = diff
+    elif points == best_points and points > 0 and (best_diff is None or diff < best_diff):
+      best_label = label
+      partial = is_partial
+      best_diff = diff
+
+  return {
+    "points": best_points,
+    "partial": partial if best_points > 0 else False,
+    "diff": best_diff,
+    "matched_as": best_label or None,
+  }
+
+
 def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
   """Score 0–100: importo 40 + anagrafica 30 + n. fattura 20 + data 10.
 
   bande: auto (≥80), probable (70–79), review (<70).
+  L'importo banca viene confrontato con residuo, totale e importo pagato.
   """
   breakdown = {"amount": 0, "party": 0, "number": 0, "date": 0}
   if getattr(mov, "movement_type", None) and str(mov.movement_type).lower() != "uscita":
@@ -1185,23 +1237,29 @@ def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
       "breakdown": breakdown,
       "partial": False,
       "amount_diff": None,
+      "amount_matched_as": None,
     }
 
+  total = abs(_dec(getattr(inv, "total", 0)))
+  paid = abs(_dec(getattr(inv, "amount_paid", 0)))
   residuo = _invoice_residuo(inv)
-  if residuo <= Decimal("0.009"):
-    residuo = abs(_dec(getattr(inv, "total", 0)))
   amt = abs(_dec(getattr(mov, "amount", 0)))
-  diff = abs(residuo - amt) if residuo > 0 and amt > 0 else None
-  partial = False
 
-  if amt > Decimal("1.00") and residuo > Decimal("0.009"):
-    if diff is not None and diff <= Decimal("0.05"):
-      breakdown["amount"] = _SCORE_AMOUNT
-    elif diff is not None and diff <= _AMOUNT_FEE_TOLERANCE:
-      breakdown["amount"] = 25  # importo quasi esatto (commissioni)
-    elif amt < residuo - Decimal("0.05") and amt >= residuo * Decimal("0.4"):
-      breakdown["amount"] = 15  # acconto / parziale
-      partial = True
+  amount_targets: List[tuple[str, Decimal]] = []
+  if residuo > Decimal("0.009"):
+    amount_targets.append(("residuo", residuo))
+  if total > Decimal("0.009"):
+    amount_targets.append(("totale", total))
+  if paid > Decimal("0.009"):
+    amount_targets.append(("pagato", paid))
+  # Se già saldata, confronta comunque col totale (riverifica bonifico)
+  if not amount_targets and total > Decimal("0.009"):
+    amount_targets.append(("totale", total))
+
+  amount_hit = _score_amount_vs_targets(amt, amount_targets)
+  breakdown["amount"] = int(amount_hit["points"])
+  partial = bool(amount_hit["partial"])
+  diff = amount_hit["diff"]
 
   beneficiary = _movement_beneficiary(mov, blob)
   supplier_name = getattr(inv, "supplier_name", None)
@@ -1263,6 +1321,7 @@ def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
     "breakdown": breakdown,
     "partial": partial,
     "amount_diff": float(diff) if diff is not None else None,
+    "amount_matched_as": amount_hit.get("matched_as"),
   }
 
 
@@ -1299,6 +1358,7 @@ def _invoice_row_out(
   match_score: Optional[int] = None,
   match_band: Optional[str] = None,
   match_breakdown: Optional[Dict[str, Any]] = None,
+  amount_matched_as: Optional[str] = None,
 ) -> Dict[str, Any]:
   total = _dec(getattr(inv, "total", 0))
   paid = _dec(getattr(inv, "amount_paid", 0))
@@ -1336,6 +1396,8 @@ def _invoice_row_out(
     out["match_band"] = match_band
   if match_breakdown:
     out["match_breakdown"] = match_breakdown
+  if amount_matched_as:
+    out["amount_matched_as"] = amount_matched_as
   return out
 
 
@@ -1429,6 +1491,7 @@ def reconciliation_preview(
         supplier_name=getattr(inv, "supplier_name", None),
         supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
         invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
+        invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
       )
 
     if found:
@@ -1450,6 +1513,7 @@ def reconciliation_preview(
           match_score=(found_score or {}).get("score"),
           match_band=(found_score or {}).get("band"),
           match_breakdown=(found_score or {}).get("breakdown"),
+          amount_matched_as=(found_score or {}).get("amount_matched_as"),
         )
       )
     elif cash_hit:
@@ -1661,6 +1725,7 @@ def sync_payment_status_from_bank(
         or ""
       ).strip(),
       invoice_total=float(_dec(getattr(inv_dto, "total", 0)) or 0),
+      invoice_amount_paid=float(_dec(getattr(inv_dto, "amount_paid", 0)) or 0),
     )
 
   marked: List[Dict[str, Any]] = []

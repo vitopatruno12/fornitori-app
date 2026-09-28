@@ -422,7 +422,9 @@ const BANK_INVOICE_STATUS_COLUMNS = [
   { id: 'supplier_name', label: 'Emittente', width: 18, fluid: true },
   { id: 'doc_ref', label: 'N. nel bonifico', width: 14, fluid: true, emphasis: true },
   { id: 'beneficiary', label: 'Beneficiario', width: 18, fluid: true },
-  { id: 'total', label: 'Importo', width: 11, fluid: true, numeric: true },
+  { id: 'total', label: 'Importo', width: 10, fluid: true, numeric: true },
+  { id: 'amount_paid', label: 'Pagato', width: 10, fluid: true, numeric: true },
+  { id: 'residuo', label: 'Residuo', width: 10, fluid: true, numeric: true },
   {
     id: 'ok',
     label: 'OK',
@@ -483,9 +485,12 @@ function bankInvoiceStatusCellValue(row, col) {
     return m?.counterparty || m?.beneficiary || '—'
   }
   if (col.id === 'total') return eur(row?.total)
+  if (col.id === 'amount_paid') return eur(row?.amount_paid)
+  if (col.id === 'residuo') return eur(row?.residuo)
   if (col.id === 'reason') {
     if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
     if (row?.match_reason === 'importo_in_movimento') return '✔ Importo in banca'
+    if (row?.amount_matched_as === 'pagato') return '✔ Importo = pagato'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
@@ -2292,11 +2297,13 @@ export function BancaRiconciliazionePage() {
           cellValue: bankInvoiceStatusCellValue,
           totals: {
             total: schedaRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+            amount_paid: schedaRows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
             residuo: schedaRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
           },
           totalsLabel: (colId, totals) => {
             if (colId === 'supplier_name') return 'TOTALI'
             if (colId === 'total') return eur(totals?.total)
+            if (colId === 'amount_paid') return eur(totals?.amount_paid)
             if (colId === 'residuo') return eur(totals?.residuo)
             return ''
           },
@@ -2464,6 +2471,7 @@ export function BancaRiconciliazionePage() {
                     unpaidRows.length
                       ? {
                           total: unpaidRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+                          amount_paid: unpaidRows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
                           residuo: unpaidRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
                         }
                       : null
@@ -2471,6 +2479,7 @@ export function BancaRiconciliazionePage() {
                   totalsLabel={(colId, totals) => {
                     if (colId === 'supplier_name') return 'TOTALI'
                     if (colId === 'total') return eur(totals?.total)
+                    if (colId === 'amount_paid') return eur(totals?.amount_paid)
                     if (colId === 'residuo') return eur(totals?.residuo)
                     return ''
                   }}
@@ -2496,6 +2505,7 @@ export function BancaRiconciliazionePage() {
                     paidRows.length
                       ? {
                           total: paidRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+                          amount_paid: paidRows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
                           residuo: paidRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
                         }
                       : null
@@ -2503,6 +2513,7 @@ export function BancaRiconciliazionePage() {
                   totalsLabel={(colId, totals) => {
                     if (colId === 'supplier_name') return 'TOTALI'
                     if (colId === 'total') return eur(totals?.total)
+                    if (colId === 'amount_paid') return eur(totals?.amount_paid)
                     if (colId === 'residuo') return eur(totals?.residuo)
                     return ''
                   }}

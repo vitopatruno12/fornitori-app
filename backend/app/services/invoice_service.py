@@ -685,6 +685,7 @@ def reset_unverified_paid_invoices(db: Session, *, dry_run: bool = False) -> dic
         supplier_name=supplier_name,
         supplier_vat=supplier_vat,
         invoice_total=float(inv.total or 0),
+        invoice_amount_paid=float(inv.amount_paid or 0),
       )
 
     if has_bank or file_hit:
