@@ -122,7 +122,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
   const [generatedAt, setGeneratedAt] = useState('')
   const [ferieMemberId, setFerieMemberId] = useState('')
   const [ferieFrom, setFerieFrom] = useState(initial.from)
-  const [ferieTo, setFerieTo] = useState(initial.from)
+  const [ferieTo, setFerieTo] = useState(initial.to)
   const [ferieNotes, setFerieNotes] = useState('')
   const [ferieEdit, setFerieEdit] = useState(null)
   const [ferieBusy, setFerieBusy] = useState(false)
@@ -537,7 +537,7 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
     <section className="card staff-report-ferie-card staff-report-no-print" aria-label="Registra ferie manuali">
       <h2 className="staff-report-ferie-title">Registra ferie</h2>
       <p className="staff-report-ferie-lead">
-        Seleziona il dipendente e il periodo. In elenco il mese di ferie resta una sola riga, dal al.
+        Seleziona il dipendente e il periodo. Lo stesso Dal/Al aggiorna il report. In elenco il mese di ferie resta una sola riga.
       </p>
       <form className="staff-report-ferie-form" onSubmit={(e) => void handleRegisterFerie(e)}>
         <div className="form-group">
@@ -568,7 +568,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             onChange={(e) => {
               const v = e.target.value
               setFerieFrom(v)
-              if (ferieTo && v && ferieTo < v) setFerieTo(v)
+              setDateFrom(v)
+              if (ferieTo && v && ferieTo < v) {
+                setFerieTo(v)
+                setDateTo(v)
+              }
             }}
             disabled={ferieBusy || loading}
             required
@@ -581,7 +585,11 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             type="date"
             className="form-control"
             value={ferieTo}
-            onChange={(e) => setFerieTo(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value
+              setFerieTo(v)
+              setDateTo(v)
+            }}
             disabled={ferieBusy || loading}
             required
           />
@@ -631,24 +639,6 @@ export default function ReportPersonalePage({ operatorMode = false, stationId = 
             ) : null}
           </div>
           <div className="pagamenti-workbook-actions staff-report-period-actions">
-            <label className="staff-report-period-field">
-              <span>Dal</span>
-              <input
-                type="date"
-                className="form-control form-control-sm"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </label>
-            <label className="staff-report-period-field">
-              <span>Al</span>
-              <input
-                type="date"
-                className="form-control form-control-sm"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </label>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
