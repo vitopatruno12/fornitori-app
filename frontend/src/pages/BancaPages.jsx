@@ -2406,7 +2406,7 @@ export function BancaRiconciliazionePage() {
         <section className="card fatture-panel" style={{ marginBottom: '1rem' }}>
           <h2 className="fatture-panel-title">Agente riconciliazione</h2>
           <p className="fatture-note" style={{ marginTop: 0 }}>
-            Automatico <strong>martedì e venerdì alle 7:30</strong> sul server (non serve premere il tasto ogni volta).
+            Automatico <strong>martedì, mercoledì e venerdì alle 9:30 e alle 18:30</strong> sul server (non serve premere il tasto ogni volta).
             Il pulsante sotto serve solo per un controllo immediato.
           </p>
           <p className="fatture-note" style={{ marginTop: 0 }}>

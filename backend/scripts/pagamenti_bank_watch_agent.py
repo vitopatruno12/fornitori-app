@@ -4,7 +4,7 @@
 - Scarica i bonifici Enable Banking
 - Legge causale/descrizione (n. fattura, fornitore, importo) → Fattura collegata
 - Contanti: prova dal file fornitori (Pagamenti)
-- Timer tipico: martedì e venerdì 7:30 (systemd)
+- Timer: martedì, mercoledì e venerdì alle 9:30 e alle 18:30 (systemd)
 
 Uso sul server:
   cd /opt/fornitori-app/backend

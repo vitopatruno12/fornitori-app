@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 SCHEDULE_LABEL = os.getenv(
   "PAGAMENTI_WATCH_SCHEDULE_LABEL",
-  "automatico · martedì e venerdì alle 7:30 (e dopo ogni bonifico scaricato)",
+  "automatico · martedì, mercoledì e venerdì alle 9:30 e alle 18:30",
 ).strip()
 LOCK_STALE_SEC = 30 * 60
 # Periodo scarico movimenti (giorni indietro). Default 120.
