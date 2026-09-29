@@ -269,3 +269,56 @@ def test_entrata_score_zero():
   sc = score_movement_invoice(inv, mov, "ACME")
   assert sc["score"] == 0
   assert sc["band"] == "review"
+
+
+def test_auto_match_resta_nella_finestra_importo():
+  """Lo score auto non deve perdersi quando si guardano solo i bonifici vicini di importo."""
+  from app.services.banca_service import (
+    _index_uscita_by_amount,
+    _invoice_amount_targets,
+    _uscita_near_targets,
+  )
+
+  inv = _inv(total=Decimal("852.00"), supplier_name="PATRUNO VITO", invoice_date=date(2026, 9, 15))
+  movements = []
+  for i, amt in enumerate(
+    [
+      Decimal("852.00"),
+      Decimal("850.50"),
+      Decimal("400.00"),
+      Decimal("0.40"),
+    ],
+    start=1,
+  ):
+    mov = _mov(
+      id=i,
+      amount=amt,
+      counterparty="PATRUNO VITO",
+      movement_date=date(2026, 9, 29),
+    )
+    movements.append({"mov": mov, "blob": f"Bonifico {mov.counterparty}"})
+  index = _index_uscita_by_amount(movements)
+  near_ids = {m["mov"].id for m in _uscita_near_targets(index, _invoice_amount_targets(inv))}
+  auto_ids = set()
+  for meta in movements:
+    if score_movement_invoice(inv, meta["mov"], meta["blob"])["band"] == "auto":
+      auto_ids.add(meta["mov"].id)
+  assert auto_ids
+  assert auto_ids <= near_ids
+  assert 1 in auto_ids
+  assert 4 not in near_ids
+  assert 3 not in near_ids
+
+
+def test_proposta_include_acconto_e_non_importi_lontani():
+  from app.services.banca_service import (
+    _index_open_invoices_by_amount,
+    _open_invoices_near_amount,
+  )
+
+  partial = _inv(id=7, total=Decimal("200.00"), payment_status="unpaid")
+  far = _inv(id=8, total=Decimal("900.00"), payment_status="unpaid")
+  indexed = _index_open_invoices_by_amount([partial, far])
+  ids = {inv.id for inv in _open_invoices_near_amount(indexed, Decimal("100.00"))}
+  assert 7 in ids
+  assert 8 not in ids

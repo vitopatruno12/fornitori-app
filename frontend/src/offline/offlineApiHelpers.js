@@ -7,7 +7,7 @@ export function formatApiError(status, text) {
       return '502: Gateway non raggiungibile (API o portale VNE non rispondono). Riprova o riavvia fornitori-api.'
     }
     if (status === 504) {
-      return '504: Timeout gateway (richiesta VNE troppo lenta). Riprova tra qualche secondo.'
+      return '504: Timeout gateway (operazione troppo lenta). Riprova tra qualche secondo.'
     }
   }
   try {
@@ -30,7 +30,7 @@ export function formatApiError(status, text) {
       return '502: Gateway non raggiungibile (API o portale VNE non rispondono). Riprova o riavvia fornitori-api.'
     }
     if (status === 504) {
-      return '504: Timeout gateway (richiesta VNE troppo lenta). Riprova tra qualche secondo.'
+      return '504: Timeout gateway (operazione troppo lenta). Riprova tra qualche secondo.'
     }
   }
   return raw ? `API error ${status}: ${raw}` : `API error ${status}`

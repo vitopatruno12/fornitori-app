@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+import bisect
 import re
 
 from sqlalchemy import func, or_
@@ -1617,15 +1618,19 @@ def allocate_saldo_fatture(
       continue
     candidates.append((amt, meta, period, beneficiary))
 
+  by_month: Dict[tuple, List[Any]] = {}
+  for inv in invoices:
+    inv_d = _as_date(getattr(inv, "invoice_date", None))
+    if not inv_d:
+      continue
+    by_month.setdefault((inv_d.year, inv_d.month), []).append(inv)
+
   candidates.sort(key=lambda item: item[0], reverse=True)
   for amt, meta, (year, month, month_name), beneficiary in candidates:
     month_inv: List[Any] = []
-    for inv in invoices:
+    for inv in by_month.get((year, month), ()):
       iid = int(getattr(inv, "id"))
       if iid in skip_inv or iid in claimed:
-        continue
-      inv_d = _as_date(getattr(inv, "invoice_date", None))
-      if not inv_d or inv_d.year != year or inv_d.month != month:
         continue
       if not _party_names_align(getattr(inv, "supplier_name", None), beneficiary):
         continue
@@ -1905,6 +1910,151 @@ def _invoice_row_out(
   return out
 
 
+# Un abbinamento auto (score ≥80) ha sempre l'importo entro 2 €.
+# Sotto quella soglia i punti importo sono 0 o 15 e lo score non arriva a 80.
+_AUTO_AMOUNT_CENTS = 200
+
+
+def _money_cents(value: Any) -> int:
+  return int((abs(_dec(value)) * Decimal("100")).quantize(Decimal("1")))
+
+
+def _invoice_amount_targets(inv: Any) -> List[Decimal]:
+  total = abs(_dec(getattr(inv, "total", 0)))
+  paid = abs(_dec(getattr(inv, "amount_paid", 0)))
+  residuo = _invoice_residuo(inv)
+  targets: List[Decimal] = []
+  if residuo > Decimal("0.009"):
+    targets.append(residuo)
+  if total > Decimal("0.009"):
+    targets.append(total)
+  if paid > Decimal("0.009"):
+    targets.append(paid)
+  if not targets and total > Decimal("0.009"):
+    targets.append(total)
+  return targets
+
+
+def _index_uscita_by_amount(mov_meta: List[Dict[str, Any]]) -> Dict[str, Any]:
+  """Uscite indicizzate per centesimi e per fattura già collegata."""
+  by_invoice: Dict[int, Dict[str, Any]] = {}
+  buckets: Dict[int, List[Dict[str, Any]]] = {}
+  for meta in mov_meta:
+    mov = meta["mov"]
+    linked = getattr(mov, "matched_invoice_id", None)
+    if linked:
+      by_invoice.setdefault(int(linked), meta)
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    buckets.setdefault(_money_cents(amt), []).append(meta)
+  return {"by_invoice": by_invoice, "buckets": buckets}
+
+
+def _uscita_near_targets(index: Dict[str, Any], targets: List[Any]) -> List[Dict[str, Any]]:
+  """Movimenti il cui importo è entro 2 € da residuo, totale o pagato."""
+  seen: set[int] = set()
+  out: List[Dict[str, Any]] = []
+  buckets = index["buckets"]
+  for target in targets:
+    if _dec(target) <= Decimal("0.009"):
+      continue
+    center = _money_cents(target)
+    for delta in range(-_AUTO_AMOUNT_CENTS, _AUTO_AMOUNT_CENTS + 1):
+      for meta in buckets.get(center + delta, ()):
+        mid = int(getattr(meta["mov"], "id") or 0) or id(meta)
+        if mid in seen:
+          continue
+        seen.add(mid)
+        out.append(meta)
+  return out
+
+
+def _index_open_invoices_by_amount(invoices: List[Any]) -> List[tuple]:
+  """Fatture ancora aperte, ordinate per centesimi di residuo/totale/pagato."""
+  items: List[tuple] = []
+  for inv in invoices:
+    if (getattr(inv, "payment_status", None) or "") == "paid":
+      continue
+    if _invoice_residuo(inv) <= Decimal("0.009"):
+      continue
+    seen_cents: set[int] = set()
+    inv_id = int(getattr(inv, "id"))
+    for target in _invoice_amount_targets(inv):
+      cents = _money_cents(target)
+      if cents in seen_cents:
+        continue
+      seen_cents.add(cents)
+      items.append((cents, inv_id, inv))
+  items.sort(key=lambda row: row[0])
+  return items
+
+
+def _open_invoices_near_amount(indexed: List[tuple], amount: Decimal) -> List[Any]:
+  """Fatture che possono arrivare almeno a «probable» con questo importo.
+
+  Include l'importo esatto (±2 €) e l'acconto (dal 40% del totale in su).
+  Senza punti importo lo score massimo è 60, sotto la soglia 70.
+  """
+  amt = abs(_dec(amount))
+  if amt <= Decimal("1.00") or not indexed:
+    return []
+  cents_list = [row[0] for row in indexed]
+  cents = _money_cents(amt)
+  ranges = (
+    (cents - _AUTO_AMOUNT_CENTS, cents + _AUTO_AMOUNT_CENTS),
+    (cents + 1, _money_cents(amt / Decimal("0.4"))),
+  )
+  seen: set[int] = set()
+  out: List[Any] = []
+  for lo, hi in ranges:
+    if hi < lo:
+      continue
+    start = bisect.bisect_left(cents_list, lo)
+    end = bisect.bisect_right(cents_list, hi)
+    for pos in range(start, end):
+      inv_id = indexed[pos][1]
+      if inv_id in seen:
+        continue
+      seen.add(inv_id)
+      out.append(indexed[pos][2])
+  return out
+
+
+def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
+  """Una sola lettura fatture: la società in esame e, se serve, tutte le società."""
+  all_invoices = list_invoices(db, include_ignored=False)
+  if not company_id:
+    scoped = all_invoices[:5000]
+    return scoped, scoped
+  raw = company_id.strip().lower()
+  if raw in {"non_classificata", "non-classificata"}:
+    wanted = "non_classificata"
+  else:
+    from ..constants.sdi_companies import normalize_company_section
+
+    wanted = normalize_company_section(raw)
+    if wanted == "non_classificata":
+      scoped = all_invoices[:5000]
+      return scoped, scoped
+  scoped = [
+    inv for inv in all_invoices if (getattr(inv, "company", None) or "") == wanted
+  ][:5000]
+  return scoped, all_invoices[:5000]
+
+
+def _cash_rows_by_number(cash_file_rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+  grouped: Dict[str, List[Dict[str, Any]]] = {}
+  for row in cash_file_rows:
+    key = str(row.get("invoice_number_norm") or "")
+    if not key:
+      continue
+    grouped.setdefault(key, []).append(row)
+  return grouped
+
+
 def reconciliation_preview(
   db: Session,
   limit: int = 40,
@@ -1914,13 +2064,8 @@ def reconciliation_preview(
   ensure_default_account(db)
   company_id = (company or "").strip() or None
 
-  invoices = list_invoices(db, company=company_id, include_ignored=False)
-  # Ampio set: storico ricevute + bonifici sui conti collegati
-  invoices = invoices[:5000]
   # Il saldo di un mese può coprire la stessa fornitura su più società.
-  match_invoices = (
-    list_invoices(db, include_ignored=False)[:5000] if company_id else invoices
-  )
+  invoices, match_invoices = _load_recon_invoices(db, company_id)
 
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -1951,19 +2096,18 @@ def reconciliation_preview(
     )
   except Exception:
     cash_file_rows = []
+  cash_by_number = _cash_rows_by_number(cash_file_rows)
 
   paid_by_bank: List[Dict[str, Any]] = []
   da_pagare: List[Dict[str, Any]] = []
   used_mov_ids: set[int] = set()
 
-  # Prima passata: raccogli candidati auto e assegna 1 movimento → 1 fattura
+  # Prima passata: candidati auto solo tra i bonifici con importo vicino
+  mov_index = _index_uscita_by_amount(mov_meta)
   auto_pairs: List[Dict[str, Any]] = []
   for inv in invoices:
     inv_id = int(inv.id)
-    already = next(
-      (m for m in mov_meta if m["mov"].matched_invoice_id == inv_id),
-      None,
-    )
+    already = mov_index["by_invoice"].get(inv_id)
     if already:
       sc = score_movement_invoice(inv, already["mov"], already["blob"])
       if sc["band"] == "auto" or already["mov"].matched_invoice_id == inv_id:
@@ -1983,9 +2127,7 @@ def reconciliation_preview(
         continue
     best_sc = None
     best_m = None
-    for m in mov_meta:
-      if m["mov"].movement_type != "uscita":
-        continue
+    for m in _uscita_near_targets(mov_index, _invoice_amount_targets(inv)):
       linked = m["mov"].matched_invoice_id
       if linked and int(linked) != inv_id:
         continue
@@ -2052,8 +2194,9 @@ def reconciliation_preview(
 
     cash_hit = None
     if not found and cash_file_rows:
+      cash_subset = cash_by_number.get(supplier_payments_service._normalize_doc(num)) or []
       cash_hit = supplier_payments_service.find_paid_row_for_invoice(
-        cash_file_rows,
+        cash_subset,
         invoice_number=num,
         supplier_name=getattr(inv, "supplier_name", None),
         supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
@@ -2143,14 +2286,13 @@ def reconciliation_preview(
 
   suggestions = []
   used_invoices = set()
+  open_by_amount = _index_open_invoices_by_amount(invoices)
   for mov, acc, blob, mov_out in unmatched:
     best = None
     best_score_info: Optional[Dict[str, Any]] = None
-    for inv in invoices:
+    for inv in _open_invoices_near_amount(open_by_amount, _dec(mov.amount)):
       inv_id = int(inv.id)
       if inv_id in used_invoices:
-        continue
-      if (inv.payment_status or "") == "paid":
         continue
       residuo = _invoice_residuo(inv)
       if residuo <= Decimal("0.009"):
@@ -2266,10 +2408,7 @@ def sync_payment_status_from_bank(
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
-  listed = list_invoices(db, company=company_id, include_ignored=False)
-  match_invoices = (
-    list_invoices(db, include_ignored=False)[:5000] if company_id else listed
-  )
+  listed, match_invoices = _load_recon_invoices(db, company_id)
   unpaid = [
     inv
     for inv in listed
@@ -2298,12 +2437,17 @@ def sync_payment_status_from_bank(
   except Exception:
     cash_file_rows = []
 
+  cash_by_number = _cash_rows_by_number(cash_file_rows)
+
   def _cash_file_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     if not num or not cash_file_rows:
       return None
+    subset = cash_by_number.get(supplier_payments_service._normalize_doc(num)) or []
+    if not subset:
+      return None
     return supplier_payments_service.find_paid_row_for_invoice(
-      cash_file_rows,
+      subset,
       invoice_number=num,
       supplier_name=str(getattr(inv_dto, "supplier_name", None) or "").strip(),
       supplier_vat=str(
@@ -2333,22 +2477,19 @@ def sync_payment_status_from_bank(
       -int(getattr(mov, "id") or 0),
     )
 
+  mov_index = _index_uscita_by_amount(mov_meta)
+
   def _bank_hit_for_verify(inv_dto: Any, *, reserved_mov_ids: Optional[set] = None) -> Optional[Any]:
     """Usato per verificare fatture già pagate (riapertura)."""
     reserved = reserved_mov_ids or set()
     inv_id = int(getattr(inv_dto, "id"))
-    already = next(
-      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
-      None,
-    )
+    already = mov_index["by_invoice"].get(inv_id)
     if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
       return already["mov"]
     best_mov = None
     best_rank: Optional[tuple] = None
-    for meta in mov_meta:
+    for meta in _uscita_near_targets(mov_index, _invoice_amount_targets(inv_dto)):
       mov = meta["mov"]
-      if mov.movement_type != "uscita":
-        continue
       mid = int(mov.id)
       if mid in reserved:
         continue
@@ -2370,10 +2511,7 @@ def sync_payment_status_from_bank(
   for inv_dto in unpaid:
     inv_id = int(getattr(inv_dto, "id"))
     # Se già collegata a un movimento valido, ha priorità assoluta
-    already = next(
-      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
-      None,
-    )
+    already = mov_index["by_invoice"].get(inv_id)
     if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
       sc = score_movement_invoice(inv_dto, already["mov"], already["blob"])
       candidates.append(
@@ -2387,10 +2525,8 @@ def sync_payment_status_from_bank(
         }
       )
       continue
-    for meta in mov_meta:
+    for meta in _uscita_near_targets(mov_index, _invoice_amount_targets(inv_dto)):
       mov = meta["mov"]
-      if mov.movement_type != "uscita":
-        continue
       linked = mov.matched_invoice_id
       if linked and int(linked) != inv_id:
         continue
@@ -2601,53 +2737,17 @@ def auto_reconcile(
   company: Optional[str] = None,
   limit: int = 80,
 ) -> Dict[str, Any]:
-  """Applica i match con score ≥80 (auto), poi ricalcola l'anteprima. Probable (70–79) restano da confermare."""
-  preview = reconciliation_preview(db, limit=limit, company=company)
-  applied: List[Dict[str, Any]] = []
-  errors: List[Dict[str, Any]] = []
+  """Segna le fatture con score ≥80, poi calcola l'anteprima una sola volta.
 
-  for sug in preview.get("suggestions") or []:
-    inv = sug.get("suggested_invoice") or {}
-    mov = sug.get("movement") or {}
-    mov_id = mov.get("id")
-    inv_id = inv.get("invoice_id")
-    status = sug.get("status")
-    band = sug.get("match_band") or inv.get("match_band")
-    score = int(sug.get("match_score") or inv.get("match_score") or 0)
-    quality = inv.get("match_quality")
-    # Solo bande auto (≥80), non parziali: i probable restano one-click
-    if inv.get("partial"):
-      continue
-    if band == "auto" and status == "matched":
-      apply_status = "matched"
-    elif score >= _SCORE_AUTO and status == "matched":
-      apply_status = "matched"
-    else:
-      continue
-    if not mov_id or not inv_id:
-      continue
-    try:
-      apply_match(db, int(mov_id), int(inv_id), apply_status)
-      applied.append(
-        {
-          "movement_id": int(mov_id),
-          "invoice_id": int(inv_id),
-          "invoice_number": inv.get("invoice_number"),
-          "match_quality": quality or "score",
-          "match_score": score,
-          "match_band": band or "auto",
-        }
-      )
-    except Exception as e:  # noqa: BLE001 — continua con gli altri match
-      errors.append({"movement_id": mov_id, "invoice_id": inv_id, "error": str(e)})
-
-  # Copre anche movimenti già collegati / non in suggestion: score auto → pagata
+  Prima il confronto girava tre volte (anteprima, scrittura, anteprima) e il gateway
+  chiudeva la pagina con 504. La scrittura dei match auto è in sync_payment_status_from_bank.
+  I probable (70–79) restano da confermare.
+  """
   bank_sync = sync_payment_status_from_bank(db, company=company)
-
   refreshed = reconciliation_preview(db, limit=limit, company=company)
-  refreshed["auto_applied"] = len(applied) + int(bank_sync.get("marked_paid") or 0)
-  refreshed["auto_applied_items"] = applied + list(bank_sync.get("items") or [])
-  refreshed["auto_errors"] = errors
+  refreshed["auto_applied"] = int(bank_sync.get("marked_paid") or 0)
+  refreshed["auto_applied_items"] = list(bank_sync.get("items") or [])
+  refreshed["auto_errors"] = []
   refreshed["bank_sync"] = bank_sync
   refreshed["score_thresholds"] = {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE}
   return refreshed
