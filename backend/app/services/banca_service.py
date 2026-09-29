@@ -241,9 +241,9 @@ def ensure_known_account_companies(db: Session) -> int:
       if "mediazione" not in name_l:
         row.account_name = "Mediazione · CC1410004512"
         need_rename = True
-    if target == "mediazione_a" and iban_n == normalize_iban("IT06B0844516000000000972450"):
-      if "mediazione" not in name_l:
-        row.account_name = "Mediazione · BCC Terra d'Otranto"
+    if target == "mediazione_z" and iban_n == normalize_iban("IT06B0844516000000000972450"):
+      if "mediazione z" not in name_l:
+        row.account_name = "Mediazione Z · BCC Terra d'Otranto"
         need_rename = True
     if target == "risacca" and (not row.account_name or "intesa" in name_l):
       if "risacca" not in name_l:
@@ -290,11 +290,11 @@ _CANONICAL_BANK_SEEDS: List[Dict[str, Any]] = [
   },
   {
     "bank_name": "BCC Terra d'Otranto",
-    "account_name": "Mediazione · BCC Terra d'Otranto",
+    "account_name": "Mediazione Z · BCC Terra d'Otranto",
     "iban": "IT06B0844516000000000972450",
-    "company": "mediazione_a",
+    "company": "mediazione_z",
     "ledger_code": "1100",
-    "notes": "MEDIAZIONE · BCC Terra d'Otranto · IBAN IT06B0844516000000000972450",
+    "notes": "MEDIAZIONE Z · BCC Terra d'Otranto · IBAN IT06B0844516000000000972450",
   },
   {
     "bank_name": "Intesa Sanpaolo",

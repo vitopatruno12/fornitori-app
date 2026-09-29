@@ -41,8 +41,8 @@
   },
   {
     "id": "bcc_mediazione",
-    "label": "BCC Terra d'Otranto — Mediazione",
-    "company": "mediazione_a",
+    "label": "BCC Terra d'Otranto — Mediazione Z",
+    "company": "mediazione_z",
     "bank_name": "BCC Terra d'Otranto",
     "iban": "IT06B0844516000000000972450",
     "account_number": "00000972450",

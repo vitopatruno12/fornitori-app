@@ -1,7 +1,8 @@
 """Conti bancari attesi per società Atlas (riconciliazione / mastrini).
 
 Fonte operativa (marzo 2026):
-- Mediazione A/Z → BPPB + BCC Terra d'Otranto
+- Mediazione A → BPPB
+- Mediazione Z → BCC Terra d'Otranto (+ BPPB condiviso in attese)
 - Via Lattea → BCC + BPPB
 - Risacca (Bar Momento) → Intesa Sanpaolo
 - PG (Gazza Ladra) → BPPB
@@ -23,16 +24,16 @@ MEDIAZIONE_COMPANIES: frozenset[str] = frozenset({"mediazione_a", "mediazione_z"
 # Società → IBAN noti + keyword banca (fallback se IBAN non ancora in anagrafica)
 COMPANY_BANK_EXPECTATIONS: Dict[str, Dict[str, Any]] = {
   "mediazione_a": {
-    "label": "Mediazione · Mani in Pasta",
-    "banks": ("BPPB", "BCC Terra d'Otranto"),
-    "ibans": frozenset({IBAN_MEDIAZIONE_BPPB, IBAN_MEDIAZIONE_BCC}),
+    "label": "Mediazione A · Mani in Pasta Abba",
+    "banks": ("BPPB",),
+    "ibans": frozenset({IBAN_MEDIAZIONE_BPPB}),
     "company_tags": MEDIAZIONE_COMPANIES,
-    "bank_keywords": ("bppb", "puglia", "basilicata", "bcc", "terra d'otranto", "terra dotranto"),
+    "bank_keywords": ("bppb", "puglia", "basilicata"),
   },
   "mediazione_z": {
-    "label": "Mediazione · Mani in Pasta",
-    "banks": ("BPPB", "BCC Terra d'Otranto"),
-    "ibans": frozenset({IBAN_MEDIAZIONE_BPPB, IBAN_MEDIAZIONE_BCC}),
+    "label": "Mediazione Z · Mani in Pasta Zanardelli",
+    "banks": ("BCC Terra d'Otranto", "BPPB"),
+    "ibans": frozenset({IBAN_MEDIAZIONE_BCC, IBAN_MEDIAZIONE_BPPB}),
     "company_tags": MEDIAZIONE_COMPANIES,
     "bank_keywords": ("bppb", "puglia", "basilicata", "bcc", "terra d'otranto", "terra dotranto"),
   },
@@ -62,7 +63,7 @@ COMPANY_BANK_EXPECTATIONS: Dict[str, Dict[str, Any]] = {
 # IBAN → società da assegnare in anagrafica conti
 IBAN_TO_COMPANY: Dict[str, str] = {
   IBAN_MEDIAZIONE_BPPB: "mediazione_a",
-  IBAN_MEDIAZIONE_BCC: "mediazione_a",
+  IBAN_MEDIAZIONE_BCC: "mediazione_z",
   IBAN_VIA_LATTEA_BPPB: "via_lattea",
   IBAN_VIA_LATTEA_BPPB_LEGACY: "via_lattea",
   IBAN_VIA_LATTEA_BCC: "via_lattea",
