@@ -1103,6 +1103,13 @@ def _movement_beneficiary(mov: Any = None, blob: str = "") -> str:
   return _extract_beneficiary_name(raw)
 
 
+def _party_compact(name: Optional[str]) -> str:
+  raw = re.sub(r"[^A-Z0-9]", "", (name or "").upper())
+  for stop in ("UNIPERSONALE", "SOCIETA", "SRLS", "SRL", "SPA", "SNC", "SAS", "COOP"):
+    raw = raw.replace(stop, "")
+  return raw
+
+
 def _party_name_tokens(name: Optional[str]) -> List[str]:
   raw = re.sub(r"[^A-Z0-9]+", " ", (name or "").upper())
   extra_stop = {"dei", "del", "della", "delle", "degli", "di", "da", "the", "and"}
@@ -1117,7 +1124,10 @@ def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
   left = _party_name_tokens(supplier_name)
   right = _party_name_tokens(beneficiary)
   if not left or not right:
-    return False
+    # Sigle spezzate: «FR. E VA. SRL» non ha token lunghi, ma il compatto FREVA sì.
+    left_c = _party_compact(supplier_name)
+    right_c = _party_compact(beneficiary)
+    return len(left_c) >= 5 and (left_c in right_c or right_c in left_c)
   shared = set(left) & set(right)
   if shared:
     shorter = left if len(left) <= len(right) else right
@@ -1137,8 +1147,131 @@ _DOC_REF_RE = re.compile(
 )
 
 
+_FT_ANCHOR_RE = re.compile(
+  r"(?<![A-Z0-9])(?:SALDO\s+)?(?:FATTURE|FATTURA|FT\.?)(?![A-Z0-9])\s*(?:N\.?\s*)?",
+  re.IGNORECASE,
+)
+_FT_NOTE_STOP_RE = re.compile(
+  r"COMMIS|ADDEBITO|VOSTRA\s+DISPOSIZIONE|ID\.?\s*BON|C\.\s*BENEF|\bNOTE\s*:",
+  re.IGNORECASE,
+)
+
+
+def extract_invoice_refs(blob: str) -> List[str]:
+  """Numeri fattura scritti nella causale (SALDO FT '8947/01' '7684/01', 4952-4953, …)."""
+  text = re.sub(r"\s+", " ", str(blob or ""))
+  refs: List[str] = []
+  seen: set[str] = set()
+  for match in _FT_ANCHOR_RE.finditer(text):
+    chunk = text[match.end(): match.end() + 220]
+    stop = _FT_NOTE_STOP_RE.search(chunk)
+    if stop:
+      chunk = chunk[: stop.start()]
+    for ref in _tokenize_invoice_refs(chunk):
+      key = ref.upper()
+      if key in seen:
+        continue
+      seen.add(key)
+      refs.append(ref)
+  return refs
+
+
+def _tokenize_invoice_refs(chunk: str) -> List[str]:
+  chunk = (chunk or "").strip(" .:-")
+  chunk = re.sub(r"\b(20\d)\s+(\d)\b", r"\1\2", chunk)
+  if not re.search(r"\d", chunk):
+    return []
+  # «saldo fatture agosto» o «dal 17 al 31 luglio»: periodo, non un elenco di numeri.
+  scrub = re.sub(
+    r"(?i)\b(?:dal|da|al|a|del|di)\s+\d{1,2}(?:\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre))?(?:\s+20\d{2})?",
+    " ",
+    chunk,
+  )
+  scrub = re.sub(
+    r"(?i)\b(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b(?:\s+20\d{2})?",
+    " ",
+    scrub,
+  )
+  scrub = re.sub(r"\b20\d{2}\b", " ", scrub)
+  if not re.search(r"\d", scrub):
+    return []
+  leftovers = re.findall(r"\d+", scrub)
+  if leftovers and all(re.fullmatch(r"20\d{0,2}", n) for n in leftovers):
+    return []
+  found: List[str] = []
+
+  def add(token: str) -> None:
+    token = re.sub(r"\s+", "", str(token or "")).strip(" .'\"-/")
+    if not token or not re.search(r"\d", token):
+      return
+    if re.fullmatch(r"20\d{2}", token):
+      return
+    digits = re.sub(r"\D", "", token)
+    if len(digits) < 2 or len(digits) > 12:
+      return
+    found.append(token.upper())
+
+  for quoted in re.findall(r"'([^']{1,40})'", chunk):
+    piece = quoted.strip()
+    if re.fullmatch(r"\d+(?:-\d+)+", re.sub(r"\s+", "", piece)):
+      for part in re.split(r"\s*-\s*", piece):
+        add(part)
+    else:
+      add(piece)
+
+  rest = re.sub(r"'[^']*'", " ", chunk)
+  rest = re.sub(r"(?i)\bdel\s+\d{1,2}(?:\s+[a-zàèéìòù]+)?(?:\s+\d{4})?", " ", rest)
+  rest = re.split(r"(?i)\bal\s+netto\b", rest)[0]
+  rest = re.sub(r"(\d{1,3})\s+(\d{3,})", r"\1\2", rest)
+  rest = re.sub(r"(?i)\b(?:saldo|fatture|fattura|n)\b", " ", rest)
+  rest = re.sub(r"\s+", " ", rest).strip(" .:-")
+  if re.fullmatch(r"[A-Z]{1,4}-?\d[\w/\-]*", rest, re.IGNORECASE) and not re.fullmatch(
+    r"\d+(?:-\d+)+", rest
+  ):
+    add(rest)
+    rest = ""
+  for part in re.split(r"[\s,;]+|\s+\be\b\s+|(?<=\d)\s*-\s*(?=\d)", rest):
+    part = re.split(r"(?i)id\.?", part.strip(" .-'/"))[0]
+    matched = re.match(r"([A-Z]{0,4}\d[\w./\-]{0,30})", part, re.IGNORECASE)
+    if not matched:
+      continue
+    token = matched.group(1).strip("./-")
+    if re.fullmatch(r"\d+(?:-\d+)+", token):
+      for piece in token.split("-"):
+        add(piece)
+    else:
+      add(token)
+  if len(found) > 1 and len(re.sub(r"\D", "", found[-1])) <= 1:
+    found = found[:-1]
+  out: List[str] = []
+  seen: set[str] = set()
+  for token in found:
+    if token in seen:
+      continue
+    seen.add(token)
+    out.append(token)
+  return out
+
+
+def _ref_matches_number(ref: str, invoice_number: Optional[str]) -> bool:
+  ref_s = re.sub(r"\s+", "", (ref or "").upper())
+  num_s = re.sub(r"\s+", "", (invoice_number or "").upper())
+  if not ref_s or not num_s:
+    return False
+  if ref_s == num_s:
+    return True
+  if num_s.startswith(ref_s) and num_s[len(ref_s):len(ref_s) + 1] in {"/", "-", "."}:
+    return True
+  if len(ref_s) >= 8 and num_s.startswith(ref_s):
+    return True
+  return False
+
+
 def _extract_doc_ref(blob: str) -> str:
   """Numero fattura citato nella causale del bonifico."""
+  refs = extract_invoice_refs(blob)
+  if refs:
+    return ", ".join(refs)[:80]
   match = _DOC_REF_RE.search(str(blob or ""))
   if not match:
     return ""
@@ -1392,6 +1525,334 @@ def _enrich_movement_out(out: Dict[str, Any], mov: Any = None, blob: str = "") -
   return enriched
 
 
+_IT_MONTHS = {
+  "gennaio": 1,
+  "febbraio": 2,
+  "marzo": 3,
+  "aprile": 4,
+  "maggio": 5,
+  "giugno": 6,
+  "luglio": 7,
+  "agosto": 8,
+  "settembre": 9,
+  "ottobre": 10,
+  "novembre": 11,
+  "dicembre": 12,
+}
+_CREDIT_NOTE_RE = re.compile(r"(?i)(?:^|[^A-Z0-9])NC(?:[^A-Z0-9]|$)")
+
+
+def _is_credit_note(inv: Any) -> bool:
+  num = str(getattr(inv, "invoice_number", None) or "")
+  if _CREDIT_NOTE_RE.search(num):
+    return True
+  return _dec(getattr(inv, "total", 0)) < Decimal("-0.009")
+
+
+def _saldo_period(blob: str, mov_date: Optional[date]) -> Optional[tuple]:
+  """(anno, mese, nome mese) se la causale è un saldo del mese, senza elenco numeri."""
+  text = (blob or "").lower()
+  if mov_date is None:
+    return None
+  idx = text.find("saldo fattur")
+  if idx < 0:
+    short = re.search(r"saldo\s+ft\b", text)
+    if not short:
+      return None
+    # «saldo ft agosto», non «saldo ft 760» o un elenco di numeri.
+    after = text[short.end(): short.end() + 48]
+    if re.search(r"\d{3,}", after):
+      return None
+    idx = short.start()
+  window = text[idx:idx + 80]
+  month = None
+  month_name = ""
+  for name, num in _IT_MONTHS.items():
+    if re.search(rf"\b{name}\b", window):
+      month = num
+      month_name = name
+      break
+  if month is None:
+    return None
+  year = mov_date.year
+  if month > mov_date.month:
+    year -= 1
+  return year, month, month_name
+
+
+def allocate_saldo_fatture(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+) -> Dict[int, Dict[str, Any]]:
+  """Un bonifico «saldo fatture <mese>» che quadra con le fatture del fornitore.
+
+  La nota di credito e la fattura dello stesso importo (quella stornata) restano fuori.
+  Un movimento può coprire più fatture. I movimenti già usati 1:1 non vengono toccati.
+  """
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = skip_movement_ids if skip_movement_ids is not None else set()
+  claimed: set[int] = set()
+  out: Dict[int, Dict[str, Any]] = {}
+
+  candidates: List[tuple] = []
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    mid = int(getattr(mov, "id") or 0)
+    if mid and mid in skip_mov:
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    mov_d = _as_date(getattr(mov, "movement_date", None))
+    period = _saldo_period(meta.get("blob") or "", mov_d)
+    if not period:
+      continue
+    beneficiary = _movement_beneficiary(mov, meta.get("blob") or "")
+    if not beneficiary:
+      continue
+    candidates.append((amt, meta, period, beneficiary))
+
+  candidates.sort(key=lambda item: item[0], reverse=True)
+  for amt, meta, (year, month, month_name), beneficiary in candidates:
+    month_inv: List[Any] = []
+    for inv in invoices:
+      iid = int(getattr(inv, "id"))
+      if iid in skip_inv or iid in claimed:
+        continue
+      inv_d = _as_date(getattr(inv, "invoice_date", None))
+      if not inv_d or inv_d.year != year or inv_d.month != month:
+        continue
+      if not _party_names_align(getattr(inv, "supplier_name", None), beneficiary):
+        continue
+      month_inv.append(inv)
+    chosen: Optional[List[Any]] = None
+    for group in _saldo_candidate_groups(month_inv):
+      remaining = _saldo_payable(group)
+      if remaining is None:
+        continue
+      total = sum((abs(_dec(getattr(inv, "total", 0))) for inv in remaining), Decimal("0.00"))
+      if abs(total - amt) <= Decimal("0.05"):
+        chosen = remaining
+        break
+    if not chosen:
+      continue
+    mov_id = int(getattr(meta["mov"], "id") or 0)
+    if mov_id:
+      skip_mov.add(mov_id)
+    for inv in chosen:
+      iid = int(getattr(inv, "id"))
+      claimed.add(iid)
+      out[iid] = {"meta": meta, "month_label": month_name, "year": year}
+  return out
+
+
+def _saldo_candidate_groups(month_inv: List[Any]) -> List[List[Any]]:
+  """Prima tutte le società insieme, poi una società alla volta."""
+  groups = [month_inv]
+  buckets: Dict[str, List[Any]] = {}
+  for inv in month_inv:
+    key = str(getattr(inv, "company", None) or "").strip()
+    if key:
+      buckets.setdefault(key, []).append(inv)
+  if len(buckets) > 1:
+    groups.extend(buckets.values())
+  return groups
+
+
+def _saldo_payable(month_inv: List[Any]) -> Optional[List[Any]]:
+  credits = [inv for inv in month_inv if _is_credit_note(inv)]
+  ordinary = [inv for inv in month_inv if inv not in credits]
+  remaining = list(ordinary)
+  for cred in credits:
+    cred_amt = abs(_dec(getattr(cred, "total", 0)))
+    twins = [
+      inv
+      for inv in remaining
+      if abs(abs(_dec(getattr(inv, "total", 0))) - cred_amt) <= Decimal("0.05")
+    ]
+    if len(twins) != 1:
+      return None
+    remaining.remove(twins[0])
+  if len(remaining) < 2:
+    return None
+  return remaining
+
+
+def _invoice_for_ref(ref: str, invoices: List[Any]) -> Optional[Any]:
+  hits = [
+    inv
+    for inv in invoices
+    if _ref_matches_number(ref, getattr(inv, "invoice_number", None))
+  ]
+  if len(hits) == 1:
+    return hits[0]
+  exact = [
+    inv
+    for inv in hits
+    if re.sub(r"\s+", "", str(getattr(inv, "invoice_number", "") or "")).upper() == re.sub(r"\s+", "", ref).upper()
+  ]
+  if len(exact) == 1:
+    return exact[0]
+  return None
+
+
+def allocate_cited_invoices(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+) -> Dict[int, Dict[str, Any]]:
+  """Bonifico che elenca i numeri fattura in causale e la cui somma quadra.
+
+  Se manca anche un solo numero, o la somma non è l'importo del bonifico, non allega.
+  """
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = skip_movement_ids if skip_movement_ids is not None else set()
+  claimed: set[int] = set()
+  out: Dict[int, Dict[str, Any]] = {}
+
+  candidates: List[tuple] = []
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    mid = int(getattr(mov, "id") or 0)
+    if mid and mid in skip_mov:
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    refs = extract_invoice_refs(meta.get("blob") or "")
+    if not refs:
+      continue
+    beneficiary = _movement_beneficiary(mov, meta.get("blob") or "")
+    if not beneficiary:
+      continue
+    candidates.append((amt, meta, refs, beneficiary))
+
+  candidates.sort(key=lambda item: item[0], reverse=True)
+  for amt, meta, refs, beneficiary in candidates:
+    pool = []
+    for inv in invoices:
+      iid = int(getattr(inv, "id"))
+      if iid in skip_inv or iid in claimed:
+        continue
+      if not _party_names_align(getattr(inv, "supplier_name", None), beneficiary):
+        continue
+      pool.append(inv)
+    chosen: List[Any] = []
+    seen_ids: set[int] = set()
+    complete = True
+    for ref in refs:
+      inv = _invoice_for_ref(ref, pool)
+      if inv is None:
+        complete = False
+        break
+      iid = int(getattr(inv, "id"))
+      if iid in seen_ids:
+        continue
+      seen_ids.add(iid)
+      chosen.append(inv)
+    if not complete or not chosen:
+      continue
+    total = sum((abs(_dec(getattr(inv, "total", 0))) for inv in chosen), Decimal("0.00"))
+    if abs(total - amt) > Decimal("0.05"):
+      continue
+    mov_id = int(getattr(meta["mov"], "id") or 0)
+    if mov_id:
+      skip_mov.add(mov_id)
+    for inv in chosen:
+      iid = int(getattr(inv, "id"))
+      claimed.add(iid)
+      out[iid] = {"meta": meta, "cited": True, "refs": refs}
+  return out
+
+
+_NUM_RANGE_RE = re.compile(
+  r"(?:dalla|dal)\s+n?\.?\s*(\d{2,8})\s+(?:alla|al)\s+n?\.?\s*(\d{2,8})"
+  r"|da\s+n\.?\s*(\d{2,8})\s+a\s+n\.?\s*(\d{2,8})",
+  re.IGNORECASE,
+)
+
+
+def _invoice_leading_number(invoice_number: Optional[str]) -> Optional[int]:
+  match = re.match(r"\D*(\d{2,8})", str(invoice_number or ""))
+  if not match:
+    return None
+  return int(match.group(1))
+
+
+def allocate_number_ranges(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+) -> Dict[int, Dict[str, Any]]:
+  """«Dalla n. 7905 alla n. 8764»: allega se la somma di quel intervallo quadra."""
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = skip_movement_ids if skip_movement_ids is not None else set()
+  claimed: set[int] = set()
+  out: Dict[int, Dict[str, Any]] = {}
+  candidates: List[tuple] = []
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    mid = int(getattr(mov, "id") or 0)
+    if mid and mid in skip_mov:
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    blob = meta.get("blob") or ""
+    if "saldo" not in blob.lower():
+      continue
+    found = _NUM_RANGE_RE.search(blob)
+    if not found:
+      continue
+    nums = [int(g) for g in found.groups() if g]
+    if len(nums) != 2:
+      continue
+    lo, hi = sorted(nums)
+    beneficiary = _movement_beneficiary(mov, blob)
+    if not beneficiary:
+      continue
+    candidates.append((amt, meta, lo, hi, beneficiary))
+  candidates.sort(key=lambda item: item[0], reverse=True)
+  for amt, meta, lo, hi, beneficiary in candidates:
+    chosen: List[Any] = []
+    for inv in invoices:
+      iid = int(getattr(inv, "id"))
+      if iid in skip_inv or iid in claimed:
+        continue
+      if not _party_names_align(getattr(inv, "supplier_name", None), beneficiary):
+        continue
+      leading = _invoice_leading_number(getattr(inv, "invoice_number", None))
+      if leading is None or leading < lo or leading > hi:
+        continue
+      chosen.append(inv)
+    if len(chosen) < 2:
+      continue
+    total = sum((abs(_dec(getattr(inv, "total", 0))) for inv in chosen), Decimal("0.00"))
+    if abs(total - amt) > Decimal("0.05"):
+      continue
+    mov_id = int(getattr(meta["mov"], "id") or 0)
+    if mov_id:
+      skip_mov.add(mov_id)
+    for inv in chosen:
+      iid = int(getattr(inv, "id"))
+      claimed.add(iid)
+      out[iid] = {"meta": meta, "cited": True, "refs": [str(lo), str(hi)]}
+  return out
+
+
 def _invoice_row_out(
   inv: Any,
   *,
@@ -1415,6 +1876,7 @@ def _invoice_row_out(
     "importo_in_movimento",
     "file_contanti",
     "score_auto",
+    "saldo_fatture",
   }
   out = {
     "invoice_id": getattr(inv, "id", None),
@@ -1455,6 +1917,10 @@ def reconciliation_preview(
   invoices = list_invoices(db, company=company_id, include_ignored=False)
   # Ampio set: storico ricevute + bonifici sui conti collegati
   invoices = invoices[:5000]
+  # Il saldo di un mese può coprire la stessa fornitura su più società.
+  match_invoices = (
+    list_invoices(db, include_ignored=False)[:5000] if company_id else invoices
+  )
 
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -1557,6 +2023,26 @@ def reconciliation_preview(
     used_mov_ids.add(mov_id)
     inv_to_pair[inv_id] = pair
 
+  saldo_by_invoice = allocate_saldo_fatture(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(inv_to_pair.keys()),
+    skip_movement_ids=used_mov_ids,
+  )
+  cited_by_invoice = allocate_cited_invoices(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(inv_to_pair.keys()) | set(saldo_by_invoice.keys()),
+    skip_movement_ids=used_mov_ids,
+  )
+  for iid, hit in allocate_number_ranges(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(inv_to_pair.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
+    skip_movement_ids=used_mov_ids,
+  ).items():
+    cited_by_invoice[iid] = hit
+
   for inv in invoices:
     inv_id = int(inv.id)
     num = str(inv.invoice_number or "").strip()
@@ -1575,15 +2061,45 @@ def reconciliation_preview(
         invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
       )
 
+    saldo_hit = None if found else saldo_by_invoice.get(inv_id)
+    cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
+    if saldo_hit and not found:
+      found = saldo_hit["meta"]
+      found_score = {
+        "score": 100,
+        "band": "auto",
+        "breakdown": {"amount": 40, "party": 30, "number": 0, "date": 10},
+        "amount_matched_as": "saldo",
+      }
+    elif cited_hit and not found:
+      found = cited_hit["meta"]
+      found_score = {
+        "score": 100,
+        "band": "auto",
+        "breakdown": {"amount": 40, "party": 30, "number": 20, "date": 10},
+        "amount_matched_as": "numeri",
+      }
+
     if found:
       has_num = _invoice_number_in_text(num, found["blob"])
-      reason = "matched" if found["mov"].matched_invoice_id == inv_id else (
-        "numero_in_movimento" if has_num else "importo_in_movimento"
-      )
-      if found_score and found_score.get("band") == "auto":
+      if saldo_hit:
+        reason = "saldo_fatture"
+      elif cited_hit:
+        reason = "numero_in_movimento"
+      else:
+        reason = "matched" if found["mov"].matched_invoice_id == inv_id else (
+          "numero_in_movimento" if has_num else "importo_in_movimento"
+        )
+      if found_score and found_score.get("band") == "auto" and reason not in {"saldo_fatture", "numero_in_movimento"}:
         reason = "score_auto" if reason != "matched" else reason
       mov_out = _enrich_movement_out(found["out"], found["mov"], found["blob"])
-      if has_num and num:
+      if saldo_hit:
+        mov_out = dict(mov_out)
+        mov_out["doc_ref"] = f"saldo {saldo_hit['month_label']}"
+      elif cited_hit and num:
+        mov_out = dict(mov_out)
+        mov_out["doc_ref"] = num
+      elif has_num and num:
         mov_out = dict(mov_out)
         mov_out["doc_ref"] = num
       paid_by_bank.append(
@@ -1741,8 +2257,9 @@ def sync_payment_status_from_bank(
   - bonifici sui conti (score auto: importo + fornitore e/o n. documento, anche ritardati)
   - file Pagamenti: solo CONTANTI/CARTA/assegno (senza bonifico)
 
-  Un movimento banca paga al massimo una fattura (assegnazione greedy sul miglior score).
-  Quando arriva il bonifico a distanza di giorni/settimane, la fattura passa a pagata.
+  Un movimento con importo di una sola fattura paga quella fattura.
+  Un bonifico «saldo fatture <mese>» che quadra con più fatture dello stesso fornitore
+  le segna tutte pagate (la nota di credito e la fattura stornata restano fuori).
   """
   from decimal import Decimal
 
@@ -1750,6 +2267,9 @@ def sync_payment_status_from_bank(
 
   company_id = (company or "").strip() or None
   listed = list_invoices(db, company=company_id, include_ignored=False)
+  match_invoices = (
+    list_invoices(db, include_ignored=False)[:5000] if company_id else listed
+  )
   unpaid = [
     inv
     for inv in listed
@@ -1901,6 +2421,26 @@ def sync_payment_status_from_bank(
     assigned_mov.add(mov_id)
     bank_assignments[inv_id] = cand
 
+  saldo_by_invoice = allocate_saldo_fatture(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(bank_assignments.keys()),
+    skip_movement_ids=assigned_mov,
+  )
+  cited_by_invoice = allocate_cited_invoices(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()),
+    skip_movement_ids=assigned_mov,
+  )
+  for iid, hit in allocate_number_ranges(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
+    skip_movement_ids=assigned_mov,
+  ).items():
+    cited_by_invoice[iid] = hit
+
   marked: List[Dict[str, Any]] = []
   reopened: List[Dict[str, Any]] = []
   marked_from_file = 0
@@ -1911,8 +2451,10 @@ def sync_payment_status_from_bank(
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     cand = bank_assignments.get(inv_id)
     found = cand["mov"] if cand else None
-    cash_hit = None if found else _cash_file_hit(inv_dto)
-    if not found and not cash_hit:
+    saldo_hit = None if found else saldo_by_invoice.get(inv_id)
+    cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
+    cash_hit = None if (found or saldo_hit or cited_hit) else _cash_file_hit(inv_dto)
+    if not found and not saldo_hit and not cited_hit and not cash_hit:
       continue
 
     row = db.query(Invoice).filter(Invoice.id == inv_id).first()
@@ -1944,6 +2486,16 @@ def sync_payment_status_from_bank(
         found.reconciliation_status = "matched"
         found.matched_invoice_id = inv_id
         found.difference_amount = None
+    elif saldo_hit or cited_hit:
+      group = saldo_hit or cited_hit
+      reason = "saldo_fatture" if saldo_hit else "numero_in_movimento"
+      match_score = 100
+      match_band = "auto"
+      movement_id = int(group["meta"]["mov"].id)
+      group_mov = group["meta"]["mov"]
+      if group_mov.reconciliation_status == "unmatched":
+        group_mov.reconciliation_status = "matched"
+        group_mov.difference_amount = None
     else:
       marked_from_file += 1
     changed = True
@@ -1958,7 +2510,13 @@ def sync_payment_status_from_bank(
       item["match_band"] = match_band
     if movement_id is not None:
       item["movement_id"] = movement_id
-      bonifico = _extract_bonifico_ref(cand["blob"] if cand else "")
+      if cand:
+        blob_for_ref = cand["blob"]
+      elif saldo_hit or cited_hit:
+        blob_for_ref = (saldo_hit or cited_hit)["meta"].get("blob") or ""
+      else:
+        blob_for_ref = ""
+      bonifico = _extract_bonifico_ref(blob_for_ref)
       if bonifico:
         item["bonifico_ref"] = bonifico
     if cash_hit:
@@ -1966,13 +2524,38 @@ def sync_payment_status_from_bank(
       item["pagamenti_payment_date"] = cash_hit.get("payment_date")
     marked.append(item)
 
+  covered_ids = {int(item["invoice_id"]) for item in marked}
+  for inv_id, hit in list(saldo_by_invoice.items()) + list(cited_by_invoice.items()):
+    if inv_id in covered_ids:
+      continue
+    covered_ids.add(inv_id)
+    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    if not row or row.is_paid:
+      continue
+    row.amount_paid = _dec(row.total)
+    row.is_paid = True
+    group_mov = hit["meta"]["mov"]
+    if getattr(group_mov, "reconciliation_status", None) == "unmatched":
+      group_mov.reconciliation_status = "matched"
+      group_mov.difference_amount = None
+    changed = True
+    marked.append(
+      {
+        "invoice_id": inv_id,
+        "invoice_number": str(getattr(row, "invoice_number", "") or ""),
+        "reason": "saldo_fatture" if inv_id in saldo_by_invoice else "numero_in_movimento",
+        "movement_id": int(group_mov.id),
+        "match_band": "auto",
+      }
+    )
+
   # Riapri «pagate» senza prova banca né contanti/POS da file
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     found = _bank_hit_for_verify(inv_dto, reserved_mov_ids=assigned_mov)
     cash_hit = _cash_file_hit(inv_dto)
-    if found or cash_hit:
+    if found or cash_hit or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
     row = db.query(Invoice).filter(Invoice.id == inv_id).first()
     if not row:

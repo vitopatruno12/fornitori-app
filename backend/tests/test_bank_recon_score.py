@@ -86,6 +86,183 @@ def test_wrong_amount_not_auto_without_other_signals():
   assert sc["band"] != "auto"
 
 
+def test_saldo_agosto_carcagni_paga_la_269_e_non_la_stornata():
+  """Il bonifico BPPB è il saldo di agosto, non l'importo della sola 269/2026."""
+  from app.services.banca_service import allocate_saldo_fatture
+
+  supplier = "CARCAGNI' ANDREA"
+  invoices = [
+    _inv(id=1, invoice_number="235/2026", invoice_date=date(2026, 8, 3), supplier_name=supplier, total=Decimal("376.43")),
+    _inv(id=2, invoice_number="269/2026", invoice_date=date(2026, 8, 31), supplier_name=supplier, total=Decimal("431.76")),
+    _inv(id=3, invoice_number="269/BIS", invoice_date=date(2026, 8, 31), supplier_name=supplier, total=Decimal("100.00")),
+    _inv(id=4, invoice_number="01/NC", invoice_date=date(2026, 8, 31), supplier_name=supplier, total=Decimal("376.43")),
+    _inv(id=5, invoice_number="287/2026", invoice_date=date(2026, 9, 17), supplier_name=supplier, total=Decimal("154.96")),
+  ]
+  # 431.76 + 100.00 = 531.76 (235 stornata dalla NC)
+  description = (
+    "BONIFICO DA VOI DISPOSTO A FAVORE DI ANDREA CARCAGNI "
+    "NOTE: saldo fatture agosto al netto della nc 01 del 31"
+  )
+  mov = _mov(
+    id=1710,
+    amount=Decimal("531.76"),
+    movement_date=date(2026, 9, 18),
+    counterparty="ANDREA CARCAGNI C. BENEF. IT42B0103016009000063203433 NOTE: saldo fatture",
+    description=description,
+    causale="",
+  )
+  fee = _mov(
+    id=1711,
+    amount=Decimal("0.40"),
+    movement_date=date(2026, 9, 18),
+    counterparty=mov.counterparty,
+    description=description,
+  )
+  blob = f"{description} {mov.counterparty}"
+  meta = [
+    {"mov": mov, "blob": blob, "out": {}},
+    {"mov": fee, "blob": blob, "out": {}},
+  ]
+  allocated = allocate_saldo_fatture(invoices, meta)
+  assert set(allocated) == {2, 3}
+  assert allocated[2]["month_label"] == "agosto"
+  assert allocated[2]["meta"]["mov"].id == 1710
+
+
+def test_extract_invoice_numbers_listed_in_bonifico():
+  from app.services.banca_service import extract_invoice_refs
+
+  quoted = (
+    "BONIFICO A FAVORE DI RISTORALL S.R.L.U. "
+    "NOTE: SALDO FT '8947/01' '7684/01' '7505/01' ADDEBITO BONIFICO"
+  )
+  assert extract_invoice_refs(quoted) == ["8947/01", "7684/01", "7505/01"]
+  dashed = "NOTE: saldo ft 4952-4953-5314 VOSTRA DISPOSIZIONE"
+  assert extract_invoice_refs(dashed) == ["4952", "4953", "5314"]
+  assert extract_invoice_refs("NOTE: saldo fatture agosto") == []
+  assert extract_invoice_refs("NOTE: SALDO FATTURE DAL 17 AL 31 LUGLIO") == []
+  assert extract_invoice_refs("NOTE: SALDO FATTURE DA 01 LUGLIO 20") == []
+  assert extract_invoice_refs("NOTE: SALDO FATTURE DA 01 LUGLIO 202 6 A 16 LUGLIO") == []
+  assert extract_invoice_refs("NOTE: SALDO FATTURA 74 DEL 21 SETTEMBRE") == ["74"]
+
+
+def test_cited_invoices_attach_when_sum_matches_wire():
+  from app.services.banca_service import allocate_cited_invoices
+
+  invoices = [
+    _inv(id=1, invoice_number="8947/01", supplier_name="RISTORALL S.R.L.U.", total=Decimal("926.30")),
+    _inv(id=2, invoice_number="7684/01", supplier_name="RISTORALL S.R.L.U.", total=Decimal("940.38")),
+    _inv(id=3, invoice_number="7505/01", supplier_name="RISTORALL S.R.L.U.", total=Decimal("82.38")),
+    _inv(id=4, invoice_number="4952/Vendite", supplier_name="FRAGRANZE MEDITERRANEE SRL", total=Decimal("134.13")),
+    _inv(id=5, invoice_number="4953/Vendite", supplier_name="FRAGRANZE MEDITERRANEE SRL", total=Decimal("440.22")),
+    _inv(id=6, invoice_number="5314/Vendite", supplier_name="FRAGRANZE MEDITERRANEE SRL", total=Decimal("357.56")),
+  ]
+  ristorall = _mov(
+    id=20,
+    amount=Decimal("1949.06"),
+    counterparty="RISTORALL S.R.L.U.",
+    description="NOTE: SALDO FT '8947/01' '7684/01' '7505/01'",
+  )
+  fragranze = _mov(
+    id=21,
+    amount=Decimal("931.91"),
+    counterparty="FRAGRANZE MEDITERRANEE SRL",
+    description="NOTE: saldo ft 4952-4953-5314",
+  )
+  fee = _mov(id=22, amount=Decimal("0.40"), counterparty=ristorall.counterparty, description=ristorall.description)
+  meta = []
+  for mov in (ristorall, fragranze, fee):
+    blob = f"{mov.description} {mov.counterparty}"
+    meta.append({"mov": mov, "blob": blob, "out": {}})
+  allocated = allocate_cited_invoices(invoices, meta)
+  assert set(allocated) == {1, 2, 3, 4, 5, 6}
+  assert allocated[1]["cited"] is True
+  assert allocated[4]["meta"]["mov"].id == 21
+
+
+def test_truncated_invoice_list_is_not_attached():
+  from app.services.banca_service import allocate_cited_invoices
+
+  invoices = [
+    _inv(id=1, invoice_number="2180/10/2026", supplier_name="GI.MA. CHEESE SRL", total=Decimal("165.00")),
+    _inv(id=2, invoice_number="2181/10/2026", supplier_name="GI.MA. CHEESE SRL", total=Decimal("541.55")),
+  ]
+  mov = _mov(
+    id=30,
+    amount=Decimal("1867.98"),
+    counterparty="GI.MA. CHEESE S.R.L.",
+    description="NOTE: saldo ft '2181/10/2026' '2061/10/20",
+  )
+  blob = f"{mov.description} {mov.counterparty}"
+  allocated = allocate_cited_invoices(invoices, [{"mov": mov, "blob": blob, "out": {}}])
+  assert allocated == {}
+
+
+def test_fr_eva_abbreviation_aligns():
+  from app.services.banca_service import _party_names_align
+
+  assert _party_names_align("FR. E VA. SRL", "FR. E VA. SRL C. BENEF. IT20O0860316000000000312477")
+
+
+def test_saldo_ft_agosto_senza_la_parola_fatture():
+  from app.services.banca_service import allocate_saldo_fatture
+
+  invoices = [
+    _inv(id=1, invoice_number="100", invoice_date=date(2026, 8, 2), supplier_name="DICIANNOVE ZERO SETTE SRLS", total=Decimal("10.00")),
+    _inv(id=2, invoice_number="101", invoice_date=date(2026, 8, 3), supplier_name="DICIANNOVE ZERO SETTE SRLS", total=Decimal("15.00")),
+  ]
+  mov = _mov(
+    id=40,
+    amount=Decimal("25.00"),
+    movement_date=date(2026, 9, 2),
+    counterparty="DICIANNOVE ZERO SETTE S.R.L.S.",
+    description="NOTE: SALDO FT AGOSTO",
+  )
+  blob = f"{mov.description} {mov.counterparty}"
+  allocated = allocate_saldo_fatture(invoices, [{"mov": mov, "blob": blob, "out": {}}])
+  assert set(allocated) == {1, 2}
+
+
+def test_number_range_in_causale_when_sum_matches():
+  from app.services.banca_service import allocate_number_ranges
+
+  invoices = [
+    _inv(id=1, invoice_number="7905", supplier_name="INTERNATIONAL FRUIT SRL", total=Decimal("10.00")),
+    _inv(id=2, invoice_number="8200", supplier_name="INTERNATIONAL FRUIT SRL", total=Decimal("15.50")),
+    _inv(id=3, invoice_number="9000", supplier_name="INTERNATIONAL FRUIT SRL", total=Decimal("99.00")),
+  ]
+  mov = _mov(
+    id=41,
+    amount=Decimal("25.50"),
+    counterparty="INTERNATIONAL FRUIT SRL",
+    description="NOTE: SALDO FT DALLA N 7905 ALLA N 8764",
+  )
+  blob = f"{mov.description} {mov.counterparty}"
+  allocated = allocate_number_ranges(invoices, [{"mov": mov, "blob": blob, "out": {}}])
+  assert set(allocated) == {1, 2}
+
+
+def test_saldo_agosto_unisce_due_societa_se_la_somma_quadra():
+  from app.services.banca_service import allocate_saldo_fatture
+
+  invoices = [
+    _inv(id=1, invoice_number="A1", invoice_date=date(2026, 8, 2), supplier_name="FR. E VA. SRL", total=Decimal("100.00"), company="mediazione_a"),
+    _inv(id=2, invoice_number="A2", invoice_date=date(2026, 8, 3), supplier_name="FR. E VA. SRL", total=Decimal("50.00"), company="mediazione_a"),
+    _inv(id=3, invoice_number="Z1", invoice_date=date(2026, 8, 4), supplier_name="FR. E VA. SRL", total=Decimal("80.00"), company="mediazione_z"),
+    _inv(id=4, invoice_number="Z2", invoice_date=date(2026, 8, 5), supplier_name="FR. E VA. SRL", total=Decimal("20.00"), company="mediazione_z"),
+  ]
+  mov = _mov(
+    id=711,
+    amount=Decimal("250.00"),
+    movement_date=date(2026, 9, 11),
+    counterparty="FR. E VA. SRL",
+    description="NOTE: saldo fatture agosto",
+  )
+  blob = f"{mov.description} {mov.counterparty}"
+  allocated = allocate_saldo_fatture(invoices, [{"mov": mov, "blob": blob, "out": {}}])
+  assert set(allocated) == {1, 2, 3, 4}
+
+
 def test_entrata_score_zero():
   inv = _inv()
   mov = _mov(movement_type="entrata")

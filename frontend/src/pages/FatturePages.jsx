@@ -172,6 +172,7 @@ function matchReasonLabel(reason) {
   if (reason === 'importo_in_movimento') return 'Importo in banca'
   if (reason === 'matched') return 'Riconciliata'
   if (reason === 'file_contanti' || reason === 'file_pagamenti') return 'Contanti'
+  if (reason === 'saldo_fatture') return 'Saldo fatture'
   if (reason === 'da_pagare') return 'Da pagare'
   return reason || '—'
 }
@@ -192,6 +193,7 @@ function invoiceIsPaidRow(row) {
     || reason === 'matched'
     || reason === 'file_contanti'
     || reason === 'file_pagamenti'
+    || reason === 'saldo_fatture'
   ) {
     return true
   }

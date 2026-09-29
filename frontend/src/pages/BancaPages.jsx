@@ -448,6 +448,7 @@ function invoiceIsAligned(row) {
       'file_contanti',
       'file_pagamenti',
       'score_auto',
+      'saldo_fatture',
     ].includes(reason)
   ) {
     return true
@@ -502,6 +503,7 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'numero_in_movimento') return '✔ N. in banca'
     if (row?.match_reason === 'importo_in_movimento') return '✔ Importo in banca'
     if (row?.amount_matched_as === 'pagato') return '✔ Importo = pagato'
+    if (row?.match_reason === 'saldo_fatture') return '✔ Saldo fatture'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
