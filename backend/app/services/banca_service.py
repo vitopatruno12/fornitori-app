@@ -2025,7 +2025,7 @@ def _open_invoices_near_amount(indexed: List[tuple], amount: Decimal) -> List[An
 
 def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
   """Una sola lettura fatture: la società in esame e, se serve, tutte le società."""
-  all_invoices = list_invoices(db, include_ignored=False)
+  all_invoices = list_invoices(db, include_ignored=False, light=True)
   if not company_id:
     scoped = all_invoices[:5000]
     return scoped, scoped
@@ -2053,6 +2053,107 @@ def _cash_rows_by_number(cash_file_rows: List[Dict[str, Any]]) -> Dict[str, List
       continue
     grouped.setdefault(key, []).append(row)
   return grouped
+
+
+def reconciliation_snapshot(
+  db: Session,
+  limit: int = 40,
+  company: Optional[str] = None,
+) -> Dict[str, Any]:
+  """Elenco pagate/da pagare dallo stato già salvato, senza ricalcolare ogni bonifico.
+
+  L'apertura della pagina non può rifare il confronto completo: supera il timeout
+  del gateway e la griglia resta vuota.
+  """
+  company_id = (company or "").strip() or None
+  invoices, _match_invoices = _load_recon_invoices(db, company_id)
+  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
+  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
+
+  inv_ids = [int(inv.id) for inv in invoices if getattr(inv, "id", None) is not None]
+  linked_by_invoice: Dict[int, Dict[str, Any]] = {}
+  if inv_ids:
+    linked_rows = (
+      db.query(BankMovement, BankAccount)
+      .join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+      .filter(BankMovement.matched_invoice_id.in_(inv_ids))
+      .all()
+    )
+    for mov, acc in linked_rows:
+      linked_by_invoice[int(mov.matched_invoice_id)] = {
+        "mov": mov,
+        "blob": _movement_search_blob(mov),
+        "out": _movement_out(mov, acc),
+      }
+
+  paid_by_bank: List[Dict[str, Any]] = []
+  da_pagare: List[Dict[str, Any]] = []
+  for inv in invoices:
+    inv_id = int(inv.id)
+    status = str(getattr(inv, "payment_status", None) or "")
+    linked = linked_by_invoice.get(inv_id)
+    if status == "paid":
+      paid_by_bank.append(
+        _invoice_row_out(
+          inv,
+          match_movement=_enrich_movement_out(linked["out"], linked["mov"], linked["blob"]) if linked else None,
+          reason="matched",
+          match_score=100 if linked else None,
+          match_band="auto" if linked else None,
+        )
+      )
+    else:
+      da_pagare.append(_invoice_row_out(inv, reason="da_pagare"))
+
+  unmatched_q = (
+    db.query(BankMovement, BankAccount)
+    .join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+    .filter(
+      BankMovement.reconciliation_status == "unmatched",
+      BankMovement.movement_type == "uscita",
+    )
+  )
+  if account_ids:
+    unmatched_q = unmatched_q.filter(BankMovement.bank_account_id.in_(account_ids))
+  unmatched_count = unmatched_q.count()
+  suggestions = []
+  for mov, acc in (
+    unmatched_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(limit).all()
+  ):
+    suggestions.append(
+      {
+        "movement": _movement_out(mov, acc),
+        "suggested_invoice": None,
+        "status": "unmatched",
+        "match_score": 0,
+        "match_band": "review",
+      }
+    )
+
+  return {
+    "company": company_id or "",
+    "suggestions": suggestions,
+    "paid_by_bank": paid_by_bank,
+    "da_pagare": da_pagare,
+    "open_invoices_count": len(da_pagare),
+    "paid_count": len(paid_by_bank),
+    "pagamenti_paid_rows": 0,
+    "pagamenti_cash_rows": 0,
+    "unmatched_movements": unmatched_count,
+    "score_thresholds": {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE},
+    "accounts_used": [
+      {
+        "id": a.get("id"),
+        "label": a.get("label") or f"{a.get('bank_name')} · {a.get('account_name')}",
+        "company": a.get("company"),
+        "bank_name": a.get("bank_name"),
+        "iban": a.get("iban"),
+      }
+      for a in account_items
+    ],
+    "expected_banks": expected_banks_for_company(company_id),
+    "fast": True,
+  }
 
 
 def reconciliation_preview(
@@ -2689,9 +2790,11 @@ def sync_payment_status_from_bank(
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+      continue
     found = _bank_hit_for_verify(inv_dto, reserved_mov_ids=assigned_mov)
     cash_hit = _cash_file_hit(inv_dto)
-    if found or cash_hit or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+    if found or cash_hit:
       continue
     row = db.query(Invoice).filter(Invoice.id == inv_id).first()
     if not row:
@@ -2744,7 +2847,7 @@ def auto_reconcile(
   I probable (70–79) restano da confermare.
   """
   bank_sync = sync_payment_status_from_bank(db, company=company)
-  refreshed = reconciliation_preview(db, limit=limit, company=company)
+  refreshed = reconciliation_snapshot(db, limit=limit, company=company)
   refreshed["auto_applied"] = int(bank_sync.get("marked_paid") or 0)
   refreshed["auto_applied_items"] = list(bank_sync.get("items") or [])
   refreshed["auto_errors"] = []

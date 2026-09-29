@@ -385,7 +385,7 @@ def banca_riconciliazione(
   company: Optional[str] = Query(None, description="Filtro società (come fatture)"),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-  return banca_service.reconciliation_preview(db, company=company)
+  return banca_service.reconciliation_snapshot(db, company=company)
 
 
 @router.post("/riconciliazione/auto")

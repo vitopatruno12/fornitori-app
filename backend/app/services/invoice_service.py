@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Literal, Optional
+from types import SimpleNamespace
+from typing import List, Literal, Optional, Union
 from pathlib import Path
 import logging
 import re
@@ -132,7 +133,8 @@ def list_invoices(
   include_ignored: bool = False,
   company: Optional[str] = None,
   activity: Optional[str] = None,
-) -> List[InvoiceListOut]:
+  light: bool = False,
+) -> List[Union[InvoiceListOut, SimpleNamespace]]:
   ensure_invoices_bolla_verified_column()
   try:
     return _list_invoices_impl(
@@ -142,6 +144,7 @@ def list_invoices(
       include_ignored=include_ignored,
       company=company,
       activity=activity,
+      light=light,
     )
   except ProgrammingError as exc:
     err = str(exc).lower()
@@ -157,6 +160,7 @@ def list_invoices(
       include_ignored=include_ignored,
       company=company,
       activity=activity,
+      light=light,
     )
 
 
@@ -167,7 +171,8 @@ def _list_invoices_impl(
   include_ignored: bool = False,
   company: Optional[str] = None,
   activity: Optional[str] = None,
-) -> List[InvoiceListOut]:
+  light: bool = False,
+) -> List[Union[InvoiceListOut, SimpleNamespace]]:
   q = (
     db.query(
       Invoice,
@@ -266,14 +271,31 @@ def _list_invoices_impl(
         if not linked or linked == "non_classificata" or inv_company != linked:
           continue
 
-    base = InvoiceRead.model_validate(inv).model_dump()
-    base["supplier_name"] = supplier_name or ""
     # P.IVA fornitore: anagrafica Atlas, poi XML venditore (ricevute)
     vat_bits = [
       str(supplier_vat_anag or "").strip(),
       str(seller_vat or "").strip(),
     ]
-    base["supplier_vat"] = next((v for v in vat_bits if v), None)
+    supplier_vat = next((v for v in vat_bits if v), None)
+    if light:
+      out.append(
+        SimpleNamespace(
+          id=inv.id,
+          supplier_name=supplier_name or "",
+          supplier_vat=supplier_vat,
+          invoice_number=inv.invoice_number,
+          invoice_date=inv.invoice_date,
+          due_date=inv.due_date,
+          total=inv.total,
+          amount_paid=inv.amount_paid,
+          payment_status=ps,
+          company=inv_company,
+        )
+      )
+      continue
+    base = InvoiceRead.model_validate(inv).model_dump()
+    base["supplier_name"] = supplier_name or ""
+    base["supplier_vat"] = supplier_vat
     base["payment_status"] = ps
     base["company"] = inv_company
     base["activity"] = inv_activity

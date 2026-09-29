@@ -2232,7 +2232,7 @@ export function BancaRiconciliazionePage() {
     setSuccess('')
     try {
       await runBancaRiconciliazioneAgent({ force: true })
-      if (companyId) await reload(companyId, { auto: true })
+      if (companyId) await reload(companyId, { auto: false })
     } catch (e) {
       setError(e?.message || 'Agente riconciliazione non riuscito')
     } finally {
@@ -2241,8 +2241,8 @@ export function BancaRiconciliazionePage() {
   }
 
   useEffect(() => {
-    // Allinea subito fatture ↔ movimenti dei conti collegati alla società
-    reload(companyId, { auto: true })
+    // Legge lo stato già salvato. Il ricalcolo completo resta sul pulsante.
+    reload(companyId, { auto: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
@@ -2260,7 +2260,7 @@ export function BancaRiconciliazionePage() {
       const status = row.status === 'difference' ? 'difference' : 'matched'
       await postBancaRiconcilia(movId, { invoice_id: invId, status })
       setSuccess('Abbinamento salvato')
-      await reload(companyId, { auto: true })
+      await reload(companyId, { auto: false })
     } catch (e) {
       setError(e?.message || 'Errore salvataggio')
     } finally {
@@ -2363,7 +2363,7 @@ export function BancaRiconciliazionePage() {
               className="btn btn-secondary btn-sm"
               onClick={() => {
                 setSuccess('')
-                reload(companyId, { auto: true })
+                reload(companyId, { auto: false })
               }}
               disabled={loading || agentBusy || !companyId}
             >
