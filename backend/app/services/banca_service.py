@@ -994,14 +994,38 @@ def _as_date(value: Any) -> Optional[date]:
   return None
 
 
-def _dates_compatible(inv: Any, mov: Any, *, max_days: int = 120) -> bool:
-  """La data fa fede: bonifico non prima della fattura (tolleranza 3 gg) e entro max_days."""
+def _dates_compatible(inv: Any, mov: Any, *, max_days: int = 365) -> bool:
+  """Bonifico non prima della fattura (tolleranza 3 gg) e entro max_days (pagamenti ritardati)."""
   inv_d = _as_date(getattr(inv, "invoice_date", None))
   mov_d = _as_date(getattr(mov, "movement_date", None))
   if not inv_d or not mov_d:
     return False
   delta = (mov_d - inv_d).days
   return -3 <= delta <= max_days
+
+
+def _date_match_points(inv: Any, mov: Any) -> int:
+  """Punti data: fino a 180 gg pieni; intorno alla scadenza; metà fino a 365 gg."""
+  inv_d = _as_date(getattr(inv, "invoice_date", None))
+  due_d = _as_date(getattr(inv, "due_date", None))
+  mov_d = _as_date(getattr(mov, "movement_date", None))
+  if not inv_d or not mov_d:
+    return 0
+  delta_inv = (mov_d - inv_d).days
+  if delta_inv < -3:
+    return 0
+  if due_d:
+    delta_due = (mov_d - due_d).days
+    # Tipico: pagata vicino alla scadenza o nelle settimane successive
+    if -21 <= delta_due <= 90:
+      return _SCORE_DATE
+    if -45 <= delta_due <= 180:
+      return _SCORE_DATE
+  if delta_inv <= 180:
+    return _SCORE_DATE
+  if delta_inv <= 365:
+    return 5
+  return 0
 
 
 _BENE_LABEL_RE = re.compile(
@@ -1237,6 +1261,8 @@ def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
 
   bande: auto (≥80), probable (70–79), review (<70).
   L'importo banca viene confrontato con residuo, totale e importo pagato.
+  I bonifici ritardati (fino a ~1 anno) restano riconoscibili se importo+fornitore
+  o importo+n. documento sono solidi.
   """
   breakdown = {"amount": 0, "party": 0, "number": 0, "date": 0}
   if getattr(mov, "movement_type", None) and str(mov.movement_type).lower() != "uscita":
@@ -1299,18 +1325,25 @@ def score_movement_invoice(inv: Any, mov: Any, blob: str) -> Dict[str, Any]:
     else:
       breakdown["number"] = _SCORE_NUMBER
 
-  if _dates_compatible(inv, mov, max_days=90):
-    breakdown["date"] = _SCORE_DATE
-  else:
-    # finestra più larga: metà punti
-    inv_d = _as_date(getattr(inv, "invoice_date", None))
-    mov_d = _as_date(getattr(mov, "movement_date", None))
-    if inv_d and mov_d:
-      delta = (mov_d - inv_d).days
-      if -7 <= delta <= 180:
-        breakdown["date"] = 5
+  breakdown["date"] = _date_match_points(inv, mov)
 
   score = int(sum(breakdown.values()))
+  amount_exact = breakdown["amount"] >= _SCORE_AMOUNT
+  party_ok = breakdown["party"] >= _SCORE_PARTY
+  number_ok = breakdown["number"] >= _SCORE_NUMBER
+  date_ok = _dates_compatible(inv, mov, max_days=365)
+
+  # Regole auto per bonifici tipici / ritardati (senza file pagamenti)
+  if not partial and date_ok and amount_exact and number_ok and len(norm) >= 4:
+    # Importo esatto + n. fattura in causale → prova forte
+    score = max(score, _SCORE_AUTO)
+  elif not partial and date_ok and amount_exact and party_ok:
+    # Importo esatto + beneficiario/fornitore entro 1 anno dalla fattura
+    score = max(score, _SCORE_AUTO)
+  elif not partial and amount_exact and number_ok and party_ok and len(norm) >= 4:
+    # Tre segnali solidi anche se la data è debole
+    score = max(score, _SCORE_AUTO)
+
   if score >= _SCORE_AUTO:
     band = "auto"
   elif score >= _SCORE_PROBABLE:
@@ -1455,42 +1488,81 @@ def reconciliation_preview(
 
   paid_by_bank: List[Dict[str, Any]] = []
   da_pagare: List[Dict[str, Any]] = []
+  used_mov_ids: set[int] = set()
+
+  # Prima passata: raccogli candidati auto e assegna 1 movimento → 1 fattura
+  auto_pairs: List[Dict[str, Any]] = []
+  for inv in invoices:
+    inv_id = int(inv.id)
+    already = next(
+      (m for m in mov_meta if m["mov"].matched_invoice_id == inv_id),
+      None,
+    )
+    if already:
+      sc = score_movement_invoice(inv, already["mov"], already["blob"])
+      if sc["band"] == "auto" or already["mov"].matched_invoice_id == inv_id:
+        auto_pairs.append(
+          {
+            "inv": inv,
+            "found": already,
+            "sc": sc,
+            "rank": (
+              10_000,
+              int(sc.get("score") or 0),
+              1 if _invoice_number_in_text(str(inv.invoice_number or ""), already["blob"]) else 0,
+            ),
+            "prelinked": True,
+          }
+        )
+        continue
+    best_sc = None
+    best_m = None
+    for m in mov_meta:
+      if m["mov"].movement_type != "uscita":
+        continue
+      linked = m["mov"].matched_invoice_id
+      if linked and int(linked) != inv_id:
+        continue
+      sc = score_movement_invoice(inv, m["mov"], m["blob"])
+      if sc["band"] != "auto":
+        continue
+      if best_sc is None or sc["score"] > best_sc["score"]:
+        best_sc = sc
+        best_m = m
+    if best_m is not None and best_sc is not None:
+      auto_pairs.append(
+        {
+          "inv": inv,
+          "found": best_m,
+          "sc": best_sc,
+          "rank": (
+            int(best_sc.get("score") or 0),
+            1 if _invoice_number_in_text(str(inv.invoice_number or ""), best_m["blob"]) else 0,
+            -int(best_m["mov"].id or 0),
+          ),
+          "prelinked": False,
+        }
+      )
+
+  auto_pairs.sort(key=lambda p: p["rank"], reverse=True)
+  inv_to_pair: Dict[int, Dict[str, Any]] = {}
+  for pair in auto_pairs:
+    inv_id = int(pair["inv"].id)
+    mov_id = int(pair["found"]["mov"].id)
+    if inv_id in inv_to_pair or (mov_id in used_mov_ids and not pair["prelinked"]):
+      continue
+    if mov_id in used_mov_ids and pair["prelinked"]:
+      # prelinked vince sul movimento già usato
+      pass
+    used_mov_ids.add(mov_id)
+    inv_to_pair[inv_id] = pair
 
   for inv in invoices:
     inv_id = int(inv.id)
     num = str(inv.invoice_number or "").strip()
-
-    # Già riconciliata / migliore score auto nei movimenti
-    already = next(
-      (
-        m
-        for m in mov_meta
-        if m["mov"].matched_invoice_id == inv_id
-      ),
-      None,
-    )
-    found = None
-    found_score: Optional[Dict[str, Any]] = None
-    if already:
-      sc = score_movement_invoice(inv, already["mov"], already["blob"])
-      if sc["band"] == "auto" or already["mov"].matched_invoice_id == inv_id:
-        found = already
-        found_score = sc
-    if not found:
-      best_sc = None
-      best_m = None
-      for m in mov_meta:
-        if m["mov"].movement_type != "uscita":
-          continue
-        sc = score_movement_invoice(inv, m["mov"], m["blob"])
-        if sc["band"] != "auto":
-          continue
-        if best_sc is None or sc["score"] > best_sc["score"]:
-          best_sc = sc
-          best_m = m
-      if best_m is not None:
-        found = best_m
-        found_score = best_sc
+    pair = inv_to_pair.get(inv_id)
+    found = pair["found"] if pair else None
+    found_score = pair["sc"] if pair else None
 
     cash_hit = None
     if not found and cash_file_rows:
@@ -1548,7 +1620,9 @@ def reconciliation_preview(
   unmatched = [
     (m["mov"], m["acc"], m["blob"], m["out"])
     for m in mov_meta
-    if m["mov"].reconciliation_status == "unmatched" and m["mov"].movement_type == "uscita"
+    if m["mov"].reconciliation_status == "unmatched"
+    and m["mov"].movement_type == "uscita"
+    and int(m["mov"].id) not in used_mov_ids
   ][:limit]
 
   suggestions = []
@@ -1664,10 +1738,11 @@ def sync_payment_status_from_bank(
 ) -> Dict[str, Any]:
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
-  - bonifici sui conti: n. documento O importo, con data compatibile
-  - file Pagamenti: solo CONTANTI/CARTA (senza bonifico)
+  - bonifici sui conti (score auto: importo + fornitore e/o n. documento, anche ritardati)
+  - file Pagamenti: solo CONTANTI/CARTA/assegno (senza bonifico)
 
-  Se la fattura non compare nei movimenti (n. o importo) e non è contanti → da pagare.
+  Un movimento banca paga al massimo una fattura (assegnazione greedy sul miglior score).
+  Quando arriva il bonifico a distanza di giorni/settimane, la fattura passa a pagata.
   """
   from decimal import Decimal
 
@@ -1703,23 +1778,6 @@ def sync_payment_status_from_bank(
   except Exception:
     cash_file_rows = []
 
-  def _bank_hit(inv_dto: Any) -> Optional[Any]:
-    inv_id = int(getattr(inv_dto, "id"))
-    already = next(
-      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
-      None,
-    )
-    if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
-      return already["mov"]
-    for meta in mov_meta:
-      mov = meta["mov"]
-      if mov.movement_type != "uscita":
-        continue
-      if not _bank_movement_pays_invoice(inv_dto, mov, meta["blob"]):
-        continue
-      return mov
-    return None
-
   def _cash_file_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     if not num or not cash_file_rows:
@@ -1737,6 +1795,112 @@ def sync_payment_status_from_bank(
       invoice_amount_paid=float(_dec(getattr(inv_dto, "amount_paid", 0)) or 0),
     )
 
+  def _pair_rank(inv_dto: Any, mov: Any, blob: str, sc: Dict[str, Any]) -> tuple:
+    """Ordine: score, n. in causale, vicinanza data, fattura più vecchia."""
+    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    has_num = 1 if _invoice_number_in_text(num, blob) else 0
+    inv_d = _as_date(getattr(inv_dto, "invoice_date", None))
+    due_d = _as_date(getattr(inv_dto, "due_date", None))
+    mov_d = _as_date(getattr(mov, "movement_date", None))
+    anchor = due_d or inv_d
+    date_gap = abs((mov_d - anchor).days) if mov_d and anchor else 9999
+    inv_ord = inv_d.toordinal() if inv_d else 0
+    return (
+      int(sc.get("score") or 0),
+      has_num,
+      -date_gap,
+      -inv_ord,
+      -int(getattr(mov, "id") or 0),
+    )
+
+  def _bank_hit_for_verify(inv_dto: Any, *, reserved_mov_ids: Optional[set] = None) -> Optional[Any]:
+    """Usato per verificare fatture già pagate (riapertura)."""
+    reserved = reserved_mov_ids or set()
+    inv_id = int(getattr(inv_dto, "id"))
+    already = next(
+      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
+      None,
+    )
+    if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
+      return already["mov"]
+    best_mov = None
+    best_rank: Optional[tuple] = None
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.movement_type != "uscita":
+        continue
+      mid = int(mov.id)
+      if mid in reserved:
+        continue
+      # Già abbinato ad altra fattura → non riusarlo in verifica
+      linked = mov.matched_invoice_id
+      if linked and int(linked) != inv_id:
+        continue
+      sc = score_movement_invoice(inv_dto, mov, meta["blob"])
+      if sc["band"] != "auto":
+        continue
+      rank = _pair_rank(inv_dto, mov, meta["blob"], sc)
+      if best_rank is None or rank > best_rank:
+        best_rank = rank
+        best_mov = mov
+    return best_mov
+
+  # --- Assegnazione esclusiva bonifico → fattura da pagare ---
+  candidates: List[Dict[str, Any]] = []
+  for inv_dto in unpaid:
+    inv_id = int(getattr(inv_dto, "id"))
+    # Se già collegata a un movimento valido, ha priorità assoluta
+    already = next(
+      (meta for meta in mov_meta if meta["mov"].matched_invoice_id == inv_id),
+      None,
+    )
+    if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
+      sc = score_movement_invoice(inv_dto, already["mov"], already["blob"])
+      candidates.append(
+        {
+          "inv": inv_dto,
+          "mov": already["mov"],
+          "blob": already["blob"],
+          "sc": sc,
+          "rank": (10_000, *_pair_rank(inv_dto, already["mov"], already["blob"], sc)),
+          "prelinked": True,
+        }
+      )
+      continue
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if mov.movement_type != "uscita":
+        continue
+      linked = mov.matched_invoice_id
+      if linked and int(linked) != inv_id:
+        continue
+      sc = score_movement_invoice(inv_dto, mov, meta["blob"])
+      if sc["band"] != "auto":
+        continue
+      candidates.append(
+        {
+          "inv": inv_dto,
+          "mov": mov,
+          "blob": meta["blob"],
+          "sc": sc,
+          "rank": _pair_rank(inv_dto, mov, meta["blob"], sc),
+          "prelinked": False,
+        }
+      )
+
+  candidates.sort(key=lambda c: c["rank"], reverse=True)
+  assigned_inv: set[int] = set()
+  assigned_mov: set[int] = set()
+  bank_assignments: Dict[int, Dict[str, Any]] = {}
+  for cand in candidates:
+    inv_id = int(getattr(cand["inv"], "id"))
+    mov_id = int(cand["mov"].id)
+    if inv_id in assigned_inv or mov_id in assigned_mov:
+      continue
+    assigned_inv.add(inv_id)
+    assigned_mov.add(mov_id)
+    bank_assignments[inv_id] = cand
+
   marked: List[Dict[str, Any]] = []
   reopened: List[Dict[str, Any]] = []
   marked_from_file = 0
@@ -1745,7 +1909,8 @@ def sync_payment_status_from_bank(
   for inv_dto in unpaid:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    found = _bank_hit(inv_dto)
+    cand = bank_assignments.get(inv_id)
+    found = cand["mov"] if cand else None
     cash_hit = None if found else _cash_file_hit(inv_dto)
     if not found and not cash_hit:
       continue
@@ -1759,9 +1924,9 @@ def sync_payment_status_from_bank(
     movement_id = None
     match_score = None
     match_band = None
-    if found:
-      blob = next((m["blob"] for m in mov_meta if m["mov"].id == found.id), "")
-      sc = score_movement_invoice(inv_dto, found, blob)
+    if found and cand:
+      blob = cand["blob"]
+      sc = cand["sc"]
       match_score = sc.get("score")
       match_band = sc.get("band")
       has_num = _invoice_number_in_text(num, blob)
@@ -1771,10 +1936,10 @@ def sync_payment_status_from_bank(
       elif sc.get("breakdown", {}).get("amount", 0) >= 25:
         reason = "importo_in_movimento"
       movement_id = int(found.id)
-      if (
-        found.reconciliation_status == "unmatched"
-        and found.movement_type == "uscita"
-        and not found.matched_invoice_id
+      if found.movement_type == "uscita" and (
+        found.matched_invoice_id is None
+        or int(found.matched_invoice_id) == inv_id
+        or found.reconciliation_status == "unmatched"
       ):
         found.reconciliation_status = "matched"
         found.matched_invoice_id = inv_id
@@ -1793,9 +1958,7 @@ def sync_payment_status_from_bank(
       item["match_band"] = match_band
     if movement_id is not None:
       item["movement_id"] = movement_id
-      bonifico = _extract_bonifico_ref(
-        next((m["blob"] for m in mov_meta if m["mov"].id == found.id), "")
-      )
+      bonifico = _extract_bonifico_ref(cand["blob"] if cand else "")
       if bonifico:
         item["bonifico_ref"] = bonifico
     if cash_hit:
@@ -1803,11 +1966,11 @@ def sync_payment_status_from_bank(
       item["pagamenti_payment_date"] = cash_hit.get("payment_date")
     marked.append(item)
 
-  # Riapri «pagate» senza prova banca (n./importo+data) né contanti da file
+  # Riapri «pagate» senza prova banca né contanti/POS da file
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    found = _bank_hit(inv_dto)
+    found = _bank_hit_for_verify(inv_dto, reserved_mov_ids=assigned_mov)
     cash_hit = _cash_file_hit(inv_dto)
     if found or cash_hit:
       continue

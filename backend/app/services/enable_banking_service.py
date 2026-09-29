@@ -917,7 +917,7 @@ def sync_enable_banking_account(
   period_note = f" (periodo {' → '.join(period_bits)})" if period_bits else ""
   msg = f"Sync Enable Banking: {imported} nuovi movimenti{period_note}."
   if marked:
-    msg += f" Segnate pagate {marked} fatture (n. documento in bonifico)."
+    msg += f" Segnate pagate {marked} fatture (bonifico riconosciuto)."
 
   return {
     "ok": True,
