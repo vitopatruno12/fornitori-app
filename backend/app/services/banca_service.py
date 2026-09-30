@@ -1858,6 +1858,156 @@ def allocate_number_ranges(
   return out
 
 
+_PAYMENT_NOTE_RE = re.compile(
+  r"\n?\[pagamenti banca\].*?\[/pagamenti banca\]\s*",
+  re.DOTALL,
+)
+
+
+def _eur_it(amount: Decimal) -> str:
+  return f"{_dec(amount):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _set_payment_note(row: Any, body: Optional[str]) -> None:
+  """Sostituisce solo il blocco dei pagamenti banca, senza cancellare le altre note."""
+  note = _PAYMENT_NOTE_RE.sub("\n", str(getattr(row, "note", None) or "")).strip()
+  if body:
+    block = f"[pagamenti banca]\n{body}\n[/pagamenti banca]"
+    row.note = f"{note}\n{block}".strip() if note else block
+  else:
+    row.note = note or None
+
+
+def _movement_pay_line(meta: Dict[str, Any]) -> str:
+  mov = meta["mov"]
+  mov_d = _as_date(getattr(mov, "movement_date", None))
+  when = mov_d.strftime("%d/%m/%Y") if mov_d else "data n.d."
+  return f"{when} € {_eur_it(abs(_dec(getattr(mov, 'amount', 0))))}"
+
+
+def allocate_acconti(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+) -> Dict[int, Dict[str, Any]]:
+  """Bonifico che cita la fattura principale e ne paga solo una parte.
+
+  Più acconti sulla stessa fattura si sommano. La fattura diventa pagata
+  solo quando la somma raggiunge il totale.
+  """
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = set(skip_movement_ids or ())
+  grouped: Dict[int, Dict[str, Any]] = {}
+
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    mid = int(getattr(mov, "id") or 0)
+    if mid and mid in skip_mov:
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    blob = meta.get("blob") or ""
+    beneficiary = _movement_beneficiary(mov, blob)
+    pool = invoices
+    if beneficiary:
+      aligned = [
+        inv
+        for inv in invoices
+        if _party_names_align(getattr(inv, "supplier_name", None), beneficiary)
+      ]
+      if aligned:
+        pool = aligned
+    chosen: Optional[Any] = None
+    refs = [ref for ref in extract_invoice_refs(blob) if len(_normalize_doc_token(ref)) >= 4]
+    if refs:
+      found: List[Any] = []
+      seen_ids: set[int] = set()
+      for ref in refs:
+        inv = _invoice_for_ref(ref, pool)
+        if inv is None:
+          continue
+        iid = int(getattr(inv, "id"))
+        if iid in seen_ids:
+          continue
+        seen_ids.add(iid)
+        found.append(inv)
+      if len(found) == 1:
+        chosen = found[0]
+    if chosen is None:
+      named = [
+        inv
+        for inv in pool
+        if len(_normalize_doc_token(str(getattr(inv, "invoice_number", None) or ""))) >= 4
+        and _invoice_number_in_text(getattr(inv, "invoice_number", None), blob)
+      ]
+      if len(named) == 1:
+        chosen = named[0]
+    if chosen is None:
+      continue
+    iid = int(getattr(chosen, "id"))
+    if iid in skip_inv:
+      continue
+    linked = getattr(mov, "matched_invoice_id", None)
+    if linked and int(linked) != iid:
+      continue
+    total = abs(_dec(getattr(chosen, "total", 0)))
+    if total <= Decimal("0.009") or amt + Decimal("0.05") >= total:
+      continue
+    bucket = grouped.setdefault(iid, {"inv": chosen, "parts": []})
+    bucket["parts"].append(meta)
+
+  out: Dict[int, Dict[str, Any]] = {}
+  for iid, bucket in grouped.items():
+    parts = bucket["parts"]
+    total = abs(_dec(getattr(bucket["inv"], "total", 0)))
+    paid = sum((abs(_dec(getattr(meta["mov"], "amount", 0))) for meta in parts), Decimal("0.00"))
+    if paid <= Decimal("0.009"):
+      continue
+    out[iid] = {
+      "inv": bucket["inv"],
+      "parts": parts,
+      "paid": paid,
+      "total": total,
+      "residuo": max(Decimal("0.00"), total - paid),
+      "settled": paid + Decimal("0.05") >= total,
+    }
+  return out
+
+
+def _apply_acconto_state(row: Any, hit: Dict[str, Any]) -> bool:
+  """Aggiorna importo, stato e nota. Ritorna True se la fattura è saldata."""
+  total = abs(_dec(getattr(row, "total", 0)))
+  paid = _dec(hit.get("paid"))
+  settled = bool(hit.get("settled")) or paid + Decimal("0.05") >= total
+  number = str(getattr(row, "invoice_number", None) or "").strip()
+  lines = [_movement_pay_line(meta) for meta in hit.get("parts") or []]
+  detail = "; ".join(lines)
+  if settled:
+    row.amount_paid = total
+    row.is_paid = True
+    body = f"Fattura {number} saldata. Pagamenti: {detail}."
+  else:
+    residuo = max(Decimal("0.00"), total - paid)
+    row.amount_paid = min(paid, total)
+    row.is_paid = False
+    body = (
+      f"Fattura {number} pagata in parte. Pagamenti: {detail}. "
+      f"Residuo da saldare € {_eur_it(residuo)}."
+    )
+  _set_payment_note(row, body)
+  for meta in hit.get("parts") or []:
+    mov = meta["mov"]
+    mov.reconciliation_status = "matched"
+    mov.matched_invoice_id = int(getattr(row, "id"))
+    mov.difference_amount = None if settled else (total - paid)
+  return settled
+
+
 def _invoice_row_out(
   inv: Any,
   *,
@@ -2100,6 +2250,14 @@ def reconciliation_snapshot(
           reason="matched",
           match_score=100 if linked else None,
           match_band="auto" if linked else None,
+        )
+      )
+    elif status == "partial":
+      da_pagare.append(
+        _invoice_row_out(
+          inv,
+          match_movement=_enrich_movement_out(linked["out"], linked["mov"], linked["blob"]) if linked else None,
+          reason="acconto",
         )
       )
     else:
@@ -2607,6 +2765,16 @@ def sync_payment_status_from_bank(
         best_mov = mov
     return best_mov
 
+  # Acconti: il bonifico cita la fattura e ne paga solo una parte.
+  # Vanno riservati prima del match 1:1, altrimenti un importo uguale a un'altra fattura li ruba.
+  acconti = allocate_acconti(match_invoices, mov_meta)
+  acconto_mov_ids = {
+    int(part["mov"].id)
+    for hit in acconti.values()
+    for part in hit["parts"]
+    if getattr(part["mov"], "id", None) is not None
+  }
+
   # --- Assegnazione esclusiva bonifico → fattura da pagare ---
   candidates: List[Dict[str, Any]] = []
   for inv_dto in unpaid:
@@ -2628,6 +2796,8 @@ def sync_payment_status_from_bank(
       continue
     for meta in _uscita_near_targets(mov_index, _invoice_amount_targets(inv_dto)):
       mov = meta["mov"]
+      if int(mov.id) in acconto_mov_ids:
+        continue
       linked = mov.matched_invoice_id
       if linked and int(linked) != inv_id:
         continue
@@ -2662,19 +2832,19 @@ def sync_payment_status_from_bank(
     match_invoices,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()),
-    skip_movement_ids=assigned_mov,
+    skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   cited_by_invoice = allocate_cited_invoices(
     match_invoices,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()),
-    skip_movement_ids=assigned_mov,
+    skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   for iid, hit in allocate_number_ranges(
     match_invoices,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
-    skip_movement_ids=assigned_mov,
+    skip_movement_ids=assigned_mov | acconto_mov_ids,
   ).items():
     cited_by_invoice[iid] = hit
 
@@ -2691,11 +2861,25 @@ def sync_payment_status_from_bank(
     saldo_hit = None if found else saldo_by_invoice.get(inv_id)
     cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
     cash_hit = None if (found or saldo_hit or cited_hit) else _cash_file_hit(inv_dto)
-    if not found and not saldo_hit and not cited_hit and not cash_hit:
+    acconto_hit = None if (found or saldo_hit or cited_hit or cash_hit) else acconti.get(inv_id)
+    if not found and not saldo_hit and not cited_hit and not cash_hit and not acconto_hit:
       continue
 
     row = db.query(Invoice).filter(Invoice.id == inv_id).first()
     if not row:
+      continue
+    if acconto_hit and not found and not saldo_hit and not cited_hit and not cash_hit:
+      settled = _apply_acconto_state(row, acconto_hit)
+      changed = True
+      marked.append(
+        {
+          "invoice_id": inv_id,
+          "invoice_number": num,
+          "reason": "matched" if settled else "acconto",
+          "amount_paid": float(_dec(row.amount_paid)),
+          "residuo": float(_dec(row.total) - _dec(row.amount_paid)),
+        }
+      )
       continue
     row.amount_paid = _dec(row.total)
     row.is_paid = True
@@ -2786,11 +2970,43 @@ def sync_payment_status_from_bank(
       }
     )
 
+  handled_ids = {int(item["invoice_id"]) for item in marked}
+  for inv_id, hit in acconti.items():
+    if inv_id in handled_ids or inv_id in bank_assignments or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+      continue
+    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    if not row or row.is_paid:
+      continue
+    settled = _apply_acconto_state(row, hit)
+    changed = True
+    handled_ids.add(inv_id)
+    marked.append(
+      {
+        "invoice_id": inv_id,
+        "invoice_number": str(getattr(row, "invoice_number", "") or ""),
+        "reason": "matched" if settled else "acconto",
+        "amount_paid": float(_dec(row.amount_paid)),
+        "residuo": float(_dec(row.total) - _dec(row.amount_paid)),
+      }
+    )
+
   # Riapri «pagate» senza prova banca né contanti/POS da file
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+      continue
+    part_sum = sum(
+      (
+        abs(_dec(meta["mov"].amount))
+        for meta in mov_meta
+        if getattr(meta["mov"], "matched_invoice_id", None)
+        and int(meta["mov"].matched_invoice_id) == inv_id
+      ),
+      Decimal("0.00"),
+    )
+    total_inv = abs(_dec(getattr(inv_dto, "total", 0)))
+    if total_inv > Decimal("0.009") and part_sum + Decimal("0.05") >= total_inv:
       continue
     found = _bank_hit_for_verify(inv_dto, reserved_mov_ids=assigned_mov)
     cash_hit = _cash_file_hit(inv_dto)
@@ -2819,11 +3035,13 @@ def sync_payment_status_from_bank(
   if changed:
     db.commit()
 
-  da_pagare_count = max(0, len(unpaid) - len(marked) + len(reopened))
+  fully_marked = [item for item in marked if item.get("reason") != "acconto"]
+  da_pagare_count = max(0, len(unpaid) - len(fully_marked) + len(reopened))
   return {
     "ok": True,
     "company": company_id or "",
-    "marked_paid": len(marked),
+    "marked_paid": len(fully_marked),
+    "marked_partial": len(marked) - len(fully_marked),
     "marked_from_pagamenti": marked_from_file,
     "reopened_unpaid": len(reopened),
     "da_pagare": da_pagare_count,

@@ -75,7 +75,7 @@ function detailCellValue(row, col) {
   if (col.id === 'stato') {
     if (row.invoiceKind === 'pagamento') return 'Pagato'
     if (row.paymentStatus === 'paid') return 'Pagata'
-    if (row.paymentStatus === 'partial') return 'Parziale'
+    if (row.paymentStatus === 'partial') return 'Pagata in parte'
     if (row.paymentStatus === 'unpaid') return 'Da pagare'
     if (row.invoiceKind === 'emessa') return 'Emessa'
     return '—'

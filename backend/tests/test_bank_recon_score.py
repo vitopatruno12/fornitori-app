@@ -263,6 +263,60 @@ def test_saldo_agosto_unisce_due_societa_se_la_somma_quadra():
   assert set(allocated) == {1, 2, 3, 4}
 
 
+def test_acconto_cita_la_fattura_e_lascia_il_residuo():
+  from app.services.banca_service import _apply_acconto_state, allocate_acconti
+
+  invoice = _inv(
+    id=11,
+    invoice_number="269/2026",
+    total=Decimal("1000.00"),
+    supplier_name="CARCAGNI ANDREA",
+  )
+  first = _mov(
+    id=1,
+    amount=Decimal("400.00"),
+    movement_date=date(2026, 9, 17),
+    counterparty="ANDREA CARCAGNI",
+    description="ACCONTO FATTURA 269/2026",
+  )
+  second = _mov(
+    id=2,
+    amount=Decimal("600.00"),
+    movement_date=date(2026, 10, 2),
+    counterparty="ANDREA CARCAGNI",
+    description="SALDO FATTURA 269/2026",
+  )
+  other = _mov(
+    id=3,
+    amount=Decimal("400.00"),
+    movement_date=date(2026, 9, 18),
+    counterparty="ANDREA CARCAGNI",
+    description="PAGAMENTO FORNITORE",
+  )
+  metas = [
+    {"mov": first, "blob": f"{first.description} {first.counterparty}"},
+    {"mov": second, "blob": f"{second.description} {second.counterparty}"},
+    {"mov": other, "blob": f"{other.description} {other.counterparty}"},
+  ]
+  partial = allocate_acconti([invoice], [metas[0], metas[2]])
+  assert set(partial) == {11}
+  assert partial[11]["settled"] is False
+  assert partial[11]["residuo"] == Decimal("600.00")
+  row = SimpleNamespace(id=11, invoice_number="269/2026", total=Decimal("1000.00"), amount_paid=Decimal("0"), is_paid=False, note="Nota interna")
+  assert _apply_acconto_state(row, partial[11]) is False
+  assert row.is_paid is False
+  assert row.amount_paid == Decimal("400.00")
+  assert "Residuo da saldare" in row.note
+  assert "Nota interna" in row.note
+
+  settled = allocate_acconti([invoice], metas)
+  assert settled[11]["settled"] is True
+  assert _apply_acconto_state(row, settled[11]) is True
+  assert row.is_paid is True
+  assert row.amount_paid == Decimal("1000.00")
+  assert "saldata" in row.note
+
+
 def test_entrata_score_zero():
   inv = _inv()
   mov = _mov(movement_type="entrata")

@@ -508,6 +508,10 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
       return '✔ Pagato (file Pagamenti)'
     }
+    if (row?.match_reason === 'acconto') {
+      const left = Number(row?.residuo) || 0
+      return left > 0.009 ? `Pagata in parte · residuo ${eur(left)}` : 'Pagata in parte'
+    }
     if (row?.match_reason === 'da_pagare') return 'Da pagare'
     return row?.match_reason || '—'
   }

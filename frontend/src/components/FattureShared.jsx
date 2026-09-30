@@ -75,7 +75,7 @@ export function PaymentBadge({ status, ignored }) {
     )
   }
   if (status === 'partial') {
-    return <span style={{ ...base, background: '#fef3c7', color: '#b45309' }}>Parziale</span>
+    return <span style={{ ...base, background: '#fef3c7', color: '#b45309' }}>Pagata in parte</span>
   }
   return (
     <span style={{ ...base, background: 'var(--danger-bg, #fee2e2)', color: 'var(--danger, #dc2626)' }}>

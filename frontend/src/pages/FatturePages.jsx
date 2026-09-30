@@ -135,7 +135,7 @@ const SCADENZIARIO_COLUMNS = [
 function paymentStatusText(status, ignored) {
   if (ignored) return 'Ignorata'
   if (status === 'paid') return 'Pagata'
-  if (status === 'partial') return 'Parziale'
+  if (status === 'partial') return 'Pagata in parte'
   return 'Da pagare'
 }
 
