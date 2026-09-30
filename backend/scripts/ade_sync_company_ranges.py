@@ -93,7 +93,7 @@ def _run_jobs(
     if pid.lower() not in available:
       print(f"  skip {pid}: profilo assente ({label})")
       continue
-    print(f"\n=== {title} · {label} [{pid}] {dfrom} → {dto} ===", flush=True)
+    print(f"\n=== {title} · {label} [{pid}] {dfrom} -> {dto} ===", flush=True)
     os.environ["ADE_ONLY_PROFILE"] = pid
     os.environ["ADE_DATE_FROM"] = dfrom
     os.environ["ADE_DATE_TO"] = dto
@@ -157,11 +157,11 @@ def main() -> int:
 
   if args.list:
     for pid, dfrom, dto, label in jobs:
-      print(f"  {pid:16} {dfrom} → {dto}  ({label})")
+      print(f"  {pid:16} {dfrom} -> {dto}  ({label})")
     return 0
 
   available = _available_profile_ids()
-  print("AdE: richiesta → (attesa) → scarico, per società")
+  print("AdE: richiesta -> (attesa) -> scarico, per societa")
   rc = 0
 
   if args.phase in ("both", "request"):
