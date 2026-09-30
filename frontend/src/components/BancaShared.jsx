@@ -120,9 +120,9 @@ export function BancaSubnav() {
   )
 }
 
-export function AmministrazionePageShell({ title, lead, children, actions = null }) {
+export function AmministrazionePageShell({ title, lead, children, actions = null, className = '' }) {
   return (
-    <div className="fatture-page banca-page">
+    <div className={`fatture-page banca-page${className ? ` ${className}` : ''}`}>
       <header className="fatture-header staff-page-hero">
         <div className="fatture-header-row">
           <div>

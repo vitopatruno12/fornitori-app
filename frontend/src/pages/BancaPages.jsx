@@ -523,62 +523,126 @@ function bankInvoiceStatusCellValue(row, col) {
   return ''
 }
 
+const AMM_HUB_MODULES = [
+  {
+    to: '/banca',
+    tone: 'banca',
+    kicker: 'Liquidità',
+    title: 'Banca',
+    value: 'Conti e movimenti',
+    desc: 'Saldi, sync Enable Banking e riconciliazione automatica',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"
+        />
+      </svg>
+    ),
+  },
+  {
+    to: '/fatture',
+    tone: 'fatture',
+    kicker: 'Fornitori',
+    title: 'Fatture',
+    value: 'SDI e scadenze',
+    desc: 'Ricevute, registrate e sync Agenzia Entrate',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm7 1.5V9h4.5L14 4.5ZM8.5 12h7v1.5h-7V12Zm0 3.5h7V17h-7v-1.5Zm0 3.5h5V20.5h-5V19Z"
+        />
+      </svg>
+    ),
+  },
+  {
+    to: '/prima-nota',
+    tone: 'prima',
+    kicker: 'Cassa',
+    title: 'Prima Nota',
+    value: 'Cassa e banca',
+    desc: 'Movimenti manuali, cartaceo e collegamenti',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M4 5h16a1 1 0 0 1 1 1v3H3V6a1 1 0 0 1 1-1Zm-1 6h18v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8Zm3 2.5h4V16H6v-2.5Z"
+        />
+      </svg>
+    ),
+  },
+  {
+    to: '/amministrazione/mastrini',
+    tone: 'mastri',
+    kicker: 'Contabilità',
+    title: 'Mastrini',
+    value: 'Piano contabile',
+    desc: 'Dare/Avere, dettaglio conto e stampe',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M5 4h14a1 1 0 0 1 1 1v14l-3-2-3 2-3-2-3 2-3-2V5a1 1 0 0 1 1-1Zm2 3.5v1.5h10V7.5H7Zm0 4v1.5h10V11.5H7Zm0 4v1.5h6V15.5H7Z"
+        />
+      </svg>
+    ),
+  },
+]
+
+const AMM_HUB_QUICK = [
+  { to: '/banca/conti', label: 'Conti correnti' },
+  { to: '/banca/riconciliazione', label: 'Riconciliazione' },
+  { to: '/fatture/scadenziario', label: 'Scadenziario fatture' },
+  { to: '/pagamenti', label: 'Pagamenti' },
+  { to: '/amministrazione/mastrini', label: 'Mastrini contabili' },
+]
+
 export function AmministrazioneDashboardPage() {
   return (
     <AmministrazionePageShell
+      className="amm-hub-page"
       title="Dashboard"
       lead="Centro operativo amministrazione: banca, fatture fornitori e prima nota."
     >
-      <div className="ui-kpi-row">
-        <Link className="ui-kpi-card" to="/banca" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="ui-kpi-card-label">Banca</div>
-          <div className="ui-kpi-card-value" style={{ fontSize: '1.1rem' }}>
-            Conti e movimenti
-          </div>
-          <div className="dashboard-kpi-sub">Saldi, sync e riconciliazione</div>
-        </Link>
-        <Link className="ui-kpi-card" to="/fatture" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="ui-kpi-card-label">Fatture Fornitori</div>
-          <div className="ui-kpi-card-value" style={{ fontSize: '1.1rem' }}>
-            SDI e scadenze
-          </div>
-          <div className="dashboard-kpi-sub">Ricevute, registrate, sync AdE</div>
-        </Link>
-        <Link className="ui-kpi-card" to="/prima-nota" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="ui-kpi-card-label">Prima Nota</div>
-          <div className="ui-kpi-card-value" style={{ fontSize: '1.1rem' }}>
-            Cassa e banca
-          </div>
-          <div className="dashboard-kpi-sub">Movimenti manuali e collegamenti</div>
-        </Link>
-        <Link className="ui-kpi-card" to="/amministrazione/mastrini" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="ui-kpi-card-label">Mastrini</div>
-          <div className="ui-kpi-card-value" style={{ fontSize: '1.1rem' }}>
-            Piano contabile
-          </div>
-          <div className="dashboard-kpi-sub">Dare/Avere, dettaglio conto e stampe</div>
-        </Link>
-      </div>
-      <section className="card fatture-panel">
-        <h2 className="fatture-panel-title">Accesso rapido</h2>
-        <div className="analisi-panel-actions">
-          <Link className="btn btn-primary btn-sm" to="/banca/conti">
-            Conti correnti
-          </Link>
-          <Link className="btn btn-secondary btn-sm" to="/banca/riconciliazione">
-            Riconciliazione
-          </Link>
-          <Link className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
-            Scadenziario fatture
-          </Link>
-          <Link className="btn btn-secondary btn-sm" to="/pagamenti">
-            Pagamenti
-          </Link>
-          <Link className="btn btn-secondary btn-sm" to="/amministrazione/mastrini">
-            Mastrini contabili
-          </Link>
+      <div className="amm-hub">
+        <div className="amm-hub-modules" role="list">
+          {AMM_HUB_MODULES.map((mod, index) => (
+            <Link
+              key={mod.to}
+              to={mod.to}
+              className={`amm-hub-module amm-hub-module--${mod.tone}`}
+              role="listitem"
+              style={{ '--amm-hub-i': index }}
+            >
+              <span className="amm-hub-module-icon">{mod.icon}</span>
+              <span className="amm-hub-module-copy">
+                <span className="amm-hub-module-kicker">{mod.kicker}</span>
+                <span className="amm-hub-module-title">{mod.title}</span>
+                <span className="amm-hub-module-value">{mod.value}</span>
+                <span className="amm-hub-module-desc">{mod.desc}</span>
+              </span>
+              <span className="amm-hub-module-go" aria-hidden="true">
+                →
+              </span>
+            </Link>
+          ))}
         </div>
-      </section>
+
+        <section className="amm-hub-quick" aria-label="Accesso rapido">
+          <div className="amm-hub-quick-head">
+            <h2 className="amm-hub-quick-title">Accesso rapido</h2>
+            <p className="amm-hub-quick-lead">Le operazioni più usate, a un click.</p>
+          </div>
+          <div className="amm-hub-quick-links">
+            {AMM_HUB_QUICK.map((item) => (
+              <Link key={item.to} className="amm-hub-quick-link" to={item.to}>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </section>
+      </div>
     </AmministrazionePageShell>
   )
 }
