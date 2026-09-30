@@ -1,6 +1,6 @@
 import { apiFetch, apiUrl, API_BASE_URL } from './api'
 
-export async function fetchInvoices(params = {}) {
+export async function fetchInvoices(params = {}, options = {}) {
   const searchParams = new URLSearchParams()
   if (params.supplier_id) searchParams.append('supplier_id', String(params.supplier_id))
   if (params.due_filter) searchParams.append('due_filter', params.due_filter)
@@ -10,7 +10,7 @@ export async function fetchInvoices(params = {}) {
   if (params.sync_from_bank) searchParams.append('sync_from_bank', 'true')
   const query = searchParams.toString()
   const path = query ? `/invoices?${query}` : '/invoices'
-  return apiFetch(path)
+  return apiFetch(path, options)
 }
 
 export async function fetchInvoice(id) {
@@ -119,12 +119,12 @@ export async function importInvoiceXml(file) {
 }
 
 /** Fatture emesse caricate manualmente (XML / PDF / immagine). */
-export async function fetchIssuedInvoices({ company, limit = 200 } = {}) {
+export async function fetchIssuedInvoices({ company, limit = 200 } = {}, options = {}) {
   const searchParams = new URLSearchParams()
   if (company) searchParams.append('company', String(company))
   if (limit) searchParams.append('limit', String(limit))
   const query = searchParams.toString()
-  return apiFetch(query ? `/invoices/emesse?${query}` : '/invoices/emesse')
+  return apiFetch(query ? `/invoices/emesse?${query}` : '/invoices/emesse', options)
 }
 
 export async function uploadIssuedInvoice({

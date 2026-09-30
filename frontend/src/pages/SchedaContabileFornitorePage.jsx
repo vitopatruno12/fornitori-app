@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { AmministrazionePageShell } from '../components/BancaShared.jsx'
@@ -97,6 +97,7 @@ export function SchedaContabileFornitorePage({
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [selectedKey, setSelectedKey] = useState('')
+  const loadAbortRef = useRef(null)
 
   async function reload() {
     if (!companyId) {
@@ -104,6 +105,9 @@ export function SchedaContabileFornitorePage({
       setLoading(false)
       return
     }
+    loadAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadAbortRef.current = controller
     setLoading(true)
     setError('')
     try {
@@ -111,19 +115,28 @@ export function SchedaContabileFornitorePage({
         company: companyId,
         dateFrom,
         dateTo,
+        signal: controller.signal,
       })
+      if (controller.signal.aborted) return
       setData(res)
       if (res.warnings?.length) setError(res.warnings.join(' '))
     } catch (e) {
+      if (controller.signal.aborted || e?.name === 'AbortError') return
       setError(e?.message || 'Errore caricamento scheda contabile')
       setData(null)
     } finally {
-      setLoading(false)
+      if (loadAbortRef.current === controller) {
+        setLoading(false)
+        loadAbortRef.current = null
+      }
     }
   }
 
   useEffect(() => {
     reload()
+    return () => {
+      loadAbortRef.current?.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 

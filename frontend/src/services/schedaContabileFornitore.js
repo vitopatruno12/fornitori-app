@@ -64,7 +64,13 @@ function formatSaldoPasscom(value) {
  * Non lanciare sync_from_bank qui: sulla scheda serve solo lettura e la sync
  * completa può appendersi per minuti (Enable Banking / riconciliazione).
  */
-export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo } = {}) {
+export async function loadSchedaContabileFornitori({
+  company,
+  dateFrom,
+  dateTo,
+  signal,
+  timeoutMs = 45000,
+} = {}) {
   const companyId = String(company || '').trim()
   if (!companyId) {
     return {
@@ -77,71 +83,97 @@ export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo }
   }
 
   const warnings = []
-  const withTimeout = (promise, ms, label) =>
-    Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error(`${label} troppo lenta (oltre ${Math.round(ms / 1000)}s)`)), ms)
-      }),
+  const localAbort = new AbortController()
+  const onOuterAbort = () => localAbort.abort()
+  if (signal) {
+    if (signal.aborted) localAbort.abort()
+    else signal.addEventListener('abort', onOuterAbort, { once: true })
+  }
+  const timer = window.setTimeout(() => localAbort.abort(), timeoutMs)
+  const fetchOpts = { signal: localAbort.signal }
+
+  const abortMessage = (label) =>
+    localAbort.signal.aborted && signal?.aborted
+      ? `${label} annullata.`
+      : `${label} troppo lenta (oltre ${Math.round(timeoutMs / 1000)}s).`
+
+  try {
+    const [invRes, issuedRes, bankRes] = await Promise.allSettled([
+      fetchInvoices({ company: companyId }, fetchOpts),
+      fetchIssuedInvoices({ company: companyId, limit: 500 }, fetchOpts),
+      fetchBancaMovimenti(
+        {
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        },
+        fetchOpts,
+      ),
     ])
 
-  const [invRes, issuedRes, bankRes] = await Promise.allSettled([
-    withTimeout(fetchInvoices({ company: companyId }), 45000, 'Fatture ricevute'),
-    withTimeout(fetchIssuedInvoices({ company: companyId, limit: 500 }), 45000, 'Fatture emesse'),
-    withTimeout(
-      fetchBancaMovimenti({
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-      }),
-      45000,
-      'Movimenti banca',
-    ),
-  ])
+    const invoices = invRes.status === 'fulfilled'
+      ? Array.isArray(invRes.value?.items)
+        ? invRes.value.items
+        : Array.isArray(invRes.value)
+          ? invRes.value
+          : []
+      : []
+    if (invRes.status === 'rejected') {
+      const msg = String(invRes.reason?.message || '')
+      warnings.push(
+        /abort|cancell/i.test(msg) ? abortMessage('Fatture ricevute') : msg || 'Fatture ricevute/registrate non disponibili.',
+      )
+    }
 
-  const invoices = invRes.status === 'fulfilled'
-    ? Array.isArray(invRes.value?.items)
-      ? invRes.value.items
-      : Array.isArray(invRes.value)
-        ? invRes.value
-        : []
-    : []
-  if (invRes.status === 'rejected') {
-    warnings.push(invRes.reason?.message || 'Fatture ricevute/registrate non disponibili.')
-  }
+    const issued = issuedRes.status === 'fulfilled'
+      ? Array.isArray(issuedRes.value?.items)
+        ? issuedRes.value.items
+        : Array.isArray(issuedRes.value)
+          ? issuedRes.value
+          : []
+      : []
+    if (issuedRes.status === 'rejected') {
+      const msg = String(issuedRes.reason?.message || '')
+      warnings.push(
+        /abort|cancell/i.test(msg) ? abortMessage('Fatture emesse') : msg || 'Fatture emesse non disponibili.',
+      )
+    }
 
-  const issued = issuedRes.status === 'fulfilled'
-    ? Array.isArray(issuedRes.value?.items)
-      ? issuedRes.value.items
-      : Array.isArray(issuedRes.value)
-        ? issuedRes.value
-        : []
-    : []
-  if (issuedRes.status === 'rejected') {
-    warnings.push(issuedRes.reason?.message || 'Fatture emesse non disponibili.')
-  }
+    const bankMovements = bankRes.status === 'fulfilled'
+      ? Array.isArray(bankRes.value?.items)
+        ? bankRes.value.items
+        : Array.isArray(bankRes.value)
+          ? bankRes.value
+          : []
+      : []
+    if (bankRes.status === 'rejected') {
+      const msg = String(bankRes.reason?.message || '')
+      warnings.push(
+        /abort|cancell/i.test(msg) ? abortMessage('Movimenti banca') : msg || 'Movimenti banca non disponibili.',
+      )
+    }
 
-  const bankMovements = bankRes.status === 'fulfilled'
-    ? Array.isArray(bankRes.value?.items)
-      ? bankRes.value.items
-      : Array.isArray(bankRes.value)
-        ? bankRes.value
-        : []
-    : []
-  if (bankRes.status === 'rejected') {
-    warnings.push(bankRes.reason?.message || 'Movimenti banca non disponibili.')
-  }
+    // Se l'utente ha cambiato società / lasciato la pagina, non elaborare
+    if (signal?.aborted) {
+      const err = new Error('Caricamento annullato.')
+      err.name = 'AbortError'
+      throw err
+    }
 
-  const built = buildSchedaContabileFornitori(invoices, issued, bankMovements, {
-    company: companyId,
-    dateFrom,
-    dateTo,
-  })
+    const built = buildSchedaContabileFornitori(invoices, issued, bankMovements, {
+      company: companyId,
+      dateFrom,
+      dateTo,
+    })
 
-  return {
-    ...built,
-    company: companyId,
-    companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
-    warnings,
+    return {
+      ...built,
+      company: companyId,
+      companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
+      warnings,
+    }
+  } finally {
+    window.clearTimeout(timer)
+    if (signal) signal.removeEventListener('abort', onOuterAbort)
   }
 }
 

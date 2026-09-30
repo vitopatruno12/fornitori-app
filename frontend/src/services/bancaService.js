@@ -93,7 +93,7 @@ export async function importBanMovements(accountId, movements) {
   })
 }
 
-export async function fetchBancaMovimenti(params = {}) {
+export async function fetchBancaMovimenti(params = {}, options = {}) {
   const search = new URLSearchParams()
   if (params.account_id) search.append('account_id', String(params.account_id))
   if (params.date_from) search.append('date_from', params.date_from)
@@ -101,7 +101,7 @@ export async function fetchBancaMovimenti(params = {}) {
   if (params.category) search.append('category', params.category)
   if (params.counterparty) search.append('counterparty', params.counterparty)
   const q = search.toString()
-  return apiFetch(q ? `/banca/movimenti?${q}` : '/banca/movimenti')
+  return apiFetch(q ? `/banca/movimenti?${q}` : '/banca/movimenti', options)
 }
 
 export async function fetchBancaRiconciliazione(company) {
