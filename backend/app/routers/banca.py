@@ -388,12 +388,23 @@ def banca_riconciliazione(
   return banca_service.reconciliation_snapshot(db, company=company)
 
 
+@router.get("/riconciliazione/proposte")
+def banca_riconciliazione_proposte(
+  company: Optional[str] = Query(None, description="Filtro società (come fatture)"),
+  limit: int = Query(40, ge=1, le=120),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """Solo proposte score 70–79 (one-click). Separato da /auto per evitare 504."""
+  snap = banca_service.reconciliation_snapshot(db, limit=limit, company=company)
+  return banca_service.enrich_probable_suggestions(db, snap, company=company, limit=limit)
+
+
 @router.post("/riconciliazione/auto")
 def banca_riconciliazione_auto(
   company: Optional[str] = Query(None, description="Filtro società (come fatture)"),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-  """Riconcilia automaticamente i match sicuri (n. documento / importo esatto)."""
+  """Riconcilia automaticamente i match sicuri (n. documento / importo esatto / multi-fattura)."""
   return banca_service.auto_reconcile(db, company=company)
 
 

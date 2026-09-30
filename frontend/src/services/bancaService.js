@@ -109,6 +109,14 @@ export async function fetchBancaRiconciliazione(company) {
   return apiFetch(`/banca/riconciliazione${q}`)
 }
 
+export async function fetchBancaRiconciliazioneProposte(company, limit = 40) {
+  const params = new URLSearchParams()
+  if (company) params.set('company', company)
+  if (limit) params.set('limit', String(limit))
+  const q = params.toString()
+  return apiFetch(`/banca/riconciliazione/proposte${q ? `?${q}` : ''}`)
+}
+
 export async function postBancaRiconciliazioneAuto(company) {
   const q = company ? `?company=${encodeURIComponent(company)}` : ''
   return apiFetch(`/banca/riconciliazione/auto${q}`, { method: 'POST' })

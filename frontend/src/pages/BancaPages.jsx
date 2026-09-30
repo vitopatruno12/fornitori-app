@@ -22,6 +22,7 @@ import {
   fetchBancaMovimenti,
   fetchBancaRiconciliazione,
   fetchBancaRiconciliazioneAgent,
+  fetchBancaRiconciliazioneProposte,
   importBanMovements,
   postBancaRiconcilia,
   postBancaRiconciliazioneAuto,
@@ -2222,7 +2223,23 @@ export function BancaRiconciliazionePage() {
         : await fetchBancaRiconciliazione(nextCompany)
       setData(res)
       const n = Number(res?.auto_applied) || 0
-      const probable = Number(res?.probable_count) || 0
+      // Proposte one-click in una seconda richiesta (evita 504 sul /auto)
+      let probable = Number(res?.probable_count) || 0
+      try {
+        const proposte = await fetchBancaRiconciliazioneProposte(nextCompany)
+        probable = Number(proposte?.probable_count) || 0
+        setData((prev) => ({
+          ...(prev || res),
+          suggestions: proposte?.suggestions || prev?.suggestions || [],
+          probable_count: probable,
+          unmatched_movements:
+            proposte?.unmatched_movements ?? prev?.unmatched_movements ?? res?.unmatched_movements,
+          score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
+          suggestions_pending: false,
+        }))
+      } catch {
+        // Snapshot già mostrato: le proposte possono ripetersi al prossimo click
+      }
       if (auto && n > 0) {
         setSuccess(
           probable

@@ -1862,61 +1862,65 @@ def _subset_sum_invoices(
   invoices: List[Any],
   target: Decimal,
   *,
-  max_items: int = 8,
+  max_items: int = 6,
 ) -> Optional[List[Any]]:
-  """Sottoinsieme (2…max_items) la cui somma totale ≈ target (±0,05 €)."""
-  payable = [
-    inv
-    for inv in invoices
-    if _invoice_residuo(inv) > Decimal("0.009") or abs(_dec(getattr(inv, "total", 0))) > Decimal("0.009")
-  ]
-  # Usa il residuo se parziale, altrimenti il totale
+  """Sottoinsieme (2…max_items) la cui somma totale ≈ target (±0,05 €).
+
+  Evita DFS esponenziale: somma totale, coppie, terne, poi greedy sui più vecchi.
+  """
   amounts: List[tuple[Any, Decimal]] = []
-  for inv in payable:
+  for inv in invoices:
     residuo = _invoice_residuo(inv)
     amt = residuo if residuo > Decimal("0.009") else abs(_dec(getattr(inv, "total", 0)))
-    if amt > Decimal("0.009"):
+    if amt > Decimal("0.009") and amt <= target + Decimal("0.05"):
       amounts.append((inv, amt))
   if len(amounts) < 2:
     return None
-  amounts.sort(key=lambda item: item[1], reverse=True)
-  # Limita la ricerca a fatture non più grandi del target
-  amounts = [(inv, amt) for inv, amt in amounts if amt <= target + Decimal("0.05")]
-  if len(amounts) < 2:
-    return None
-  # Prima: tutte le fatture aperte del fornitore
+  # Al massimo 12 fatture: oltre è troppo lento e raro
+  amounts.sort(key=lambda item: (_as_date(getattr(item[0], "invoice_date", None)) or date.min, item[1]))
+  if len(amounts) > 12:
+    amounts = amounts[:12]
+  n = len(amounts)
+  tol = Decimal("0.05")
+
   full = sum((amt for _, amt in amounts), Decimal("0.00"))
-  if abs(full - target) <= Decimal("0.05") and 2 <= len(amounts) <= max_items:
+  if abs(full - target) <= tol and 2 <= n <= max_items:
     return [inv for inv, _ in amounts]
 
-  best: Optional[List[Any]] = None
+  # Coppie
+  for i in range(n):
+    for j in range(i + 1, n):
+      if abs(amounts[i][1] + amounts[j][1] - target) <= tol:
+        return [amounts[i][0], amounts[j][0]]
 
-  def dfs(start: int, chosen: List[Any], running: Decimal) -> None:
-    nonlocal best
-    if best is not None:
-      return
-    if len(chosen) >= 2 and abs(running - target) <= Decimal("0.05"):
-      best = list(chosen)
-      return
-    if len(chosen) >= max_items or start >= len(amounts):
-      return
-    for i in range(start, len(amounts)):
-      inv, amt = amounts[i]
-      nxt = running + amt
-      if nxt > target + Decimal("0.05"):
+  if max_items < 3:
+    return None
+
+  # Terne
+  for i in range(n):
+    for j in range(i + 1, n):
+      partial = amounts[i][1] + amounts[j][1]
+      if partial > target + tol:
         continue
-      # pruning: anche prendendo tutto il resto non si arriva
-      remain = sum((a for _, a in amounts[i + 1 :]), Decimal("0.00"))
-      if nxt + remain < target - Decimal("0.05") and len(chosen) + 1 + (len(amounts) - i - 1) < 2:
-        continue
+      for k in range(j + 1, n):
+        if abs(partial + amounts[k][1] - target) <= tol:
+          return [amounts[i][0], amounts[j][0], amounts[k][0]]
+
+  if max_items < 4 or n < 4:
+    return None
+
+  # Greedy: fatture più vecchie finché la somma non arriva (tolleranza 0,05)
+  chosen: List[Any] = []
+  running = Decimal("0.00")
+  for inv, amt in amounts:
+    if len(chosen) >= max_items:
+      break
+    if running + amt <= target + tol:
       chosen.append(inv)
-      dfs(i + 1, chosen, nxt)
-      chosen.pop()
-      if best is not None:
-        return
-
-  dfs(0, [], Decimal("0.00"))
-  return best
+      running += amt
+      if abs(running - target) <= tol and len(chosen) >= 2:
+        return chosen
+  return None
 
 
 def allocate_supplier_bundles(
@@ -1955,6 +1959,7 @@ def allocate_supplier_bundles(
     pool_src.append(inv)
 
   candidates: List[tuple] = []
+  # Solo uscite ancora unmatched (o matched multi senza id): evita scan su tutto lo storico
   for meta in mov_meta:
     mov = meta["mov"]
     if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
@@ -1962,11 +1967,14 @@ def allocate_supplier_bundles(
     mid = int(getattr(mov, "id") or 0)
     if mid and mid in skip_mov:
       continue
-    if (
-      not include_paid
-      and getattr(mov, "matched_invoice_id", None)
-      and str(getattr(mov, "reconciliation_status", "") or "") == "matched"
-    ):
+    status = str(getattr(mov, "reconciliation_status", "") or "")
+    linked = getattr(mov, "matched_invoice_id", None)
+    if not include_paid:
+      if status == "matched" and linked:
+        continue
+      if status not in ("", "unmatched", "matched"):
+        continue
+    elif status == "matched" and linked:
       continue
     amt = abs(_dec(getattr(mov, "amount", 0)))
     if amt <= Decimal("1.00"):
@@ -1975,8 +1983,9 @@ def allocate_supplier_bundles(
     if not beneficiary:
       continue
     candidates.append((amt, meta, beneficiary))
-
+  # Al massimo 80 bonifici candidati per richiesta (i più grandi)
   candidates.sort(key=lambda item: item[0], reverse=True)
+  candidates = candidates[:80]
   for amt, meta, beneficiary in candidates:
     pool = [
       inv
@@ -1987,7 +1996,7 @@ def allocate_supplier_bundles(
     ]
     if len(pool) < 2:
       continue
-    chosen = _subset_sum_invoices(pool, amt, max_items=8)
+    chosen = _subset_sum_invoices(pool, amt, max_items=6)
     if not chosen or len(chosen) < 2:
       continue
     mov_id = int(getattr(meta["mov"], "id") or 0)
@@ -3274,18 +3283,27 @@ def sync_payment_status_from_bank(
     )
 
   # Riapri «pagate» senza prova banca né contanti/POS da file
-  multi_still_valid = allocate_supplier_bundles(
-    match_invoices,
-    mov_meta,
-    include_paid=True,
-    skip_invoice_ids=set(),
-    skip_movement_ids=set(),
-  )
+  # Bundle multi: movimento «matched» senza matched_invoice_id (tipico saldo/multi)
+  multi_suppliers: set[str] = set()
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "reconciliation_status", "") or "") != "matched":
+      continue
+    if getattr(mov, "matched_invoice_id", None):
+      continue
+    bene = _movement_beneficiary(mov, meta.get("blob") or "")
+    if bene:
+      multi_suppliers.add(bene.upper())
+
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice or inv_id in multi_still_valid:
+    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
+    if multi_suppliers:
+      sup = str(getattr(inv_dto, "supplier_name", None) or "")
+      if any(_party_names_align(sup, bene) for bene in multi_suppliers):
+        continue
     part_sum = sum(
       (
         abs(_dec(meta["mov"].amount))
@@ -3348,19 +3366,19 @@ def auto_reconcile(
   company: Optional[str] = None,
   limit: int = 80,
 ) -> Dict[str, Any]:
-  """Segna le fatture con match auto (anche multi-fattura), poi propone i probable.
+  """Segna le fatture con match auto (anche multi-fattura) e restituisce lo snapshot.
 
-  I match ≥80 e i bundle fornitore vengono applicati subito.
-  I probable (70–79) restano in griglia con Conferma one-click.
+  Le proposte 70–79 (one-click) sono su GET /riconciliazione/proposte, separate,
+  così il gateway non va in 504 sulla stessa richiesta lunga.
   """
   bank_sync = sync_payment_status_from_bank(db, company=company)
   refreshed = reconciliation_snapshot(db, limit=limit, company=company)
-  refreshed = enrich_probable_suggestions(db, refreshed, company=company, limit=limit)
   refreshed["auto_applied"] = int(bank_sync.get("marked_paid") or 0)
   refreshed["auto_applied_items"] = list(bank_sync.get("items") or [])
   refreshed["auto_errors"] = []
   refreshed["bank_sync"] = bank_sync
   refreshed["score_thresholds"] = {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE}
+  refreshed["suggestions_pending"] = True
   return refreshed
 
 
