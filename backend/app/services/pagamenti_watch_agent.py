@@ -15,6 +15,8 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -73,6 +75,60 @@ def default_status() -> Dict[str, Any]:
   }
 
 
+def _lock_owner_alive() -> bool:
+  path = _lock_path()
+  if not path.is_file():
+    return False
+  try:
+    pid = int((path.read_text(encoding="ascii", errors="replace") or "0").strip() or "0")
+  except (OSError, ValueError):
+    return False
+  if pid <= 0:
+    return False
+  try:
+    os.kill(pid, 0)
+  except ProcessLookupError:
+    return False
+  except PermissionError:
+    return True
+  except OSError:
+    return False
+  return True
+
+
+def _drop_dead_lock() -> None:
+  path = _lock_path()
+  try:
+    if path.is_file() and not _lock_owner_alive():
+      path.unlink(missing_ok=True)
+  except OSError:
+    pass
+
+
+def _lock_is_fresh() -> bool:
+  path = _lock_path()
+  try:
+    if not path.is_file():
+      return False
+    if (time.time() - path.stat().st_mtime) > LOCK_STALE_SEC:
+      return False
+  except OSError:
+    return False
+  return _lock_owner_alive()
+
+
+def _started_age_sec(value: Any) -> Optional[float]:
+  if not value:
+    return None
+  try:
+    started = datetime.fromisoformat(str(value))
+  except ValueError:
+    return None
+  if started.tzinfo is None:
+    started = started.replace(tzinfo=timezone.utc)
+  return (datetime.now(timezone.utc) - started).total_seconds()
+
+
 def read_status() -> Dict[str, Any]:
   path = _state_path()
   data = default_status()
@@ -86,6 +142,12 @@ def read_status() -> Dict[str, Any]:
     logger.warning("Stato agente riconciliazione illeggibile: %s", path, exc_info=True)
   data["schedule"] = SCHEDULE_LABEL
   data["agent"] = "riconciliazione_bancaria"
+  if _lock_is_fresh():
+    data["running"] = True
+  elif data.get("running"):
+    age = _started_age_sec(data.get("started_at"))
+    if age is None or age > 90:
+      data["running"] = False
   return data
 
 
@@ -101,7 +163,9 @@ def _acquire_lock() -> bool:
   path = _lock_path()
   path.parent.mkdir(parents=True, exist_ok=True)
   try:
-    if path.is_file() and (time.time() - path.stat().st_mtime) > LOCK_STALE_SEC:
+    if path.is_file() and (
+      (time.time() - path.stat().st_mtime) > LOCK_STALE_SEC or not _lock_owner_alive()
+    ):
       path.unlink(missing_ok=True)
   except OSError:
     pass
@@ -295,8 +359,9 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
   """Sincronizza movimenti e riconcilia automaticamente fatture (banca + contanti file)."""
   if not _acquire_lock():
     status = read_status()
-    status["ok"] = False
-    status["message"] = "Agente già in esecuzione. Riprova tra qualche minuto."
+    status["ok"] = True
+    status["running"] = True
+    status["message"] = "Agente già in esecuzione. La pagina si aggiorna da sola."
     return status
 
   started = datetime.now(timezone.utc)
@@ -395,6 +460,7 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
       "items": marked.get("items") or [],
       "reopened_items": marked.get("reopened_items") or [],
       "errors": marked.get("errors") or [],
+      "running": False,
       # compat UI Pagamenti
       "marked": {
         "marked_paid": paid_n,
@@ -416,6 +482,7 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
       "last_ok": False,
       "skipped": False,
       "reason": "errore",
+      "running": False,
       "message": f"Controllo fallito: {exc}"[:400],
     }
     try:
@@ -425,6 +492,61 @@ def run_watch(db: Session, *, force: bool = False) -> Dict[str, Any]:
     return payload
   finally:
     _release_lock()
+
+
+def start_watch_detached(*, force: bool = True) -> Dict[str, Any]:
+  """Avvia l'agente in un processo separato e risponde subito.
+
+  La pagina non resta in attesa del download banca: il gateway chiude intorno
+  ai due minuti, mentre i conti ne impiegano di più.
+  """
+  _drop_dead_lock()
+  if _lock_is_fresh():
+    status = read_status()
+    status["ok"] = True
+    status["running"] = True
+    status["message"] = "Agente già in esecuzione. La pagina si aggiorna da sola."
+    return status
+
+  started = datetime.now(timezone.utc).isoformat()
+  status = read_status()
+  status.update(
+    {
+      "ok": True,
+      "running": True,
+      "started_at": started,
+      "force": bool(force),
+      "message": "Agente in corso: scarico i movimenti e aggiorno le fatture.",
+    }
+  )
+  _write_status(status)
+
+  script = Path(__file__).resolve().parents[2] / "scripts" / "pagamenti_bank_watch_agent.py"
+  cmd = [sys.executable, str(script)]
+  if force:
+    cmd.append("--force")
+  spawn_kwargs: Dict[str, Any] = {
+    "cwd": str(script.parent.parent),
+    "stdin": subprocess.DEVNULL,
+    "stdout": subprocess.DEVNULL,
+    "stderr": subprocess.DEVNULL,
+  }
+  if os.name == "nt":
+    spawn_kwargs["creationflags"] = (
+      getattr(subprocess, "DETACHED_PROCESS", 0)
+      | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    )
+  else:
+    spawn_kwargs["start_new_session"] = True
+  try:
+    subprocess.Popen(cmd, **spawn_kwargs)
+  except OSError as exc:
+    logger.exception("Avvio agente riconciliazione non riuscito")
+    status["ok"] = False
+    status["running"] = False
+    status["message"] = f"Avvio agente non riuscito: {exc}"[:400]
+    _write_status(status)
+  return status
 
 
 # Alias espliciti per API / documentazione

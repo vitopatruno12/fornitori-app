@@ -21,6 +21,7 @@ import {
   fetchBancaDashboard,
   fetchBancaMovimenti,
   fetchBancaRiconciliazione,
+  fetchBancaRiconciliazioneAgent,
   importBanMovements,
   postBancaRiconcilia,
   postBancaRiconciliazioneAuto,
@@ -2233,12 +2234,26 @@ export function BancaRiconciliazionePage() {
   async function runAgent() {
     setAgentBusy(true)
     setError('')
-    setSuccess('')
+    setSuccess('Agente avviato. Scarica i movimenti e aggiorna le fatture: la pagina attende da sola.')
     try {
-      await runBancaRiconciliazioneAgent({ force: true })
+      let status = await runBancaRiconciliazioneAgent({ force: true })
+      const deadline = Date.now() + 20 * 60 * 1000
+      while (status?.running && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 4000))
+        status = await fetchBancaRiconciliazioneAgent()
+      }
+      if (status?.running) {
+        setSuccess('L’agente sta ancora lavorando. Tra qualche minuto premi Aggiorna e riconcilia.')
+      } else if (status && status.ok === false) {
+        setError(status.message || 'Agente riconciliazione non riuscito')
+        setSuccess('')
+      } else {
+        setSuccess(status?.message || 'Riconciliazione aggiornata.')
+      }
       if (companyId) await reload(companyId, { auto: false })
     } catch (e) {
       setError(e?.message || 'Agente riconciliazione non riuscito')
+      setSuccess('')
     } finally {
       setAgentBusy(false)
     }
