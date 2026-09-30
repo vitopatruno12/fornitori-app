@@ -507,7 +507,7 @@ export default function PagamentiPage() {
             <strong>Agente automatico</strong>
             <span className="pagamenti-watch-schedule">
               Controlla i file Pagamenti di tutte le società e i movimenti banca{' '}
-              {watch?.schedule || 'martedì, mercoledì e venerdì alle 9:30 e alle 18:30 (ora di Roma)'}
+              {watch?.schedule || 'martedì, mercoledì e venerdì alle 9:30 e alle 23:00 (ora di Roma)'}
             </span>
             <span className="pagamenti-watch-last">
               {watch?.last_run_at
