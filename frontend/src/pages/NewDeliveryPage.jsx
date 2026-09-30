@@ -495,23 +495,22 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   }
 
   return (
-    <div className="new-delivery-page">
+    <div className={`new-delivery-page delivery-hub-page${operatorMode ? ' delivery-hub-page--operator' : ''}`}>
       <section className="staff-page-hero">
         <div className="delivery-hero-row">
           <div className="delivery-hero-copy">
-            <h1 className="page-header staff-page-title">Nuova consegna (scarico merce)</h1>
+            <p className="delivery-hub-kicker">{operatorMode ? 'Postazione operativa' : 'Logistica'}</p>
+            <h1 className="page-header staff-page-title">Nuova consegna</h1>
             <p className="staff-page-lead">
               {operatorMode ? (
                 <>
                   Registra scarichi merce con DDT e righe prodotto. <strong>Peso e prezzo non sono obbligatori</strong>: in
-                  magazzino puoi indicare solo merce e cassette/pezzi. I dati vengono salvati nel gestionale ATLAS.
+                  magazzino puoi indicare solo merce e cassette/pezzi.
                 </>
               ) : (
                 <>
-                  Registra DDT, data di consegna e righe merce. <strong>Peso e prezzo unitario non sono obbligatori</strong>{' '}
-                  allo scarico (es. solo cassette/pezzi senza bilancia o listino). Il confronto listino è facoltativo e usa
-                  il prezzario del fornitore. Sotto puoi inserire la <strong>destinazione scarico / spedizione</strong>,
-                  registrata nelle note della consegna.
+                  Centro scarico merce: DDT, destinazione e prodotti consegnati. Da qui apri anche trasportatori, magazzino
+                  e storico. <strong>Peso e prezzo non sono obbligatori</strong> allo scarico.
                 </>
               )}
             </p>
@@ -519,11 +518,90 @@ export default function NewDeliveryPage({ operatorMode = false }) {
         </div>
       </section>
 
+      {!operatorMode ? (
+        <div className="delivery-hub-modules" role="list">
+          <div className="delivery-hub-module delivery-hub-module--scarico" role="listitem" style={{ '--delivery-hub-i': 0 }}>
+            <span className="delivery-hub-module-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M4 7h11l5 5v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm11 1.5V12h3.7L15 8.5ZM6.5 15.5h3V18h-3Zm5 0h3V18h-3Z" />
+              </svg>
+            </span>
+            <span className="delivery-hub-module-copy">
+              <span className="delivery-hub-module-kicker">Operativo</span>
+              <span className="delivery-hub-module-title">Scarico merce</span>
+              <span className="delivery-hub-module-desc">Compila il modulo sotto: fornitore, DDT e prodotti consegnati.</span>
+            </span>
+          </div>
+          <Link
+            className="delivery-hub-module delivery-hub-module--trasportatori"
+            to="/trasportatori"
+            role="listitem"
+            style={{ '--delivery-hub-i': 1 }}
+          >
+            <span className="delivery-hub-module-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M3 7h11v8h-1.5a2.5 2.5 0 0 1-5 0H6a2.5 2.5 0 0 1-5 0H1V9a2 2 0 0 1 2-2Zm11 2h3.2L20 12.2V15h-1a2.5 2.5 0 0 1-5 0h-0Zm-9.5 7.5A1.5 1.5 0 1 0 6 15a1.5 1.5 0 0 0-1.5 1.5Zm11 0A1.5 1.5 0 1 0 17 15a1.5 1.5 0 0 0-1.5 1.5Z" />
+              </svg>
+            </span>
+            <span className="delivery-hub-module-copy">
+              <span className="delivery-hub-module-kicker">Flotta</span>
+              <span className="delivery-hub-module-title">Trasportatori</span>
+              <span className="delivery-hub-module-desc">Anagrafica corrieri e stato operativo.</span>
+            </span>
+            <span className="delivery-hub-module-go" aria-hidden="true">→</span>
+          </Link>
+          <Link
+            className="delivery-hub-module delivery-hub-module--magazzino"
+            to="/magazzino"
+            role="listitem"
+            style={{ '--delivery-hub-i': 2 }}
+          >
+            <span className="delivery-hub-module-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M3 9.5 12 4l9 5.5V20H3Zm2 1.1V18h5v-5h4v5h5v-7.4L12 6.4Z" />
+              </svg>
+            </span>
+            <span className="delivery-hub-module-copy">
+              <span className="delivery-hub-module-kicker">Stock</span>
+              <span className="delivery-hub-module-title">Magazzino</span>
+              <span className="delivery-hub-module-desc">Giacenze e movimenti collegati agli scarichi.</span>
+            </span>
+            <span className="delivery-hub-module-go" aria-hidden="true">→</span>
+          </Link>
+          <Link
+            className="delivery-hub-module delivery-hub-module--storico"
+            to="/history"
+            role="listitem"
+            style={{ '--delivery-hub-i': 3 }}
+          >
+            <span className="delivery-hub-module-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M12 4a8 8 0 1 1-7.07 4.18L3 6.5V11h4.5L5.6 9.1A6 6 0 1 0 12 6v2l4-3-4-3Zm-1 4h2v5.2l3.3 1.9-.9 1.5L11 14.5Z" />
+              </svg>
+            </span>
+            <span className="delivery-hub-module-copy">
+              <span className="delivery-hub-module-kicker">Archivio</span>
+              <span className="delivery-hub-module-title">Storico</span>
+              <span className="delivery-hub-module-desc">Consegne già registrate e DDT precedenti.</span>
+            </span>
+            <span className="delivery-hub-module-go" aria-hidden="true">→</span>
+          </Link>
+        </div>
+      ) : null}
+
       {loadingSuppliers && <AnalisiLoadingBar active label="Caricamento fornitori" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
-      <section className="card">
+      <section className="card delivery-hub-work-card">
+        <div className="delivery-hub-work-head">
+          <div>
+            <h2 className="delivery-hub-work-title">Registra scarico</h2>
+            <p className="delivery-hub-work-lead">
+              Seleziona fornitore e trasportatore, inserisci DDT e prodotti consegnati.
+            </p>
+          </div>
+        </div>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <div className="form-group">
