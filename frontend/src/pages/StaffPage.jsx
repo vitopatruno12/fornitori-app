@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   fetchStaffMembers,
   fetchStaffShifts,
@@ -5092,22 +5093,23 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
 
   return (
-    <div className="staff-page">
+    <div className={`staff-page staff-hub-page${operatorMode ? ' staff-hub-page--operator' : ''}`}>
       <header className="staff-page-hero">
         <div className="staff-page-hero-inner">
-          {!operatorMode ? <h1 className="page-header staff-page-title">Personale</h1> : null}
+          <p className="staff-hub-kicker">{operatorMode ? 'Postazione operativa' : 'Personale'}</p>
+          {!operatorMode ? <h1 className="page-header staff-page-title">Personale</h1> : (
+            <h1 className="page-header staff-page-title">{stationStaffLocaleName || 'Personale sede'}</h1>
+          )}
           <p className="staff-page-lead">
             {operatorMode ? (
               <>
-                Personale della postazione: <strong>{stationStaffLocaleName || 'locale collegato'}</strong>. Inserisci il{' '}
-                <strong>codice a 6 cifre</strong> e clicca <strong>Accedi</strong> per vedere dipendenti e pianificazione di questo locale
-                (i dati di altre sedi non restano visibili).
+                Apri la postazione con il <strong>codice a 6 cifre</strong> per dipendenti e turni di{' '}
+                <strong>{stationStaffLocaleName || 'questo locale'}</strong>. I dati delle altre sedi restano nascosti.
               </>
             ) : (
               <>
-                Scegli il <strong>locale</strong>, inserisci il <strong>codice a 6 cifre</strong> e clicca{' '}
-                <strong>Accedi</strong> per vedere dipendenti e pianificazione di quel negozio. Senza codice i dati restano
-                nascosti; non vengono mostrati dipendenti di altri locali.
+                Centro operativo del personale: dipendenti, turni, report e stipendi. Scegli il locale, inserisci il codice e
+                clicca <strong>Accedi</strong> per lavorare in sicurezza su una sola sede.
               </>
             )}
           </p>
@@ -5118,8 +5120,226 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       {localeSyncWarning && <div className="alert alert-warning">{localeSyncWarning}</div>}
       {success && <div className="alert alert-info">{success}</div>}
 
+      {!activeLocaleSessionOpen ? (
+        <div className="staff-hub">
+          {!operatorMode ? (
+            <div className="staff-hub-modules" role="list">
+              <div className="staff-hub-module staff-hub-module--dipendenti" role="listitem" style={{ '--staff-hub-i': 0 }}>
+                <span className="staff-hub-module-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-7.5 8a7.5 7.5 0 0 1 15 0v1H4.5Z" />
+                  </svg>
+                </span>
+                <span className="staff-hub-module-copy">
+                  <span className="staff-hub-module-kicker">Accesso</span>
+                  <span className="staff-hub-module-title">Dipendenti</span>
+                  <span className="staff-hub-module-desc">Apri il locale qui sotto per gestire elenco, sezioni e anagrafiche.</span>
+                </span>
+              </div>
+              <Link
+                className="staff-hub-module staff-hub-module--report"
+                to="/staff/report"
+                role="listitem"
+                style={{ '--staff-hub-i': 1 }}
+              >
+                <span className="staff-hub-module-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path fill="currentColor" d="M5 19h14v-2H5Zm2-4h3V7H7Zm5 0h3V5h-3Zm5 0h3v-6h-3Z" />
+                  </svg>
+                </span>
+                <span className="staff-hub-module-copy">
+                  <span className="staff-hub-module-kicker">Analisi</span>
+                  <span className="staff-hub-module-title">Report</span>
+                  <span className="staff-hub-module-desc">Ore, turni e riepiloghi per sede e periodo.</span>
+                </span>
+                <span className="staff-hub-module-go" aria-hidden="true">→</span>
+              </Link>
+              <Link
+                className="staff-hub-module staff-hub-module--stipendi"
+                to="/staff/stipendi"
+                role="listitem"
+                style={{ '--staff-hub-i': 2 }}
+              >
+                <span className="staff-hub-module-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path fill="currentColor" d="M4 5h16v3H4Zm0 5h16v9H4Zm3 2.5h5V15H7Zm7 0h3V17h-3Z" />
+                  </svg>
+                </span>
+                <span className="staff-hub-module-copy">
+                  <span className="staff-hub-module-kicker">Compensi</span>
+                  <span className="staff-hub-module-title">Stipendi</span>
+                  <span className="staff-hub-module-desc">Documenti e gestione stipendi del personale.</span>
+                </span>
+                <span className="staff-hub-module-go" aria-hidden="true">→</span>
+              </Link>
+              <Link
+                className="staff-hub-module staff-hub-module--link"
+                to="/staff/link-operatori"
+                role="listitem"
+                style={{ '--staff-hub-i': 3 }}
+              >
+                <span className="staff-hub-module-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path fill="currentColor" d="M10.6 13.4a4 4 0 0 1 0-5.6l1.8-1.8a4 4 0 1 1 5.6 5.6l-1 1-1.4-1.4 1-1a2 2 0 1 0-2.8-2.8l-1.8 1.8a2 2 0 0 0 0 2.8Zm2.8-2.8a4 4 0 0 1 0 5.6l-1.8 1.8a4 4 0 1 1-5.6-5.6l1-1 1.4 1.4-1 1a2 2 0 1 0 2.8 2.8l1.8-1.8a2 2 0 0 0 0-2.8Z" />
+                  </svg>
+                </span>
+                <span className="staff-hub-module-copy">
+                  <span className="staff-hub-module-kicker">Sedi</span>
+                  <span className="staff-hub-module-title">Link operatori</span>
+                  <span className="staff-hub-module-desc">URL e accessi per le postazioni operative.</span>
+                </span>
+                <span className="staff-hub-module-go" aria-hidden="true">→</span>
+              </Link>
+            </div>
+          ) : null}
+
+          <section className="staff-hub-gate" ref={memberFormSectionRef} aria-label="Accesso locale personale">
+            <div className="staff-hub-gate-head">
+              <div>
+                <h2 className="staff-hub-gate-title">{operatorMode ? 'Apri la postazione' : 'Apri un locale'}</h2>
+                <p className="staff-hub-gate-lead">
+                  Inserisci il codice a 6 cifre e clicca Accedi. Senza apertura i dipendenti restano nascosti.
+                </p>
+              </div>
+              <span className={`staff-hub-status staff-hub-status--closed`}>CHIUSO</span>
+            </div>
+
+            <div className="staff-hub-gate-form">
+              <div className="form-group staff-hub-field staff-hub-field--locale">
+                <label>Nome locale</label>
+                <input
+                  className="form-control"
+                  value={operatorMode ? stationStaffLocaleName || localeStaffName : localeStaffName}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    const prev = localeStaffName
+                    if (
+                      !operatorMode &&
+                      localeNameCompareKey(prev) &&
+                      localeNameCompareKey(prev) !== localeNameCompareKey(next)
+                    ) {
+                      setStaffLocaleSessionOpen(prev, false)
+                      clearStaffDataFromMemory()
+                    }
+                    setLocaleStaffName(next)
+                  }}
+                  placeholder="Es. La Risacca"
+                  disabled={operatorMode || shiftBusy || loading || demoLoading || reportLoading}
+                  readOnly={operatorMode}
+                  title={
+                    operatorMode
+                      ? 'Locale fisso per questa postazione operativa'
+                      : 'Ogni nome locale è univoco: non puoi salvare la stessa lista dipendenti sotto un altro nome'
+                  }
+                />
+              </div>
+              {!operatorMode ? (
+                <div className="form-group staff-hub-field staff-hub-field--saved">
+                  <label>Locali salvati</label>
+                  <select
+                    className="form-control"
+                    value={
+                      savedLocaleNames.find(
+                        (n) => localeNameCompareKey(n) === localeNameCompareKey(localeStaffName),
+                      ) || ''
+                    }
+                    onChange={(e) => void handleSelectSavedLocale(e.target.value)}
+                    disabled={shiftBusy || loading || demoLoading || reportLoading || savedLocaleNames.length === 0}
+                  >
+                    <option value="">{savedLocaleNames.length === 0 ? 'Nessun locale salvato' : 'Seleziona locale salvato'}</option>
+                    {savedLocaleNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="form-group staff-hub-field staff-hub-field--code">
+                <label>Codice zona (6 cifre)</label>
+                <input
+                  className="form-control"
+                  value={localeAccessCode}
+                  onChange={(e) => setLocaleAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={(ev) => {
+                    if (ev.key !== 'Enter') return
+                    if (activeLocaleSessionOpen || localeSessionBusy) {
+                      ev.preventDefault()
+                      return
+                    }
+                    const code = normalizeLocaleAccessCode(localeAccessCode)
+                    if (!isValidLocaleAccessCode(code)) return
+                    ev.preventDefault()
+                    void handleOpenLocaleSession()
+                  }}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={6}
+                  disabled={shiftBusy || loading || demoLoading || reportLoading || localeSessionBusy}
+                  title="Obbligatorio per aprire il locale: ogni zona ha il suo codice."
+                />
+              </div>
+              <div className="staff-hub-gate-actions">
+                <button
+                  type="button"
+                  className="btn prima-nota-accedi-btn"
+                  disabled={
+                    localeSessionBusy ||
+                    shiftBusy ||
+                    loading ||
+                    demoLoading ||
+                    reportLoading ||
+                    !normalizeLocaleName(operatorMode ? stationStaffLocaleName || localeStaffName : localeStaffName)
+                  }
+                  onClick={() => void handleOpenLocaleSession()}
+                  title="Inserisci il codice e apri il locale (come in Prima Nota)."
+                >
+                  {localeSessionBusy ? 'Accesso…' : 'Accedi'}
+                </button>
+                {!operatorMode ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={() => void handleGenerateLocaleCode()}
+                    disabled={shiftBusy || loading || demoLoading || reportLoading}
+                    title="Genera un nuovo codice da usare al prossimo salvataggio"
+                  >
+                    Genera codice
+                  </button>
+                ) : null}
+                {!operatorMode ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary"
+                    onClick={() => void handleCreateEmptyLocale()}
+                    disabled={shiftBusy || loading || demoLoading || reportLoading}
+                    title="Crea un locale anche senza elenco dipendenti"
+                  >
+                    Aggiungi locale
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <p className="staff-hub-gate-note">
+              Ogni locale salvato ha un <strong>codice a 6 cifre</strong>. Con <strong>Accedi</strong> apri la sede; con{' '}
+              <strong>Chiudi</strong> la proteggi di nuovo.
+            </p>
+          </section>
+        </div>
+      ) : null}
+
+      {activeLocaleSessionOpen ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <section className="card" ref={memberFormSectionRef} style={{ order: 1, marginBottom: 0 }}>
+      {!operatorMode ? (
+        <nav className="staff-hub-quick" aria-label="Sezioni personale">
+          <Link className="staff-hub-quick-link" to="/staff/report">Report personale</Link>
+          <Link className="staff-hub-quick-link" to="/staff/stipendi">Stipendi</Link>
+          <Link className="staff-hub-quick-link" to="/staff/link-operatori">Link operatori</Link>
+          <Link className="staff-hub-quick-link" to="/staff/link-codici">Link codici</Link>
+        </nav>
+      ) : null}
+      <section className="card staff-hub-work-card" ref={memberFormSectionRef} style={{ order: 1, marginBottom: 0 }}>
         <h2 className="page-subheader" style={{ marginTop: 0 }}>
           {operatorMode ? 'Accesso personale' : editingMemberId ? 'Modifica dipendente' : 'Dipendenti'}
         </h2>
@@ -6575,6 +6795,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       </>
       ) : null}
       </div>
+      ) : null}
 
       <WeeklyStaffReportModal
         open={reportModalOpen}
