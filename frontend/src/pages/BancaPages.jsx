@@ -449,6 +449,7 @@ function invoiceIsAligned(row) {
       'file_pagamenti',
       'score_auto',
       'saldo_fatture',
+      'bundle_fornitore',
     ].includes(reason)
   ) {
     return true
@@ -469,7 +470,8 @@ function bankReconCellValue(row, col) {
   if (col.id === 'status') {
     if (row?.status === 'matched') return '✔ Riconciliato'
     if (row?.match_band === 'probable' || (Number(row?.match_score) || 0) >= 70) {
-      return 'Da confermare'
+      const score = Number(row?.match_score) || 0
+      return score ? `Da confermare (${score})` : 'Da confermare'
     }
     return reconciliationStatusLabel(row?.status)
   }
@@ -504,6 +506,7 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'importo_in_movimento') return '✔ Importo in banca'
     if (row?.amount_matched_as === 'pagato') return '✔ Importo = pagato'
     if (row?.match_reason === 'saldo_fatture') return '✔ Saldo fatture'
+    if (row?.match_reason === 'bundle_fornitore') return '✔ Bonifico multi-fattura'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
     if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
@@ -2219,10 +2222,19 @@ export function BancaRiconciliazionePage() {
         : await fetchBancaRiconciliazione(nextCompany)
       setData(res)
       const n = Number(res?.auto_applied) || 0
+      const probable = Number(res?.probable_count) || 0
       if (auto && n > 0) {
-        setSuccess(`Riconciliati automaticamente ${n} movimenti (score ≥80).`)
+        setSuccess(
+          probable
+            ? `Riconciliati automaticamente ${n} documenti. ${probable} proposte da confermare.`
+            : `Riconciliati automaticamente ${n} documenti (match auto + multi-fattura).`,
+        )
       } else if (auto) {
-        setSuccess('Nessun nuovo match auto (score ≥80). Restano proposte 70–79 da confermare e movimenti senza match.')
+        setSuccess(
+          probable
+            ? `Nessun nuovo match auto. ${probable} proposte 70–79 da confermare.`
+            : 'Nessun nuovo match auto. Nessuna proposta da confermare.',
+        )
       }
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
@@ -2250,7 +2262,7 @@ export function BancaRiconciliazionePage() {
       } else {
         setSuccess(status?.message || 'Riconciliazione aggiornata.')
       }
-      if (companyId) await reload(companyId, { auto: false })
+      if (companyId) await reload(companyId, { auto: true })
     } catch (e) {
       setError(e?.message || 'Agente riconciliazione non riuscito')
       setSuccess('')
@@ -2282,6 +2294,48 @@ export function BancaRiconciliazionePage() {
       await reload(companyId, { auto: false })
     } catch (e) {
       setError(e?.message || 'Errore salvataggio')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function confirmAllProbable() {
+    const rows = pendingSuggestions.filter(
+      (s) =>
+        s?.suggested_invoice?.invoice_id
+        && typeof s?.movement?.id === 'number'
+        && (s.match_band === 'probable' || s.status === 'difference' || (Number(s.match_score) || 0) >= 70),
+    )
+    if (!rows.length) {
+      setSuccess('Nessuna proposta da confermare.')
+      return
+    }
+    setBusyId('all')
+    setError('')
+    setSuccess('')
+    let ok = 0
+    let fail = 0
+    try {
+      for (const row of rows) {
+        try {
+          const status = row.status === 'difference' ? 'difference' : 'matched'
+          await postBancaRiconcilia(row.movement.id, {
+            invoice_id: row.suggested_invoice.invoice_id,
+            status,
+          })
+          ok += 1
+        } catch {
+          fail += 1
+        }
+      }
+      setSuccess(
+        fail
+          ? `Confermati ${ok} abbinamenti · ${fail} errori`
+          : `Confermati ${ok} abbinamenti probabili.`,
+      )
+      await reload(companyId, { auto: true })
+    } catch (e) {
+      setError(e?.message || 'Errore conferma multipla')
     } finally {
       setBusyId(null)
     }
@@ -2382,7 +2436,7 @@ export function BancaRiconciliazionePage() {
               className="btn btn-secondary btn-sm"
               onClick={() => {
                 setSuccess('')
-                reload(companyId, { auto: false })
+                reload(companyId, { auto: true })
               }}
               disabled={loading || agentBusy || !companyId}
             >
@@ -2513,8 +2567,30 @@ export function BancaRiconciliazionePage() {
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da controllare (differenze / da riconciliare)</h2>
                 <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-                  A sinistra il numero letto nel bonifico e il beneficiario. A destra il numero fattura e l’emittente.
+                  Proposte score 70–79: un click conferma. I match ≥80 e i bonifici multi-fattura
+                  vengono applicati da «Aggiorna e riconcilia».
                 </p>
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={
+                      loading
+                      || agentBusy
+                      || busyId != null
+                      || !pendingSuggestions.some(
+                        (s) =>
+                          s?.suggested_invoice
+                          && (s.match_band === 'probable'
+                            || s.status === 'difference'
+                            || (Number(s.match_score) || 0) >= 70),
+                      )
+                    }
+                    onClick={() => void confirmAllProbable()}
+                  >
+                    {busyId === 'all' ? 'Confermo…' : 'Conferma tutte le proposte'}
+                  </button>
+                </div>
                 <WorkbookGrid
                   title="Residui da controllare"
                   sheetLabel={`${pendingSuggestions.length} righe`}
@@ -2543,7 +2619,7 @@ export function BancaRiconciliazionePage() {
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
-                        disabled={busyId === row.movement.id}
+                        disabled={busyId === row.movement.id || busyId === 'all'}
                         onClick={(e) => {
                           e.stopPropagation()
                           confirmMatch(row)

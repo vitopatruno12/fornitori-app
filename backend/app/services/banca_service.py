@@ -1858,6 +1858,153 @@ def allocate_number_ranges(
   return out
 
 
+def _subset_sum_invoices(
+  invoices: List[Any],
+  target: Decimal,
+  *,
+  max_items: int = 8,
+) -> Optional[List[Any]]:
+  """Sottoinsieme (2…max_items) la cui somma totale ≈ target (±0,05 €)."""
+  payable = [
+    inv
+    for inv in invoices
+    if _invoice_residuo(inv) > Decimal("0.009") or abs(_dec(getattr(inv, "total", 0))) > Decimal("0.009")
+  ]
+  # Usa il residuo se parziale, altrimenti il totale
+  amounts: List[tuple[Any, Decimal]] = []
+  for inv in payable:
+    residuo = _invoice_residuo(inv)
+    amt = residuo if residuo > Decimal("0.009") else abs(_dec(getattr(inv, "total", 0)))
+    if amt > Decimal("0.009"):
+      amounts.append((inv, amt))
+  if len(amounts) < 2:
+    return None
+  amounts.sort(key=lambda item: item[1], reverse=True)
+  # Limita la ricerca a fatture non più grandi del target
+  amounts = [(inv, amt) for inv, amt in amounts if amt <= target + Decimal("0.05")]
+  if len(amounts) < 2:
+    return None
+  # Prima: tutte le fatture aperte del fornitore
+  full = sum((amt for _, amt in amounts), Decimal("0.00"))
+  if abs(full - target) <= Decimal("0.05") and 2 <= len(amounts) <= max_items:
+    return [inv for inv, _ in amounts]
+
+  best: Optional[List[Any]] = None
+
+  def dfs(start: int, chosen: List[Any], running: Decimal) -> None:
+    nonlocal best
+    if best is not None:
+      return
+    if len(chosen) >= 2 and abs(running - target) <= Decimal("0.05"):
+      best = list(chosen)
+      return
+    if len(chosen) >= max_items or start >= len(amounts):
+      return
+    for i in range(start, len(amounts)):
+      inv, amt = amounts[i]
+      nxt = running + amt
+      if nxt > target + Decimal("0.05"):
+        continue
+      # pruning: anche prendendo tutto il resto non si arriva
+      remain = sum((a for _, a in amounts[i + 1 :]), Decimal("0.00"))
+      if nxt + remain < target - Decimal("0.05") and len(chosen) + 1 + (len(amounts) - i - 1) < 2:
+        continue
+      chosen.append(inv)
+      dfs(i + 1, chosen, nxt)
+      chosen.pop()
+      if best is not None:
+        return
+
+  dfs(0, [], Decimal("0.00"))
+  return best
+
+
+def allocate_supplier_bundles(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+  include_paid: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+  """Un bonifico = somma di 2+ fatture aperte dello stesso fornitore (beneficiario allineato).
+
+  Copre i pagamenti multipli anche senza testo «saldo fatture <mese>» in causale.
+  Con include_paid=True serve a verificare che un gruppo multi resti valido (no riapertura).
+  """
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = skip_movement_ids if skip_movement_ids is not None else set()
+  claimed: set[int] = set()
+  out: Dict[int, Dict[str, Any]] = {}
+
+  pool_src: List[Any] = []
+  for inv in invoices:
+    iid = int(getattr(inv, "id"))
+    if iid in skip_inv:
+      continue
+    status = (getattr(inv, "payment_status", None) or "unpaid")
+    if status == "paid" and not include_paid:
+      continue
+    residuo = _invoice_residuo(inv)
+    total = abs(_dec(getattr(inv, "total", 0)))
+    if status == "paid":
+      if total <= Decimal("0.009"):
+        continue
+    elif residuo <= Decimal("0.009") and total <= Decimal("0.009"):
+      continue
+    pool_src.append(inv)
+
+  candidates: List[tuple] = []
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+      continue
+    mid = int(getattr(mov, "id") or 0)
+    if mid and mid in skip_mov:
+      continue
+    if (
+      not include_paid
+      and getattr(mov, "matched_invoice_id", None)
+      and str(getattr(mov, "reconciliation_status", "") or "") == "matched"
+    ):
+      continue
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    if amt <= Decimal("1.00"):
+      continue
+    beneficiary = _movement_beneficiary(mov, meta.get("blob") or "")
+    if not beneficiary:
+      continue
+    candidates.append((amt, meta, beneficiary))
+
+  candidates.sort(key=lambda item: item[0], reverse=True)
+  for amt, meta, beneficiary in candidates:
+    pool = [
+      inv
+      for inv in pool_src
+      if int(getattr(inv, "id")) not in claimed
+      and _party_names_align(getattr(inv, "supplier_name", None), beneficiary)
+      and _dates_compatible(inv, meta["mov"], max_days=365)
+    ]
+    if len(pool) < 2:
+      continue
+    chosen = _subset_sum_invoices(pool, amt, max_items=8)
+    if not chosen or len(chosen) < 2:
+      continue
+    mov_id = int(getattr(meta["mov"], "id") or 0)
+    if mov_id:
+      skip_mov.add(mov_id)
+    for inv in chosen:
+      iid = int(getattr(inv, "id"))
+      claimed.add(iid)
+      out[iid] = {
+        "meta": meta,
+        "bundle": True,
+        "bundle_size": len(chosen),
+        "supplier": getattr(inv, "supplier_name", None),
+      }
+  return out
+
+
 _PAYMENT_NOTE_RE = re.compile(
   r"\n?\[pagamenti banca\].*?\[/pagamenti banca\]\s*",
   re.DOTALL,
@@ -2312,6 +2459,123 @@ def reconciliation_snapshot(
     "expected_banks": expected_banks_for_company(company_id),
     "fast": True,
   }
+
+
+def enrich_probable_suggestions(
+  db: Session,
+  snapshot: Dict[str, Any],
+  *,
+  company: Optional[str] = None,
+  limit: int = 40,
+) -> Dict[str, Any]:
+  """Riempie le proposte 70–79 (one-click) sui movimenti ancora unmatched.
+
+  Lo snapshot veloce non calcola gli score: senza questo passo la griglia
+  «Da controllare» non ha mai il pulsante Conferma.
+  """
+  company_id = (company or snapshot.get("company") or "").strip() or None
+  invoices, _ = _load_recon_invoices(db, company_id)
+  open_by_amount = _index_open_invoices_by_amount(invoices)
+  used_invoices: set[int] = set()
+
+  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
+  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
+  mov_q = (
+    db.query(BankMovement, BankAccount)
+    .join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+    .filter(
+      BankMovement.reconciliation_status == "unmatched",
+      BankMovement.movement_type == "uscita",
+    )
+  )
+  if account_ids:
+    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
+  unmatched_rows = (
+    mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(limit).all()
+  )
+
+  suggestions: List[Dict[str, Any]] = []
+  for mov, acc in unmatched_rows:
+    blob = _movement_search_blob(mov)
+    mov_out = _enrich_movement_out(_movement_out(mov, acc), mov, blob)
+    best = None
+    best_sc: Optional[Dict[str, Any]] = None
+    for inv in _open_invoices_near_amount(open_by_amount, _dec(mov.amount)):
+      inv_id = int(inv.id)
+      if inv_id in used_invoices:
+        continue
+      residuo = _invoice_residuo(inv)
+      if residuo <= Decimal("0.009"):
+        continue
+      sc = score_movement_invoice(inv, mov, blob)
+      if sc["score"] < _SCORE_PROBABLE:
+        continue
+      if best_sc is None or sc["score"] > best_sc["score"]:
+        best_sc = sc
+        diff = abs(residuo - _dec(mov.amount))
+        quality = (
+          "number"
+          if sc["breakdown"].get("number", 0) >= _SCORE_NUMBER
+          else ("exact" if sc["breakdown"].get("amount", 0) >= 25 else "near")
+        )
+        best = {
+          "invoice_id": inv_id,
+          "supplier_name": inv.supplier_name,
+          "invoice_number": inv.invoice_number,
+          "due_date": inv.due_date.date().isoformat()
+          if hasattr(inv.due_date, "date")
+          else (inv.due_date.isoformat() if inv.due_date else None),
+          "residuo": float(residuo),
+          "difference": float(diff),
+          "match_quality": quality,
+          "match_score": sc["score"],
+          "match_band": sc["band"],
+          "match_breakdown": sc["breakdown"],
+          "partial": sc.get("partial"),
+        }
+
+    if best and best_sc:
+      used_invoices.add(int(best["invoice_id"]))
+      band = best.get("match_band") or "review"
+      linked_number = str(best.get("invoice_number") or "").strip()
+      if linked_number and _invoice_number_in_text(linked_number, blob):
+        mov_out = dict(mov_out)
+        mov_out["doc_ref"] = linked_number
+      # auto: già applicati da sync; qui restano i probable da one-click
+      if band == "auto" and not best.get("partial"):
+        status = "matched"
+      elif band == "probable" or best.get("partial"):
+        status = "difference"
+      else:
+        status = "unmatched"
+      suggestions.append(
+        {
+          "movement": mov_out,
+          "suggested_invoice": best,
+          "status": status,
+          "match_score": best.get("match_score"),
+          "match_band": band,
+        }
+      )
+    else:
+      suggestions.append(
+        {
+          "movement": mov_out,
+          "suggested_invoice": None,
+          "status": "unmatched",
+          "match_score": 0,
+          "match_band": "review",
+        }
+      )
+
+  out = dict(snapshot)
+  out["suggestions"] = suggestions
+  out["unmatched_movements"] = len([s for s in suggestions if s["status"] == "unmatched"])
+  out["probable_count"] = len(
+    [s for s in suggestions if s.get("match_band") == "probable" or s.get("status") == "difference"]
+  )
+  out["fast"] = False
+  return out
 
 
 def reconciliation_preview(
@@ -2848,6 +3112,16 @@ def sync_payment_status_from_bank(
   ).items():
     cited_by_invoice[iid] = hit
 
+  bundle_by_invoice = allocate_supplier_bundles(
+    match_invoices,
+    mov_meta,
+    skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
+    skip_movement_ids=assigned_mov | acconto_mov_ids,
+  )
+  for iid, hit in bundle_by_invoice.items():
+    # Stesso canale «multi-fattura» di saldo/cited in UI
+    saldo_by_invoice[iid] = hit
+
   marked: List[Dict[str, Any]] = []
   reopened: List[Dict[str, Any]] = []
   marked_from_file = 0
@@ -2909,7 +3183,12 @@ def sync_payment_status_from_bank(
         found.difference_amount = None
     elif saldo_hit or cited_hit:
       group = saldo_hit or cited_hit
-      reason = "saldo_fatture" if saldo_hit else "numero_in_movimento"
+      if group.get("bundle"):
+        reason = "bundle_fornitore"
+      elif saldo_hit:
+        reason = "saldo_fatture"
+      else:
+        reason = "numero_in_movimento"
       match_score = 100
       match_band = "auto"
       movement_id = int(group["meta"]["mov"].id)
@@ -2964,7 +3243,11 @@ def sync_payment_status_from_bank(
       {
         "invoice_id": inv_id,
         "invoice_number": str(getattr(row, "invoice_number", "") or ""),
-        "reason": "saldo_fatture" if inv_id in saldo_by_invoice else "numero_in_movimento",
+        "reason": (
+          "bundle_fornitore"
+          if hit.get("bundle")
+          else ("saldo_fatture" if inv_id in saldo_by_invoice else "numero_in_movimento")
+        ),
         "movement_id": int(group_mov.id),
         "match_band": "auto",
       }
@@ -2991,10 +3274,17 @@ def sync_payment_status_from_bank(
     )
 
   # Riapri «pagate» senza prova banca né contanti/POS da file
+  multi_still_valid = allocate_supplier_bundles(
+    match_invoices,
+    mov_meta,
+    include_paid=True,
+    skip_invoice_ids=set(),
+    skip_movement_ids=set(),
+  )
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice or inv_id in multi_still_valid:
       continue
     part_sum = sum(
       (
@@ -3058,14 +3348,14 @@ def auto_reconcile(
   company: Optional[str] = None,
   limit: int = 80,
 ) -> Dict[str, Any]:
-  """Segna le fatture con score ≥80, poi calcola l'anteprima una sola volta.
+  """Segna le fatture con match auto (anche multi-fattura), poi propone i probable.
 
-  Prima il confronto girava tre volte (anteprima, scrittura, anteprima) e il gateway
-  chiudeva la pagina con 504. La scrittura dei match auto è in sync_payment_status_from_bank.
-  I probable (70–79) restano da confermare.
+  I match ≥80 e i bundle fornitore vengono applicati subito.
+  I probable (70–79) restano in griglia con Conferma one-click.
   """
   bank_sync = sync_payment_status_from_bank(db, company=company)
   refreshed = reconciliation_snapshot(db, limit=limit, company=company)
+  refreshed = enrich_probable_suggestions(db, refreshed, company=company, limit=limit)
   refreshed["auto_applied"] = int(bank_sync.get("marked_paid") or 0)
   refreshed["auto_applied_items"] = list(bank_sync.get("items") or [])
   refreshed["auto_errors"] = []
