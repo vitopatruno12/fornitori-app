@@ -1,5 +1,7 @@
 # Installazione (sul server):
 #   sudo install -m 755 deploy/pagamenti-bank-watch.sh /usr/local/sbin/atlas-pagamenti-watch
+#   # Adatta User/Group se diverso da mic04:
+#   #   id -un; systemctl show fornitori-api -p User --value
 #   sudo cp deploy/pagamenti-bank-watch.service deploy/pagamenti-bank-watch.timer /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now pagamenti-bank-watch.timer
@@ -16,12 +18,14 @@ Wants=network-online.target postgresql.service
 
 [Service]
 Type=oneshot
-User=fornitori
-Group=fornitori
-WorkingDirectory=/opt/fornitori-app/backend
-EnvironmentFile=-/opt/fornitori-app/backend/.env
+# Utente runtime sul VPS atlass (come otp-whatsapp-webhook). Non esiste «fornitori».
+User=mic04
+Group=mic04
+WorkingDirectory=/var/www/app-fornitori/fornitori-app/backend
 EnvironmentFile=-/var/www/app-fornitori/fornitori-app/backend/.env
+EnvironmentFile=-/opt/fornitori-app/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=APP_DIR=/var/www/app-fornitori/fornitori-app
 ExecStart=/usr/local/sbin/atlas-pagamenti-watch --force
 # --force: due volte a settimana riconcilia sempre (anche senza nuove variazioni rilevate)
 Nice=10
@@ -29,4 +33,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/fornitori-app/backend/data /opt/fornitori-app/backend/app/uploads /var/www/app-fornitori/fornitori-app/backend/data /var/www/app-fornitori/fornitori-app/backend/app/uploads
+ReadWritePaths=/var/www/app-fornitori/fornitori-app/backend/data /var/www/app-fornitori/fornitori-app/backend/app/uploads /opt/fornitori-app/backend/data /opt/fornitori-app/backend/app/uploads
