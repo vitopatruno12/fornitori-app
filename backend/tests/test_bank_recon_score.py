@@ -317,6 +317,87 @@ def test_acconto_cita_la_fattura_e_lascia_il_residuo():
   assert "saldata" in row.note
 
 
+def test_bundle_trova_combinazione_che_il_greedy_perdeva():
+  """Bonifico = 4 fatture non contigue: il greedy sui più vecchi falliva."""
+  from app.services.banca_service import allocate_supplier_bundles, _subset_sum_invoices
+
+  supplier = "ACME FORNITURE SRL"
+  invoices = [
+    _inv(id=1, invoice_number="1", invoice_date=date(2026, 1, 1), supplier_name=supplier, total=Decimal("10.00")),
+    _inv(id=2, invoice_number="2", invoice_date=date(2026, 1, 2), supplier_name=supplier, total=Decimal("20.00")),
+    _inv(id=3, invoice_number="3", invoice_date=date(2026, 1, 3), supplier_name=supplier, total=Decimal("30.00")),
+    _inv(id=4, invoice_number="4", invoice_date=date(2026, 1, 4), supplier_name=supplier, total=Decimal("40.00")),
+    _inv(id=5, invoice_number="5", invoice_date=date(2026, 1, 5), supplier_name=supplier, total=Decimal("100.00")),
+  ]
+  # 10+30+40=80 — greedy prende 10+20+30=60 poi +40=100 e non trova 80
+  chosen = _subset_sum_invoices(invoices, Decimal("80.00"), max_items=6)
+  assert chosen is not None
+  assert {inv.id for inv in chosen} == {1, 3, 4}
+
+  mov = _mov(
+    id=99,
+    amount=Decimal("80.00"),
+    counterparty=supplier,
+    movement_date=date(2026, 2, 1),
+    description="Bonifico SEPA",
+    causale="",
+  )
+  allocated = allocate_supplier_bundles(invoices, [{"mov": mov, "blob": supplier, "out": {}}])
+  assert set(allocated) == {1, 3, 4}
+  assert allocated[1]["bundle"] is True
+  assert allocated[1]["bundle_size"] == 3
+
+
+def test_bundle_preferisce_blocco_consecutivo():
+  from app.services.banca_service import _subset_sum_invoices
+
+  supplier = "BETA SPA"
+  invoices = [
+    _inv(id=1, invoice_number="1", invoice_date=date(2026, 3, 1), supplier_name=supplier, total=Decimal("50.00")),
+    _inv(id=2, invoice_number="2", invoice_date=date(2026, 3, 2), supplier_name=supplier, total=Decimal("50.00")),
+    _inv(id=3, invoice_number="3", invoice_date=date(2026, 5, 1), supplier_name=supplier, total=Decimal("50.00")),
+    _inv(id=4, invoice_number="4", invoice_date=date(2026, 5, 2), supplier_name=supplier, total=Decimal("50.00")),
+  ]
+  # Due coppie da 100: preferisce quella consecutiva più stretta (marzo o maggio — stesso span 1g)
+  # Con span uguale e entrambe contigue → ambigue → None
+  assert _subset_sum_invoices(invoices, Decimal("100.00")) is None
+
+  # Solo una coppia consecutiva unica se le altre non sommano
+  invoices2 = [
+    _inv(id=1, invoice_number="1", invoice_date=date(2026, 3, 1), supplier_name=supplier, total=Decimal("40.00")),
+    _inv(id=2, invoice_number="2", invoice_date=date(2026, 3, 2), supplier_name=supplier, total=Decimal("60.00")),
+    _inv(id=3, invoice_number="3", invoice_date=date(2026, 5, 1), supplier_name=supplier, total=Decimal("30.00")),
+    _inv(id=4, invoice_number="4", invoice_date=date(2026, 8, 1), supplier_name=supplier, total=Decimal("70.00")),
+  ]
+  # 40+60=100 (contigui) e 30+70=100 (non contigui) → preferisce marzo
+  chosen = _subset_sum_invoices(invoices2, Decimal("100.00"))
+  assert {inv.id for inv in chosen} == {1, 2}
+
+
+def test_bundle_ambiguo_due_coppie_uguali_non_assegna():
+  from app.services.banca_service import allocate_supplier_bundles, _subset_sum_invoices
+
+  supplier = "GAMMA SRL"
+  invoices = [
+    _inv(id=1, invoice_number="1", invoice_date=date(2026, 1, 1), supplier_name=supplier, total=Decimal("100.00")),
+    _inv(id=2, invoice_number="2", invoice_date=date(2026, 6, 1), supplier_name=supplier, total=Decimal("100.00")),
+  ]
+  # Una sola coppia → ok
+  mov = _mov(id=1, amount=Decimal("200.00"), counterparty=supplier, movement_date=date(2026, 7, 1))
+  assert set(allocate_supplier_bundles(invoices, [{"mov": mov, "blob": supplier, "out": {}}])) == {1, 2}
+
+  # Due blocchi contigui con lo stesso span (1 giorno) → ambigui, non auto
+  invoices3 = [
+    _inv(id=1, invoice_number="1", invoice_date=date(2026, 1, 1), supplier_name=supplier, total=Decimal("100.00")),
+    _inv(id=2, invoice_number="2", invoice_date=date(2026, 1, 2), supplier_name=supplier, total=Decimal("100.00")),
+    _inv(id=3, invoice_number="3", invoice_date=date(2026, 6, 1), supplier_name=supplier, total=Decimal("100.00")),
+    _inv(id=4, invoice_number="4", invoice_date=date(2026, 6, 2), supplier_name=supplier, total=Decimal("100.00")),
+  ]
+  assert _subset_sum_invoices(invoices3, Decimal("200.00")) is None
+  mov2 = _mov(id=2, amount=Decimal("200.00"), counterparty=supplier, movement_date=date(2026, 8, 1))
+  assert allocate_supplier_bundles(invoices3, [{"mov": mov2, "blob": supplier, "out": {}}]) == {}
+
+
 def test_entrata_score_zero():
   inv = _inv()
   mov = _mov(movement_type="entrata")

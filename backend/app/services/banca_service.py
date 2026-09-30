@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from itertools import combinations
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import bisect
 import re
 
@@ -1858,68 +1859,96 @@ def allocate_number_ranges(
   return out
 
 
+_SUBSET_POOL_MAX = 20  # C(20,6) ≈ 39k: enumerazione esatta ancora leggera
+_SUBSET_CANDIDATE_WIRES = 120
+_SUBSET_TOL = Decimal("0.05")
+
+
+def _subset_pick_best(
+  hits: Sequence[Tuple[int, ...]],
+  amounts: Sequence[Tuple[Any, Decimal]],
+) -> Optional[Tuple[int, ...]]:
+  """Tra sottoinsiemi della stessa taglia: preferisci indici contigui, poi span date minimo.
+
+  Se restano più candidati equivalenti → None (ambiguo, non auto-abbinare).
+  """
+  if not hits:
+    return None
+  if len(hits) == 1:
+    return hits[0]
+
+  def _span_days(idxs: Tuple[int, ...]) -> int:
+    dates = [_as_date(getattr(amounts[i][0], "invoice_date", None)) or date.min for i in idxs]
+    return (max(dates) - min(dates)).days
+
+  contiguous = [h for h in hits if h[-1] - h[0] == len(h) - 1]
+  pool = contiguous if contiguous else list(hits)
+  if len(pool) == 1:
+    return pool[0]
+  best_span = min(_span_days(h) for h in pool)
+  tight = [h for h in pool if _span_days(h) == best_span]
+  if len(tight) == 1:
+    return tight[0]
+  return None
+
+
 def _subset_sum_invoices(
   invoices: List[Any],
   target: Decimal,
   *,
   max_items: int = 6,
+  around: Optional[date] = None,
 ) -> Optional[List[Any]]:
   """Sottoinsieme (2…max_items) la cui somma totale ≈ target (±0,05 €).
 
-  Evita DFS esponenziale: somma totale, coppie, terne, poi greedy sui più vecchi.
+  Enumerazione esatta sul pool (no greedy). Preferisce il sottoinsieme più piccolo;
+  a parità, fatture consecutive per data / span minimo. Ambiguità → None.
   """
-  amounts: List[tuple[Any, Decimal]] = []
+  amounts: List[Tuple[Any, Decimal]] = []
   for inv in invoices:
     residuo = _invoice_residuo(inv)
     amt = residuo if residuo > Decimal("0.009") else abs(_dec(getattr(inv, "total", 0)))
-    if amt > Decimal("0.009") and amt <= target + Decimal("0.05"):
+    if amt > Decimal("0.009") and amt <= target + _SUBSET_TOL:
       amounts.append((inv, amt))
   if len(amounts) < 2:
     return None
-  # Al massimo 12 fatture: oltre è troppo lento e raro
+
+  if len(amounts) > _SUBSET_POOL_MAX:
+    if around is not None:
+      amounts.sort(
+        key=lambda item: (
+          abs(((_as_date(getattr(item[0], "invoice_date", None)) or around) - around).days),
+          item[1],
+        )
+      )
+    else:
+      amounts.sort(
+        key=lambda item: (_as_date(getattr(item[0], "invoice_date", None)) or date.min, item[1])
+      )
+    amounts = amounts[:_SUBSET_POOL_MAX]
+
+  # Ordine cronologico: serve per preferire blocchi contigui (saldo periodo)
   amounts.sort(key=lambda item: (_as_date(getattr(item[0], "invoice_date", None)) or date.min, item[1]))
-  if len(amounts) > 12:
-    amounts = amounts[:12]
   n = len(amounts)
-  tol = Decimal("0.05")
+  tol = _SUBSET_TOL
+  limit = min(max_items, n)
 
   full = sum((amt for _, amt in amounts), Decimal("0.00"))
-  if abs(full - target) <= tol and 2 <= n <= max_items:
+  if abs(full - target) <= tol and 2 <= n <= limit:
     return [inv for inv, _ in amounts]
 
-  # Coppie
-  for i in range(n):
-    for j in range(i + 1, n):
-      if abs(amounts[i][1] + amounts[j][1] - target) <= tol:
-        return [amounts[i][0], amounts[j][0]]
-
-  if max_items < 3:
-    return None
-
-  # Terne
-  for i in range(n):
-    for j in range(i + 1, n):
-      partial = amounts[i][1] + amounts[j][1]
-      if partial > target + tol:
-        continue
-      for k in range(j + 1, n):
-        if abs(partial + amounts[k][1] - target) <= tol:
-          return [amounts[i][0], amounts[j][0], amounts[k][0]]
-
-  if max_items < 4 or n < 4:
-    return None
-
-  # Greedy: fatture più vecchie finché la somma non arriva (tolleranza 0,05)
-  chosen: List[Any] = []
-  running = Decimal("0.00")
-  for inv, amt in amounts:
-    if len(chosen) >= max_items:
-      break
-    if running + amt <= target + tol:
-      chosen.append(inv)
-      running += amt
-      if abs(running - target) <= tol and len(chosen) >= 2:
-        return chosen
+  for k in range(2, limit + 1):
+    hits: List[Tuple[int, ...]] = []
+    for idxs in combinations(range(n), k):
+      total = sum((amounts[i][1] for i in idxs), Decimal("0.00"))
+      if abs(total - target) <= tol:
+        hits.append(idxs)
+    if not hits:
+      continue
+    best = _subset_pick_best(hits, amounts)
+    if best is None:
+      return None
+    return [amounts[i][0] for i in best]
   return None
 
 
@@ -1983,9 +2012,9 @@ def allocate_supplier_bundles(
     if not beneficiary:
       continue
     candidates.append((amt, meta, beneficiary))
-  # Al massimo 80 bonifici candidati per richiesta (i più grandi)
+  # Priorità ai bonifici più grandi; finestra ampliata per non perdere multi medi
   candidates.sort(key=lambda item: item[0], reverse=True)
-  candidates = candidates[:80]
+  candidates = candidates[:_SUBSET_CANDIDATE_WIRES]
   for amt, meta, beneficiary in candidates:
     pool = [
       inv
@@ -1996,7 +2025,8 @@ def allocate_supplier_bundles(
     ]
     if len(pool) < 2:
       continue
-    chosen = _subset_sum_invoices(pool, amt, max_items=6)
+    mov_d = _as_date(getattr(meta["mov"], "movement_date", None))
+    chosen = _subset_sum_invoices(pool, amt, max_items=6, around=mov_d)
     if not chosen or len(chosen) < 2:
       continue
     mov_id = int(getattr(meta["mov"], "id") or 0)
