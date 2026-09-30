@@ -1,8 +1,10 @@
 [Unit]
-Description=ATLAS agente Pagamenti + banca (mar, mer, ven alle 9:30 e alle 18:30)
+Description=ATLAS agente Pagamenti + banca (mar, mer, ven alle 9:30 e 18:30 ora di Roma)
 Requires=pagamenti-bank-watch.service
 
 [Timer]
+# Orari italiani (CET/CEST), indipendenti dal fuso del server
+Timezone=Europe/Rome
 OnCalendar=Tue,Wed,Fri *-*-* 09:30:00
 OnCalendar=Tue,Wed,Fri *-*-* 18:30:00
 Persistent=true

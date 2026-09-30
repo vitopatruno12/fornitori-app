@@ -4,6 +4,7 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now pagamenti-bank-watch.timer
 #   sudo systemctl list-timers pagamenti-bank-watch.timer
+#   # Verifica fuso: systemctl cat pagamenti-bank-watch.timer | grep -i Timezone
 #
 # Avvio manuale:
 #   sudo systemctl start pagamenti-bank-watch.service
