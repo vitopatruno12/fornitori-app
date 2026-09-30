@@ -101,6 +101,7 @@ export function SchedaContabileFornitorePage({
   async function reload() {
     if (!companyId) {
       setData(null)
+      setLoading(false)
       return
     }
     setLoading(true)

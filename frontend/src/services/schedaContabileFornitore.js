@@ -60,6 +60,9 @@ function formatSaldoPasscom(value) {
 
 /**
  * Costruisce elenco fornitori + movimenti scheda (FR/PG) per società e periodo.
+ *
+ * Non lanciare sync_from_bank qui: sulla scheda serve solo lettura e la sync
+ * completa può appendersi per minuti (Enable Banking / riconciliazione).
  */
 export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo } = {}) {
   const companyId = String(company || '').trim()
@@ -74,10 +77,25 @@ export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo }
   }
 
   const warnings = []
+  const withTimeout = (promise, ms, label) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error(`${label} troppo lenta (oltre ${Math.round(ms / 1000)}s)`)), ms)
+      }),
+    ])
+
   const [invRes, issuedRes, bankRes] = await Promise.allSettled([
-    fetchInvoices({ company: companyId, sync_from_bank: true }),
-    fetchIssuedInvoices({ company: companyId }),
-    fetchBancaMovimenti({}),
+    withTimeout(fetchInvoices({ company: companyId }), 45000, 'Fatture ricevute'),
+    withTimeout(fetchIssuedInvoices({ company: companyId, limit: 500 }), 45000, 'Fatture emesse'),
+    withTimeout(
+      fetchBancaMovimenti({
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      }),
+      45000,
+      'Movimenti banca',
+    ),
   ])
 
   const invoices = invRes.status === 'fulfilled'
@@ -87,7 +105,9 @@ export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo }
         ? invRes.value
         : []
     : []
-  if (invRes.status === 'rejected') warnings.push('Fatture ricevute/registrate non disponibili.')
+  if (invRes.status === 'rejected') {
+    warnings.push(invRes.reason?.message || 'Fatture ricevute/registrate non disponibili.')
+  }
 
   const issued = issuedRes.status === 'fulfilled'
     ? Array.isArray(issuedRes.value?.items)
@@ -96,7 +116,9 @@ export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo }
         ? issuedRes.value
         : []
     : []
-  if (issuedRes.status === 'rejected') warnings.push('Fatture emesse non disponibili.')
+  if (issuedRes.status === 'rejected') {
+    warnings.push(issuedRes.reason?.message || 'Fatture emesse non disponibili.')
+  }
 
   const bankMovements = bankRes.status === 'fulfilled'
     ? Array.isArray(bankRes.value?.items)
@@ -105,7 +127,9 @@ export async function loadSchedaContabileFornitori({ company, dateFrom, dateTo }
         ? bankRes.value
         : []
     : []
-  if (bankRes.status === 'rejected') warnings.push('Movimenti banca non disponibili.')
+  if (bankRes.status === 'rejected') {
+    warnings.push(bankRes.reason?.message || 'Movimenti banca non disponibili.')
+  }
 
   const built = buildSchedaContabileFornitori(invoices, issued, bankMovements, {
     company: companyId,
