@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchStaffLocaleAccessCode, fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
 import { getOperatorStationStaffLocaleName, getOperatorStationActivitySlug, operatorStationLocaleNameMatches } from '../utils/operatorStationLocale.js'
 import {
   closeOtherOperatorStationStaffSessions,
@@ -145,32 +145,35 @@ export default function OperatorStationStaffGate({
   }, [stationId, refreshLocaleNames])
 
   const [autoOpenDone, setAutoOpenDone] = useState(false)
+  const suppressAutoOpenRef = useRef(false)
 
   useEffect(() => {
-    if (!stationStaffLocaleName) return
+    if (!stationStaffLocaleName || suppressAutoOpenRef.current) return
     void (async () => {
-      const stored = await readStoredLocaleAccessCode(stationStaffLocaleName)
-      if (isValidLocaleAccessCode(stored)) {
-        setLocaleAccessCode(stored)
-        // Auto-apre la sessione se il codice era già salvato (evita click manuale dopo ricarica).
+      let code = await readStoredLocaleAccessCode(stationStaffLocaleName)
+      if (!isValidLocaleAccessCode(code)) {
+        code = await fetchStaffLocaleAccessCode(stationStaffLocaleName)
+      }
+      if (isValidLocaleAccessCode(code)) {
+        setLocaleAccessCode(code)
         if (!sessionOpen) {
           const summaries = await fetchStaffLocalePacks().catch(() => [])
           setLocaleSummaries(Array.isArray(summaries) ? summaries : [])
           const localeName = resolveCanonicalLocaleName(stationStaffLocaleName, summaries, getOperatorStationActivitySlug(stationId))
           if (localeName) {
-            const access = await verifyLocaleZoneAccess(localeName, stored, summaries, getOperatorStationActivitySlug(stationId))
+            const access = await verifyLocaleZoneAccess(localeName, code, summaries, getOperatorStationActivitySlug(stationId))
             if (access.ok) {
-              setOperatorStationStaffSession(stationId, access.localeName || localeName, true)
+              const openName = access.localeName || localeName
+              setOperatorStationStaffSession(stationId, openName, true)
+              await upsertStoredLocaleAccessCode(openName, code)
               setSessionTick((n) => n + 1)
               void preloadOperatorStationMembers(stationId)
               onSessionChange?.(true)
             }
           }
         }
-        setAutoOpenDone(true)
-      } else {
-        setAutoOpenDone(true)
       }
+      setAutoOpenDone(true)
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stationStaffLocaleName, stationId])
@@ -217,6 +220,7 @@ export default function OperatorStationStaffGate({
   function handleClose() {
     const localeName = stationStaffLocaleName
     if (!localeName) return
+    suppressAutoOpenRef.current = true
     setOperatorStationStaffSession(stationId, localeName, false)
     invalidateOperatorStationMembersCache(stationId, localeName)
     setLocaleAccessCode('')
@@ -234,8 +238,8 @@ export default function OperatorStationStaffGate({
           {banner ? 'Accesso personale' : title}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem' }}>
-          Locale: <strong>{stationStaffLocaleName || '—'}</strong>. Inserisci il codice e clicca <strong>Accedi</strong> per
-          visualizzare i dati di questa sede.
+          Locale: <strong>{stationStaffLocaleName || '—'}</strong>. Il codice si applica da solo e il locale si apre.
+          I dati di questa sede restano nascosti finché l’accesso non è aperto.
         </p>
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {success ? <div className="alert alert-info">{success}</div> : null}

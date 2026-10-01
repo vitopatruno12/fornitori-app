@@ -222,6 +222,18 @@ export function staffDocumentFileUrl(doc) {
   return path ? apiUrl(path) : ''
 }
 
+export async function fetchStaffLocaleAccessCode(localeName) {
+  const name = String(localeName || '').trim()
+  if (!name) return ''
+  try {
+    const data = await apiFetch(`/staff/locale-packs/access-code?name=${encodeURIComponent(name)}`)
+    const code = String(data?.access_code || '').replace(/\D/g, '')
+    return code.length === 6 ? code : ''
+  } catch {
+    return ''
+  }
+}
+
 export async function fetchStaffLocalePacks() {
   const data = await apiFetch('/staff/locale-packs', SYNC_FETCH)
   return asArray(data, 'staff/locale-packs')

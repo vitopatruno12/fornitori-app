@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   fetchStaffMembers,
@@ -12,6 +12,7 @@ import {
   deleteStaffShift,
   deleteStaffShiftsBulk,
   fetchStaffPayrollMonths,
+  fetchStaffLocaleAccessCode,
   fetchStaffLocalePacks,
   fetchStaffLocalePack,
   upsertStaffLocalePack,
@@ -1961,6 +1962,27 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     setPayrollImporto({})
   }, [])
 
+  const suppressStaffAutoOpenRef = useRef(false)
+
+  useEffect(() => {
+    if (!operatorMode || !operatorStationId) return undefined
+    const name = normalizeLocaleName(stationStaffLocaleName)
+    if (!name || suppressStaffAutoOpenRef.current) return undefined
+    let cancelled = false
+    void (async () => {
+      setLocaleStaffName((prev) => (normalizeLocaleName(prev) ? prev : name))
+      let code = await readStoredLocaleAccessCode(name)
+      if (!isValidLocaleAccessCode(code)) code = await fetchStaffLocaleAccessCode(name)
+      if (cancelled || !isValidLocaleAccessCode(code) || suppressStaffAutoOpenRef.current) return
+      setLocaleAccessCode(code)
+      if (isStaffLocaleSessionOpen(name)) return
+      await handleOpenLocaleSession(code, name)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [operatorMode, operatorStationId, stationStaffLocaleName])
+
   useEffect(() => {
     const n = normalizeLocaleName(localeStaffName)
     if (!n) return
@@ -3207,8 +3229,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     return { ok: false, wrongCode: true }
   }
 
-  async function handleOpenLocaleSession() {
-    const localeName = resolveCanonicalLocaleName(localeStaffName)
+  async function handleOpenLocaleSession(codeOverride, localeOverride) {
+    const localeName = resolveCanonicalLocaleName(localeOverride || localeStaffName)
     if (!localeName) {
       setError('Inserisci o seleziona il locale da aprire.')
       return
@@ -3216,7 +3238,9 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (localeName !== normalizeLocaleName(localeStaffName)) {
       setLocaleStaffName(localeName)
     }
-    const code = normalizeLocaleAccessCode(localeAccessCode)
+    const code = normalizeLocaleAccessCode(
+      codeOverride != null && codeOverride !== '' ? codeOverride : localeAccessCode,
+    )
     const alreadyOpen = isStaffLocaleSessionOpen(localeName)
     setLocaleSessionBusy(true)
     setError('')
@@ -3277,6 +3301,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       return
     }
     const wasOpen = isStaffLocaleSessionOpen(localeName)
+    suppressStaffAutoOpenRef.current = true
     setStaffLocaleSessionOpen(localeName, false)
     setLocaleAccessCode('')
     setLocaleSessionBusy(false)
@@ -3284,7 +3309,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     clearStaffDataFromMemory()
     setSuccess(
       wasOpen
-        ? `Locale «${localeName}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`
+        ? `Locale «${localeName}» chiuso. Riselezionalo per riaprirlo.`
         : `Locale «${localeName}» già chiuso.`,
     )
   }
@@ -4741,13 +4766,18 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setStaffLocaleSessionOpen(prev, false)
       clearStaffDataFromMemory()
     }
+    suppressStaffAutoOpenRef.current = false
     setLocaleStaffName(name)
     if (!name) {
       setLocaleAccessCode('')
       return
     }
-    const stored = await readStoredLocaleAccessCode(name)
-    setLocaleAccessCode(isValidLocaleAccessCode(stored) ? stored : '')
+    let code = await readStoredLocaleAccessCode(name)
+    if (!isValidLocaleAccessCode(code)) code = await fetchStaffLocaleAccessCode(name)
+    setLocaleAccessCode(isValidLocaleAccessCode(code) ? code : '')
+    if (isValidLocaleAccessCode(code)) {
+      await handleOpenLocaleSession(code, name)
+    }
   }
 
   function handleMembersBackupLocaleChange(value) {
@@ -5103,13 +5133,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           <p className="staff-page-lead">
             {operatorMode ? (
               <>
-                Apri la postazione con il <strong>codice a 6 cifre</strong> per dipendenti e turni di{' '}
-                <strong>{stationStaffLocaleName || 'questo locale'}</strong>. I dati delle altre sedi restano nascosti.
+                Il codice della postazione si applica da solo. Dipendenti e turni di{' '}
+                <strong>{stationStaffLocaleName || 'questo locale'}</strong> restano separati dalle altre sedi.
               </>
             ) : (
               <>
-                Centro operativo del personale: dipendenti, turni, report e stipendi. Scegli il locale, inserisci il codice e
-                clicca <strong>Accedi</strong> per lavorare in sicurezza su una sola sede.
+                Centro operativo del personale: dipendenti, turni, report e stipendi. Scegli il locale: il codice si applica
+                da solo e la sede si apre.
               </>
             )}
           </p>
@@ -5198,7 +5228,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               <div>
                 <h2 className="staff-hub-gate-title">{operatorMode ? 'Apri la postazione' : 'Apri un locale'}</h2>
                 <p className="staff-hub-gate-lead">
-                  Inserisci il codice a 6 cifre e clicca Accedi. Senza apertura i dipendenti restano nascosti.
+                  Scegli il locale: il codice a 6 cifre si applica da solo. Senza apertura i dipendenti restano nascosti.
                 </p>
               </div>
               <span className={`staff-hub-status staff-hub-status--closed`}>CHIUSO</span>
@@ -5534,8 +5564,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               {activeLocaleSessionOpen ? 'APERTO' : 'CHIUSO'}
             </strong>
             {' — '}
-            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: apri con <strong>Accedi</strong> (come in Prima Nota) e
-            chiudi con <strong>Chiudi</strong>. Senza apertura non si modificano gli elenchi protetti.
+            Ogni locale salvato ha un <strong>codice a 6 cifre</strong>: alla scelta si applica da solo.
+            Con <strong>Chiudi</strong> lo richiudi. Senza apertura non si modificano gli elenchi protetti.
           </p>
         </div>
         {!activeLocaleSessionOpen ? (

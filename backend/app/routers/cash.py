@@ -96,6 +96,11 @@ def list_locale_packs(db: Session = Depends(get_db)):
         return []
 
 
+@router.get("/locale-packs/{activity_slug}/access-code")
+def reveal_locale_access_code(activity_slug: str, db: Session = Depends(get_db)):
+    return {"access_code": prima_nota_locale_service.reveal_activity_access_code(db, activity_slug)}
+
+
 @router.get("/locale-packs/{activity_slug}", response_model=PrimaNotaLocalePackRead)
 def get_locale_pack(
     activity_slug: str,

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
+import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaAccessCode, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
 import { invalidateCachePrefix } from '../offline/offlineCache.js'
-import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
+import { fetchStaffLocaleAccessCode, fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
 import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
@@ -250,6 +250,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [saveCodeBusy, setSaveCodeBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [localeAccessMetaReady, setLocaleAccessMetaReady] = useState(false)
+  const [pauseAutoUnlockSlug, setPauseAutoUnlockSlug] = useState('')
+  const unlockRequestRef = useRef(0)
 
   const protectedSlugs = useMemo(() => {
     const slugs = new Set()
@@ -412,10 +414,12 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       protectedSlugs.includes(slug) &&
       [...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug)
     if (alreadyOpen) return true
+    const requestId = ++unlockRequestRef.current
     setUnlockBusy(true)
     setError('')
     try {
       const access = await verifyLocaleAccess(activityId, code)
+      if (unlockRequestRef.current !== requestId) return false
       if (!access.ok) {
         if (!access.needsCode) {
           setError('Codice errato: non puoi aprire questo locale.')
@@ -437,9 +441,23 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
+  async function resolveLocaleAccessCode(activityId) {
+    const slug = String(activityId || '').trim().toLowerCase()
+    if (!slug) return ''
+    let code = readStoredPrimaNotaAccessCode(slug)
+    if (isValidLocaleAccessCode(code)) return code
+    code = await fetchPrimaNotaAccessCode(slug)
+    if (isValidLocaleAccessCode(code)) return code
+    const staffName = resolveStaffLocaleName(slug, staffLocaleSummaries)
+    if (!staffName) return ''
+    code = await fetchStaffLocaleAccessCode(staffName)
+    return isValidLocaleAccessCode(code) ? code : ''
+  }
+
   function handleCloseLocaleAccess() {
     const slug = String(activeActivity || '').trim().toLowerCase()
     if (!slug) return
+    setPauseAutoUnlockSlug(slug)
     const wasOpen =
       [...unlockedSlugs].some((s) => String(s || '').trim().toLowerCase() === slug) ||
       isValidLocaleAccessCode(readStoredPrimaNotaAccessCode(slug))
@@ -454,7 +472,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setUnlockBusy(false)
     setError('')
     if (wasOpen) {
-      setSuccess(`Registro «${activeActivityLabel}» chiuso. Inserisci il codice e clicca Accedi per riaprire.`)
+      setSuccess(`Registro «${activeActivityLabel}» chiuso. Riselezionalo per riaprirlo.`)
     } else {
       setSuccess(`Registro «${activeActivityLabel}» già chiuso.`)
     }
@@ -1832,12 +1850,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         saveCodeBusy={saveCodeBusy}
         deleteBusy={deleteBusy}
         autoPromptLocaleId={needsLocaleUnlock ? activeActivity : ''}
+        resolveAccessCode={resolveLocaleAccessCode}
+        pauseAutoUnlockId={pauseAutoUnlockSlug}
+        onResumeAutoUnlock={() => setPauseAutoUnlockSlug('')}
       />
 
       {needsLocaleUnlock ? (
         <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
-          Il registro di <strong>{activeActivityLabel}</strong> è protetto: inserisci il codice a 6 cifre e clicca{' '}
-          <strong>Accedi</strong> per continuare.
+          {String(pauseAutoUnlockSlug || '').trim().toLowerCase() === String(activeActivity || '').trim().toLowerCase()
+            ? <>Registro «{activeActivityLabel}» chiuso. Riselezionalo: il codice si applica da solo.</>
+            : <>Il registro di <strong>{activeActivityLabel}</strong> si apre da solo con il codice del locale.</>}
         </div>
       ) : null}
 

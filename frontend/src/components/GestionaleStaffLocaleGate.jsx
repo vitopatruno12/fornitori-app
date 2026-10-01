@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import StaffGestionaleLocaleSelect from './StaffGestionaleLocaleSelect.jsx'
-import { fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
+import { fetchStaffLocaleAccessCode, fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService.js'
 import {
   closeOtherGestionaleStaffLocaleSessions,
   isGestionaleStaffLocaleSessionOpen,
@@ -89,6 +89,9 @@ export default function GestionaleStaffLocaleGate({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [sessionTick, setSessionTick] = useState(0)
+  const suppressAutoOpenRef = useRef('')
+  const onSessionChangeRef = useRef(onSessionChange)
+  onSessionChangeRef.current = onSessionChange
 
   const sessionOpen = useMemo(() => {
     void sessionTick
@@ -104,6 +107,7 @@ export default function GestionaleStaffLocaleGate({
       }
       writeGestionaleStaffLocale(next)
       setLocaleNameState(next)
+      suppressAutoOpenRef.current = ''
       setLocaleAccessCode('')
       setError('')
       setSuccess('')
@@ -159,14 +163,49 @@ export default function GestionaleStaffLocaleGate({
   }, [sessionOpen, localeName])
 
   useEffect(() => {
-    if (!localeName) return
+    if (!localeName || sessionOpen) return undefined
+    if (
+      suppressAutoOpenRef.current
+      && gestionaleLocaleNamesEqual(suppressAutoOpenRef.current, localeName)
+    ) {
+      return undefined
+    }
+    let cancelled = false
     void (async () => {
-      const stored = await readStoredLocaleAccessCode(localeName)
-      if (isValidLocaleAccessCode(stored)) {
-        setLocaleAccessCode(stored)
+      let code = await readStoredLocaleAccessCode(localeName)
+      if (!isValidLocaleAccessCode(code)) {
+        code = await fetchStaffLocaleAccessCode(localeName)
+      }
+      if (cancelled || !isValidLocaleAccessCode(code)) return
+      if (
+        suppressAutoOpenRef.current
+        && gestionaleLocaleNamesEqual(suppressAutoOpenRef.current, localeName)
+      ) {
+        return
+      }
+      setLocaleAccessCode(code)
+      setBusy(true)
+      setError('')
+      try {
+        const summaries =
+          localeSummaries.length > 0 ? localeSummaries : await fetchStaffLocalePacks().catch(() => [])
+        const access = await verifyLocaleZoneAccess(localeName, code, summaries)
+        if (cancelled || !access.ok) return
+        const openName = access.localeName || localeName
+        closeOtherGestionaleStaffLocaleSessions(openName)
+        setGestionaleStaffLocaleSessionOpen(openName, true)
+        await upsertStoredLocaleAccessCode(openName, code)
+        setSessionTick((n) => n + 1)
+        onSessionChangeRef.current?.(true, openName, code)
+        setSuccess(`Locale «${openName}» aperto.`)
+      } finally {
+        if (!cancelled) setBusy(false)
       }
     })()
-  }, [localeName])
+    return () => {
+      cancelled = true
+    }
+  }, [localeName, sessionOpen, localeSummaries])
 
   async function handleOpen() {
     const name = String(localeName || '').trim()
@@ -209,6 +248,7 @@ export default function GestionaleStaffLocaleGate({
     const name = String(localeName || '').trim()
     if (!name) return
     setGestionaleStaffLocaleSessionOpen(name, false)
+    suppressAutoOpenRef.current = name
     setLocaleAccessCode('')
     setSessionTick((n) => n + 1)
     onSessionChange?.(false, name, '')
@@ -224,8 +264,8 @@ export default function GestionaleStaffLocaleGate({
           {title}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '-0.35rem', marginBottom: '0.85rem' }}>
-          Scegli la <strong>società / locale</strong> (come in Personale), inserisci il <strong>codice a 6 cifre</strong> e
-          clicca <strong>Accedi</strong>. Buste paga, contratti e documenti restano divisi per sede.
+          Scegli la <strong>società / locale</strong>: il codice a 6 cifre si applica da solo e il locale si apre.
+          Buste paga, contratti e documenti restano divisi per sede.
         </p>
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {success ? <div className="alert alert-info">{success}</div> : null}
@@ -282,7 +322,7 @@ export default function GestionaleStaffLocaleGate({
         </div>
         {!sessionOpen ? (
           <div className="alert alert-warning" style={{ marginTop: '0.85rem', marginBottom: 0 }}>
-            Seleziona il locale e apri con il codice per vedere i dati. Il personale di altri locali non viene mostrato.
+            Seleziona il locale: se il codice è già noto, l’accesso si apre da solo. Il personale di altri locali non viene mostrato.
           </div>
         ) : null}
       </section>

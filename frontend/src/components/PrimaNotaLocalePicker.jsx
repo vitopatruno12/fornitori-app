@@ -37,6 +37,9 @@ export default function PrimaNotaLocalePicker({
   saveCodeBusy = false,
   deleteBusy = false,
   autoPromptLocaleId = '',
+  resolveAccessCode,
+  pauseAutoUnlockId = '',
+  onResumeAutoUnlock,
 }) {
   const [open, setOpen] = useState(false)
   const [newLocaleName, setNewLocaleName] = useState('')
@@ -44,6 +47,10 @@ export default function PrimaNotaLocalePicker({
   const [pendingCode, setPendingCode] = useState('')
   const [codePromptError, setCodePromptError] = useState('')
   const rootRef = useRef(null)
+  const resolveAccessCodeRef = useRef(resolveAccessCode)
+  const verifyLocaleRef = useRef(onVerifyAndSelectLocale)
+  resolveAccessCodeRef.current = resolveAccessCode
+  verifyLocaleRef.current = onVerifyAndSelectLocale
 
   const currentLabel = localeLabel(activeActivity, locales)
   const protectedSet = useMemo(
@@ -85,6 +92,19 @@ export default function PrimaNotaLocalePicker({
     return isProtectedLocale(id) && !isUnlockedLocale(id)
   }
 
+  async function applyKnownCode(id) {
+    const code = normalizeLocaleAccessCode(await resolveAccessCodeRef.current?.(id))
+    if (!isValidLocaleAccessCode(code)) return false
+    setPendingCode(code)
+    const ok = await verifyLocaleRef.current?.(id, code)
+    if (!ok) return false
+    setPendingLocaleId('')
+    setPendingCode('')
+    setCodePromptError('')
+    setOpen(false)
+    return true
+  }
+
   useEffect(() => {
     const id = String(autoPromptLocaleId || '').trim()
     if (!id || !requiresCodeBeforeOpen(id)) {
@@ -94,20 +114,32 @@ export default function PrimaNotaLocalePicker({
         if (!requiresCodeBeforeOpen(prev)) return ''
         return prev
       })
-      return
+      return undefined
     }
+    const paused = String(pauseAutoUnlockId || '').trim().toLowerCase() === id.toLowerCase()
     setPendingLocaleId(id)
     setPendingCode('')
     setCodePromptError('')
-  }, [autoPromptLocaleId, protectedSlugs, unlockedSlugs])
+    if (paused) return undefined
+    let cancelled = false
+    void (async () => {
+      const opened = await applyKnownCode(id)
+      if (cancelled || opened) return
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [autoPromptLocaleId, protectedSlugs, unlockedSlugs, pauseAutoUnlockId])
 
   function handlePick(id) {
-    // Seleziona subito (verde), poi chiedi il codice se il registro è ancora chiuso.
+    onResumeAutoUnlock?.()
+    // Seleziona subito (verde), poi il codice noto apre il registro da solo.
     if (!isActiveLocale(id)) onSelect(id)
     if (requiresCodeBeforeOpen(id)) {
       setPendingLocaleId(id)
       setPendingCode('')
       setCodePromptError('')
+      void applyKnownCode(id)
       return
     }
     setPendingLocaleId('')
@@ -248,7 +280,7 @@ export default function PrimaNotaLocalePicker({
             title={
               protectedLocale
                 ? locked
-                  ? 'Registro protetto: inserisci il codice a 6 cifre per aprire il registro'
+                  ? 'Registro protetto: alla scelta il codice si applica e il registro si apre'
                   : 'Registro protetto (registro aperto)'
                 : undefined
             }

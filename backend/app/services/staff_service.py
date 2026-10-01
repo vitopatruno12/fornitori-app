@@ -891,6 +891,20 @@ def request_access_code_otp(
     return staff_schema.AccessCodeOtpRequestOut(**payload)
 
 
+def reveal_locale_access_code(db: Session, locale_name: str) -> str:
+    """Codice a 6 cifre del locale, per aprirlo appena viene scelto."""
+    from ..constants.staff_locale_access_defaults import (
+        RETIRED_STAFF_LOCALE_ACCESS_CODES,
+        default_access_code_for_locale,
+    )
+
+    row = _find_locale_pack_by_key(db, locale_name)
+    stored = _normalize_access_code(row.access_code) if row else ""
+    if stored and stored not in RETIRED_STAFF_LOCALE_ACCESS_CODES:
+        return stored
+    return default_access_code_for_locale(locale_name) or ""
+
+
 def get_locale_pack(
     db: Session,
     locale_name: str,

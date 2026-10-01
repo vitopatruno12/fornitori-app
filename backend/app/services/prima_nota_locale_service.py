@@ -155,6 +155,16 @@ def list_locale_packs(db: Session) -> List[PrimaNotaLocalePackSummary]:
         raise
 
 
+def reveal_activity_access_code(db: Session, activity_slug: str) -> str:
+    """Codice a 6 cifre del registro, per aprirlo appena viene scelto."""
+    slug = str(activity_slug or "").strip().lower()
+    row = _find_pack(db, slug) if slug else None
+    stored = _normalize_access_code(row.access_code) if row else ""
+    if stored and stored not in RETIRED_PRIMA_NOTA_ACTIVITY_ACCESS_CODES:
+        return stored
+    return _normalize_access_code(DEFAULT_PRIMA_NOTA_ACTIVITY_ACCESS_CODES.get(slug)) or ""
+
+
 def get_locale_pack(
     db: Session,
     activity_slug: str,

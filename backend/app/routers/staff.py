@@ -227,6 +227,14 @@ def list_locale_packs(db: Session = Depends(get_db)):
     return staff_service.list_locale_packs(db)
 
 
+@router.get("/locale-packs/access-code")
+def reveal_locale_access_code(
+    name: str = Query(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+):
+    return {"access_code": staff_service.reveal_locale_access_code(db, name)}
+
+
 @router.get("/locale-packs/detail", response_model=staff_schema.StaffLocalePackRead)
 def get_locale_pack(
     name: str = Query(..., min_length=1, max_length=255),

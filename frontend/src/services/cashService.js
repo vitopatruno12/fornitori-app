@@ -26,6 +26,18 @@ export async function fetchPrimaNotaLocalePacks() {
   return apiFetch('/cash/locale-packs')
 }
 
+export async function fetchPrimaNotaAccessCode(activitySlug) {
+  const slug = encodeURIComponent(String(activitySlug || '').trim())
+  if (!slug) return ''
+  try {
+    const data = await apiFetch(`/cash/locale-packs/${slug}/access-code`)
+    const code = String(data?.access_code || '').replace(/\D/g, '')
+    return code.length === 6 ? code : ''
+  } catch {
+    return ''
+  }
+}
+
 export async function fetchPrimaNotaLocalePack(activitySlug, accessCode) {
   const slug = encodeURIComponent(String(activitySlug || '').trim())
   const code = String(accessCode || '').replace(/\D/g, '')
