@@ -99,6 +99,7 @@ def _movement_out(
   account: Optional[BankAccount] = None,
   invoice: Optional[Invoice] = None,
   supplier_name: Optional[str] = None,
+  linked_invoices: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
   out = {
     "id": row.id,
@@ -134,6 +135,12 @@ def _movement_out(
       "payment_status": payment_status_label(invoice),
       "company": getattr(invoice, "company", None) or getattr(account, "company", None),
     }
+  if linked_invoices is not None:
+    out["linked_invoices"] = linked_invoices
+  elif invoice is not None:
+    out["linked_invoices"] = [out["matched_invoice"]]
+  else:
+    out["linked_invoices"] = []
   return _enrich_movement_out(out, row)
 
 
@@ -647,28 +654,82 @@ def list_movements(
     q = q.filter(func.lower(BankMovement.counterparty).like(f"%{counterparty.lower()}%"))
   rows = q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(limit).all()
   invoice_ids = {m.matched_invoice_id for m, _ in rows if m.matched_invoice_id}
+  lookup_tokens: List[str] = []
+  for m, _ in rows:
+    lookup_tokens.extend(_parse_linked_invoices_note(getattr(m, "notes", None)))
+    if not _parse_linked_invoices_note(getattr(m, "notes", None)):
+      lookup_tokens.extend(extract_invoice_refs(_movement_search_blob(m)))
+
   invoices_by_id: Dict[int, Invoice] = {}
+  invoices_by_norm: Dict[str, Invoice] = {}
   suppliers_by_id: Dict[int, str] = {}
+
   if invoice_ids:
     inv_rows = db.query(Invoice).filter(Invoice.id.in_(invoice_ids)).all()
-    invoices_by_id = {inv.id: inv for inv in inv_rows}
-    supplier_ids = {inv.supplier_id for inv in inv_rows if inv.supplier_id}
-    if supplier_ids:
-      suppliers_by_id = {
-        s.id: s.name
-        for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()
-      }
-  return [
-    _movement_out(
+    for inv in inv_rows:
+      invoices_by_id[inv.id] = inv
+      key = _normalize_doc_token(str(inv.invoice_number or ""))
+      if key:
+        invoices_by_norm[key] = inv
+
+  digit_cores = sorted(
+    {
+      re.sub(r"\D", "", tok)
+      for tok in lookup_tokens
+      if len(re.sub(r"\D", "", tok)) >= 4
+    },
+    key=len,
+    reverse=True,
+  )
+  if digit_cores:
+    clauses = [Invoice.invoice_number.ilike(f"%{core}%") for core in digit_cores[:80]]
+    if clauses:
+      for inv in db.query(Invoice).filter(or_(*clauses)).limit(2500).all():
+        invoices_by_id[inv.id] = inv
+        key = _normalize_doc_token(str(inv.invoice_number or ""))
+        if key:
+          invoices_by_norm[key] = inv
+
+  supplier_ids = {inv.supplier_id for inv in invoices_by_id.values() if inv.supplier_id}
+  if supplier_ids:
+    suppliers_by_id = {
+      s.id: s.name
+      for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()
+    }
+
+  out_rows: List[Dict[str, Any]] = []
+  for m, a in rows:
+    matched = invoices_by_id.get(m.matched_invoice_id) if m.matched_invoice_id else None
+    sn = None
+    if matched is not None and matched.supplier_id:
+      sn = suppliers_by_id.get(matched.supplier_id)
+    linked = _build_linked_invoices(
       m,
-      a,
-      invoices_by_id.get(m.matched_invoice_id) if m.matched_invoice_id else None,
-      suppliers_by_id.get(invoices_by_id[m.matched_invoice_id].supplier_id)
-      if m.matched_invoice_id and m.matched_invoice_id in invoices_by_id and invoices_by_id[m.matched_invoice_id].supplier_id
-      else None,
+      matched=matched,
+      supplier_name=sn,
+      account=a,
+      invoices_by_norm=invoices_by_norm,
+      suppliers_by_id=suppliers_by_id,
     )
-    for m, a in rows
-  ]
+    # Se abbiamo più fatture ma matched_invoice assente, usa la prima come primaria in UI
+    primary = matched
+    primary_sn = sn
+    if primary is None and linked:
+      first_id = linked[0].get("id")
+      if first_id and first_id in invoices_by_id:
+        primary = invoices_by_id[first_id]
+        if primary.supplier_id:
+          primary_sn = suppliers_by_id.get(primary.supplier_id)
+    out_rows.append(
+      _movement_out(
+        m,
+        a,
+        primary,
+        primary_sn,
+        linked_invoices=linked,
+      )
+    )
+  return out_rows
 
 
 def get_dashboard(db: Session) -> Dict[str, Any]:
@@ -2073,6 +2134,14 @@ _PAYMENT_NOTE_RE = re.compile(
   r"\n?\[pagamenti banca\].*?\[/pagamenti banca\]\s*",
   re.DOTALL,
 )
+_LINKED_INVOICES_NOTE_RE = re.compile(
+  r"\n?\[fatture collegate\].*?\[/fatture collegate\]\s*",
+  re.DOTALL,
+)
+_LINKED_INVOICES_BODY_RE = re.compile(
+  r"\[fatture collegate\](.*?)\[/fatture collegate\]",
+  re.DOTALL,
+)
 
 
 def _eur_it(amount: Decimal) -> str:
@@ -2087,6 +2156,138 @@ def _set_payment_note(row: Any, body: Optional[str]) -> None:
     row.note = f"{note}\n{block}".strip() if note else block
   else:
     row.note = note or None
+
+
+def _parse_linked_invoices_note(notes: Optional[str]) -> List[str]:
+  """Numeri fattura salvati sul bonifico (saldo cumulativo / multi-fattura)."""
+  match = _LINKED_INVOICES_BODY_RE.search(str(notes or ""))
+  if not match:
+    return []
+  body = match.group(1) or ""
+  numbers: List[str] = []
+  seen: set[str] = set()
+  for raw in re.split(r"[\n;,]+", body):
+    line = str(raw or "").strip()
+    if not line or line.startswith("#"):
+      continue
+    key = _normalize_doc_token(line)
+    if not key or key in seen:
+      continue
+    seen.add(key)
+    numbers.append(line)
+  return numbers
+
+
+def _set_linked_invoices_note(
+  mov: Any,
+  numbers: List[str],
+  *,
+  reason: str = "",
+) -> None:
+  """Scrive sul movimento l'elenco fatture pagate dallo stesso bonifico."""
+  note = _LINKED_INVOICES_NOTE_RE.sub("\n", str(getattr(mov, "notes", None) or "")).strip()
+  uniq: List[str] = []
+  seen: set[str] = set()
+  for raw in numbers:
+    n = str(raw or "").strip()
+    if not n:
+      continue
+    key = _normalize_doc_token(n)
+    if not key or key in seen:
+      continue
+    seen.add(key)
+    uniq.append(n)
+  if not uniq:
+    mov.notes = note or None
+    return
+  header = f"# {reason}\n" if reason else ""
+  block = f"[fatture collegate]\n{header}{'; '.join(uniq)}\n[/fatture collegate]"
+  mov.notes = f"{note}\n{block}".strip() if note else block
+
+
+def _invoice_brief(
+  inv: Invoice,
+  *,
+  supplier_name: str = "",
+  account: Optional[BankAccount] = None,
+) -> Dict[str, Any]:
+  return {
+    "id": inv.id,
+    "invoice_number": inv.invoice_number or str(inv.id),
+    "supplier_id": getattr(inv, "supplier_id", None),
+    "supplier_name": supplier_name or "",
+    "total": float(_dec(inv.total)),
+    "payment_status": payment_status_label(inv),
+    "company": getattr(inv, "company", None) or (getattr(account, "company", None) if account else None),
+  }
+
+
+def _build_linked_invoices(
+  mov: BankMovement,
+  *,
+  matched: Optional[Invoice] = None,
+  supplier_name: Optional[str] = None,
+  account: Optional[BankAccount] = None,
+  invoices_by_norm: Optional[Dict[str, Invoice]] = None,
+  suppliers_by_id: Optional[Dict[int, str]] = None,
+) -> List[Dict[str, Any]]:
+  """Elenco fatture collegate: nota sul movimento, FK singola, refs in causale."""
+  by_norm = invoices_by_norm or {}
+  suppliers = suppliers_by_id or {}
+  out: List[Dict[str, Any]] = []
+  seen_ids: set[int] = set()
+  seen_norm: set[str] = set()
+
+  def _add_inv(inv: Invoice, sn: str = "") -> None:
+    if inv.id in seen_ids:
+      return
+    seen_ids.add(inv.id)
+    num = inv.invoice_number or str(inv.id)
+    seen_norm.add(_normalize_doc_token(num))
+    name = sn or suppliers.get(getattr(inv, "supplier_id", None) or 0, "") or ""
+    out.append(_invoice_brief(inv, supplier_name=name, account=account))
+
+  def _add_number(raw: str) -> None:
+    n = str(raw or "").strip()
+    if not n:
+      return
+    key = _normalize_doc_token(n)
+    if not key or key in seen_norm:
+      return
+    inv = by_norm.get(key)
+    if inv is None:
+      for cand in by_norm.values():
+        if _ref_matches_number(n, getattr(cand, "invoice_number", None)):
+          inv = cand
+          break
+    if inv is not None:
+      _add_inv(inv)
+      return
+    seen_norm.add(key)
+    out.append(
+      {
+        "id": None,
+        "invoice_number": n,
+        "supplier_id": None,
+        "supplier_name": "",
+        "total": None,
+        "payment_status": None,
+        "company": getattr(account, "company", None) if account else None,
+      }
+    )
+
+  if matched is not None:
+    _add_inv(matched, supplier_name or "")
+
+  for num in _parse_linked_invoices_note(getattr(mov, "notes", None)):
+    _add_number(num)
+
+  # Causale con più numeri (SALDO FT '123' '456') anche senza nota ancora scritta
+  if len(out) <= 1:
+    for ref in extract_invoice_refs(_movement_search_blob(mov)):
+      _add_number(ref)
+
+  return out
 
 
 def _movement_pay_line(meta: Dict[str, Any]) -> str:
@@ -3432,6 +3633,73 @@ def sync_payment_status_from_bank(
         "reason": "no_bank_match",
       }
     )
+
+  # Persisti sul bonifico l'elenco fatture (saldo cumulativo / multi-fattura)
+  by_mov_items: Dict[int, List[Dict[str, Any]]] = {}
+  for item in marked:
+    mid = item.get("movement_id")
+    if mid is None:
+      continue
+    by_mov_items.setdefault(int(mid), []).append(item)
+
+  # Bonifici di gruppo già matched senza FK: ricostruisci da fatture pagate nominate in causale
+  for meta in mov_meta:
+    mov = meta["mov"]
+    if str(getattr(mov, "reconciliation_status", "") or "") != "matched":
+      continue
+    mid = int(mov.id)
+    if mid in by_mov_items:
+      continue
+    if getattr(mov, "matched_invoice_id", None):
+      continue
+    if _parse_linked_invoices_note(getattr(mov, "notes", None)):
+      continue
+    blob = meta.get("blob") or ""
+    named: List[Dict[str, Any]] = []
+    for inv_dto in paid_listed:
+      if invoice_named_on_group_wire(inv_dto, mov, blob):
+        named.append(
+          {
+            "invoice_id": int(getattr(inv_dto, "id")),
+            "invoice_number": str(getattr(inv_dto, "invoice_number", "") or ""),
+            "reason": "saldo_fatture",
+          }
+        )
+    if len(named) > 1:
+      by_mov_items[mid] = named
+
+  mov_by_id = {int(meta["mov"].id): meta["mov"] for meta in mov_meta}
+  for mid, items in by_mov_items.items():
+    mov = mov_by_id.get(mid)
+    if not mov:
+      continue
+    numbers = [
+      str(it.get("invoice_number") or "").strip()
+      for it in items
+      if str(it.get("invoice_number") or "").strip()
+    ]
+    if len(numbers) < 2:
+      continue
+    reasons = {str(it.get("reason") or "") for it in items}
+    if "bundle_fornitore" in reasons:
+      reason_label = "bundle fornitore"
+    elif "saldo_fatture" in reasons:
+      reason_label = "saldo cumulativo"
+    else:
+      reason_label = "saldo cumulativo"
+    prev_note = _parse_linked_invoices_note(getattr(mov, "notes", None))
+    prev_keys = {_normalize_doc_token(n) for n in prev_note}
+    next_keys = {_normalize_doc_token(n) for n in numbers}
+    if prev_keys != next_keys:
+      _set_linked_invoices_note(mov, numbers, reason=reason_label)
+      changed = True
+    if not getattr(mov, "matched_invoice_id", None):
+      first_id = items[0].get("invoice_id")
+      if first_id:
+        mov.matched_invoice_id = int(first_id)
+        mov.reconciliation_status = "matched"
+        mov.difference_amount = None
+        changed = True
 
   if changed:
     db.commit()

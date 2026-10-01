@@ -476,3 +476,49 @@ def test_proposta_include_acconto_e_non_importi_lontani():
   ids = {inv.id for inv in _open_invoices_near_amount(indexed, Decimal("100.00"))}
   assert 7 in ids
   assert 8 not in ids
+
+
+def test_linked_invoices_note_roundtrip():
+  from app.services.banca_service import (
+    _parse_linked_invoices_note,
+    _set_linked_invoices_note,
+  )
+
+  mov = _mov(notes="nota libera")
+  _set_linked_invoices_note(mov, ["8947/01", "7684/01", "8947/01"], reason="saldo cumulativo")
+  assert "fatture collegate" in (mov.notes or "")
+  assert "nota libera" in (mov.notes or "")
+  nums = _parse_linked_invoices_note(mov.notes)
+  assert nums == ["8947/01", "7684/01"]
+  _set_linked_invoices_note(mov, ["100/01", "200/01"], reason="bundle fornitore")
+  assert _parse_linked_invoices_note(mov.notes) == ["100/01", "200/01"]
+  assert "nota libera" in (mov.notes or "")
+
+
+def test_build_linked_invoices_from_causale_and_note():
+  from app.services.banca_service import (
+    _build_linked_invoices,
+    _normalize_doc_token,
+    _set_linked_invoices_note,
+  )
+
+  inv_a = _inv(id=1, invoice_number="8947/01", supplier_name="Fornitore A", supplier_id=1)
+  inv_b = _inv(id=2, invoice_number="7684/01", supplier_name="Fornitore A", supplier_id=1)
+  by_norm = {
+    _normalize_doc_token(inv_a.invoice_number): inv_a,
+    _normalize_doc_token(inv_b.invoice_number): inv_b,
+  }
+  mov = _mov(
+    causale="SALDO FT '8947/01' '7684/01'",
+    description="Bonifico SEPA SALDO FT",
+    matched_invoice_id=None,
+  )
+  linked = _build_linked_invoices(mov, invoices_by_norm=by_norm, suppliers_by_id={1: "Fornitore A"})
+  nums = {x["invoice_number"] for x in linked}
+  assert "8947/01" in nums
+  assert "7684/01" in nums
+
+  mov2 = _mov(causale="Bonifico generico", description="BONIFICO DISPOSTO")
+  _set_linked_invoices_note(mov2, ["8947/01", "7684/01"], reason="saldo cumulativo")
+  linked2 = _build_linked_invoices(mov2, invoices_by_norm=by_norm, suppliers_by_id={1: "Fornitore A"})
+  assert [x["invoice_number"] for x in linked2] == ["8947/01", "7684/01"]

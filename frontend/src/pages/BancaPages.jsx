@@ -379,11 +379,23 @@ function bankMovementsCellValue(row, col) {
     return desc || who || '—'
   }
   if (col.id === 'linked_invoice') {
-    const inv = row?.matched_invoice
-    if (!inv) return row?.matched_invoice_id ? `Fattura #${row.matched_invoice_id}` : '—'
-    const num = inv.invoice_number || inv.id
-    const supplier = inv.supplier_name ? ` · ${inv.supplier_name}` : ''
-    return `Fattura ${num}${supplier}`
+    const linked = Array.isArray(row?.linked_invoices) && row.linked_invoices.length
+      ? row.linked_invoices
+      : row?.matched_invoice
+        ? [row.matched_invoice]
+        : []
+    if (!linked.length) {
+      return row?.matched_invoice_id ? `Fattura #${row.matched_invoice_id}` : '—'
+    }
+    const nums = linked
+      .map((inv) => String(inv?.invoice_number || inv?.id || '').trim())
+      .filter(Boolean)
+    const supplier = String(linked[0]?.supplier_name || '').trim()
+    if (nums.length === 1) {
+      return `Fattura ${nums[0]}${supplier ? ` · ${supplier}` : ''}`
+    }
+    const head = supplier ? `${supplier} · ` : ''
+    return `${head}Saldo cumulativo · ${nums.join(', ')}`
   }
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
@@ -400,6 +412,7 @@ function bankMovementsCellValue(row, col) {
 
 function movementSearchBlob(mov) {
   const inv = mov?.matched_invoice
+  const linked = Array.isArray(mov?.linked_invoices) ? mov.linked_invoices : []
   return [
     mov?.description,
     mov?.causale,
@@ -409,6 +422,8 @@ function movementSearchBlob(mov) {
     inv?.invoice_number,
     inv?.supplier_name,
     mov?.matched_invoice_id != null ? String(mov.matched_invoice_id) : '',
+    ...linked.map((x) => x?.invoice_number),
+    ...linked.map((x) => x?.supplier_name),
   ]
     .map((x) => String(x || '').trim())
     .filter(Boolean)
@@ -421,6 +436,10 @@ function movementMatchesSearch(mov, query) {
   if (!q) return false
   const invNum = mov?.matched_invoice?.invoice_number
   if (invNum && invoiceNumbersMatch(invNum, q)) return true
+  const linked = Array.isArray(mov?.linked_invoices) ? mov.linked_invoices : []
+  for (const inv of linked) {
+    if (inv?.invoice_number && invoiceNumbersMatch(inv.invoice_number, q)) return true
+  }
   if (mov?.doc_ref && invoiceNumbersMatch(mov.doc_ref, q)) return true
   const blob = movementSearchBlob(mov)
   const tokens = blob.split(/[\s,;|·]+/).filter(Boolean)
