@@ -3270,15 +3270,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       }
       // Passa i dipendenti caricati: altrimenti i turni restano vuoti (cache/pack non allineati).
       await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
-      let savedOk = false
-      if (Array.isArray(mem) && mem.length > 0 && !(operatorMode && operatorStationId)) {
-        try {
-          await handleSaveMembersByLocale({ members: mem, quiet: true })
-          savedOk = true
-        } catch {
-          savedOk = false
-        }
-      }
       const memberCount = Array.isArray(mem) ? mem.length : 0
       if (alreadyOpen) {
         setSuccess(
@@ -3288,10 +3279,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
         )
       } else {
         setSuccess(
-          savedOk
-            ? `Locale «${localeName}» aperto. Piano caricato e dipendenti salvati automaticamente.`
-            : `Locale «${localeName}» aperto. Piano caricato.` +
-                (memberCount === 0 ? ' Nessun dipendente nel pack locale.' : ` (${memberCount} dipendenti)`),
+          `Locale «${localeName}» aperto. Piano caricato.` +
+            (memberCount === 0 ? ' Nessun dipendente nel pack locale.' : ` (${memberCount} dipendenti)`),
         )
       }
     } finally {
@@ -3636,7 +3625,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   async function handleSaveMembersByLocale(opts = {}) {
     const quiet = Boolean(opts?.quiet)
     const memberRows = Array.isArray(opts?.members) ? opts.members : members
-    const localeName = normalizeLocaleName(localeStaffName)
+    const localeName = normalizeLocaleName(opts.localeName || localeStaffName)
     if (!localeName) {
       setError('Inserisci il nome del locale prima di salvare i dipendenti')
       return
