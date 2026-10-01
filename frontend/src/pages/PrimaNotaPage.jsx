@@ -380,11 +380,29 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       return { ok: true }
     }
 
+    let staffRejected = false
     if (staffLocaleRequiresCode(slug, staffLocaleSummaries)) {
       const staffName = resolveStaffLocaleName(slug, staffLocaleSummaries)
-      if (!staffName) return { ok: false, wrongCode: true }
+      if (staffName) {
+        try {
+          await fetchStaffLocalePack(staffName, normalized)
+          saveStoredPrimaNotaAccessCode(slug, normalized)
+          setUnlockedSlugs((prev) => new Set([...prev, slug]))
+          return { ok: true }
+        } catch {
+          staffRejected = true
+        }
+      } else {
+        staffRejected = true
+      }
+    }
+
+    const primaNotaProtected = protectedLocaleSummaries.some(
+      (row) => String(row?.activity_slug || '').trim().toLowerCase() === slug && row?.requires_access_code,
+    )
+    if (primaNotaProtected) {
       try {
-        await fetchStaffLocalePack(staffName, normalized)
+        await fetchPrimaNotaLocalePack(slug, normalized)
         saveStoredPrimaNotaAccessCode(slug, normalized)
         setUnlockedSlugs((prev) => new Set([...prev, slug]))
         return { ok: true }
@@ -392,19 +410,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         return { ok: false, wrongCode: true }
       }
     }
-
-    const primaNotaProtected = protectedLocaleSummaries.some(
-      (row) => String(row?.activity_slug || '').trim().toLowerCase() === slug && row?.requires_access_code,
-    )
-    if (!primaNotaProtected) return { ok: true }
-    try {
-      await fetchPrimaNotaLocalePack(slug, normalized)
-      saveStoredPrimaNotaAccessCode(slug, normalized)
-      setUnlockedSlugs((prev) => new Set([...prev, slug]))
-      return { ok: true }
-    } catch {
-      return { ok: false, wrongCode: true }
-    }
+    if (staffRejected) return { ok: false, wrongCode: true }
+    return { ok: true }
   }
 
   async function handleVerifyAndSelectLocale(activityId, code) {
@@ -444,14 +451,23 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   async function resolveLocaleAccessCode(activityId) {
     const slug = String(activityId || '').trim().toLowerCase()
     if (!slug) return ''
-    let code = readStoredPrimaNotaAccessCode(slug)
-    if (isValidLocaleAccessCode(code)) return code
-    code = await fetchPrimaNotaAccessCode(slug)
-    if (isValidLocaleAccessCode(code)) return code
     const staffName = resolveStaffLocaleName(slug, staffLocaleSummaries)
-    if (!staffName) return ''
-    code = await fetchStaffLocaleAccessCode(staffName)
-    return isValidLocaleAccessCode(code) ? code : ''
+    const candidates = []
+    const push = (value) => {
+      const code = normalizeLocaleAccessCode(value)
+      if (isValidLocaleAccessCode(code) && !candidates.includes(code)) candidates.push(code)
+    }
+    if (staffName && staffLocaleRequiresCode(slug, staffLocaleSummaries)) {
+      push(await fetchStaffLocaleAccessCode(staffName))
+    }
+    push(readStoredPrimaNotaAccessCode(slug))
+    push(await fetchPrimaNotaAccessCode(slug))
+    if (staffName) push(await fetchStaffLocaleAccessCode(staffName))
+    for (const code of candidates) {
+      const access = await verifyLocaleAccess(slug, code)
+      if (access.ok) return code
+    }
+    return ''
   }
 
   function handleCloseLocaleAccess() {
