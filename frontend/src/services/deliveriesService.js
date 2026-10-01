@@ -60,6 +60,11 @@ export async function updateDeliveryNotes(id, payload) {
   })
 }
 
+/** Aggiorna denominazione prodotto (e opzionalmente quantità/prezzo/note) di una riga salvata. */
+export async function updateDeliveryLine(id, payload) {
+  return updateDeliveryNotes(id, payload)
+}
+
 /** Importa righe da Excel/ODS nello storico consegne (salta DDT già presenti). */
 export async function importDeliveriesWorkbook(rows, { skip_duplicate_ddt = true } = {}) {
   return apiFetch('/deliveries/import', {
