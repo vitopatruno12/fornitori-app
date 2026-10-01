@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   type OperatorAuthMode,
   type OperatorStationId,
+  validateAtlasMainLogin,
   validateOperatorAuthMode,
 } from '../utils/atlasAuth'
 import { setOperatorStationLock } from '../utils/operatorMode.ts'
@@ -216,8 +217,9 @@ export default function OperatorSatelliteShell({
   }, [documentTitle])
 
   React.useEffect(() => {
+    if (!isAuthenticated) return
     try {
-      sessionStorage.setItem(sessionKey, isAuthenticated ? '1' : '0')
+      sessionStorage.setItem(sessionKey, '1')
     } catch {
       /* ignore */
     }
@@ -232,11 +234,19 @@ export default function OperatorSatelliteShell({
       setLoginError('Inserisci username e password')
       return
     }
-    if (!validateOperatorAuthMode(authMode, u, p)) {
+    const accepted =
+      validateOperatorAuthMode(authMode, u, p)
+      || (authMode === 'carrier' && validateAtlasMainLogin(u, p))
+    if (!accepted) {
       setLoginError('Username o password non corretti')
       return
     }
     setLoginError('')
+    try {
+      sessionStorage.setItem(sessionKey, '1')
+    } catch {
+      /* ignore */
+    }
     setIsLoggingIn(true)
     window.setTimeout(() => {
       setIsAuthenticated(true)
@@ -247,6 +257,11 @@ export default function OperatorSatelliteShell({
   }
 
   function handleLogout() {
+    try {
+      sessionStorage.setItem(sessionKey, '0')
+    } catch {
+      /* ignore */
+    }
     setIsAuthenticated(false)
     setLoginPassword('')
     if (stationOnly) setOperatorStationLock(false, stationId)

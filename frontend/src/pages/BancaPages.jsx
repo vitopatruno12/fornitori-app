@@ -2285,42 +2285,39 @@ export function BancaRiconciliazionePage() {
       const res = auto
         ? await postBancaRiconciliazioneAuto(nextCompany)
         : await fetchBancaRiconciliazione(nextCompany)
-      setData(res)
+      setData({ ...res, suggestions_pending: true })
       const n = Number(res?.auto_applied) || 0
-      // Proposte one-click in una seconda richiesta (evita 504 sul /auto)
-      let probable = Number(res?.probable_count) || 0
-      try {
-        const proposte = await fetchBancaRiconciliazioneProposte(nextCompany)
-        probable = Number(proposte?.probable_count) || 0
-        setData((prev) => ({
-          ...(prev || res),
-          suggestions: proposte?.suggestions || prev?.suggestions || [],
-          probable_count: probable,
-          unmatched_movements:
-            proposte?.unmatched_movements ?? prev?.unmatched_movements ?? res?.unmatched_movements,
-          score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
-          suggestions_pending: false,
-        }))
-      } catch {
-        // Snapshot già mostrato: le proposte possono ripetersi al prossimo click
-      }
       if (auto && n > 0) {
-        setSuccess(
-          probable
-            ? `Riconciliati automaticamente ${n} documenti. ${probable} proposte da confermare.`
-            : `Riconciliati automaticamente ${n} documenti (match auto + multi-fattura).`,
-        )
+        setSuccess(`Riconciliati automaticamente ${n} documenti.`)
       } else if (auto) {
-        setSuccess(
-          probable
-            ? `Nessun nuovo match auto. ${probable} proposte 70–79 da confermare.`
-            : 'Nessun nuovo match auto. Nessuna proposta da confermare.',
-        )
+        setSuccess('Nessun nuovo match auto.')
       }
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
-    } finally {
       setLoading(false)
+      return
+    }
+    setLoading(false)
+    try {
+      const proposte = await fetchBancaRiconciliazioneProposte(nextCompany)
+      const probable = Number(proposte?.probable_count) || 0
+      setData((prev) => ({
+        ...(prev || {}),
+        suggestions: proposte?.suggestions || prev?.suggestions || [],
+        probable_count: probable,
+        unmatched_movements: proposte?.unmatched_movements ?? prev?.unmatched_movements,
+        score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
+        suggestions_pending: false,
+      }))
+      if (auto) {
+        setSuccess((prev) =>
+          probable
+            ? `${prev} ${probable} proposte da confermare.`.replace(/\s+/g, ' ').trim()
+            : prev,
+        )
+      }
+    } catch {
+      setData((prev) => (prev ? { ...prev, suggestions_pending: false } : prev))
     }
   }
 
@@ -2343,7 +2340,7 @@ export function BancaRiconciliazionePage() {
       } else {
         setSuccess(status?.message || 'Riconciliazione aggiornata.')
       }
-      if (companyId) await reload(companyId, { auto: true })
+      if (companyId) await reload(companyId, { auto: false })
     } catch (e) {
       setError(e?.message || 'Agente riconciliazione non riuscito')
       setSuccess('')
@@ -2573,9 +2570,11 @@ export function BancaRiconciliazionePage() {
             </div>
           </div>
 
-          {loading ? <AnalisiLoadingBar active label="Confronto fatture e movimenti banca" variant="subtle" /> : null}
+          {loading && !data ? (
+            <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />
+          ) : null}
 
-          {!loading ? (
+          {data ? (
             <>
               <section className="card fatture-panel banca-fit-panel">
                 <h2 className="fatture-panel-title">Da pagare</h2>

@@ -198,6 +198,25 @@ def test_truncated_invoice_list_is_not_attached():
   assert allocated == {}
 
 
+def test_group_wire_does_not_cover_unnamed_invoice():
+  from app.services.banca_service import invoice_named_on_group_wire
+
+  mov = _mov(
+    id=50,
+    amount=Decimal("1949.06"),
+    movement_date=date(2026, 9, 28),
+    counterparty="RISTORALL S.R.L.U.",
+    description="NOTE: SALDO FT '8947/01' '7684/01' '7505/01'",
+    reconciliation_status="matched",
+    matched_invoice_id=None,
+  )
+  blob = f"{mov.description} {mov.counterparty}"
+  cited = _inv(id=1, invoice_number="8947/01", supplier_name="RISTORALL S.R.L.U.", total=Decimal("926.30"))
+  other = _inv(id=2, invoice_number="10200/01", supplier_name="RISTORALL S.R.L.U.", total=Decimal("134.53"))
+  assert invoice_named_on_group_wire(cited, mov, blob) is True
+  assert invoice_named_on_group_wire(other, mov, blob) is False
+
+
 def test_fr_eva_abbreviation_aligns():
   from app.services.banca_service import _party_names_align
 

@@ -394,9 +394,8 @@ def banca_riconciliazione_proposte(
   limit: int = Query(40, ge=1, le=120),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-  """Solo proposte score 70–79 (one-click). Separato da /auto per evitare 504."""
-  snap = banca_service.reconciliation_snapshot(db, limit=limit, company=company)
-  return banca_service.enrich_probable_suggestions(db, snap, company=company, limit=limit)
+  """Solo proposte score 70–79 (one-click). Non ricalcola l'elenco fatture già mostrato."""
+  return banca_service.enrich_probable_suggestions(db, company=company, limit=limit)
 
 
 @router.post("/riconciliazione/auto")

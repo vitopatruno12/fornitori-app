@@ -808,6 +808,11 @@ function App() {
 
   function goToCarrierDeliveryLogin() {
     markCarrierPwaLaunchPreferred()
+    try {
+      sessionStorage.setItem('atlasAuthCarrier', '1')
+    } catch {
+      // ignore storage errors
+    }
     navigate(OPERATOR_DELIVERY_PATH, { replace: true })
   }
 

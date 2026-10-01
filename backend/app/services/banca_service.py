@@ -1794,6 +1794,31 @@ def _invoice_leading_number(invoice_number: Optional[str]) -> Optional[int]:
   return int(match.group(1))
 
 
+def invoice_named_on_group_wire(inv: Any, mov: Any, blob: str) -> bool:
+  """Un saldo di gruppo tiene pagata solo la fattura scritta in causale, non tutto il fornitore."""
+  beneficiary = _movement_beneficiary(mov, blob)
+  supplier = getattr(inv, "supplier_name", None)
+  if beneficiary and not _party_names_align(supplier, beneficiary):
+    return False
+  num = str(getattr(inv, "invoice_number", None) or "").strip()
+  if not num:
+    return False
+  for ref in extract_invoice_refs(blob):
+    if _ref_matches_number(ref, num):
+      return True
+  text = blob or ""
+  if "saldo" in text.lower():
+    found = _NUM_RANGE_RE.search(text)
+    if found:
+      nums = [int(group) for group in found.groups() if group]
+      if len(nums) == 2:
+        lo, hi = sorted(nums)
+        lead = _invoice_leading_number(num)
+        if lead is not None and lo <= lead <= hi:
+          return True
+  return False
+
+
 def allocate_number_ranges(
   invoices: List[Any],
   mov_meta: List[Dict[str, Any]],
@@ -2500,9 +2525,21 @@ def reconciliation_snapshot(
   }
 
 
+def _pair_can_score(inv: Any, blob: str, beneficiary: str, blob_digits: str) -> bool:
+  """Senza fornitore o numero in causale lo score non arriva a 70. Evita il confronto completo."""
+  if beneficiary and _party_names_align(getattr(inv, "supplier_name", None), beneficiary):
+    return True
+  num = str(getattr(inv, "invoice_number", None) or "").strip()
+  if num and _invoice_number_in_text(num, blob):
+    return True
+  vat = str(getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None) or "")
+  digits = re.sub(r"\D", "", vat)
+  return bool(digits) and len(digits) >= 11 and digits in (blob_digits or "")
+
+
 def enrich_probable_suggestions(
   db: Session,
-  snapshot: Dict[str, Any],
+  snapshot: Optional[Dict[str, Any]] = None,
   *,
   company: Optional[str] = None,
   limit: int = 40,
@@ -2512,7 +2549,7 @@ def enrich_probable_suggestions(
   Lo snapshot veloce non calcola gli score: senza questo passo la griglia
   «Da controllare» non ha mai il pulsante Conferma.
   """
-  company_id = (company or snapshot.get("company") or "").strip() or None
+  company_id = (company or (snapshot or {}).get("company") or "").strip() or None
   invoices, _ = _load_recon_invoices(db, company_id)
   open_by_amount = _index_open_invoices_by_amount(invoices)
   used_invoices: set[int] = set()
@@ -2536,6 +2573,8 @@ def enrich_probable_suggestions(
   suggestions: List[Dict[str, Any]] = []
   for mov, acc in unmatched_rows:
     blob = _movement_search_blob(mov)
+    beneficiary = _movement_beneficiary(mov, blob)
+    blob_digits = re.sub(r"\D", "", blob)
     mov_out = _enrich_movement_out(_movement_out(mov, acc), mov, blob)
     best = None
     best_sc: Optional[Dict[str, Any]] = None
@@ -2545,6 +2584,8 @@ def enrich_probable_suggestions(
         continue
       residuo = _invoice_residuo(inv)
       if residuo <= Decimal("0.009"):
+        continue
+      if not _pair_can_score(inv, blob, beneficiary, blob_digits):
         continue
       sc = score_movement_invoice(inv, mov, blob)
       if sc["score"] < _SCORE_PROBABLE:
@@ -2607,7 +2648,7 @@ def enrich_probable_suggestions(
         }
       )
 
-  out = dict(snapshot)
+  out = dict(snapshot or {})
   out["suggestions"] = suggestions
   out["unmatched_movements"] = len([s for s in suggestions if s["status"] == "unmatched"])
   out["probable_count"] = len(
@@ -2990,7 +3031,17 @@ def sync_payment_status_from_bank(
   movements = (
     mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(5000).all()
   )
-  mov_meta = [{"mov": m, "blob": _movement_search_blob(m)} for m in movements]
+  mov_meta = []
+  for movement in movements:
+    blob = _movement_search_blob(movement)
+    mov_meta.append(
+      {
+        "mov": movement,
+        "blob": blob,
+        "beneficiary": _movement_beneficiary(movement, blob),
+        "blob_digits": re.sub(r"\D", "", blob),
+      }
+    )
 
   try:
     cash_file_rows = supplier_payments_service.list_cash_paid_document_rows(
@@ -3059,6 +3110,13 @@ def sync_payment_status_from_bank(
       linked = mov.matched_invoice_id
       if linked and int(linked) != inv_id:
         continue
+      if not _pair_can_score(
+        inv_dto,
+        meta["blob"],
+        meta.get("beneficiary") or "",
+        meta.get("blob_digits") or "",
+      ):
+        continue
       sc = score_movement_invoice(inv_dto, mov, meta["blob"])
       if sc["band"] != "auto":
         continue
@@ -3103,6 +3161,13 @@ def sync_payment_status_from_bank(
         continue
       linked = mov.matched_invoice_id
       if linked and int(linked) != inv_id:
+        continue
+      if not _pair_can_score(
+        inv_dto,
+        meta["blob"],
+        meta.get("beneficiary") or "",
+        meta.get("blob_digits") or "",
+      ):
         continue
       sc = score_movement_invoice(inv_dto, mov, meta["blob"])
       if sc["band"] != "auto":
@@ -3312,28 +3377,26 @@ def sync_payment_status_from_bank(
       }
     )
 
-  # Riapri «pagate» senza prova banca né contanti/POS da file
-  # Bundle multi: movimento «matched» senza matched_invoice_id (tipico saldo/multi)
-  multi_suppliers: set[str] = set()
-  for meta in mov_meta:
-    mov = meta["mov"]
-    if str(getattr(mov, "reconciliation_status", "") or "") != "matched":
-      continue
-    if getattr(mov, "matched_invoice_id", None):
-      continue
-    bene = _movement_beneficiary(mov, meta.get("blob") or "")
-    if bene:
-      multi_suppliers.add(bene.upper())
-
+  # Riapri «pagate» senza prova banca né contanti/POS da file.
+  # Un saldo di gruppo (matched, senza fattura singola) protegge solo i numeri in causale.
+  group_wires = [
+    meta
+    for meta in mov_meta
+    if str(getattr(meta["mov"], "reconciliation_status", "") or "") == "matched"
+    and not getattr(meta["mov"], "matched_invoice_id", None)
+  ]
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
-    if multi_suppliers:
-      sup = str(getattr(inv_dto, "supplier_name", None) or "")
-      if any(_party_names_align(sup, bene) for bene in multi_suppliers):
-        continue
+    named_on_group = False
+    for meta in group_wires:
+      if invoice_named_on_group_wire(inv_dto, meta["mov"], meta.get("blob") or ""):
+        named_on_group = True
+        break
+    if named_on_group:
+      continue
     part_sum = sum(
       (
         abs(_dec(meta["mov"].amount))
