@@ -1704,6 +1704,59 @@ select.form-control {
   box-shadow: inset 0 2px 0 #2d6a4f;
 }
 
+.pagamenti-invoice-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.16);
+  background: #faf8ff;
+}
+
+.pagamenti-invoice-search label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5b21b6;
+}
+
+.pagamenti-invoice-search .form-control {
+  width: min(16rem, 100%);
+  min-height: 2.15rem;
+}
+
+.pagamenti-invoice-search-note {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.pagamenti-invoice-search-note.is-hit {
+  color: #5b21b6;
+  font-weight: 600;
+}
+
+.pagamenti-grid tr.pagamenti-row-search-hit td {
+  background: #ede9fe !important;
+  box-shadow: inset 0 -2px 0 #7c3aed;
+}
+
+.pagamenti-grid tr.pagamenti-row-search-hit .excel-cell {
+  background: transparent;
+  color: #4c1d95;
+  font-weight: 700;
+}
+
+.pagamenti-sheet-tab.has-search-hit {
+  box-shadow: inset 0 -3px 0 #7c3aed;
+}
+
+.pagamenti-sheet-tab.is-active.has-search-hit {
+  box-shadow: inset 0 2px 0 #2d6a4f, inset 0 -3px 0 #7c3aed;
+}
+
 /* --- restored: tmp-workbook-grid-wrap.css --- */
 .suppliers-grid-wrap {
   max-height: min(72vh, 780px);

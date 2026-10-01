@@ -318,6 +318,61 @@ export function bodyRowOffset(sheetName) {
   return 1
 }
 
+function foldInvoiceNumber(value) {
+  if (value == null || value === '') return ''
+  if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value))
+  return stripExcelQuotes(String(value)).trim().toUpperCase().replace(/[\s'"]/g, '')
+}
+
+export function invoiceNumbersMatch(cellValue, query) {
+  const cell = foldInvoiceNumber(cellValue)
+  const needle = foldInvoiceNumber(query)
+  if (!cell || !needle) return false
+  if (cell === needle) return true
+  const cellDigits = cell.replace(/^0+/, '')
+  const needleDigits = needle.replace(/^0+/, '')
+  if (/^\d+$/.test(cellDigits) && /^\d+$/.test(needleDigits) && cellDigits === needleDigits && needleDigits.length >= 4) {
+    return true
+  }
+  return false
+}
+
+function invoiceColumnIndex(sheet) {
+  const headers = sheetHeaders(sheet)
+  const idx = headers.findIndex((cell) => {
+    const text = String(cell || '').toLowerCase()
+    return text.includes('numero') && (text.includes('fattura') || text.includes('documento'))
+  })
+  if (idx >= 0) return idx
+  if (isMonthlySheet(sheet?.name)) return 1
+  return -1
+}
+
+/** Tutte le righe fattura, in qualsiasi foglio del registro aperto, il cui numero coincide. */
+export function findInvoiceRows(workbook, query) {
+  const needle = String(query || '').trim()
+  if (!needle) return []
+  const hits = []
+  for (const sheet of workbook?.sheets || []) {
+    const col = invoiceColumnIndex(sheet)
+    if (col < 0) continue
+    const offset = bodyRowOffset(sheet.name)
+    const rows = sheet.rows || []
+    for (let i = offset; i < rows.length; i += 1) {
+      const row = rows[i]
+      if (!rowHasContent(row)) continue
+      if (isMonthlySheet(sheet.name) && (isSubtotalRow(row) || isMonthlyFooterRow(row))) continue
+      if (!invoiceNumbersMatch(row[col], needle)) continue
+      hits.push({
+        sheetName: sheet.name,
+        sheetRowIndex: i,
+        bodyRowIndex: i - offset,
+      })
+    }
+  }
+  return hits
+}
+
 function isDataInvoiceRow(row, rowIndex) {
   if (rowIndex === 0) return false
   if (!rowHasContent(row)) return false

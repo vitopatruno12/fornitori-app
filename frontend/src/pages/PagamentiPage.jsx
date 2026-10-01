@@ -40,6 +40,7 @@ import {
   resolveHighlightClass,
   applyWorkbookHighlight,
   clearAllWorkbookSheets,
+  findInvoiceRows,
 } from '../utils/pagamentiWorkbook.js'
 import { downloadWorkbookAsExcel, parseExcelFileToWorkbook } from '../utils/pagamentiExcel.js'
 
@@ -95,8 +96,13 @@ export default function PagamentiPage() {
   const [newSheetName, setNewSheetName] = useState('')
   const [selectedCell, setSelectedCell] = useState(null)
   const [highlightMenuOpen, setHighlightMenuOpen] = useState(false)
+  const [invoiceQuery, setInvoiceQuery] = useState('')
+  const [invoiceHits, setInvoiceHits] = useState([])
+  const [invoiceSearchNote, setInvoiceSearchNote] = useState('')
+  const [invoiceSearchToken, setInvoiceSearchToken] = useState(0)
   const uploadInputRef = useRef(null)
   const highlightMenuRef = useRef(null)
+  const gridWrapRef = useRef(null)
 
   function handleBack() {
     if (typeof window !== 'undefined' && window.history.length > 1) {
@@ -151,8 +157,39 @@ export default function PagamentiPage() {
     }
     writePagamentiWorkbookKey(nextKey)
     setWorkbookKey(nextKey)
+    setInvoiceHits([])
+    setInvoiceSearchNote('')
     setSuccess('')
     setError('')
+  }
+
+  function clearInvoiceSearch() {
+    setInvoiceQuery('')
+    setInvoiceHits([])
+    setInvoiceSearchNote('')
+  }
+
+  function runInvoiceSearch() {
+    const query = invoiceQuery.trim()
+    if (!query) {
+      setInvoiceHits([])
+      setInvoiceSearchNote('Inserisci il numero fattura.')
+      return
+    }
+    const hits = findInvoiceRows(workbook, query)
+    setInvoiceHits(hits)
+    if (!hits.length) {
+      setInvoiceSearchNote('Nessuna fattura con questo numero in questo file.')
+      return
+    }
+    const sheets = [...new Set(hits.map((hit) => hit.sheetName))]
+    setActiveSheet(hits[0].sheetName)
+    setInvoiceSearchToken((token) => token + 1)
+    setInvoiceSearchNote(
+      sheets.length === 1
+        ? `Trovata in ${sheets[0]}.`
+        : `Trovate ${hits.length} in ${sheets.join(', ')}.`,
+    )
   }
 
   useEffect(() => {
@@ -225,6 +262,33 @@ export default function PagamentiPage() {
     }
     return currentSheet.rows.slice(1)
   }, [currentSheet])
+
+  const searchHitRows = useMemo(() => {
+    const rows = new Set()
+    invoiceHits.forEach((hit) => {
+      if (hit.sheetName === activeSheet) rows.add(hit.bodyRowIndex)
+    })
+    return rows
+  }, [invoiceHits, activeSheet])
+
+  const searchHitSheets = useMemo(
+    () => new Set(invoiceHits.map((hit) => hit.sheetName)),
+    [invoiceHits],
+  )
+
+  const searchAnchorRow = useMemo(() => {
+    const hit = invoiceHits.find((item) => item.sheetName === activeSheet)
+    return hit ? hit.bodyRowIndex : -1
+  }, [invoiceHits, activeSheet])
+
+  useEffect(() => {
+    if (!invoiceSearchToken || searchAnchorRow < 0) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const row = gridWrapRef.current?.querySelector('tr[data-search-anchor="1"]')
+      row?.scrollIntoView({ block: 'center', inline: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [invoiceSearchToken, activeSheet, searchAnchorRow, loading])
 
   function applyWorkbook(nextWorkbook, message) {
     setWorkbook(recalculateWorkbook(nextWorkbook))
@@ -683,10 +747,44 @@ export default function PagamentiPage() {
           </div>
         </div>
 
+        <form
+          className="pagamenti-invoice-search"
+          onSubmit={(event) => {
+            event.preventDefault()
+            runInvoiceSearch()
+          }}
+        >
+          <label htmlFor="pagamenti-invoice-search">Cerca fattura</label>
+          <input
+            id="pagamenti-invoice-search"
+            className="form-control"
+            value={invoiceQuery}
+            onChange={(event) => setInvoiceQuery(event.target.value)}
+            placeholder="Numero, es. 27/2026"
+            autoComplete="off"
+            disabled={loading}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={loading}>
+            Trova
+          </button>
+          {invoiceHits.length > 0 || invoiceSearchNote ? (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={clearInvoiceSearch}>
+              Pulisci
+            </button>
+          ) : null}
+          {invoiceSearchNote ? (
+            <span className={`pagamenti-invoice-search-note${invoiceHits.length ? ' is-hit' : ''}`}>
+              {invoiceSearchNote}
+            </span>
+          ) : (
+            <span className="pagamenti-invoice-search-note">Cerca in tutti i mesi di questo file.</span>
+          )}
+        </form>
+
         {loading ? (
           <AnalisiLoadingBar active label="Caricamento registro pagamenti" variant="subtle" />
         ) : (
-          <div className="pagamenti-grid-wrap excel-wrap">
+          <div className="pagamenti-grid-wrap excel-wrap" ref={gridWrapRef}>
             <table className="app-table excel-table pagamenti-grid">
               <thead>
                 <tr>
@@ -725,7 +823,14 @@ export default function PagamentiPage() {
                   const sheetRowIndex = rowIndex + rowOffset
                   if (kind === 'empty') {
                     return (
-                      <tr key={`r-${rowIndex}`} className="pagamenti-row-empty">
+                      <tr
+                        key={`r-${rowIndex}`}
+                        className={[
+                          'pagamenti-row-empty',
+                          searchHitRows.has(rowIndex) ? 'pagamenti-row-search-hit' : '',
+                        ].filter(Boolean).join(' ')}
+                        data-search-anchor={rowIndex === searchAnchorRow ? '1' : undefined}
+                      >
                         {Array.from({ length: columnCount }, (_, colIndex) => {
                           const editable = isCellEditable('empty', colIndex, currentSheet?.name)
                           const highlightClass = resolveHighlightClass(sheetHighlights, sheetRowIndex, colIndex)
@@ -762,7 +867,9 @@ export default function PagamentiPage() {
                       className={[
                         `pagamenti-row-${kind}`,
                         sheetHighlights.rows[String(sheetRowIndex)] ? 'pagamenti-row-highlighted' : '',
+                        searchHitRows.has(rowIndex) ? 'pagamenti-row-search-hit' : '',
                       ].filter(Boolean).join(' ')}
+                      data-search-anchor={rowIndex === searchAnchorRow ? '1' : undefined}
                     >
                       {Array.from({ length: columnCount }, (_, colIndex) => {
                         const value = row[colIndex]
@@ -806,13 +913,13 @@ export default function PagamentiPage() {
             return (
               <div
                 key={sheet.name}
-                className={`pagamenti-sheet-tab-wrap${sheet.name === activeSheet ? ' is-active' : ''}`}
+                className={`pagamenti-sheet-tab-wrap${sheet.name === activeSheet ? ' is-active' : ''}${searchHitSheets.has(sheet.name) ? ' has-search-hit' : ''}`}
               >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={sheet.name === activeSheet}
-                  className={`pagamenti-sheet-tab${sheet.name === activeSheet ? ' is-active' : ''}`}
+                  className={`pagamenti-sheet-tab${sheet.name === activeSheet ? ' is-active' : ''}${searchHitSheets.has(sheet.name) ? ' has-search-hit' : ''}`}
                   onClick={() => setActiveSheet(sheet.name)}
                 >
                   {sheet.name}
