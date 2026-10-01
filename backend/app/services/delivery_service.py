@@ -17,6 +17,9 @@ from ..schemas.delivery import (
     DeliveryPricePoint,
     DeliveryRead,
     DeliveryReadEnriched,
+    DeliveryImportRequest,
+    DeliveryImportResult,
+    DeliveryImportRow,
 )
 from . import price_list_service
 from .vat_service import calculate_vat
@@ -381,3 +384,137 @@ def update_delivery_notes(db: Session, delivery_id: int, data: DeliveryNotesUpda
     db.commit()
     db.refresh(delivery)
     return delivery
+
+
+def _normalize_supplier_key(name):
+  return re.sub(r'\s+', ' ', str(name or '').strip().lower())
+
+
+def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryImportResult:
+  """Importa righe da file Excel/ODS nello storico, saltando DDT gia presenti."""
+  rows = list(data.rows or [])
+  if not rows:
+    return DeliveryImportResult(ok=True, message='Nessuna riga da importare.')
+
+  suppliers = db.query(Supplier).order_by(Supplier.id.asc()).all()
+  by_id = {int(s.id): s for s in suppliers}
+  by_name = {_normalize_supplier_key(s.name): s for s in suppliers if s.name}
+
+  existing_ddt = set()
+  for sid, ddt in (
+    db.query(Delivery.supplier_id, Delivery.ddt_number)
+    .filter(Delivery.ddt_number.isnot(None))
+    .filter(Delivery.ddt_number != '')
+    .all()
+  ):
+    if sid is None or not ddt:
+      continue
+    existing_ddt.add((int(sid), str(ddt).strip().lower()))
+
+  groups = {}
+  skipped_unknown = 0
+  skipped_empty = 0
+  skipped_dup = 0
+
+  for row in rows:
+    supplier = None
+    if row.supplier_id and int(row.supplier_id) in by_id:
+      supplier = by_id[int(row.supplier_id)]
+    elif row.supplier_name:
+      supplier = by_name.get(_normalize_supplier_key(row.supplier_name))
+      if supplier is None:
+        needle = _normalize_supplier_key(row.supplier_name)
+        for key, s in by_name.items():
+          if needle and (needle in key or key in needle):
+            supplier = s
+            break
+    if supplier is None:
+      skipped_unknown += 1
+      continue
+    product = (row.product_description or '').strip()
+    if not product:
+      skipped_empty += 1
+      continue
+    ddt = _norm_ddt(row.ddt_number)
+    sid = int(supplier.id)
+    if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in existing_ddt:
+      skipped_dup += 1
+      continue
+    date_key = row.delivery_date.date().isoformat() if row.delivery_date else ''
+    gkey = (sid, (ddt or '').lower(), date_key)
+    groups.setdefault(gkey, []).append((supplier, row))
+
+  imported_lines = 0
+  imported_ddt = 0
+  created_keys = set()
+
+  for (sid, ddt_l, _date_key), bundle in groups.items():
+    if not bundle:
+      continue
+    supplier, first = bundle[0]
+    ddt = _norm_ddt(first.ddt_number)
+    if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in existing_ddt:
+      skipped_dup += len(bundle)
+      continue
+    if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in created_keys:
+      skipped_dup += len(bundle)
+      continue
+
+    delivery_date = first.delivery_date or datetime.utcnow()
+    dest = (first.destination or '').strip()
+    doc_note = (first.document_note or '').strip()
+    note = _merge_delivery_note(dest or None, doc_note or None)
+    unloading = _norm_signature(first.unloading_signed_by)
+    vat_percent = Decimal(str(first.vat_percent or '23.0'))
+
+    items_payload = []
+    for _sup, row in bundle:
+      items_payload.append({
+        'product_description': (row.product_description or '').strip() or None,
+        'weight_kg': row.weight_kg,
+        'pieces': row.pieces,
+        'unit_price': row.unit_price if row.unit_price is not None else Decimal('0'),
+        'anomaly_note': (row.anomaly_note or '').strip() or None,
+      })
+
+    batch = DeliveryBatchCreate(
+      supplier_id=sid,
+      delivery_date=delivery_date,
+      vat_percent=vat_percent,
+      note=note,
+      ddt_number=ddt,
+      unloading_signed_by=unloading,
+      items=items_payload,
+    )
+    try:
+      created = create_delivery_batch(db, batch)
+    except HTTPException as exc:
+      detail = str(getattr(exc, 'detail', '') or '')
+      detail_l = detail.lower()
+      if 'ddt' in detail_l and ('presente' in detail_l or 'duplicat' in detail_l):
+        skipped_dup += len(bundle)
+        continue
+      raise
+    imported_lines += len(created)
+    imported_ddt += 1
+    if ddt:
+      created_keys.add((sid, ddt.lower()))
+      existing_ddt.add((sid, ddt.lower()))
+
+  bits = [f'Importate {imported_lines} righe ({imported_ddt} DDT).']
+  if skipped_dup:
+    bits.append(f'Saltati {skipped_dup} duplicati DDT.')
+  if skipped_unknown:
+    bits.append(f'{skipped_unknown} senza fornitore riconosciuto.')
+  if skipped_empty:
+    bits.append(f'{skipped_empty} senza prodotto.')
+
+  return DeliveryImportResult(
+    ok=True,
+    imported_lines=imported_lines,
+    imported_ddt=imported_ddt,
+    skipped_duplicate_ddt=skipped_dup,
+    skipped_unknown_supplier=skipped_unknown,
+    skipped_empty=skipped_empty,
+    message=' '.join(bits),
+  )

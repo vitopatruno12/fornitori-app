@@ -84,6 +84,37 @@ class DeliveryPricePoint(BaseModel):
   ddt_number: Optional[str] = None
 
 
+class DeliveryImportRow(BaseModel):
+  supplier_id: Optional[int] = None
+  supplier_name: Optional[str] = None
+  delivery_date: Optional[datetime] = None
+  ddt_number: Optional[str] = None
+  product_description: Optional[str] = None
+  weight_kg: Optional[Decimal] = None
+  pieces: Optional[int] = None
+  unit_price: Decimal = Decimal("0")
+  vat_percent: Decimal = Decimal("23.0")
+  destination: Optional[str] = None
+  document_note: Optional[str] = None
+  anomaly_note: Optional[str] = None
+  unloading_signed_by: Optional[str] = None
+
+
+class DeliveryImportRequest(BaseModel):
+  rows: List[DeliveryImportRow]
+  skip_duplicate_ddt: bool = True
+
+
+class DeliveryImportResult(BaseModel):
+  ok: bool = True
+  imported_lines: int = 0
+  imported_ddt: int = 0
+  skipped_duplicate_ddt: int = 0
+  skipped_unknown_supplier: int = 0
+  skipped_empty: int = 0
+  message: str = ""
+
+
 class DeliveryPriceAnalytics(BaseModel):
   supplier_id: int
   supplier_name: Optional[str] = None

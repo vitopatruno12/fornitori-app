@@ -12,6 +12,8 @@ from ..schemas.delivery import (
     DeliveryRead,
     DeliveryReadEnriched,
     DeliveryPriceAnalytics,
+    DeliveryImportRequest,
+    DeliveryImportResult,
 )
 from ..services import delivery_service
 
@@ -55,6 +57,12 @@ def create_delivery(payload: DeliveryCreate, db: Session = Depends(get_db)):
 @router.post("/batch", response_model=List[DeliveryRead])
 def create_delivery_batch(payload: DeliveryBatchCreate, db: Session = Depends(get_db)):
     return delivery_service.create_delivery_batch(db, payload)
+
+
+@router.post("/import", response_model=DeliveryImportResult)
+def import_deliveries(payload: DeliveryImportRequest, db: Session = Depends(get_db)):
+    """Carica righe da Excel/ODS nello storico (salta DDT già presenti)."""
+    return delivery_service.import_delivery_rows(db, payload)
 
 
 @router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)

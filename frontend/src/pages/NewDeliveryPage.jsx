@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { createDeliveryBatch, fetchDeliveries } from '../services/deliveriesService'
+import { createDeliveryBatch, fetchDeliveries, importDeliveriesWorkbook } from '../services/deliveriesService'
+import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import {
+  DELIVERIES_IMPORT_PREVIEW_COLUMNS,
+  deliveryImportPreviewCellValue,
+  readDeliveriesWorkbook,
+} from '../utils/deliveriesWorkbookImport.js'
 import { fetchPriceList, addPriceListBatch, deletePriceListItem } from '../services/priceListService'
 import {
   PRICE_LIST_WORKBOOK_COLUMNS,
@@ -118,6 +124,10 @@ export default function NewDeliveryPage({ operatorMode = false }) {
   const [priceList, setPriceList] = useState([])
   const [priceListLoading, setPriceListLoading] = useState(false)
   const [priceRows, setPriceRows] = useState([emptyPriceRow()])
+  const [importRows, setImportRows] = useState([])
+  const [importMeta, setImportMeta] = useState(null)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importFileName, setImportFileName] = useState('')
   const [savingPrice, setSavingPrice] = useState(false)
   const [orderImportLoading, setOrderImportLoading] = useState(false)
   const [ordersForImport, setOrdersForImport] = useState([])
@@ -399,6 +409,80 @@ export default function NewDeliveryPage({ operatorMode = false }) {
     }
   }
 
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const name = String(file.name || '').toLowerCase()
+    if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.ods')) {
+      setError('Carica un file Excel (.xlsx, .xls) o ODS (.ods).')
+      return
+    }
+    setError('')
+    setSuccess('')
+    setImportBusy(true)
+    setImportFileName(file.name)
+    try {
+      const buffer = await file.arrayBuffer()
+      const parsed = await readDeliveriesWorkbook(buffer)
+      setImportRows(parsed.rows || [])
+      setImportMeta({
+        rawCount: parsed.rawCount || 0,
+        removedExact: parsed.removedExact || 0,
+        removedDdt: parsed.removedDdt || 0,
+      })
+      if (!(parsed.rows || []).length) {
+        setError('Nessuna riga valida nel file. Servono colonne Data/DDT/Fornitore/Prodotto.')
+      } else {
+        const bits = [`Lette ${(parsed.rows || []).length} righe da «${file.name}».`]
+        if (parsed.removedExact) bits.push(`Rimossi ${parsed.removedExact} duplicati esatti.`)
+        if (parsed.removedDdt) bits.push(`Rimossi ${parsed.removedDdt} DDT ripetuti nel file.`)
+        setSuccess(bits.join(' '))
+      }
+    } catch (err) {
+      setImportRows([])
+      setImportMeta(null)
+      setError(err?.message || 'Lettura file non riuscita')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  async function handleImportToHistory() {
+    if (!importRows.length) {
+      setError('Carica prima un file Excel/ODS.')
+      return
+    }
+    setImportBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      const payloadRows = importRows.map((row) => ({
+        supplier_name: row.supplier_name || null,
+        delivery_date: row.delivery_date ? `${row.delivery_date}T00:00:00` : null,
+        ddt_number: row.ddt_number || null,
+        product_description: row.product_description || null,
+        weight_kg: row.weight_kg,
+        pieces: row.pieces,
+        unit_price: row.unit_price != null ? row.unit_price : 0,
+        vat_percent: row.vat_percent != null ? row.vat_percent : 23,
+        destination: row.destination || null,
+        document_note: row.document_note || null,
+        anomaly_note: row.anomaly_note || null,
+        unloading_signed_by: row.unloading_signed_by || null,
+      }))
+      const res = await importDeliveriesWorkbook(payloadRows, { skip_duplicate_ddt: true })
+      setSuccess(res?.message || 'Import nello storico completato.')
+      setImportRows([])
+      setImportMeta(null)
+      setImportFileName('')
+    } catch (err) {
+      setError(err?.message || 'Import nello storico non riuscito')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -588,6 +672,80 @@ export default function NewDeliveryPage({ operatorMode = false }) {
           </Link>
         </div>
       ) : null}
+
+      <section className="card delivery-hub-work-card">
+        <div className="delivery-hub-work-head">
+          <div>
+            <h2 className="delivery-hub-work-title">Carica file nello storico</h2>
+            <p className="fatture-note" style={{ margin: 0 }}>
+              Excel (.xlsx / .xls) o ODS: legge Data, DDT, Fornitore, Prodotto… elimina duplicati DDT e importa nello
+              storico consegne.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: importBusy ? 'wait' : 'pointer' }}>
+              {importBusy ? 'Lettura…' : 'Scegli file'}
+              <input
+                type="file"
+                accept=".xlsx,.xls,.ods,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                hidden
+                disabled={importBusy}
+                onChange={(ev) => void handleImportFile(ev)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={importBusy || !importRows.length}
+              onClick={() => void handleImportToHistory()}
+            >
+              {importBusy ? 'Carico…' : 'Carica nello storico'}
+            </button>
+            {importRows.length ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={importBusy}
+                onClick={() => {
+                  setImportRows([])
+                  setImportMeta(null)
+                  setImportFileName('')
+                }}
+              >
+                Pulisci anteprima
+              </button>
+            ) : null}
+            <Link className="btn btn-secondary btn-sm" to="/history">
+              Apri storico
+            </Link>
+          </div>
+        </div>
+        {importFileName ? (
+          <p className="fatture-note" style={{ marginTop: '0.75rem' }}>
+            File: <strong>{importFileName}</strong>
+            {importMeta
+              ? ` · ${importRows.length} righe in tabella` +
+                (importMeta.removedExact || importMeta.removedDdt
+                  ? ` (tolti ${Number(importMeta.removedExact || 0) + Number(importMeta.removedDdt || 0)} duplicati)`
+                  : '')
+              : ''}
+          </p>
+        ) : null}
+        {importRows.length ? (
+          <div style={{ marginTop: '0.75rem' }}>
+            <WorkbookGrid
+              title="Anteprima import consegne"
+              sheetLabel={`${importRows.length} righe`}
+              columns={DELIVERIES_IMPORT_PREVIEW_COLUMNS}
+              rows={importRows}
+              cellValue={deliveryImportPreviewCellValue}
+              emptyMessage="Nessuna riga."
+              gridClassName="banca-fit-grid"
+              rowKey={(_row, idx) => `imp-${idx}`}
+            />
+          </div>
+        ) : null}
+      </section>
 
       {loadingSuppliers && <AnalisiLoadingBar active label="Caricamento fornitori" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
