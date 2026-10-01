@@ -52,6 +52,14 @@ SAFE_MIGRATIONS=(
   20260926_invoices_bolla_verified.sql
 )
 
+# ADD COLUMN prende un lock esclusivo anche se la colonna c'è già.
+# Se le quattro colonne contatti sono presenti, non toccare suppliers.
+suppliers_contacts_ready() {
+  local n
+  n="$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'suppliers' AND column_name IN ('phones_json','emails_json','cities_json','merchandise_categories_json')" | tr -d '[:space:]')"
+  [[ "$n" == "4" ]]
+}
+
 log "Migrazioni SQL su database $DB_NAME"
 for name in "${SAFE_MIGRATIONS[@]}"; do
   file="$MIG_DIR/$name"
@@ -60,10 +68,15 @@ for name in "${SAFE_MIGRATIONS[@]}"; do
     continue
   fi
   log "Applico $name"
-  if sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -f "$file"; then
+  if [[ "$name" == "20260712_supplier_multi_contacts.sql" ]] && suppliers_contacts_ready; then
+    echo "    OK (colonne già presenti, tabella non bloccata)"
+    continue
+  fi
+  # Se un'altra sessione tiene la tabella, fallisci in 20s invece di restare appesi.
+  if sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "SET lock_timeout = '20s'" -f "$file"; then
     echo "    OK"
   else
-    warn "Migrazione fallita: $name (verifica permessi DB)"
+    warn "Migrazione fallita: $name (tabella occupata o permessi DB). Ferma fornitori-api e rilancia."
     exit 1
   fi
 done

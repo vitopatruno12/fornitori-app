@@ -108,6 +108,11 @@ else
 fi
 
 if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/null; then
+  # Le ALTER aspettano un lock esclusivo. Con l'API accesa restano in coda all'infinito.
+  if systemctl list-unit-files fornitori-api.service &>/dev/null; then
+    log "Fermo l'API durante le migrazioni, così le tabelle non restano bloccate"
+    systemctl stop fornitori-api || warn "Stop fornitori-api non riuscito"
+  fi
   if [[ -f "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh" ]]; then
     log "Tabella codici Prima Nota (obbligatoria per salvare i codici locale)"
     APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-prima-nota-locale-table.sh"
@@ -137,6 +142,10 @@ if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/nu
   fi
 else
   warn "PostgreSQL non attivo: salto migrazioni database."
+fi
+
+if [[ "${RESTART_API:-0}" != "1" ]] && systemctl list-unit-files fornitori-api.service &>/dev/null; then
+  systemctl start fornitori-api || warn "Riavvio fornitori-api non riuscito"
 fi
 
 API_DIR="${API_DIR:-/opt/fornitori-app}"

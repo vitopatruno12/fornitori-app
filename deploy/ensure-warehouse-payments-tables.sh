@@ -83,7 +83,15 @@ _apply_sql_file() {
     return 0
   fi
   log "Applico $name"
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -f "$file"
+  if [[ "$name" == "20260712_supplier_multi_contacts.sql" ]]; then
+    local n
+    n="$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'suppliers' AND column_name IN ('phones_json','emails_json','cities_json','merchandise_categories_json')" | tr -d '[:space:]')"
+    if [[ "$n" == "4" ]]; then
+      echo "    OK (colonne già presenti, tabella non bloccata)"
+      return 0
+    fi
+  fi
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "SET lock_timeout = '20s'" -f "$file"
 }
 
 log "Migrazioni schema Atlas su $DB_NAME (owner $DB_USER)"

@@ -1611,7 +1611,7 @@ export function FattureDaRegistrarePage() {
       setLoading(true)
       setError('')
       try {
-        const params = { include_ignored: false, sync_from_bank: true }
+        const params = { include_ignored: false }
         if (gestionaleMode) {
           if (scopeMode === 'company' && companyId) params.company = companyId
           if (scopeMode === 'locale' && localeId) params.activity = localeId
@@ -2233,7 +2233,6 @@ export function FattureScadenziarioPage() {
         due_filter: filter,
         include_ignored: false,
         company: companyId,
-        sync_from_bank: true,
       })
       setInvoices(Array.isArray(rows) ? rows : [])
     } catch (e) {
