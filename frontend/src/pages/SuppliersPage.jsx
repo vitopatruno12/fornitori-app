@@ -513,48 +513,50 @@ export default function SuppliersPage() {
   }
 
   return (
-    <div>
+    <div className="suppliers-page">
       <section className="staff-page-hero">
-      <h1 className="page-header staff-page-title">Fornitori</h1>
-      <p className="staff-page-lead">
-        Anagrafica completa con dati commerciali, pagamenti e collegamenti. L&apos;elenco usa un foglio Excel con una colonna per ogni attributo;
-        in fondo compaiono i totali. <strong>Apri IBAN</strong> mostra solo gli IBAN da copiare.
-      </p>
+        <p className="suppliers-kicker">Anagrafica</p>
+        <h1 className="page-header staff-page-title">Fornitori</h1>
+        <p className="staff-page-lead">
+          Scheda commerciale, contatti e condizioni. L&apos;elenco sotto tiene i totali; Apri IBAN mostra solo i codici da copiare.
+        </p>
+        <p className="suppliers-hero-count">{suppliers.length} in anagrafica</p>
       </section>
 
       {error && <div className="alert alert-danger">{error}</div>}
 
-      <section className="card" ref={supplierFormSectionRef}>
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>
-          {editingId ? 'Modifica fornitore' : 'Nuovo fornitore'}
-        </h2>
-        <div
-          className="supplier-invoice-upload-row"
-          style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}
-        >
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={invoiceUploadBusy || aiSupplierLoading}
-            onClick={() => invoiceUploadRef.current?.click()}
-            title="Carica XML FatturaPA o PDF fattura: nome, P.IVA, IBAN, email, telefono e pagamento nel modulo sotto"
-          >
-            {invoiceUploadBusy ? 'Lettura…' : 'Upload fornitore'}
-          </button>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Carica una fattura del fornitore (XML o PDF) per compilare l&apos;anagrafica in automatico.
-          </span>
-          <input
-            ref={invoiceUploadRef}
-            type="file"
-            accept=".xml,.pdf,.p7m,application/xml,application/pdf,text/xml"
-            className="pagamenti-upload-input"
-            onChange={(e) => void handleSupplierInvoiceUpload(e)}
-          />
+      <section className="card suppliers-editor-card" ref={supplierFormSectionRef}>
+        <div className="suppliers-editor-head">
+          <div>
+            <p className="suppliers-kicker suppliers-kicker--ink">Scheda</p>
+            <h2 className="page-subheader" style={{ marginTop: 0 }}>
+              {editingId ? 'Modifica fornitore' : 'Nuovo fornitore'}
+            </h2>
+          </div>
+          <div className="supplier-invoice-upload-row">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={invoiceUploadBusy || aiSupplierLoading}
+              onClick={() => invoiceUploadRef.current?.click()}
+              title="Carica XML FatturaPA o PDF fattura: nome, P.IVA, IBAN, email, telefono e pagamento nel modulo sotto"
+            >
+              {invoiceUploadBusy ? 'Lettura…' : 'Compila da fattura'}
+            </button>
+            <span>XML o PDF: nome, P.IVA, IBAN e contatti si compilano da soli.</span>
+            <input
+              ref={invoiceUploadRef}
+              type="file"
+              accept=".xml,.pdf,.p7m,application/xml,application/pdf,text/xml"
+              className="pagamenti-upload-input"
+              onChange={(e) => void handleSupplierInvoiceUpload(e)}
+            />
+          </div>
         </div>
         <GeminiVoiceAssistant
-          label="Fornitore a voce (Atlas AI)"
-          hint='Dì chiaramente «partita IVA» + 11 cifre e «codice fiscale» + codice (16 caratteri). Es: «Bar Roma partita IVA 12345678901 codice fiscale RSSMRA80A01H501U email info@bar.it tel 0801234567». Dopo Compila il testo si cancella.'
+          variant="studio"
+          label="Dettatura"
+          hint="Dì ragione sociale, partita IVA e contatti. Poi premi Compila fornitore."
           text={aiSupplierText}
           onTextChange={setAiSupplierText}
           onCompile={(spoken) => handleAiSuggestSupplier(spoken)}
@@ -632,6 +634,11 @@ export default function SuppliersPage() {
             merchandiseCategories={merchandiseCategories}
             setMerchandiseCategories={setMerchandiseCategories}
           />
+          <div className="supplier-form-panel supplier-commercial-panel">
+            <div className="supplier-form-panel-head">
+              <h3 className="supplier-form-panel-title">Commerciale</h3>
+              <p className="supplier-form-panel-lead">Pagamento, locali e note interne.</p>
+            </div>
           <div className="form-row">
             <div className="form-group" style={{ flex: '1 1 320px' }}>
               <label>IBAN</label>
@@ -699,17 +706,19 @@ export default function SuppliersPage() {
             <label>Note</label>
             <textarea className="form-control" value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Note interne" />
           </div>
-          <div className="form-row" style={{ alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginRight: '1.5rem' }}>
+          <div className="suppliers-status-row">
+            <label>
               <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
               Attivo
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <label>
               <input type="checkbox" checked={isExpired} onChange={e => setIsExpired(e.target.checked)} />
-              Scaduto (rapporto / documentazione)
+              Scaduto
             </label>
           </div>
-          <div className="btn-group" style={{ marginTop: '0.75rem' }}>
+          </div>
+          <div className="suppliers-editor-actions">
+            <div className="btn-group">
             <button type="submit" className="btn btn-primary">
               {editingId ? 'Salva modifiche' : 'Aggiungi fornitore'}
             </button>
@@ -718,14 +727,15 @@ export default function SuppliersPage() {
                 Annulla
               </button>
             )}
+            </div>
             <button
               type="button"
-              className="btn btn-outline-danger"
+              className="btn btn-outline-danger btn-sm"
               onClick={handleDeleteAll}
               disabled={deletingAll || suppliers.length === 0}
               title="Elimina tutti i fornitori e i dati collegati (scarichi, fatture, prezzario)"
             >
-              {deletingAll ? 'Eliminazione…' : 'Elimina tutti i fornitori'}
+              {deletingAll ? 'Eliminazione…' : 'Elimina tutti'}
             </button>
           </div>
         </form>

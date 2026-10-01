@@ -26,6 +26,7 @@ export default function GeminiVoiceAssistant({
   autoCompileOnMicStop = true,
   /** true = svuota il campo dopo Compila (successo o errore) */
   clearAfterCompile = true,
+  variant = 'mint',
 }) {
   const { online } = useOffline()
   const offlinePaused = !online
@@ -151,12 +152,16 @@ export default function GeminiVoiceAssistant({
 
   return (
     <div
-      className="gemini-voice-assistant card"
-      style={{
-        padding: '0.85rem 1rem',
-        marginBottom: '1rem',
-        background: 'linear-gradient(180deg, #f0fdfa 0%, #fff 100%)',
-      }}
+      className={`gemini-voice-assistant card${variant === 'studio' ? ' gemini-voice-assistant--studio' : ''}`}
+      style={
+        variant === 'studio'
+          ? undefined
+          : {
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              background: 'linear-gradient(180deg, #f0fdfa 0%, #fff 100%)',
+            }
+      }
     >
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
         <strong style={{ color: '#0d9488' }}>{label}</strong>
