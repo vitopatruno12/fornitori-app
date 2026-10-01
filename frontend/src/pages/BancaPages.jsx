@@ -522,6 +522,25 @@ function invoiceIsAligned(row) {
   return false
 }
 
+function invoiceSupplierMatches(row, query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return false
+  const name = String(row?.supplier_name || '').trim().toLowerCase()
+  if (name && name.includes(q)) return true
+  const num = String(row?.invoice_number || '').trim().toLowerCase()
+  return Boolean(num && num.includes(q))
+}
+
+function scrollToInvoiceRow(domId) {
+  if (!domId || typeof document === 'undefined') return
+  window.requestAnimationFrame(() => {
+    const el = document.getElementById(domId)
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+}
+
 function bankReconCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement?.movement_date)
   if (col.id === 'bonifico_ref') return row?.movement?.bonifico_ref || '—'
@@ -2385,6 +2404,12 @@ export function BancaRiconciliazionePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
+  const [unpaidSupplierDraft, setUnpaidSupplierDraft] = useState('')
+  const [unpaidSupplierHit, setUnpaidSupplierHit] = useState('')
+  const [paidSupplierDraft, setPaidSupplierDraft] = useState('')
+  const [paidSupplierHit, setPaidSupplierHit] = useState('')
+  const [supplierSearchNote, setSupplierSearchNote] = useState('')
+  const [supplierSearchScope, setSupplierSearchScope] = useState('')
 
   async function reload(nextCompany = companyId, { auto = true } = {}) {
     if (!nextCompany) {
@@ -2536,6 +2561,56 @@ export function BancaRiconciliazionePage() {
   const companyName = companyId ? companyLabel(companyId) : ''
   const pendingSuggestions = (data?.suggestions || []).filter((s) => s?.status !== 'matched')
   const schedaRows = [...unpaidRows, ...paidRows]
+
+  const unpaidHitIds = useMemo(() => {
+    const q = unpaidSupplierHit.trim()
+    if (!q) return new Set()
+    return new Set(
+      unpaidRows.filter((row) => invoiceSupplierMatches(row, q)).map((row) => String(row.invoice_id)),
+    )
+  }, [unpaidRows, unpaidSupplierHit])
+
+  const paidHitIds = useMemo(() => {
+    const q = paidSupplierHit.trim()
+    if (!q) return new Set()
+    return new Set(
+      paidRows.filter((row) => invoiceSupplierMatches(row, q)).map((row) => String(row.invoice_id)),
+    )
+  }, [paidRows, paidSupplierHit])
+
+  function cercaFornitoreInLista(kind) {
+    const draft = kind === 'paid' ? paidSupplierDraft : unpaidSupplierDraft
+    const rows = kind === 'paid' ? paidRows : unpaidRows
+    const q = String(draft || '').trim()
+    setSupplierSearchNote('')
+    setSupplierSearchScope(kind)
+    if (!q) {
+      if (kind === 'paid') setPaidSupplierHit('')
+      else setUnpaidSupplierHit('')
+      setSupplierSearchNote('Scrivi il nome fornitore (o n. fattura) e premi Cerca.')
+      return
+    }
+    const hits = rows.filter((row) => invoiceSupplierMatches(row, q))
+    if (kind === 'paid') setPaidSupplierHit(q)
+    else setUnpaidSupplierHit(q)
+    if (!hits.length) {
+      setSupplierSearchNote(
+        kind === 'paid'
+          ? `Nessun fornitore «${q}» in Pagate / abbinate.`
+          : `Nessun fornitore «${q}» in Da pagare.`,
+      )
+      return
+    }
+    const first = hits[0]
+    const domId =
+      kind === 'paid' ? `banca-recon-paid-${first.invoice_id}` : `banca-recon-open-${first.invoice_id}`
+    setSupplierSearchNote(
+      hits.length === 1
+        ? `Trovato: ${first.supplier_name || first.invoice_number || 'documento'}.`
+        : `Trovati ${hits.length} documenti per «${q}» (evidenziati in viola).`,
+    )
+    scrollToInvoiceRow(domId)
+  }
 
   function stampaSchedaRiconciliazione() {
     try {
@@ -2689,10 +2764,52 @@ export function BancaRiconciliazionePage() {
           {data ? (
             <>
               <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Da pagare</h2>
-                <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Numero fattura ed emittente non ancora collegati a un bonifico.
-                </p>
+                <div className="banca-recon-panel-head">
+                  <div>
+                    <h2 className="fatture-panel-title">Da pagare</h2>
+                    <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
+                      Numero fattura ed emittente non ancora collegati a un bonifico.
+                    </p>
+                  </div>
+                  <form
+                    className="banca-recon-supplier-search"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      cercaFornitoreInLista('unpaid')
+                    }}
+                  >
+                    <label className="banca-recon-supplier-search-label">
+                      Cerca fornitore
+                      <input
+                        className="form-control"
+                        value={unpaidSupplierDraft}
+                        onChange={(e) => setUnpaidSupplierDraft(e.target.value)}
+                        placeholder="es. Fatano, Metro…"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <button type="submit" className="btn btn-primary btn-sm">
+                      Cerca
+                    </button>
+                    {unpaidSupplierHit ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setUnpaidSupplierDraft('')
+                          setUnpaidSupplierHit('')
+                          setSupplierSearchNote('')
+                          setSupplierSearchScope('')
+                        }}
+                      >
+                        Pulisci
+                      </button>
+                    ) : null}
+                  </form>
+                </div>
+                {supplierSearchNote && supplierSearchScope === 'unpaid' ? (
+                  <p className="fatture-note banca-recon-supplier-hit-note">{supplierSearchNote}</p>
+                ) : null}
                 <WorkbookGrid
                   title="Fatture da pagare"
                   sheetLabel={`${unpaidRows.length} doc.`}
@@ -2702,7 +2819,15 @@ export function BancaRiconciliazionePage() {
                   emptyMessage="Nessuna fattura da pagare: tutte allineate ai movimenti o al file PAGATO."
                   gridClassName="banca-fit-grid"
                   rowKey={(row) => row.invoice_id}
-                  getRowClassName={(row) => (invoiceIsAligned(row) ? 'banca-recon-row-ok' : 'banca-recon-row-open')}
+                  getRowId={(row) => `banca-recon-open-${row.invoice_id}`}
+                  getRowClassName={(row) =>
+                    [
+                      invoiceIsAligned(row) ? 'banca-recon-row-ok' : 'banca-recon-row-open',
+                      unpaidHitIds.has(String(row.invoice_id)) ? 'banca-recon-supplier-hit' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+                  }
                   totals={
                     unpaidRows.length
                       ? {
@@ -2723,10 +2848,52 @@ export function BancaRiconciliazionePage() {
               </section>
 
               <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
-                <p className="fatture-note" style={{ marginTop: 0 }}>
-                  Numero fattura, emittente e beneficiario del bonifico coincidono.
-                </p>
+                <div className="banca-recon-panel-head">
+                  <div>
+                    <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
+                    <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
+                      Numero fattura, emittente e beneficiario del bonifico coincidono.
+                    </p>
+                  </div>
+                  <form
+                    className="banca-recon-supplier-search"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      cercaFornitoreInLista('paid')
+                    }}
+                  >
+                    <label className="banca-recon-supplier-search-label">
+                      Cerca fornitore
+                      <input
+                        className="form-control"
+                        value={paidSupplierDraft}
+                        onChange={(e) => setPaidSupplierDraft(e.target.value)}
+                        placeholder="es. Fatano, Metro…"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <button type="submit" className="btn btn-primary btn-sm">
+                      Cerca
+                    </button>
+                    {paidSupplierHit ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setPaidSupplierDraft('')
+                          setPaidSupplierHit('')
+                          setSupplierSearchNote('')
+                          setSupplierSearchScope('')
+                        }}
+                      >
+                        Pulisci
+                      </button>
+                    ) : null}
+                  </form>
+                </div>
+                {supplierSearchNote && supplierSearchScope === 'paid' ? (
+                  <p className="fatture-note banca-recon-supplier-hit-note">{supplierSearchNote}</p>
+                ) : null}
                 <WorkbookGrid
                   title="Fatture pagate o abbinate"
                   sheetLabel={`${paidRows.length} doc.`}
@@ -2736,7 +2903,15 @@ export function BancaRiconciliazionePage() {
                   emptyMessage="Nessuna fattura ancora abbinata ai movimenti."
                   gridClassName="banca-fit-grid"
                   rowKey={(row) => `paid-${row.invoice_id}`}
-                  getRowClassName={() => 'banca-recon-row-ok'}
+                  getRowId={(row) => `banca-recon-paid-${row.invoice_id}`}
+                  getRowClassName={(row) =>
+                    [
+                      'banca-recon-row-ok',
+                      paidHitIds.has(String(row.invoice_id)) ? 'banca-recon-supplier-hit' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+                  }
                   totals={
                     paidRows.length
                       ? {

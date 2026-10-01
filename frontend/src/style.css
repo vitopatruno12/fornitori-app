@@ -10414,6 +10414,47 @@ select.form-control {
   border-color: #facc15;
 }
 
+.workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit td,
+.workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit .excel-cell {
+  background: #f3e8ff !important;
+  border-color: #c4b5fd;
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
+.banca-recon-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.banca-recon-panel-head .fatture-panel-title {
+  margin-bottom: 0.25rem;
+}
+
+.banca-recon-supplier-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.banca-recon-supplier-search-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  min-width: min(16rem, 100%);
+}
+
+.banca-recon-supplier-hit-note {
+  color: #5b21b6 !important;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
 .banca-mov-search-hit-note {
   color: #854d0e !important;
   font-weight: 600;
