@@ -49,6 +49,7 @@ export default function PrimaNotaLocalePicker({
   const rootRef = useRef(null)
   const resolveAccessCodeRef = useRef(resolveAccessCode)
   const verifyLocaleRef = useRef(onVerifyAndSelectLocale)
+  const pickTokenRef = useRef(0)
   resolveAccessCodeRef.current = resolveAccessCode
   verifyLocaleRef.current = onVerifyAndSelectLocale
 
@@ -92,12 +93,13 @@ export default function PrimaNotaLocalePicker({
     return isProtectedLocale(id) && !isUnlockedLocale(id)
   }
 
-  async function applyKnownCode(id) {
+  async function applyKnownCode(id, token) {
     const code = normalizeLocaleAccessCode(await resolveAccessCodeRef.current?.(id))
+    if (pickTokenRef.current !== token) return false
     if (!isValidLocaleAccessCode(code)) return false
     setPendingCode(code)
     const ok = await verifyLocaleRef.current?.(id, code)
-    if (!ok) return false
+    if (pickTokenRef.current !== token || !ok) return false
     setPendingLocaleId('')
     setPendingCode('')
     setCodePromptError('')
@@ -121,9 +123,10 @@ export default function PrimaNotaLocalePicker({
     setPendingCode('')
     setCodePromptError('')
     if (paused) return undefined
+    const token = pickTokenRef.current
     let cancelled = false
     void (async () => {
-      const opened = await applyKnownCode(id)
+      const opened = await applyKnownCode(id, token)
       if (cancelled || opened) return
     })()
     return () => {
@@ -132,6 +135,7 @@ export default function PrimaNotaLocalePicker({
   }, [autoPromptLocaleId, protectedSlugs, unlockedSlugs, pauseAutoUnlockId])
 
   function handlePick(id) {
+    const token = ++pickTokenRef.current
     onResumeAutoUnlock?.()
     // Seleziona subito (verde), poi il codice noto apre il registro da solo.
     if (!isActiveLocale(id)) onSelect(id)
@@ -139,10 +143,12 @@ export default function PrimaNotaLocalePicker({
       setPendingLocaleId(id)
       setPendingCode('')
       setCodePromptError('')
-      void applyKnownCode(id)
+      void applyKnownCode(id, token)
       return
     }
     setPendingLocaleId('')
+    setPendingCode('')
+    setCodePromptError('')
     setOpen(false)
   }
 

@@ -252,6 +252,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [localeAccessMetaReady, setLocaleAccessMetaReady] = useState(false)
   const [pauseAutoUnlockSlug, setPauseAutoUnlockSlug] = useState('')
   const unlockRequestRef = useRef(0)
+  const desiredActivityRef = useRef(String(activeActivity || '').trim().toLowerCase())
 
   const protectedSlugs = useMemo(() => {
     const slugs = new Set()
@@ -427,6 +428,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     try {
       const access = await verifyLocaleAccess(activityId, code)
       if (unlockRequestRef.current !== requestId) return false
+      if (desiredActivityRef.current !== slug) return false
       if (!access.ok) {
         if (!access.needsCode) {
           setError('Codice errato: non puoi aprire questo locale.')
@@ -892,6 +894,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   function selectActivity(activityId) {
     if (operatorMode) return
     const next = normalizePrimaNotaActivity(activityId, locales)
+    desiredActivityRef.current = String(next || '').trim().toLowerCase()
     if (next === activeActivity) return
     setActiveActivity(next)
     try {
