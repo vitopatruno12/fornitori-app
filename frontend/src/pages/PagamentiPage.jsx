@@ -773,7 +773,7 @@ export default function PagamentiPage() {
             className="form-control"
             value={invoiceQuery}
             onChange={(event) => setInvoiceQuery(event.target.value)}
-            placeholder="Numero, es. 27/2026"
+            placeholder="Numero, es. 27 oppure 27/2026"
             autoComplete="off"
             disabled={loading}
           />
@@ -790,7 +790,9 @@ export default function PagamentiPage() {
               {invoiceSearchNote}
             </span>
           ) : (
-            <span className="pagamenti-invoice-search-note">Cerca in tutti i mesi di questo file.</span>
+            <span className="pagamenti-invoice-search-note">
+              Cerca in tutti i mesi di questo file (anche solo il numero, senza anno).
+            </span>
           )}
         </form>
 

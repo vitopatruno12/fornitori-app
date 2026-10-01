@@ -324,16 +324,48 @@ function foldInvoiceNumber(value) {
   return stripExcelQuotes(String(value)).trim().toUpperCase().replace(/[\s'"]/g, '')
 }
 
+function invoiceDigitsOnly(value) {
+  return String(value || '').replace(/\D/g, '').replace(/^0+/, '') || ''
+}
+
+function invoiceMainNumber(value) {
+  const folded = foldInvoiceNumber(value)
+  if (!folded) return ''
+  const head = folded.split(/[/\-_.]/)[0] || folded
+  return invoiceDigitsOnly(head)
+}
+
+function invoiceYearSuffix(value) {
+  const folded = foldInvoiceNumber(value)
+  const m = folded.match(/[/\-_.](\d{2,4})$/)
+  return m ? m[1] : ''
+}
+
 export function invoiceNumbersMatch(cellValue, query) {
   const cell = foldInvoiceNumber(cellValue)
   const needle = foldInvoiceNumber(query)
   if (!cell || !needle) return false
   if (cell === needle) return true
-  const cellDigits = cell.replace(/^0+/, '')
-  const needleDigits = needle.replace(/^0+/, '')
-  if (/^\d+$/.test(cellDigits) && /^\d+$/.test(needleDigits) && cellDigits === needleDigits && needleDigits.length >= 4) {
-    return true
+
+  // Solo cifre: "0027" ≈ "27", "27/2026" ≈ "272026"
+  const cellDigits = invoiceDigitsOnly(cell)
+  const needleDigits = invoiceDigitsOnly(needle)
+  if (cellDigits && needleDigits && cellDigits === needleDigits) return true
+
+  // Numero principale prima di / - _: "27" trova "27/2026"; "27/26" trova "27/2026"
+  const cellMain = invoiceMainNumber(cell)
+  const needleMain = invoiceMainNumber(needle)
+  if (cellMain && needleMain && cellMain === needleMain) {
+    const cellYear = invoiceYearSuffix(cell)
+    const needleYear = invoiceYearSuffix(needle)
+    if (!needleYear || !cellYear) return true
+    if (cellYear === needleYear) return true
+    if (cellYear.endsWith(needleYear) || needleYear.endsWith(cellYear)) return true
   }
+
+  // Frammento lungo già presente nel numero (es. "27/202")
+  if (needle.length >= 4 && cell.includes(needle)) return true
+
   return false
 }
 
