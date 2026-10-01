@@ -253,6 +253,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [pauseAutoUnlockSlug, setPauseAutoUnlockSlug] = useState('')
   const unlockRequestRef = useRef(0)
   const desiredActivityRef = useRef(String(activeActivity || '').trim().toLowerCase())
+  const entriesLoadSeq = useRef(0)
 
   const protectedSlugs = useMemo(() => {
     const slugs = new Set()
@@ -896,6 +897,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const next = normalizePrimaNotaActivity(activityId, locales)
     desiredActivityRef.current = String(next || '').trim().toLowerCase()
     if (next === activeActivity) return
+    setLocaleAccessCode('')
+    setError('')
     setActiveActivity(next)
     try {
       sessionStorage.setItem('primaNotaActivity', next)
@@ -918,11 +921,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   async function loadEntries(periodOverride = null) {
+    const seq = ++entriesLoadSeq.current
     if (!localeAccessMetaReady) {
       setLoading(true)
       return
     }
     if (!hasActiveLocaleAccess()) {
+      if (seq !== entriesLoadSeq.current) return
       setEntries([])
       setLoading(false)
       return
@@ -937,17 +942,22 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         from = to
         to = swap
       }
+      const activity = activeActivity
       const data = await fetchEntries({
         date_from: from || undefined,
         date_to: to || undefined,
-        activity: activeActivity,
+        activity,
         access_code: resolveActiveAccessCode(),
       })
+      if (seq !== entriesLoadSeq.current) return
+      if (String(desiredActivityRef.current || '') !== String(activity || '').trim().toLowerCase()) return
       setEntries(data)
+      setError('')
     } catch (e) {
+      if (seq !== entriesLoadSeq.current) return
       setError(e?.message?.includes('Codice') ? 'Codice locale non valido o mancante.' : 'Errore nel caricamento dei movimenti')
     } finally {
-      setLoading(false)
+      if (seq === entriesLoadSeq.current) setLoading(false)
     }
   }
 
