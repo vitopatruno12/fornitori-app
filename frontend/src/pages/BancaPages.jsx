@@ -362,6 +362,14 @@ const BANK_MOVEMENTS_COLUMNS = [
   { id: 'status', label: 'Riconciliazione', width: 8, fluid: true },
 ]
 
+function invoiceNumberDigitsOnly(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const parts = raw.match(/\d+(?:[/-]\d+)*/g)
+  if (!parts || !parts.length) return ''
+  return parts.join(', ')
+}
+
 function bankMovementsCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement_date)
   if (col.id === 'counterparty') {
@@ -384,18 +392,19 @@ function bankMovementsCellValue(row, col) {
       : row?.matched_invoice
         ? [row.matched_invoice]
         : []
-    if (!linked.length) {
-      return row?.matched_invoice_id ? `Fattura #${row.matched_invoice_id}` : '—'
+    const nums = []
+    const seen = new Set()
+    for (const inv of linked) {
+      const digits = invoiceNumberDigitsOnly(inv?.invoice_number || inv?.id || '')
+      if (!digits || seen.has(digits)) continue
+      seen.add(digits)
+      nums.push(digits)
     }
-    const nums = linked
-      .map((inv) => String(inv?.invoice_number || inv?.id || '').trim())
-      .filter(Boolean)
-    const supplier = String(linked[0]?.supplier_name || '').trim()
-    if (nums.length === 1) {
-      return `Fattura ${nums[0]}${supplier ? ` · ${supplier}` : ''}`
+    if (!nums.length) {
+      const fallback = invoiceNumberDigitsOnly(row?.matched_invoice_id)
+      return fallback || '—'
     }
-    const head = supplier ? `${supplier} · ` : ''
-    return `${head}Saldo cumulativo · ${nums.join(', ')}`
+    return nums.join(', ')
   }
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
@@ -2087,6 +2096,18 @@ export function BancaMovimentiPage() {
       } else {
         setLastSyncedLabel(`${targets.length} conti sincronizzati`)
         setSuccess(`Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti${periodLabel}.`)
+      }
+      // Collega beneficiario + n. fattura in causale e chiude le aperte
+      try {
+        const recon = await postBancaRiconciliazioneAuto()
+        const closed = Number(recon?.auto_applied) || 0
+        if (closed > 0) {
+          setSuccess((prev) =>
+            `${prev || 'Movimenti aggiornati.'} Riconciliate ${closed} fatture (beneficiario + n. in causale).`.trim(),
+          )
+        }
+      } catch {
+        // Sync movimenti ok anche se la riconciliazione fallisce
       }
       await load()
     } catch (e) {

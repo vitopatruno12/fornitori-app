@@ -658,7 +658,7 @@ def list_movements(
   for m, _ in rows:
     lookup_tokens.extend(_parse_linked_invoices_note(getattr(m, "notes", None)))
     if not _parse_linked_invoices_note(getattr(m, "notes", None)):
-      lookup_tokens.extend(extract_invoice_refs(_movement_search_blob(m)))
+      lookup_tokens.extend(extract_invoice_digit_tokens(_movement_search_blob(m)))
 
   invoices_by_id: Dict[int, Invoice] = {}
   invoices_by_norm: Dict[str, Invoice] = {}
@@ -1239,6 +1239,61 @@ def extract_invoice_refs(blob: str) -> List[str]:
   return refs
 
 
+_INVOICE_DIGIT_TOKEN_RE = re.compile(
+  r"(?<!\d)(\d{2,8}(?:\s*[/-]\s*\d{1,4})?)(?!\d)",
+)
+
+
+def invoice_ref_digits(value: Optional[str]) -> str:
+  """Solo cifre (e / - tra gruppi), senza lettere/etichette."""
+  raw = str(value or "").strip()
+  if not raw:
+    return ""
+  parts = re.findall(r"\d+(?:[/-]\d+)*", raw)
+  return ", ".join(parts) if parts else ""
+
+
+def extract_invoice_digit_tokens(blob: str) -> List[str]:
+  """Token numerici fattura: prima da ancore FT/SALDO, poi cifre isolate in causale.
+
+  Esclude anni (20xx) e riferimenti bancari troppo lunghi (CRO/PV).
+  """
+  primary = extract_invoice_refs(blob)
+  out: List[str] = []
+  seen: set[str] = set()
+
+  def add(token: str) -> None:
+    cleaned = invoice_ref_digits(token) or str(token or "").strip()
+    if not cleaned:
+      return
+    # un solo gruppo principale
+    first = cleaned.split(",")[0].strip()
+    digits = re.sub(r"\D", "", first)
+    if len(digits) < 2 or len(digits) > 12:
+      return
+    if re.fullmatch(r"20\d{2}", digits):
+      return
+    key = _normalize_doc_token(first)
+    if not key or key in seen:
+      return
+    seen.add(key)
+    out.append(first)
+
+  for ref in primary:
+    add(ref)
+  if out:
+    return out
+
+  text = re.sub(r"\s+", " ", str(blob or ""))
+  # Evita «saldo agosto» senza numeri utili
+  lower = text.lower()
+  if re.search(r"saldo\s+(?:ft|fattur)", lower) and not re.search(r"\d{2,}", text):
+    return []
+  for match in _INVOICE_DIGIT_TOKEN_RE.finditer(text):
+    add(match.group(1))
+  return out
+
+
 def _tokenize_invoice_refs(chunk: str) -> List[str]:
   chunk = (chunk or "").strip(" .:-")
   chunk = re.sub(r"\b(20\d)\s+(\d)\b", r"\1\2", chunk)
@@ -1795,7 +1850,7 @@ def allocate_cited_invoices(
     amt = abs(_dec(getattr(mov, "amount", 0)))
     if amt <= Decimal("1.00"):
       continue
-    refs = extract_invoice_refs(meta.get("blob") or "")
+    refs = extract_invoice_digit_tokens(meta.get("blob") or "")
     if not refs:
       continue
     beneficiary = _movement_beneficiary(mov, meta.get("blob") or "")
@@ -2189,7 +2244,7 @@ def _set_linked_invoices_note(
   uniq: List[str] = []
   seen: set[str] = set()
   for raw in numbers:
-    n = str(raw or "").strip()
+    n = invoice_ref_digits(raw) or str(raw or "").strip()
     if not n:
       continue
     key = _normalize_doc_token(n)
@@ -2248,7 +2303,7 @@ def _build_linked_invoices(
     out.append(_invoice_brief(inv, supplier_name=name, account=account))
 
   def _add_number(raw: str) -> None:
-    n = str(raw or "").strip()
+    n = invoice_ref_digits(raw) or str(raw or "").strip()
     if not n:
       return
     key = _normalize_doc_token(n)
@@ -2282,9 +2337,9 @@ def _build_linked_invoices(
   for num in _parse_linked_invoices_note(getattr(mov, "notes", None)):
     _add_number(num)
 
-  # Causale con più numeri (SALDO FT '123' '456') anche senza nota ancora scritta
+  # Causale: numeri fattura (anche senza prefisso FT) da collegare al beneficiario
   if len(out) <= 1:
-    for ref in extract_invoice_refs(_movement_search_blob(mov)):
+    for ref in extract_invoice_digit_tokens(_movement_search_blob(mov)):
       _add_number(ref)
 
   return out

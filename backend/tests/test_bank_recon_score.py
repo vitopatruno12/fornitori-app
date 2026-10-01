@@ -482,6 +482,8 @@ def test_linked_invoices_note_roundtrip():
   from app.services.banca_service import (
     _parse_linked_invoices_note,
     _set_linked_invoices_note,
+    extract_invoice_digit_tokens,
+    invoice_ref_digits,
   )
 
   mov = _mov(notes="nota libera")
@@ -493,6 +495,12 @@ def test_linked_invoices_note_roundtrip():
   _set_linked_invoices_note(mov, ["100/01", "200/01"], reason="bundle fornitore")
   assert _parse_linked_invoices_note(mov.notes) == ["100/01", "200/01"]
   assert "nota libera" in (mov.notes or "")
+  assert invoice_ref_digits("Fattura 256/E - DEC") == "256"
+  assert invoice_ref_digits("FT 8947/01") == "8947/01"
+  tokens = extract_invoice_digit_tokens("BONIFICO INTERFRUTTA SALDO FT '8947/01' '7684/01'")
+  assert "8947/01" in tokens and "7684/01" in tokens
+  loose = extract_invoice_digit_tokens("Pagamento 4521/01 e 4522/01 a Interfrutta")
+  assert "4521/01" in loose and "4522/01" in loose
 
 
 def test_build_linked_invoices_from_causale_and_note():
