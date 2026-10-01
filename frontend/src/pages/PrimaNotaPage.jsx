@@ -491,7 +491,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setUnlockBusy(false)
     setError('')
     if (wasOpen) {
-      setSuccess(`Registro «${activeActivityLabel}» chiuso. Riselezionalo per riaprirlo.`)
+      setSuccess(`Registro «${activeActivityLabel}» chiuso. Clicca Accedi: il codice si ricarica da solo.`)
     } else {
       setSuccess(`Registro «${activeActivityLabel}» già chiuso.`)
     }
@@ -1789,7 +1789,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const cassaFinaleRiepilogo = Number(totaleVenditaGiorno || 0)
   const needsLocaleUnlock = activeLocaleNeedsCode() && !hasActiveLocaleAccess()
   // Aperto in UI = sessione sbloccata o codice ancora in memoria browser.
-  const localeRegisterOpen = isActiveLocaleUnlocked()
+  const localeRegisterOpen = !activeLocaleNeedsCode() || isActiveLocaleUnlocked()
 
   const totaleEntrateGiorno = summary?.totale_entrate != null ? Number(summary.totale_entrate) : entrateCassaGiornoComputed
   const totaleUsciteGiorno = summary?.totale_uscite != null ? Number(summary.totale_uscite) : usciteCassaGiornoComputed

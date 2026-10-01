@@ -217,9 +217,14 @@ export default function GestionaleStaffLocaleGate({
       setSuccess(`Locale «${name}» già aperto.`)
       return
     }
-    const code = normalizeLocaleAccessCode(localeAccessCode)
+    suppressAutoOpenRef.current = ''
+    let code = normalizeLocaleAccessCode(localeAccessCode)
     if (!isValidLocaleAccessCode(code)) {
-      setError('Inserisci il codice a 6 cifre del locale.')
+      code = await fetchStaffLocaleAccessCode(name)
+      if (isValidLocaleAccessCode(code)) setLocaleAccessCode(code)
+    }
+    if (!isValidLocaleAccessCode(code)) {
+      setError('Nessun codice salvato per questo locale.')
       return
     }
     setBusy(true)

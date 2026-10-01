@@ -192,9 +192,14 @@ export default function OperatorStationStaffGate({
       setSuccess(`Locale «${localeName}» già aperto.`)
       return
     }
-    const code = normalizeLocaleAccessCode(localeAccessCode)
+    suppressAutoOpenRef.current = false
+    let code = normalizeLocaleAccessCode(localeAccessCode)
     if (!isValidLocaleAccessCode(code)) {
-      setError('Inserisci il codice a 6 cifre del locale.')
+      code = await fetchStaffLocaleAccessCode(localeName)
+      if (isValidLocaleAccessCode(code)) setLocaleAccessCode(code)
+    }
+    if (!isValidLocaleAccessCode(code)) {
+      setError('Nessun codice salvato per questo locale.')
       return
     }
     setBusy(true)

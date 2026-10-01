@@ -158,14 +158,30 @@ export default function PrimaNotaLocalePicker({
     setCodePromptError('')
   }
 
+  async function resolveCodeFor(id, typed) {
+    let code = normalizeLocaleAccessCode(typed)
+    if (isValidLocaleAccessCode(code)) return code
+    code = normalizeLocaleAccessCode(await resolveAccessCodeRef.current?.(id))
+    return isValidLocaleAccessCode(code) ? code : ''
+  }
+
+  async function handleAccediClick() {
+    onResumeAutoUnlock?.()
+    const code = await resolveCodeFor(activeActivity, localeAccessCode)
+    if (isValidLocaleAccessCode(code)) onLocaleAccessCodeChange?.(code)
+    await onVerifyAndSelectLocale?.(activeActivity, code)
+  }
+
   async function confirmCodePrompt(e) {
     e?.preventDefault?.()
     if (!pendingLocaleId) return
-    const code = normalizeLocaleAccessCode(pendingCode)
+    onResumeAutoUnlock?.()
+    const code = await resolveCodeFor(pendingLocaleId, pendingCode)
     if (!isValidLocaleAccessCode(code)) {
-      setCodePromptError('Inserisci il codice a 6 cifre del locale.')
+      setCodePromptError('Nessun codice salvato per questo registro.')
       return
     }
+    setPendingCode(code)
     setCodePromptError('')
     const ok = await onVerifyAndSelectLocale?.(pendingLocaleId, code)
     if (!ok) {
@@ -390,22 +406,14 @@ export default function PrimaNotaLocalePicker({
             <button
               type="button"
               className={`btn btn-sm prima-nota-accedi-btn${localeRegisterOpen ? ' is-register-open' : ''}`}
-              disabled={
-                unlockBusy ||
-                localeRegisterOpen ||
-                !isValidLocaleAccessCode(normalizeLocaleAccessCode(localeAccessCode))
-              }
+              disabled={unlockBusy || localeRegisterOpen}
               tabIndex={localeRegisterOpen ? -1 : undefined}
               aria-disabled={localeRegisterOpen || unlockBusy}
-              onClick={
-                localeRegisterOpen
-                  ? undefined
-                  : () => void onVerifyAndSelectLocale?.(activeActivity, normalizeLocaleAccessCode(localeAccessCode))
-              }
+              onClick={localeRegisterOpen ? undefined : () => void handleAccediClick()}
               title={
                 localeRegisterOpen
                   ? 'Registro aperto: Accedi bloccato. Usa Chiudi per richiuderlo.'
-                  : 'Inserisci il codice e accedi al registro.'
+                  : 'Accedi: il codice salvato si ricarica da solo.'
               }
             >
               {unlockBusy ? 'Accesso…' : localeRegisterOpen ? 'Bloccato' : 'Accedi'}

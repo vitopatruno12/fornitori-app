@@ -3238,9 +3238,14 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (localeName !== normalizeLocaleName(localeStaffName)) {
       setLocaleStaffName(localeName)
     }
-    const code = normalizeLocaleAccessCode(
+    suppressStaffAutoOpenRef.current = false
+    let code = normalizeLocaleAccessCode(
       codeOverride != null && codeOverride !== '' ? codeOverride : localeAccessCode,
     )
+    if (!isValidLocaleAccessCode(code)) {
+      code = await fetchStaffLocaleAccessCode(localeName)
+      if (isValidLocaleAccessCode(code)) setLocaleAccessCode(code)
+    }
     const alreadyOpen = isStaffLocaleSessionOpen(localeName)
     setLocaleSessionBusy(true)
     setError('')
