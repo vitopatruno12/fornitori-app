@@ -10405,6 +10405,20 @@ select.form-control {
   text-overflow: ellipsis;
 }
 
+.workbook-grid.banca-fit-grid tr.banca-mov-hit td {
+  background: #fef08a;
+}
+
+.workbook-grid.banca-fit-grid tr.banca-mov-hit .excel-cell {
+  background: #fef08a !important;
+  border-color: #facc15;
+}
+
+.banca-mov-search-hit-note {
+  color: #854d0e !important;
+  font-weight: 600;
+}
+
 .workbook-grid.mastrini-fit-grid .sup-actions-col {
   min-width: 0;
   width: 7%;

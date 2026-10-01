@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AmministrazionePageShell,
@@ -10,6 +10,7 @@ import {
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
+import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
 import {
   confirmBancaConnectOtp,
   connectBancaAccount,
@@ -395,6 +396,41 @@ function bankMovementsCellValue(row, col) {
   }
   if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
   return ''
+}
+
+function movementSearchBlob(mov) {
+  const inv = mov?.matched_invoice
+  return [
+    mov?.description,
+    mov?.causale,
+    mov?.counterparty,
+    mov?.doc_ref,
+    mov?.notes,
+    inv?.invoice_number,
+    inv?.supplier_name,
+    mov?.matched_invoice_id != null ? String(mov.matched_invoice_id) : '',
+  ]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** Trova bonifici per n. fattura in causale / fattura collegata, oppure testo libero. */
+function movementMatchesSearch(mov, query) {
+  const q = String(query || '').trim()
+  if (!q) return false
+  const invNum = mov?.matched_invoice?.invoice_number
+  if (invNum && invoiceNumbersMatch(invNum, q)) return true
+  if (mov?.doc_ref && invoiceNumbersMatch(mov.doc_ref, q)) return true
+  const blob = movementSearchBlob(mov)
+  const tokens = blob.split(/[\s,;|·]+/).filter(Boolean)
+  for (const token of tokens) {
+    if (invoiceNumbersMatch(token, q)) return true
+  }
+  const foldedQ = q.toUpperCase().replace(/[\s'"]/g, '')
+  const foldedBlob = blob.toUpperCase().replace(/[\s'"]/g, '')
+  if (foldedQ.length >= 2 && foldedBlob.includes(foldedQ)) return true
+  return false
 }
 
 const BANK_RECON_COLUMNS = [
@@ -1938,7 +1974,7 @@ export function BancaMovimentiPage() {
   const [accountId, setAccountId] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [counterparty, setCounterparty] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [syncBusy, setSyncBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1972,7 +2008,6 @@ export function BancaMovimentiPage() {
           account_id: accountId || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
-          counterparty: counterparty || undefined,
         }),
         fetchBancaAccounts(),
       ])
@@ -2048,6 +2083,31 @@ export function BancaMovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
 
+  const searchHitIds = useMemo(() => {
+    const q = searchQuery.trim()
+    if (!q) return new Set()
+    return new Set(items.filter((m) => movementMatchesSearch(m, q)).map((m) => m.id))
+  }, [items, searchQuery])
+
+  const displayRows = useMemo(() => {
+    if (!searchHitIds.size) return items
+    const hits = []
+    const rest = []
+    for (const row of items) {
+      if (searchHitIds.has(row.id)) hits.push(row)
+      else rest.push(row)
+    }
+    return [...hits, ...rest]
+  }, [items, searchHitIds])
+
+  const searchStatusNote = useMemo(() => {
+    const q = searchQuery.trim()
+    if (!q) return ''
+    const n = searchHitIds.size
+    if (n > 0) return `Trovati ${n} bonifici/movimenti per «${q}» (evidenziati in giallo).`
+    return `Nessun bonifico con fattura/testo «${q}» nei movimenti caricati. Allarga il periodo e premi Cerca.`
+  }, [searchQuery, searchHitIds])
+
   const companyGroups = []
   const byCompany = new Map()
   for (const account of accounts) {
@@ -2105,7 +2165,7 @@ export function BancaMovimentiPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            load()
+            void load()
           }}
           style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}
         >
@@ -2146,13 +2206,30 @@ export function BancaMovimentiPage() {
           >
             {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
           </button>
-          <label>
-            Cliente/Fornitore
-            <input className="form-control" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
+          <label style={{ minWidth: 200, flex: '1 1 200px' }}>
+            Cerca
+            <input
+              className="form-control"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="N. fattura, es. 27/2026"
+              title="Cerca il bonifico che paga quella fattura (in causale o fattura collegata)"
+              autoComplete="off"
+            />
           </label>
           <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
-            Filtra
+            Cerca
           </button>
+          {searchQuery.trim() ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={loading || syncBusy}
+              onClick={() => setSearchQuery('')}
+            >
+              Pulisci
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-secondary"
@@ -2176,13 +2253,13 @@ export function BancaMovimentiPage() {
                   title: `Scheda movimenti · ${viewAccountLabel}`,
                   subtitle: [
                     dateFrom || dateTo ? `Periodo ${dateFrom || '…'} → ${dateTo || '…'}` : null,
-                    counterparty ? `Controparte: ${counterparty}` : null,
+                    searchQuery.trim() ? `Cerca: ${searchQuery.trim()}` : null,
                     `${items.length} movimenti`,
                   ]
                     .filter(Boolean)
                     .join(' · '),
                   columns: BANK_MOVEMENTS_COLUMNS,
-                  rows: items,
+                  rows: searchHitIds.size ? displayRows.filter((r) => searchHitIds.has(r.id)) : items,
                   cellValue: bankMovementsCellValue,
                   totals,
                   totalsLabel: (colId, t) => {
@@ -2202,6 +2279,11 @@ export function BancaMovimentiPage() {
             Stampa scheda PDF
           </button>
         </form>
+        {searchStatusNote ? (
+          <p className={`fatture-note${searchHitIds.size ? ' banca-mov-search-hit-note' : ''}`} style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+            {searchStatusNote}
+          </p>
+        ) : null}
         <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
           Stai vedendo:{' '}
           <strong>{viewAccountLabel}</strong>
@@ -2225,13 +2307,18 @@ export function BancaMovimentiPage() {
         ) : (
           <WorkbookGrid
             title={`Movimenti bancari · ${viewAccountLabel}`}
-            sheetLabel={`${items.length} movimenti`}
+            sheetLabel={
+              searchHitIds.size
+                ? `${searchHitIds.size} trovati · ${items.length} movimenti`
+                : `${items.length} movimenti`
+            }
             columns={BANK_MOVEMENTS_COLUMNS}
-            rows={items}
+            rows={displayRows}
             cellValue={bankMovementsCellValue}
             emptyMessage={`Nessun movimento per «${viewAccountLabel}». Usa Aggiorna oppure Sincronizza in Conti correnti.`}
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
+            getRowClassName={(row) => (searchHitIds.has(row.id) ? 'banca-mov-hit' : '')}
             totals={{
               amountEntrate: items.reduce(
                 (acc, m) => acc + (String(m?.movement_type || '').toLowerCase() === 'entrata' ? Number(m?.amount) || 0 : 0),
