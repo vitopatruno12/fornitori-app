@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import OperatorStationStaffGate from '../components/OperatorStationStaffGate.jsx'
 import GestionaleStaffLocaleGate from '../components/GestionaleStaffLocaleGate.jsx'
@@ -11,6 +11,7 @@ import {
 } from '../services/staffService.js'
 import StipendiDocumentsPanel from '../components/StipendiDocumentsPanel.jsx'
 import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
+import { readStipendiWorkbook } from '../utils/stipendiWorkbookImport.js'
 import { getOperatorStationStaffLocaleName } from '../utils/operatorStationLocale.js'
 import { resolveGestionaleLocaleMembers, readGestionaleStaffLocale } from '../utils/gestionaleStaffLocale.js'
 import { memberNameKey } from '../utils/operatorLocalePack.js'
@@ -169,6 +170,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [activeSheet, setActiveSheet] = useState('stipendi')
+  const importFileRef = useRef(null)
 
   const activeSheetMeta = useMemo(
     () => STIPENDI_SHEETS.find((s) => s.id === activeSheet) || STIPENDI_SHEETS[0],
@@ -514,6 +516,76 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     }
   }
 
+  function applyImportedLines(imported) {
+    const incoming = []
+    const seen = new Set()
+    for (const partial of imported) {
+      const row = emptyLine(partial)
+      const name = String(row.name || '').trim()
+      const key = memberNameKey(name)
+      if (!name || !key || seen.has(key)) continue
+      seen.add(key)
+      incoming.push(row)
+    }
+    if (!incoming.length) {
+      setError('Nessuna riga con nominativo nel file. Servono le colonne Nominativo, Busta, Fuori, TFR.')
+      return
+    }
+    setLines((prev) => {
+      const byKey = new Map()
+      for (const row of prev) {
+        const key = memberNameKey(row.name)
+        if (key) byKey.set(key, row)
+      }
+      const next = []
+      const used = new Set()
+      for (const row of incoming) {
+        const key = memberNameKey(row.name)
+        const previous = byKey.get(key)
+        used.add(key)
+        next.push(
+          emptyLine({
+            ...row,
+            staff_member_id: previous?.staff_member_id ?? row.staff_member_id,
+          }),
+        )
+      }
+      for (const row of prev) {
+        const key = memberNameKey(row.name)
+        if (key && used.has(key)) continue
+        next.push(row)
+      }
+      return next
+    })
+    setSelectedIndex(null)
+    resetDraft()
+    setError('')
+    setSuccess(
+      `Caricate ${incoming.length} righe dal file. Controlla la tabella e premi Salva mese.`,
+    )
+  }
+
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    const name = String(file.name || '').toLowerCase()
+    if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.ods')) {
+      setError('Carica un file Excel (.xlsx, .xls) o ODS (.ods).')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const buffer = await file.arrayBuffer()
+      applyImportedLines(await readStipendiWorkbook(buffer))
+    } catch (e) {
+      setError(e?.message || 'Lettura del file non riuscita')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function handleExcel() {
     try {
       const header = [
@@ -604,6 +676,21 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                 </button>
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy || loading} onClick={handleSave}>
                   {busy ? 'Salvo…' : activeId ? 'Aggiorna mese' : 'Salva mese'}
+                </button>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".xlsx,.xls,.ods,application/vnd.oasis.opendocument.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  hidden
+                  onChange={(e) => void handleImportFile(e)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy || loading}
+                  onClick={() => importFileRef.current?.click()}
+                >
+                  Carica Excel / ODS
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={busy || loading} onClick={handleExcel}>
                   Download Excel
