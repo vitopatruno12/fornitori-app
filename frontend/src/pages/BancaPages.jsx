@@ -2163,121 +2163,126 @@ export function BancaMovimentiPage() {
       {success && <div className="alert alert-success">{success}</div>}
       <section className="card fatture-panel">
         <form
+          className="banca-movimenti-filters"
           onSubmit={(e) => {
             e.preventDefault()
             void load()
           }}
-          style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'end' }}
         >
-          <label>
-            Periodo da
-            <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </label>
-          <label>
-            a
-            <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </label>
-          <label style={{ minWidth: 280, flex: '1 1 280px' }}>
-            Banca / conto
-            <select
-              className="form-control"
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              title="Scegli quale banca e conto stai guardando"
-            >
-              <option value="">Tutti i conti</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {formatBankAccountOptionLabel(a)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={loading || syncBusy}
-            onClick={() => void aggiornaMovimenti()}
-            title={
-              accountId
-                ? `Scarica da Enable Banking${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''} · ${viewAccountLabel}`
-                : `Aggiorna tutti i conti Enable Banking collegati${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''}`
-            }
-          >
-            {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
-          </button>
-          <label style={{ minWidth: 200, flex: '1 1 200px' }}>
-            Cerca
-            <input
-              className="form-control"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="N. fattura, es. 27/2026"
-              title="Cerca il bonifico che paga quella fattura (in causale o fattura collegata)"
-              autoComplete="off"
-            />
-          </label>
-          <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
-            Cerca
-          </button>
-          {searchQuery.trim() ? (
+          <div className="banca-movimenti-filters-row">
+            <label>
+              Periodo da
+              <input className="form-control" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </label>
+            <label>
+              a
+              <input className="form-control" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </label>
+            <label className="banca-movimenti-filters-account">
+              Banca / conto
+              <select
+                className="form-control"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                title="Scegli quale banca e conto stai guardando"
+              >
+                <option value="">Tutti i conti</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {formatBankAccountOptionLabel(a)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               className="btn btn-secondary"
               disabled={loading || syncBusy}
-              onClick={() => setSearchQuery('')}
-            >
-              Pulisci
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={loading || syncBusy || !items.length}
-            title="Apre la stampa: da lì puoi salvare come PDF"
-            onClick={() => {
-              try {
-                const totals = {
-                  amountEntrate: items.reduce(
-                    (acc, m) =>
-                      acc + (String(m?.movement_type || '').toLowerCase() === 'entrata' ? Number(m?.amount) || 0 : 0),
-                    0,
-                  ),
-                  amountUscite: items.reduce(
-                    (acc, m) =>
-                      acc + (String(m?.movement_type || '').toLowerCase() !== 'entrata' ? Number(m?.amount) || 0 : 0),
-                    0,
-                  ),
-                }
-                printVneTable({
-                  title: `Scheda movimenti · ${viewAccountLabel}`,
-                  subtitle: [
-                    dateFrom || dateTo ? `Periodo ${dateFrom || '…'} → ${dateTo || '…'}` : null,
-                    searchQuery.trim() ? `Cerca: ${searchQuery.trim()}` : null,
-                    `${items.length} movimenti`,
-                  ]
-                    .filter(Boolean)
-                    .join(' · '),
-                  columns: BANK_MOVEMENTS_COLUMNS,
-                  rows: searchHitIds.size ? displayRows.filter((r) => searchHitIds.has(r.id)) : items,
-                  cellValue: bankMovementsCellValue,
-                  totals,
-                  totalsLabel: (colId, t) => {
-                    const netto = (Number(t?.amountEntrate) || 0) - (Number(t?.amountUscite) || 0)
-                    if (colId === 'description') return `TOTALI · Netto ${eur(netto)}`
-                    if (colId === 'amount') {
-                      return `E ${eur(t?.amountEntrate)} / U ${eur(t?.amountUscite)}`
-                    }
-                    return ''
-                  },
-                })
-              } catch (err) {
-                window.alert(err?.message || 'Stampa non riuscita')
+              onClick={() => void aggiornaMovimenti()}
+              title={
+                accountId
+                  ? `Scarica da Enable Banking${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''} · ${viewAccountLabel}`
+                  : `Aggiorna tutti i conti Enable Banking collegati${dateFrom || dateTo ? ` sul periodo ${dateFrom || '…'} → ${dateTo || '…'}` : ''}`
               }
-            }}
-          >
-            Stampa scheda PDF
-          </button>
+            >
+              {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={loading || syncBusy || !items.length}
+              title="Apre la stampa: da lì puoi salvare come PDF"
+              onClick={() => {
+                try {
+                  const totals = {
+                    amountEntrate: items.reduce(
+                      (acc, m) =>
+                        acc + (String(m?.movement_type || '').toLowerCase() === 'entrata' ? Number(m?.amount) || 0 : 0),
+                      0,
+                    ),
+                    amountUscite: items.reduce(
+                      (acc, m) =>
+                        acc + (String(m?.movement_type || '').toLowerCase() !== 'entrata' ? Number(m?.amount) || 0 : 0),
+                      0,
+                    ),
+                  }
+                  printVneTable({
+                    title: `Scheda movimenti · ${viewAccountLabel}`,
+                    subtitle: [
+                      dateFrom || dateTo ? `Periodo ${dateFrom || '…'} → ${dateTo || '…'}` : null,
+                      searchQuery.trim() ? `Cerca: ${searchQuery.trim()}` : null,
+                      `${items.length} movimenti`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · '),
+                    columns: BANK_MOVEMENTS_COLUMNS,
+                    rows: searchHitIds.size ? displayRows.filter((r) => searchHitIds.has(r.id)) : items,
+                    cellValue: bankMovementsCellValue,
+                    totals,
+                    totalsLabel: (colId, t) => {
+                      const netto = (Number(t?.amountEntrate) || 0) - (Number(t?.amountUscite) || 0)
+                      if (colId === 'description') return `TOTALI · Netto ${eur(netto)}`
+                      if (colId === 'amount') {
+                        return `E ${eur(t?.amountEntrate)} / U ${eur(t?.amountUscite)}`
+                      }
+                      return ''
+                    },
+                  })
+                } catch (err) {
+                  window.alert(err?.message || 'Stampa non riuscita')
+                }
+              }}
+            >
+              Stampa scheda PDF
+            </button>
+          </div>
+
+          <div className="banca-movimenti-filters-row banca-movimenti-filters-search">
+            <label className="banca-movimenti-filters-invoice">
+              Numero fattura
+              <input
+                className="form-control"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="es. 27/2026 oppure solo 27"
+                title="Cerca il bonifico che paga quella fattura (in causale o fattura collegata)"
+                autoComplete="off"
+              />
+            </label>
+            <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
+              Cerca
+            </button>
+            {searchQuery.trim() ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={loading || syncBusy}
+                onClick={() => setSearchQuery('')}
+              >
+                Pulisci
+              </button>
+            ) : null}
+          </div>
         </form>
         {searchStatusNote ? (
           <p className={`fatture-note${searchHitIds.size ? ' banca-mov-search-hit-note' : ''}`} style={{ marginTop: '0.75rem', marginBottom: 0 }}>

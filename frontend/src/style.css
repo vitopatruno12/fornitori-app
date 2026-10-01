@@ -10419,6 +10419,35 @@ select.form-control {
   font-weight: 600;
 }
 
+.banca-movimenti-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.banca-movimenti-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.banca-movimenti-filters-account {
+  min-width: 280px;
+  flex: 1 1 280px;
+}
+
+.banca-movimenti-filters-search {
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--border);
+}
+
+.banca-movimenti-filters-invoice {
+  min-width: 260px;
+  flex: 1 1 320px;
+  max-width: 420px;
+}
+
 .workbook-grid.mastrini-fit-grid .sup-actions-col {
   min-width: 0;
   width: 7%;
