@@ -537,32 +537,21 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         const key = memberNameKey(row.name)
         if (key) byKey.set(key, row)
       }
-      const next = []
-      const used = new Set()
-      for (const row of incoming) {
-        const key = memberNameKey(row.name)
-        const previous = byKey.get(key)
-        used.add(key)
-        next.push(
-          emptyLine({
-            ...row,
-            staff_member_id: previous?.staff_member_id ?? row.staff_member_id,
-          }),
-        )
-      }
-      for (const row of prev) {
-        const key = memberNameKey(row.name)
-        if (key && used.has(key)) continue
-        next.push(row)
-      }
-      return next
+      return incoming.map((row) => {
+        const previous = byKey.get(memberNameKey(row.name))
+        return emptyLine({
+          ...row,
+          staff_member_id: previous?.staff_member_id ?? row.staff_member_id,
+        })
+      })
     })
     setSelectedIndex(null)
     resetDraft()
     setError('')
-    setSuccess(
-      `Caricate ${incoming.length} righe dal file. Controlla la tabella e premi Salva mese.`,
-    )
+    setSuccess(`Inserite ${incoming.length} righe nella tabella. Premi Salva mese per registrarle.`)
+    window.setTimeout(() => {
+      document.getElementById('stipendi-foglio-tabella')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
   }
 
   async function handleImportFile(event) {
@@ -836,6 +825,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                 </label>
               </div>
 
+              <div id="stipendi-foglio-tabella">
               <WorkbookGrid
                 title={`Foglio Excel · ${ymLabel(yearMonth)}`}
                 sheetLabel={
@@ -884,6 +874,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                   return ''
                 }}
               />
+              </div>
             </>
           )
         ) : (

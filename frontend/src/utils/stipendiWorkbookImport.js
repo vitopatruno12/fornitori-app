@@ -59,27 +59,46 @@ function isTotalRow(name) {
   return key === 'totali' || key === 'totale' || key.startsWith('totale ')
 }
 
-/** Righe di un foglio (matrice) → voci stipendi. */
-export function linesFromSheetRows(rows) {
-  const header = findHeader(rows)
-  if (!header) return []
+const POSITIONAL_FIELDS = ['name', 'busta', 'fuori', 'tfr_attuale', 'acconto_tfr', 'nuovo_tfr', 'tfr_anticipato']
+
+function rowToLine(cells, fields) {
+  const partial = {}
+  fields.forEach((field, col) => {
+    if (!field || field === 'nuovo_tfr') return
+    if (field === 'name') partial.name = String(cells[col] ?? '').trim()
+    else partial[field] = parseImportedMoney(cells[col])
+  })
+  if (!partial.name || isTotalRow(partial.name)) return null
+  return partial
+}
+
+function linesFromPosition(rows) {
   const out = []
-  for (let i = header.index + 1; i < rows.length; i += 1) {
-    const cells = Array.isArray(rows[i]) ? rows[i] : []
-    const partial = {}
-    header.fields.forEach((field, col) => {
-      if (!field || field === 'nuovo_tfr') return
-      if (field === 'name') partial.name = String(cells[col] ?? '').trim()
-      else partial[field] = parseImportedMoney(cells[col])
-    })
-    if (!partial.name || isTotalRow(partial.name)) continue
-    out.push(partial)
+  for (const raw of rows) {
+    const cells = Array.isArray(raw) ? raw : []
+    const name = String(cells[0] ?? '').trim()
+    if (!name || isTotalRow(name) || headerField(name) === 'name') continue
+    const hasAmount = cells.slice(1, 8).some((cell) => String(cell ?? '').trim() !== '')
+    if (!hasAmount) continue
+    const line = rowToLine(cells, POSITIONAL_FIELDS)
+    if (line) out.push(line)
   }
   return out
 }
 
-function sheetScore(rows) {
-  return linesFromSheetRows(rows).length
+/** Righe di un foglio (matrice) → voci stipendi. */
+export function linesFromSheetRows(rows) {
+  const header = findHeader(rows)
+  if (header) {
+    const out = []
+    for (let i = header.index + 1; i < rows.length; i += 1) {
+      const cells = Array.isArray(rows[i]) ? rows[i] : []
+      const line = rowToLine(cells, header.fields)
+      if (line) out.push(line)
+    }
+    if (out.length) return out
+  }
+  return linesFromPosition(rows)
 }
 
 /** Legge .xlsx, .xls o .ods e restituisce le voci da mettere in tabella. */
