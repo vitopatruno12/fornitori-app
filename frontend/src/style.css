@@ -1462,6 +1462,34 @@ select.form-control {
   gap: 0.75rem;
 }
 
+.pagamenti-hero-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.pagamenti-hero-copy {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.pagamenti-back-elenco {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #fff !important;
+}
+
+.pagamenti-back-elenco:hover,
+.pagamenti-back-elenco:focus-visible {
+  background: rgba(255, 255, 255, 0.24) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  color: #fff !important;
+}
+
 .pagamenti-company-select-wrap {
   max-width: 420px;
 }

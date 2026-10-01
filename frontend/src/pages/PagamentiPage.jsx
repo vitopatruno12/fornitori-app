@@ -104,11 +104,7 @@ export default function PagamentiPage() {
   const highlightMenuRef = useRef(null)
   const gridWrapRef = useRef(null)
 
-  function handleBack() {
-    if (typeof window !== 'undefined' && window.history.length > 1) {
-      navigate(-1)
-      return
-    }
+  function handleBackToList() {
     navigate('/fatture')
   }
 
@@ -537,11 +533,23 @@ export default function PagamentiPage() {
   return (
     <div className="pagamenti-page">
       <section className="staff-page-hero">
-        <h1 className="page-header staff-page-title">Pagamenti fornitori</h1>
-        <p className="staff-page-lead">
-          Un file Excel per società (Mediazione, Via Lattea, Risacca, PG). Scegli il file dal menu, carica o modifica, poi
-          Salva.
-        </p>
+        <div className="pagamenti-hero-row">
+          <div className="pagamenti-hero-copy">
+            <h1 className="page-header staff-page-title">Pagamenti fornitori</h1>
+            <p className="staff-page-lead">
+              Un file Excel per società (Mediazione, Via Lattea, Risacca, PG). Scegli il file dal menu, carica o modifica, poi
+              Salva.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm pagamenti-back-elenco"
+            onClick={handleBackToList}
+            title="Torna all’elenco fatture fornitori"
+          >
+            ← Torna elenco
+          </button>
+        </div>
         <div className="pagamenti-company-select-wrap">
           <label htmlFor="pagamenti-workbook-select">
             File fornitori
@@ -602,8 +610,13 @@ export default function PagamentiPage() {
             {dirty ? <span className="pagamenti-workbook-dirty">Modifiche non salvate</span> : null}
           </div>
           <div className="pagamenti-workbook-actions">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={handleBack}>
-              ← Torna indietro
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleBackToList}
+              title="Torna all’elenco fatture fornitori"
+            >
+              ← Torna elenco
             </button>
             <button
               type="button"
