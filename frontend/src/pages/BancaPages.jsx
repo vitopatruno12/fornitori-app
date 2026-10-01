@@ -1938,7 +1938,6 @@ export function BancaMovimentiPage() {
   const [accountId, setAccountId] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [category, setCategory] = useState('')
   const [counterparty, setCounterparty] = useState('')
   const [loading, setLoading] = useState(true)
   const [syncBusy, setSyncBusy] = useState(false)
@@ -1973,7 +1972,6 @@ export function BancaMovimentiPage() {
           account_id: accountId || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
-          category: category || undefined,
           counterparty: counterparty || undefined,
         }),
         fetchBancaAccounts(),
@@ -2135,17 +2133,6 @@ export function BancaMovimentiPage() {
               ))}
             </select>
           </label>
-          <label>
-            Categoria
-            <input className="form-control" value={category} onChange={(e) => setCategory(e.target.value)} />
-          </label>
-          <label>
-            Cliente/Fornitore
-            <input className="form-control" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
-          </label>
-          <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
-            Filtra
-          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -2158,6 +2145,13 @@ export function BancaMovimentiPage() {
             }
           >
             {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
+          </button>
+          <label>
+            Cliente/Fornitore
+            <input className="form-control" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
+          </label>
+          <button type="submit" className="btn btn-primary" disabled={loading || syncBusy}>
+            Filtra
           </button>
           <button
             type="button"
@@ -2182,7 +2176,6 @@ export function BancaMovimentiPage() {
                   title: `Scheda movimenti · ${viewAccountLabel}`,
                   subtitle: [
                     dateFrom || dateTo ? `Periodo ${dateFrom || '…'} → ${dateTo || '…'}` : null,
-                    category ? `Categoria: ${category}` : null,
                     counterparty ? `Controparte: ${counterparty}` : null,
                     `${items.length} movimenti`,
                   ]
