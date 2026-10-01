@@ -69,7 +69,7 @@ def _verify_prima_nota_activity_access(
     if preferred_staff:
         summaries = staff_service.list_locale_packs(db)
         names = [row.locale_name for row in summaries]
-        staff_name = match_staff_locale_name(preferred_staff, names)
+        staff_name = match_staff_locale_name(preferred_staff, names, act)
         hit = None
         for row in summaries:
             if _locale_name_key(row.locale_name) == _locale_name_key(staff_name):
