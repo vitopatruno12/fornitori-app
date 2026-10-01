@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import List, Literal, Optional, Union
@@ -7,7 +7,7 @@ import logging
 import re
 
 from fastapi import UploadFile
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -82,9 +82,12 @@ def _rollback_db(db: Session) -> None:
 
 
 def payment_status_label(inv: Invoice) -> Literal["paid", "unpaid", "partial"]:
-  total = float(inv.total)
+  total = float(inv.total or 0)
   paid = float(inv.amount_paid or 0)
-  if paid >= total - 0.009:
+  if bool(getattr(inv, "is_paid", False)) and paid <= 0.009 and total > 0.009:
+    # Flag pagata da riconciliazione senza amount_paid ancora allineato
+    return "paid"
+  if total > 0.009 and paid >= total - 0.009:
     return "paid"
   if paid <= 0.009:
     return "unpaid"
@@ -134,6 +137,7 @@ def list_invoices(
   company: Optional[str] = None,
   activity: Optional[str] = None,
   light: bool = False,
+  since_date: Optional[date] = None,
 ) -> List[Union[InvoiceListOut, SimpleNamespace]]:
   ensure_invoices_bolla_verified_column()
   try:
@@ -145,6 +149,7 @@ def list_invoices(
       company=company,
       activity=activity,
       light=light,
+      since_date=since_date,
     )
   except ProgrammingError as exc:
     err = str(exc).lower()
@@ -161,6 +166,7 @@ def list_invoices(
       company=company,
       activity=activity,
       light=light,
+      since_date=since_date,
     )
 
 
@@ -172,6 +178,7 @@ def _list_invoices_impl(
   company: Optional[str] = None,
   activity: Optional[str] = None,
   light: bool = False,
+  since_date: Optional[date] = None,
 ) -> List[Union[InvoiceListOut, SimpleNamespace]]:
   q = (
     db.query(
@@ -195,6 +202,10 @@ def _list_invoices_impl(
     q = q.filter(Invoice.supplier_id == supplier_id)
   if not include_ignored:
     q = q.filter(Invoice.ignored.is_(False))
+  if since_date is not None:
+    q = q.filter(
+      or_(Invoice.invoice_date.is_(None), Invoice.invoice_date >= since_date)
+    )
   rows = q.order_by(Invoice.invoice_date.desc()).all()
 
   company_filter = ""

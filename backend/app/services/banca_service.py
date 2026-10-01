@@ -1919,7 +1919,7 @@ def invoice_named_on_group_wire(inv: Any, mov: Any, blob: str) -> bool:
   num = str(getattr(inv, "invoice_number", None) or "").strip()
   if not num:
     return False
-  for ref in extract_invoice_refs(blob):
+  for ref in extract_invoice_digit_tokens(blob):
     if _ref_matches_number(ref, num):
       return True
   text = blob or ""
@@ -1931,6 +1931,42 @@ def invoice_named_on_group_wire(inv: Any, mov: Any, blob: str) -> bool:
         lo, hi = sorted(nums)
         lead = _invoice_leading_number(num)
         if lead is not None and lo <= lead <= hi:
+          return True
+  return False
+
+
+def _invoice_protected_by_bank_evidence(inv_dto: Any, mov_meta: List[Dict[str, Any]]) -> bool:
+  """True se un bonifico matched prova il pagamento (FK, nota multi-fattura, numeri in causale)."""
+  inv_id = int(getattr(inv_dto, "id") or 0)
+  num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+  num_key = _normalize_doc_token(num)
+  supplier = getattr(inv_dto, "supplier_name", None)
+
+  for meta in mov_meta:
+    mov = meta["mov"]
+    status = str(getattr(mov, "reconciliation_status", "") or "").lower()
+    if status not in {"matched", "difference"}:
+      continue
+    linked = getattr(mov, "matched_invoice_id", None)
+    if linked and int(linked) == inv_id:
+      return True
+
+    blob = meta.get("blob") or ""
+    note_nums = _parse_linked_invoices_note(getattr(mov, "notes", None))
+    for raw in note_nums:
+      if num_key and _normalize_doc_token(raw) == num_key:
+        return True
+      if num and _ref_matches_number(raw, num):
+        return True
+
+    beneficiary = meta.get("beneficiary") or _movement_beneficiary(mov, blob)
+    if beneficiary and supplier and not _party_names_align(supplier, beneficiary):
+      continue
+    if invoice_named_on_group_wire(inv_dto, mov, blob):
+      return True
+    if num:
+      for ref in extract_invoice_digit_tokens(blob):
+        if _ref_matches_number(ref, num):
           return True
   return False
 
@@ -2640,11 +2676,16 @@ def _open_invoices_near_amount(indexed: List[tuple], amount: Decimal) -> List[An
   return out
 
 
+_RECON_INVOICE_LOOKBACK_DAYS = 800  # ~26 mesi: abbastanza per bonifici ritardati
+_RECON_MOVEMENT_LIMIT = 1200
+
+
 def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
-  """Una sola lettura fatture: la società in esame e, se serve, tutte le società."""
-  all_invoices = list_invoices(db, include_ignored=False, light=True)
+  """Una sola lettura fatture (periodo recente) per la società in esame."""
+  since = date.today() - timedelta(days=_RECON_INVOICE_LOOKBACK_DAYS)
+  all_invoices = list_invoices(db, include_ignored=False, light=True, since_date=since)
   if not company_id:
-    scoped = all_invoices[:5000]
+    scoped = all_invoices[:4000]
     return scoped, scoped
   raw = company_id.strip().lower()
   if raw in {"non_classificata", "non-classificata"}:
@@ -2654,12 +2695,13 @@ def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
 
     wanted = normalize_company_section(raw)
     if wanted == "non_classificata":
-      scoped = all_invoices[:5000]
+      scoped = all_invoices[:4000]
       return scoped, scoped
   scoped = [
     inv for inv in all_invoices if (getattr(inv, "company", None) or "") == wanted
-  ][:5000]
-  return scoped, all_invoices[:5000]
+  ][:4000]
+  # Match solo sulla società: evita O(n×m) su tutte le fatture Atlas
+  return scoped, scoped
 
 
 def _cash_rows_by_number(cash_file_rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -2670,6 +2712,64 @@ def _cash_rows_by_number(cash_file_rows: List[Dict[str, Any]]) -> Dict[str, List
       continue
     grouped.setdefault(key, []).append(row)
   return grouped
+
+
+def _load_recon_movements(
+  db: Session,
+  account_ids: set,
+  *,
+  limit: int = _RECON_MOVEMENT_LIMIT,
+) -> List[Dict[str, Any]]:
+  """Carica uscite recenti: prima da riconciliare, poi matched (per verifica)."""
+  mov_q = db.query(BankMovement).filter(BankMovement.movement_type == "uscita")
+  if account_ids:
+    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
+
+  unmatched = (
+    mov_q.filter(BankMovement.reconciliation_status == "unmatched")
+    .order_by(BankMovement.movement_date.desc(), BankMovement.id.desc())
+    .limit(limit)
+    .all()
+  )
+  need = max(0, limit - len(unmatched))
+  matched: List[BankMovement] = []
+  if need:
+    seen = {int(m.id) for m in unmatched}
+    extra = (
+      mov_q.filter(BankMovement.reconciliation_status != "unmatched")
+      .order_by(BankMovement.movement_date.desc(), BankMovement.id.desc())
+      .limit(need + 50)
+      .all()
+    )
+    for m in extra:
+      if int(m.id) in seen:
+        continue
+      matched.append(m)
+      if len(matched) >= need:
+        break
+
+  movements = unmatched + matched
+  acc_ids = {int(m.bank_account_id) for m in movements if m.bank_account_id}
+  accounts = {
+    int(a.id): a
+    for a in db.query(BankAccount).filter(BankAccount.id.in_(list(acc_ids))).all()
+  } if acc_ids else {}
+
+  mov_meta: List[Dict[str, Any]] = []
+  for movement in movements:
+    blob = _movement_search_blob(movement)
+    acc = accounts.get(int(movement.bank_account_id or 0))
+    mov_meta.append(
+      {
+        "mov": movement,
+        "acc": acc,
+        "blob": blob,
+        "beneficiary": _movement_beneficiary(movement, blob),
+        "blob_digits": re.sub(r"\D", "", blob),
+        "out": _movement_out(movement, acc),
+      }
+    )
+  return mov_meta
 
 
 def reconciliation_snapshot(
@@ -2929,29 +3029,13 @@ def reconciliation_preview(
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
 
-  mov_q = db.query(BankMovement, BankAccount).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
-  if account_ids:
-    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
-  # Ampio set per matching per numero (non solo unmatched)
-  movements = mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(5000).all()
-
-  # Precompute blobs
-  mov_meta: List[Dict[str, Any]] = []
-  for mov, acc in movements:
-    mov_meta.append(
-      {
-        "mov": mov,
-        "acc": acc,
-        "blob": _movement_search_blob(mov),
-        "out": _movement_out(mov, acc),
-      }
-    )
+  mov_meta = _load_recon_movements(db, account_ids)
 
   from . import supplier_payments_service
 
   try:
     cash_file_rows = supplier_payments_service.list_cash_paid_document_rows(
-      db, company=company_id, all_workbooks=not company_id
+      db, company=company_id, all_workbooks=False
     )
   except Exception:
     cash_file_rows = []
@@ -3267,7 +3351,7 @@ def sync_payment_status_from_bank(
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
-  listed, match_invoices = _load_recon_invoices(db, company_id)
+  listed, _match_invoices = _load_recon_invoices(db, company_id)
   unpaid = [
     inv
     for inv in listed
@@ -3281,27 +3365,11 @@ def sync_payment_status_from_bank(
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
 
-  mov_q = db.query(BankMovement)
-  if account_ids:
-    mov_q = mov_q.filter(BankMovement.bank_account_id.in_(account_ids))
-  movements = (
-    mov_q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(5000).all()
-  )
-  mov_meta = []
-  for movement in movements:
-    blob = _movement_search_blob(movement)
-    mov_meta.append(
-      {
-        "mov": movement,
-        "blob": blob,
-        "beneficiary": _movement_beneficiary(movement, blob),
-        "blob_digits": re.sub(r"\D", "", blob),
-      }
-    )
+  mov_meta = _load_recon_movements(db, account_ids)
 
   try:
     cash_file_rows = supplier_payments_service.list_cash_paid_document_rows(
-      db, company=company_id, all_workbooks=not company_id
+      db, company=company_id, all_workbooks=False
     )
   except Exception:
     cash_file_rows = []
@@ -3382,9 +3450,8 @@ def sync_payment_status_from_bank(
         best_mov = mov
     return best_mov
 
-  # Acconti: il bonifico cita la fattura e ne paga solo una parte.
-  # Vanno riservati prima del match 1:1, altrimenti un importo uguale a un'altra fattura li ruba.
-  acconti = allocate_acconti(match_invoices, mov_meta)
+  # Acconti / multi-fattura: solo fatture ancora aperte (pool molto più piccolo)
+  acconti = allocate_acconti(unpaid, mov_meta)
   acconto_mov_ids = {
     int(part["mov"].id)
     for hit in acconti.values()
@@ -3453,19 +3520,19 @@ def sync_payment_status_from_bank(
     bank_assignments[inv_id] = cand
 
   saldo_by_invoice = allocate_saldo_fatture(
-    match_invoices,
+    unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   cited_by_invoice = allocate_cited_invoices(
-    match_invoices,
+    unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   for iid, hit in allocate_number_ranges(
-    match_invoices,
+    unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
@@ -3473,7 +3540,7 @@ def sync_payment_status_from_bank(
     cited_by_invoice[iid] = hit
 
   bundle_by_invoice = allocate_supplier_bundles(
-    match_invoices,
+    unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
@@ -3487,6 +3554,20 @@ def sync_payment_status_from_bank(
   marked_from_file = 0
   changed = False
 
+  touch_ids = (
+    {int(getattr(inv, "id")) for inv in unpaid}
+    | {int(getattr(inv, "id")) for inv in paid_listed}
+    | set(acconti.keys())
+    | set(saldo_by_invoice.keys())
+    | set(cited_by_invoice.keys())
+  )
+  orm_by_id: Dict[int, Invoice] = {}
+  if touch_ids:
+    orm_by_id = {
+      int(row.id): row
+      for row in db.query(Invoice).filter(Invoice.id.in_(list(touch_ids))).all()
+    }
+
   for inv_dto in unpaid:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
@@ -3499,7 +3580,7 @@ def sync_payment_status_from_bank(
     if not found and not saldo_hit and not cited_hit and not cash_hit and not acconto_hit:
       continue
 
-    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    row = orm_by_id.get(inv_id)
     if not row:
       continue
     if acconto_hit and not found and not saldo_hit and not cited_hit and not cash_hit:
@@ -3589,7 +3670,7 @@ def sync_payment_status_from_bank(
     if inv_id in covered_ids:
       continue
     covered_ids.add(inv_id)
-    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    row = orm_by_id.get(inv_id)
     if not row or row.is_paid:
       continue
     row.amount_paid = _dec(row.total)
@@ -3617,7 +3698,7 @@ def sync_payment_status_from_bank(
   for inv_id, hit in acconti.items():
     if inv_id in handled_ids or inv_id in bank_assignments or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
-    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    row = orm_by_id.get(inv_id)
     if not row or row.is_paid:
       continue
     settled = _apply_acconto_state(row, hit)
@@ -3634,24 +3715,14 @@ def sync_payment_status_from_bank(
     )
 
   # Riapri «pagate» senza prova banca né contanti/POS da file.
-  # Un saldo di gruppo (matched, senza fattura singola) protegge solo i numeri in causale.
-  group_wires = [
-    meta
-    for meta in mov_meta
-    if str(getattr(meta["mov"], "reconciliation_status", "") or "") == "matched"
-    and not getattr(meta["mov"], "matched_invoice_id", None)
-  ]
+  # Proteggi anche saldi multi-fattura (nota [fatture collegate] / numeri in causale).
+  marked_ids = {int(item["invoice_id"]) for item in marked if item.get("invoice_id") is not None}
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+    if inv_id in marked_ids or inv_id in bank_assignments or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
-    named_on_group = False
-    for meta in group_wires:
-      if invoice_named_on_group_wire(inv_dto, meta["mov"], meta.get("blob") or ""):
-        named_on_group = True
-        break
-    if named_on_group:
+    if _invoice_protected_by_bank_evidence(inv_dto, mov_meta):
       continue
     part_sum = sum(
       (
@@ -3665,11 +3736,15 @@ def sync_payment_status_from_bank(
     total_inv = abs(_dec(getattr(inv_dto, "total", 0)))
     if total_inv > Decimal("0.009") and part_sum + Decimal("0.05") >= total_inv:
       continue
-    found = _bank_hit_for_verify(inv_dto, reserved_mov_ids=assigned_mov)
-    cash_hit = _cash_file_hit(inv_dto)
-    if found or cash_hit:
+    already = mov_index["by_invoice"].get(inv_id)
+    if already and str(getattr(already["mov"], "reconciliation_status", "") or "") in {
+      "matched",
+      "difference",
+    }:
       continue
-    row = db.query(Invoice).filter(Invoice.id == inv_id).first()
+    if _cash_file_hit(inv_dto):
+      continue
+    row = orm_by_id.get(inv_id)
     if not row:
       continue
     row.amount_paid = Decimal("0.00")
@@ -3697,31 +3772,32 @@ def sync_payment_status_from_bank(
       continue
     by_mov_items.setdefault(int(mid), []).append(item)
 
-  # Bonifici di gruppo già matched senza FK: ricostruisci da fatture pagate nominate in causale
-  for meta in mov_meta:
-    mov = meta["mov"]
-    if str(getattr(mov, "reconciliation_status", "") or "") != "matched":
-      continue
-    mid = int(mov.id)
-    if mid in by_mov_items:
-      continue
-    if getattr(mov, "matched_invoice_id", None):
-      continue
-    if _parse_linked_invoices_note(getattr(mov, "notes", None)):
-      continue
-    blob = meta.get("blob") or ""
-    named: List[Dict[str, Any]] = []
-    for inv_dto in paid_listed:
-      if invoice_named_on_group_wire(inv_dto, mov, blob):
-        named.append(
-          {
-            "invoice_id": int(getattr(inv_dto, "id")),
-            "invoice_number": str(getattr(inv_dto, "invoice_number", "") or ""),
-            "reason": "saldo_fatture",
-          }
-        )
-    if len(named) > 1:
-      by_mov_items[mid] = named
+  # Ricostruzione storica solo se poche pagate (altrimenti O(mov×paid) troppo lenta)
+  if len(paid_listed) <= 200:
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if str(getattr(mov, "reconciliation_status", "") or "") != "matched":
+        continue
+      mid = int(mov.id)
+      if mid in by_mov_items:
+        continue
+      if getattr(mov, "matched_invoice_id", None):
+        continue
+      if _parse_linked_invoices_note(getattr(mov, "notes", None)):
+        continue
+      blob = meta.get("blob") or ""
+      named: List[Dict[str, Any]] = []
+      for inv_dto in paid_listed:
+        if invoice_named_on_group_wire(inv_dto, mov, blob):
+          named.append(
+            {
+              "invoice_id": int(getattr(inv_dto, "id")),
+              "invoice_number": str(getattr(inv_dto, "invoice_number", "") or ""),
+              "reason": "saldo_fatture",
+            }
+          )
+      if len(named) > 1:
+        by_mov_items[mid] = named
 
   mov_by_id = {int(meta["mov"].id): meta["mov"] for meta in mov_meta}
   for mid, items in by_mov_items.items():

@@ -2097,18 +2097,6 @@ export function BancaMovimentiPage() {
         setLastSyncedLabel(`${targets.length} conti sincronizzati`)
         setSuccess(`Aggiornati ${targets.length} conti: ${totalImported} nuovi movimenti${periodLabel}.`)
       }
-      // Collega beneficiario + n. fattura in causale e chiude le aperte
-      try {
-        const recon = await postBancaRiconciliazioneAuto()
-        const closed = Number(recon?.auto_applied) || 0
-        if (closed > 0) {
-          setSuccess((prev) =>
-            `${prev || 'Movimenti aggiornati.'} Riconciliate ${closed} fatture (beneficiario + n. in causale).`.trim(),
-          )
-        }
-      } catch {
-        // Sync movimenti ok anche se la riconciliazione fallisce
-      }
       await load()
     } catch (e) {
       setError(e?.message || 'Aggiornamento movimenti fallito')
@@ -2411,38 +2399,37 @@ export function BancaRiconciliazionePage() {
         ? await postBancaRiconciliazioneAuto(nextCompany)
         : await fetchBancaRiconciliazione(nextCompany)
       setData({ ...res, suggestions_pending: true })
+      setLoading(false)
       const n = Number(res?.auto_applied) || 0
       if (auto && n > 0) {
         setSuccess(`Riconciliati automaticamente ${n} documenti.`)
       } else if (auto) {
         setSuccess('Nessun nuovo match auto.')
       }
+      // Proposte in parallelo dopo lo snapshot (non bloccano la griglia principale)
+      void fetchBancaRiconciliazioneProposte(nextCompany)
+        .then((proposte) => {
+          const probable = Number(proposte?.probable_count) || 0
+          setData((prev) => ({
+            ...(prev || {}),
+            suggestions: proposte?.suggestions || prev?.suggestions || [],
+            probable_count: probable,
+            unmatched_movements: proposte?.unmatched_movements ?? prev?.unmatched_movements,
+            score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
+            suggestions_pending: false,
+          }))
+          if (auto && probable) {
+            setSuccess((prev) =>
+              `${prev || ''} ${probable} proposte da confermare.`.replace(/\s+/g, ' ').trim(),
+            )
+          }
+        })
+        .catch(() => {
+          setData((prev) => (prev ? { ...prev, suggestions_pending: false } : prev))
+        })
     } catch (e) {
       setError(e?.message || 'Errore riconciliazione')
       setLoading(false)
-      return
-    }
-    setLoading(false)
-    try {
-      const proposte = await fetchBancaRiconciliazioneProposte(nextCompany)
-      const probable = Number(proposte?.probable_count) || 0
-      setData((prev) => ({
-        ...(prev || {}),
-        suggestions: proposte?.suggestions || prev?.suggestions || [],
-        probable_count: probable,
-        unmatched_movements: proposte?.unmatched_movements ?? prev?.unmatched_movements,
-        score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
-        suggestions_pending: false,
-      }))
-      if (auto) {
-        setSuccess((prev) =>
-          probable
-            ? `${prev} ${probable} proposte da confermare.`.replace(/\s+/g, ' ').trim()
-            : prev,
-        )
-      }
-    } catch {
-      setData((prev) => (prev ? { ...prev, suggestions_pending: false } : prev))
     }
   }
 

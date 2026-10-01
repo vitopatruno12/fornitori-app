@@ -36,6 +36,13 @@ function invoiceNumber(inv) {
   return String(inv?.invoice_number || inv?.number || '').trim()
 }
 
+function normalizeInvoiceDigits(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const parts = raw.match(/\d+(?:[/-]\d+)*/g)
+  return parts && parts.length ? parts.join('').replace(/\D/g, '') : raw.replace(/\D/g, '')
+}
+
 function invoiceAmount(inv) {
   const total = toNum(inv?.total ?? inv?.total_amount ?? inv?.importo)
   return Math.abs(total)
@@ -103,8 +110,8 @@ export async function loadSchedaContabileFornitori({
       fetchIssuedInvoices({ company: companyId, limit: 500 }, fetchOpts),
       fetchBancaMovimenti(
         {
+          // Dai dalla data inizio scheda in avanti: i pagamenti spesso sono dopo le FR
           date_from: dateFrom || undefined,
-          date_to: dateTo || undefined,
         },
         fetchOpts,
       ),
@@ -231,38 +238,72 @@ export function buildSchedaContabileFornitori(
   }
 
   const paidInvoiceIds = new Set()
+  /** @type {Map<string, Set<string>>} */
+  const paidNumbersByParty = new Map()
 
-  // Pagamenti banca → Dare (PG)
+  const rememberPaidNumber = (partyName, rawNumber) => {
+    const digits = normalizeInvoiceDigits(rawNumber)
+    if (!digits || digits.length < 2) return
+    const key = partyKey(partyName)
+    if (!paidNumbersByParty.has(key)) paidNumbersByParty.set(key, new Set())
+    paidNumbersByParty.get(key).add(digits)
+  }
+
+  const linkedInvoicesOf = (row) => {
+    const linked = Array.isArray(row?.linked_invoices) ? row.linked_invoices : []
+    if (linked.length) return linked
+    return row?.matched_invoice ? [row.matched_invoice] : []
+  }
+
+  // Pagamenti banca → Dare (PG), anche saldo cumulativo multi-fattura
   for (const row of bankMovements) {
     const movementType = String(row?.movement_type || '').toLowerCase()
     if (movementType !== 'uscita') continue
-    const matched = row?.matched_invoice
     const amount = Math.abs(toNum(row?.amount))
     if (!amount) continue
     const date = isoDate(row?.movement_date)
     if (!inPeriod(date)) continue
-    const name = matched?.supplier_name || row?.counterparty || ''
+
+    const linked = linkedInvoicesOf(row)
+    const matched = row?.matched_invoice || linked[0] || null
+    const name =
+      matched?.supplier_name ||
+      linked.find((x) => x?.supplier_name)?.supplier_name ||
+      row?.counterparty ||
+      row?.beneficiary ||
+      ''
     if (!normalizePartyName(name)) continue
+
     const companyId = matched ? invoiceCompany(matched) : company || 'non_classificata'
     if (company && matched && companyId !== company) continue
-    if (company && !matched) continue
-    const number = matched ? invoiceNumber(matched) : ''
+    if (company && !matched && !linked.length) continue
+
     const party = ensure(name, {
       supplierId: matched?.supplier_id != null ? Number(matched.supplier_id) : null,
     })
     party.totalDare += amount
     party.pagamentiCount += 1
+
+    for (const inv of linked) {
+      if (inv?.id) paidInvoiceIds.add(Number(inv.id))
+      if (inv?.invoice_number) rememberPaidNumber(name, inv.invoice_number)
+    }
     if (matched?.id) paidInvoiceIds.add(Number(matched.id))
+    if (matched?.invoice_number) rememberPaidNumber(name, matched.invoice_number)
+
+    const numbers = linked.map((inv) => invoiceNumber(inv)).filter(Boolean)
+    const numberLabel = numbers.length ? numbers.join(', ') : matched ? invoiceNumber(matched) : ''
+
     party.movements.push({
       date,
       documentDate: date,
-      documento: number
-        ? `PG ${row?.id || ''} ${formatDocDate(date)}`
-        : `PG ${row?.id || ''} ${formatDocDate(date)}`,
+      documento: `PG ${row?.id || ''} ${formatDocDate(date)}`,
       documentoTipo: 'PG',
       registrationNumber: `PG-${row?.id ?? ''}`,
-      description: number ? `PAGAMENTO FR ${number}` : `PAGAMENTO ${row?.description || ''}`.trim(),
-      documentLabel: number ? `FR ${number}` : `Mov. ${row?.id || ''}`,
+      description: numberLabel
+        ? `PAGAMENTO FR ${numberLabel}`
+        : `PAGAMENTO ${row?.description || ''}`.trim(),
+      documentLabel: numberLabel ? `FR ${numberLabel}` : `Mov. ${row?.id || ''}`,
       contropartita: 'BANCA C/C',
       counterparty: party.name,
       company: companyId,
@@ -287,8 +328,15 @@ export function buildSchedaContabileFornitori(
     const name = inv?.supplier_name || (inv?.supplier_id ? `Fornitore #${inv.supplier_id}` : '')
     if (!normalizePartyName(name)) continue
     const number = invoiceNumber(inv)
-    const status = paymentStatus(inv)
-    const paidAmt = toNum(inv?.amount_paid)
+    const paidByBank =
+      paidInvoiceIds.has(Number(inv?.id)) ||
+      Boolean(
+        normalizeInvoiceDigits(number) &&
+          paidNumbersByParty.get(partyKey(name))?.has(normalizeInvoiceDigits(number)),
+      )
+    const statusRaw = paymentStatus(inv)
+    const status = paidByBank ? 'paid' : statusRaw
+    const paidAmt = paidByBank ? Math.max(toNum(inv?.amount_paid), amount) : toNum(inv?.amount_paid)
     const imponibile = toNum(inv?.imponibile)
     const vatAmount = toNum(inv?.vat_amount ?? inv?.iva)
     const party = ensure(name, {
@@ -297,7 +345,7 @@ export function buildSchedaContabileFornitori(
     })
     party.totalAvere += amount
     party.ricevuteCount += 1
-    if (status === 'paid' || paidInvoiceIds.has(Number(inv?.id))) party.pagateCount += 1
+    if (status === 'paid') party.pagateCount += 1
     else party.daPagareCount += 1
 
     const ivaBits = []
@@ -331,7 +379,7 @@ export function buildSchedaContabileFornitori(
     })
 
     // Se pagata in Atlas ma senza movimento banca matchato → PG virtuale
-    if (paidAmt > 0.009 && !paidInvoiceIds.has(Number(inv?.id))) {
+    if (paidAmt > 0.009 && !paidInvoiceIds.has(Number(inv?.id)) && !paidByBank) {
       const payDate = isoDate(inv?.paid_at || inv?.updated_at || date)
       if (inPeriod(payDate) || inPeriod(date)) {
         const useDate = inPeriod(payDate) ? payDate : date
