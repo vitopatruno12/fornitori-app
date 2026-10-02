@@ -1562,6 +1562,7 @@ export function FattureDaRegistrarePage() {
   const [bollaBusyId, setBollaBusyId] = useState(null)
   const [cashBusyId, setCashBusyId] = useState(null)
   const [cashMsg, setCashMsg] = useState('')
+  const [cashConfirmRow, setCashConfirmRow] = useState(null)
 
   async function toggleBollaVerified(row) {
     if (!row?.id || bollaBusyId != null) return
@@ -1771,12 +1772,13 @@ export function FattureDaRegistrarePage() {
                   type="button"
                   className="excel-cell pagamenti-cell-readonly fatture-bolla-check fatture-cash-check"
                   disabled={busy || loading}
-                  title="Spunta contanti: sposta la fattura tra le pagate e aggiorna il mastrino"
-                  aria-label={`Segna ${row.invoice_number || 'fattura'} pagata in contanti`}
+                  title="Apri la conferma per segnare pagata in contanti"
+                  aria-label={`Conferma pagamento in contanti per ${row.invoice_number || 'fattura'}`}
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
-                    void markPaidCash(row)
+                    if (cashBusyId != null) return
+                    setCashConfirmRow(row)
                   }}
                 >
                   {busy ? '…' : '○ Contanti'}
@@ -1851,6 +1853,61 @@ export function FattureDaRegistrarePage() {
           }}
         />
       </section>
+      {cashConfirmRow ? (
+        <div
+          className="staff-report-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (cashBusyId == null) setCashConfirmRow(null)
+          }}
+        >
+          <div
+            className="card staff-report-modal fatture-cash-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fatture-cash-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="fatture-cash-confirm-check" aria-hidden="true">✔</p>
+            <h3 id="fatture-cash-confirm-title" className="page-subheader" style={{ marginTop: 0 }}>
+              Confermi il pagamento in contanti?
+            </h3>
+            <p className="fatture-cash-confirm-text">
+              Fattura <strong>{cashConfirmRow.invoice_number || cashConfirmRow.id}</strong>
+              {cashConfirmRow.supplier_name ? (
+                <>
+                  {' '}
+                  di <strong>{cashConfirmRow.supplier_name}</strong>
+                </>
+              ) : null}
+              {cashConfirmRow.total != null ? <> · {eur(cashConfirmRow.total)}</> : null}.
+              Con OK viene segnata pagata in contanti, spostata in Fatture pagate e aggiornata nel mastrino.
+            </p>
+            <div className="btn-group" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={cashBusyId != null}
+                onClick={() => {
+                  const row = cashConfirmRow
+                  setCashConfirmRow(null)
+                  void markPaidCash(row)
+                }}
+              >
+                OK
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={cashBusyId != null}
+                onClick={() => setCashConfirmRow(null)}
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </FatturePageShell>
   )
 }

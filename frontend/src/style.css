@@ -1993,6 +1993,25 @@ select.form-control {
   white-space: nowrap;
 }
 
+.fatture-cash-confirm {
+  max-width: 28rem;
+  text-align: center;
+}
+
+.fatture-cash-confirm-check {
+  margin: 0 0 0.35rem;
+  font-size: 2.4rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #15803d;
+}
+
+.fatture-cash-confirm-text {
+  margin: 0 0 1rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
 .workbook-grid .fatture-bolla-check:disabled {
   opacity: 0.6;
   cursor: wait;
