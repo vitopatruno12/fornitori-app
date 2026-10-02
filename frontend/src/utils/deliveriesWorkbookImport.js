@@ -235,7 +235,7 @@ export const DELIVERIES_IMPORT_PREVIEW_COLUMNS = [
   { id: 'supplier_name', label: 'Fornitore', width: 16, fluid: true },
   { id: 'product_description', label: 'Prodotto', width: 18, fluid: true },
   { id: 'weight_kg', label: 'Peso', width: 8, fluid: true, numeric: true },
-  { id: 'pieces', label: 'Num. cassette', width: 8, fluid: true, numeric: true },
+  { id: 'pieces', label: 'Numero cassette (kg)', width: 8, fluid: true, numeric: true },
   { id: 'unit_price', label: 'Prezzo', width: 9, fluid: true, numeric: true },
   { id: 'destination', label: 'Destinazione', width: 12, fluid: true },
   { id: 'document_note', label: 'Note', width: 16, fluid: true },

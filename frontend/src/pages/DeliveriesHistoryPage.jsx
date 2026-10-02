@@ -364,7 +364,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
             />
           </div>
           <div className="form-group" style={{ flex: '1 1 110px' }}>
-            <label>Num. cassetta</label>
+            <label>Numero cassette (kg)</label>
             <input
               className="form-control"
               type="number"
@@ -714,7 +714,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                             <dd>{d.supplier_name || d.supplier_id || '—'}</dd>
                           </div>
                           <div>
-                            <dt>Num. cassetta</dt>
+                            <dt>Numero cassette (kg)</dt>
                             <dd>{d.pieces != null && d.pieces !== '' && !Number.isNaN(Number(d.pieces)) ? Number(d.pieces) : '—'}</dd>
                           </div>
                           <div>
