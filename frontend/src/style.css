@@ -1450,6 +1450,18 @@ select.form-control {
   font-family: var(--font-mono);
 }
 
+.deliveries-grid th.delivery-col-pieces,
+.delivery-items-grid th.delivery-col-pieces {
+  text-align: left;
+  padding-left: 0.45rem;
+}
+
+.deliveries-grid .excel-cell.delivery-col-pieces,
+.delivery-items-grid .excel-cell.delivery-col-pieces {
+  text-align: right;
+  padding-right: 1.85rem;
+}
+
 /* === Restored UI: workbook, ordini/magazzino prodotti, operator nav === */
 /* --- restored: tmp-workbook.css --- */
 .warehouse-move-tag--out {

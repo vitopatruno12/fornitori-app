@@ -963,7 +963,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                       <th
                         key={col.id}
                         className={[
-                          col.numeric ? 'text-end' : '',
+                          col.id === 'pieces' ? 'delivery-col-pieces' : col.numeric ? 'text-end' : '',
                           col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
                         ].filter(Boolean).join(' ')}
                       >
@@ -993,6 +993,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                                     'excel-cell',
                                     'pagamenti-cell-readonly',
                                     col.numeric ? 'excel-cell-num' : '',
+                                    col.id === 'pieces' ? 'delivery-col-pieces' : '',
                                     col.emphasis ? 'workbook-cell-emphasis' : '',
                                     diffTone,
                                   ].filter(Boolean).join(' ')}
@@ -1019,6 +1020,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                                 className={[
                                   'excel-cell',
                                   col.numeric ? 'excel-cell-num' : '',
+                                  col.id === 'pieces' ? 'delivery-col-pieces' : '',
                                   col.emphasis ? 'workbook-cell-emphasis' : '',
                                 ].filter(Boolean).join(' ')}
                                 type={col.numeric && col.id !== 'product_description' ? 'number' : 'text'}

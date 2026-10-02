@@ -588,7 +588,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                       <th
                         key={col.id}
                         className={[
-                          col.numeric ? 'text-end' : '',
+                          col.id === 'pieces' ? 'delivery-col-pieces' : col.numeric ? 'text-end' : '',
                           col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
                         ].filter(Boolean).join(' ')}
                       >
@@ -622,6 +622,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                                 'excel-cell',
                                 'pagamenti-cell-readonly',
                                 col.numeric ? 'excel-cell-num' : '',
+                                col.id === 'pieces' ? 'delivery-col-pieces' : '',
                                 col.emphasis ? 'workbook-cell-emphasis' : '',
                                 diffTone,
                               ].filter(Boolean).join(' ')}
@@ -662,6 +663,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                               'excel-cell',
                               'pagamenti-cell-readonly',
                               col.numeric ? 'excel-cell-num' : '',
+                              col.id === 'pieces' ? 'delivery-col-pieces' : '',
                               'workbook-cell-total',
                             ].filter(Boolean).join(' ')}
                             value={deliveryHistoryWorkbookTotalsLabel(col.id, deliveryTotals)}
