@@ -28,11 +28,11 @@ const HEADER_ALIASES = {
   supplier_name: ['fornitore', 'supplier', 'emittente', 'ragionesociale', 'nome'],
   product_description: ['prodotto', 'descrizione', 'merce', 'articolo', 'product', 'denominazione'],
   weight_kg: ['peso', 'pesokg', 'kg', 'weight', 'pesoinkg'],
-  pieces: ['pezzi', 'cassette', 'colli', 'qty', 'quantita', 'pieces', 'npezzi'],
+  pieces: ['pezzi', 'cassette', 'colli', 'qty', 'quantita', 'pieces', 'npezzi', 'numcassette', 'numcassetta', 'ncassette', 'ncassetta'],
   unit_price: ['prezzo', 'prezzounit', 'prezzounitario', 'unitprice', 'prezzoeuro', 'prezzoe'],
   vat_percent: ['iva', 'ivapercent', 'aliquotaiva', 'vat', 'vatpercent'],
   destination: ['destinazione', 'luogoscarico', 'destination', 'localita'],
-  document_note: ['note', 'notedoc', 'notadocumento', 'documentnote', 'nota'],
+  document_note: ['note', 'notedoc', 'notadocumento', 'documentnote', 'nota', 'noteriga', 'notes', 'osservazioni', 'osservazione', 'commento', 'commenti', 'annotazioni', 'annotazione'],
   anomaly_note: ['anomalie', 'noteanomalie', 'anomaly', 'anomalynote'],
   unloading_signed_by: ['firmascarico', 'firma', 'firmatario', 'unloading', 'chiscari'],
 }
@@ -238,6 +238,7 @@ export const DELIVERIES_IMPORT_PREVIEW_COLUMNS = [
   { id: 'pieces', label: 'Num. cassette', width: 8, fluid: true, numeric: true },
   { id: 'unit_price', label: 'Prezzo', width: 9, fluid: true, numeric: true },
   { id: 'destination', label: 'Destinazione', width: 12, fluid: true },
+  { id: 'document_note', label: 'Note', width: 16, fluid: true },
 ]
 
 export function deliveryImportPreviewCellValue(row, col) {

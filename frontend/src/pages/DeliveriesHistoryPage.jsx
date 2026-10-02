@@ -6,6 +6,7 @@ import {
   DELIVERIES_HISTORY_WORKBOOK_COLUMNS,
   DELIVERIES_HISTORY_WORKBOOK_TITLE,
   deliveryHistoryDiffTone,
+  deliveryHistoryNoteText,
   deliveryHistoryWorkbookCellValue,
   deliveryHistoryWorkbookTotals,
   deliveryHistoryWorkbookTotalsLabel,
@@ -579,7 +580,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                   {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
                     <col key={col.id} style={{ minWidth: col.width }} />
                   ))}
-                  <col style={{ minWidth: 110 }} />
+                  <col style={{ minWidth: 180 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -594,7 +595,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                         {col.label}
                       </th>
                     ))}
-                    <th className="sup-actions-col">Stato</th>
+                    <th className="sup-actions-col">Note</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -635,9 +636,10 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                       <td className="sup-actions-col">
                         <input
                           className="excel-cell pagamenti-cell-readonly"
-                          value={String(selectedDeliveryId) === String(d.id) ? 'Selezionata' : ''}
+                          value={deliveryHistoryNoteText(d)}
                           readOnly
                           tabIndex={-1}
+                          title={deliveryHistoryNoteText(d)}
                         />
                       </td>
                     </tr>
@@ -734,6 +736,9 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                         </dl>
                         {parsed.destination ? (
                           <p className="delivery-history-card-note">Destinazione: {parsed.destination}</p>
+                        ) : null}
+                        {deliveryHistoryNoteText(d) ? (
+                          <p className="delivery-history-card-note">Note: {deliveryHistoryNoteText(d)}</p>
                         ) : null}
                       </button>
                       <div className="delivery-history-card-actions">

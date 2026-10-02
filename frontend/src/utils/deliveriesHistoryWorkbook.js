@@ -60,6 +60,14 @@ export function splitDeliveryNote(note) {
   return { destination, documentNote: rest.join('\n').trim() }
 }
 
+export function deliveryHistoryNoteText(delivery) {
+  const parsed = splitDeliveryNote(delivery?.note)
+  const parts = [parsed.documentNote, delivery?.anomaly_note]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+  return parts.join(' · ')
+}
+
 function qtyCell(d) {
   const w = d.weight_kg != null && Number(d.weight_kg) > 0
   const p = d.pieces != null && Number(d.pieces) > 0

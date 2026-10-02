@@ -454,6 +454,10 @@ def _append_lines_on_existing_ddt(db: Session, supplier: Supplier, rows: List[De
     vat_amount, total = calculate_vat(imponibile, vat_percent)
     prod_desc = (row.product_description or '').strip() or None
     list_u, diff = _resolve_listino(db, supplier.id, prod_desc, unit_price)
+    row_note = _merge_delivery_note(
+      (row.destination or first.destination or '').strip() or None,
+      (row.document_note or '').strip() or None,
+    )
     db.add(Delivery(
       supplier_id=supplier.id,
       product_id=None,
@@ -467,7 +471,7 @@ def _append_lines_on_existing_ddt(db: Session, supplier: Supplier, rows: List[De
       vat_percent=vat_percent,
       vat_amount=vat_amount,
       total=total,
-      note=note,
+      note=row_note or note,
       invoice_id=None,
       ddt_number=ddt,
       order_signed_by=None,
@@ -642,6 +646,19 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
         skipped_dup += len(bundle)
         continue
       raise
+    notes_changed = False
+    for delivery, (_sup, row) in zip(created, bundle):
+      row_note = (row.document_note or '').strip()
+      if not row_note:
+        continue
+      dest = (row.destination or first.destination or '').strip()
+      delivery.note = _merge_delivery_note(dest or None, row_note)
+      if (row.anomaly_note or '').strip():
+        delivery.anomaly_note = (row.anomaly_note or '').strip()
+      db.add(delivery)
+      notes_changed = True
+    if notes_changed:
+      db.commit()
     imported_lines += len(created)
     imported_ddt += 1
     if ddt:
