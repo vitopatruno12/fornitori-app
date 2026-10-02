@@ -578,7 +578,11 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
               <table className="app-table excel-table pagamenti-grid workbook-grid deliveries-grid">
                 <colgroup>
                   {DELIVERIES_HISTORY_WORKBOOK_COLUMNS.map((col) => (
-                    <col key={col.id} style={{ minWidth: col.width }} />
+                    <col
+                      key={col.id}
+                      className={col.id === 'pieces' ? 'delivery-col-pieces' : undefined}
+                      style={col.id === 'pieces' ? { width: col.width, maxWidth: col.width } : { minWidth: col.width }}
+                    />
                   ))}
                   <col style={{ minWidth: 180 }} />
                 </colgroup>

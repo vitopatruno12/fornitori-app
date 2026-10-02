@@ -1453,13 +1453,28 @@ select.form-control {
 .deliveries-grid th.delivery-col-pieces,
 .delivery-items-grid th.delivery-col-pieces {
   text-align: left;
-  padding-left: 0.45rem;
+  width: 7.5rem;
+  max-width: 7.5rem;
+  padding-left: 0.35rem;
+  padding-right: 0.3rem;
+  white-space: normal;
+  line-height: 1.15;
+}
+
+.deliveries-grid td:has(.delivery-col-pieces),
+.delivery-items-grid td:has(.delivery-col-pieces) {
+  width: 7.5rem;
+  max-width: 7.5rem;
 }
 
 .deliveries-grid .excel-cell.delivery-col-pieces,
 .delivery-items-grid .excel-cell.delivery-col-pieces {
-  text-align: right;
-  padding-right: 1.85rem;
+  text-align: left;
+  width: 7.5rem;
+  min-width: 0;
+  max-width: 7.5rem;
+  padding-left: 0.4rem;
+  padding-right: 0.3rem;
 }
 
 /* === Restored UI: workbook, ordini/magazzino prodotti, operator nav === */
