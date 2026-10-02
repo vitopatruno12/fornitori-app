@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaAccessCode, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
-import { invalidateCachePrefix } from '../offline/offlineCache.js'
+import { collectCachedCashEntries, invalidateCachePrefix } from '../offline/offlineCache.js'
+import { isOnline } from '../offline/offlineStatus.js'
 import { fetchStaffLocaleAccessCode, fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
 import { fetchAccounts, fetchPaymentMethods, fetchCategories } from '../services/referenceService'
 import { fetchCustomers } from '../services/customersService'
@@ -277,6 +278,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const operatorActivityDateRef = useRef(activeActivity)
   useEffect(() => {
     if (!operatorMode) return
+    desiredActivityRef.current = String(activeActivity || '').trim().toLowerCase()
     if (operatorActivityDateRef.current === activeActivity) return
     operatorActivityDateRef.current = activeActivity
     const saved = readStoredOperatorPrimaNotaDate(
@@ -920,6 +922,40 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
+  function backupRowsForPeriod(activity, from, to) {
+    const latest = getLatestPrimaNotaBackup(operatorMode ? operatorPrimaNotaBackupScope : '')
+    const rows = latest?.payload?.entries
+    if (!Array.isArray(rows) || !rows.length) return []
+    const act = String(activity || '').trim().toLowerCase()
+    const backupAct = String(latest.payload.activity || act).trim().toLowerCase()
+    if (act && backupAct && backupAct !== act && !(act === 'via_abba' && backupAct === 'mediazione')) return []
+    return rows.filter((row) => {
+      const day = String(row?.entry_date || '').slice(0, 10)
+      if (!day) return false
+      if (from && day < from) return false
+      if (to && day > to) return false
+      return true
+    })
+  }
+
+  async function readLocalMovementRows(activity, from, to) {
+    let cached = []
+    try {
+      cached = await collectCachedCashEntries({ activity, dateFrom: from, dateTo: to })
+    } catch {
+      cached = []
+    }
+    const backup = backupRowsForPeriod(activity, from, to)
+    if (!backup.length) return Array.isArray(cached) ? cached : []
+    const seen = new Set((cached || []).map((row) => movementBackupKey(row)))
+    const extra = backup.filter((row) => !seen.has(movementBackupKey(row)))
+    return [...(cached || []), ...extra].sort((a, b) => {
+      const da = String(a.entry_date || '')
+      const db = String(b.entry_date || '')
+      return da.localeCompare(db) || Number(a.id || 0) - Number(b.id || 0)
+    })
+  }
+
   async function loadEntries(periodOverride = null) {
     const seq = ++entriesLoadSeq.current
     if (!localeAccessMetaReady) {
@@ -932,16 +968,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setLoading(false)
       return
     }
+    let from = periodOverride?.from ?? movementPeriodFrom
+    let to = periodOverride?.to ?? movementPeriodTo
+    if (from && to && from > to) {
+      const swap = from
+      from = to
+      to = swap
+    }
     try {
       setLoading(true)
       setError('')
-      let from = periodOverride?.from ?? movementPeriodFrom
-      let to = periodOverride?.to ?? movementPeriodTo
-      if (from && to && from > to) {
-        const swap = from
-        from = to
-        to = swap
-      }
       const activity = activeActivity
       const data = await fetchEntries({
         date_from: from || undefined,
@@ -951,10 +987,24 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       })
       if (seq !== entriesLoadSeq.current) return
       if (String(desiredActivityRef.current || '') !== String(activity || '').trim().toLowerCase()) return
-      setEntries(data)
+      setEntries(Array.isArray(data) ? data : [])
       setError('')
     } catch (e) {
       if (seq !== entriesLoadSeq.current) return
+      if (String(desiredActivityRef.current || '') !== String(activeActivity || '').trim().toLowerCase()) return
+      const offline = !isOnline() || /offline|failed to fetch|networkerror|api non raggiungibile/i.test(String(e?.message || ''))
+      if (offline) {
+        const localRows = await readLocalMovementRows(activeActivity, from, to)
+        if (seq !== entriesLoadSeq.current) return
+        if (localRows.length) {
+          setEntries(localRows)
+          setError('')
+          setSuccess('Connessione assente: movimenti letti da questo dispositivo.')
+          return
+        }
+        setError('Connessione assente: su questo dispositivo non ci sono movimenti salvati per questo giorno.')
+        return
+      }
       setError(e?.message?.includes('Codice') ? 'Codice locale non valido o mancante.' : 'Errore nel caricamento dei movimenti')
     } finally {
       if (seq === entriesLoadSeq.current) setLoading(false)

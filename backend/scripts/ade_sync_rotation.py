@@ -5,16 +5,16 @@ Regola operativa:
   - Gruppo da 3: ogni 3 giorni  -> mediazione, via_lattea, risacca
   - Gruppo da 2: ogni 4 giorni  -> pg, via_lattea
   - Se coincidono, unione senza duplicati e tetto MAX 3 AdE/giorno
-  - Flusso: RICHIESTE -> attesa -> SCARICO
+  - Richieste alle 14:00. Scarico il mattino dopo alle 05:00 (non dopo 15 minuti):
+    l'Agenzia delle Entrate puo' impiegare molte ore a preparare i file.
 
-Uso (PC ufficio, Task Scheduler ogni giorno alle 9:00):
+Uso (PC ufficio):
 
-  python scripts/ade_sync_rotation.py
+  python scripts/ade_sync_rotation.py --phase request
+  python scripts/ade_sync_rotation.py --phase download --date 2026-10-03
   python scripts/ade_sync_rotation.py --dry-run
-  python scripts/ade_sync_rotation.py --date 2026-10-03
-  python scripts/ade_sync_rotation.py --force mediazione,pg
 
-Periodo scarico: ultimi ADE_ROTATION_LOOKBACK_DAYS (default 10) fino a oggi.
+Periodo: ultimi ADE_ROTATION_LOOKBACK_DAYS (default 10) fino al giorno del piano.
 """
 
 from __future__ import annotations

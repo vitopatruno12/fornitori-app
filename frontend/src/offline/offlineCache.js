@@ -32,6 +32,56 @@ function cacheKey(path) {
   return String(path || '')
 }
 
+function cacheKeyActivity(key) {
+  const query = String(key || '').split('?')[1] || ''
+  return String(new URLSearchParams(query).get('activity') || '').trim().toLowerCase()
+}
+
+function sameCashActivity(a, b) {
+  const x = String(a || '').trim().toLowerCase()
+  const y = String(b || '').trim().toLowerCase()
+  if (x === y) return true
+  return (x === 'via_abba' && y === 'mediazione') || (x === 'mediazione' && y === 'via_abba')
+}
+
+function entryDay(entry) {
+  return String(entry?.entry_date || '').slice(0, 10)
+}
+
+/** Unisce le liste Prima Nota già salvate sul dispositivo e tiene solo il registro e le date chieste. */
+export function selectCachedCashEntries(rows, { activity, dateFrom, dateTo, now = Date.now() } = {}) {
+  const act = String(activity || '').trim().toLowerCase()
+  const byId = new Map()
+  for (const row of rows || []) {
+    const key = String(row?.key || '')
+    if (!key.startsWith('/cash/entries')) continue
+    if (now - Number(row.updatedAt || 0) > CACHE_TTL_MS) continue
+    const keyAct = cacheKeyActivity(key)
+    if (act && keyAct && !sameCashActivity(keyAct, act)) continue
+    const data = row.data
+    if (!Array.isArray(data)) continue
+    for (const entry of data) {
+      const rowAct = String(entry?.activity || '').trim().toLowerCase() || (keyAct || 'risacca')
+      if (act && !sameCashActivity(rowAct, act)) continue
+      const day = entryDay(entry)
+      if (!day) continue
+      if (dateFrom && day < dateFrom) continue
+      if (dateTo && day > dateTo) continue
+      if (entry?.id == null) continue
+      byId.set(entry.id, entry)
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const cmp = entryDay(a).localeCompare(entryDay(b))
+    return cmp || Number(a.id) - Number(b.id)
+  })
+}
+
+export async function collectCachedCashEntries(filters) {
+  const rows = await dbGetAll(CACHE_STORE)
+  return selectCachedCashEntries(rows, filters)
+}
+
 export async function getCachedResponse(path) {
   const row = await dbGet(CACHE_STORE, cacheKey(path))
   if (!row) return null
