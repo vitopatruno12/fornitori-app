@@ -715,7 +715,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                           </div>
                           <div>
                             <dt>Num. cassetta</dt>
-                            <dd>{d.pieces != null && Number(d.pieces) > 0 ? d.pieces : '—'}</dd>
+                            <dd>{d.pieces != null && d.pieces !== '' && !Number.isNaN(Number(d.pieces)) ? Number(d.pieces) : '—'}</dd>
                           </div>
                           <div>
                             <dt>Peso</dt>

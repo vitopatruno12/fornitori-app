@@ -68,13 +68,19 @@ export function deliveryHistoryNoteText(delivery) {
   return parts.join(' · ')
 }
 
+function piecesNumber(d) {
+  if (d.pieces == null || d.pieces === '') return ''
+  const n = Number(d.pieces)
+  if (Number.isNaN(n)) return ''
+  return String(n)
+}
+
 function qtyCell(d) {
   const w = d.weight_kg != null && Number(d.weight_kg) > 0
-  const p = d.pieces != null && Number(d.pieces) > 0
-  if (w && p) return `${Number(d.weight_kg)} kg + ${d.pieces} pz`
+  const pieces = piecesNumber(d)
+  if (w && pieces !== '') return `${Number(d.weight_kg)} kg + ${pieces}`
   if (w) return `${Number(d.weight_kg)} kg`
-  if (p) return `${d.pieces} pz`
-  return ''
+  return pieces
 }
 
 function formatDiff(value) {
@@ -109,7 +115,7 @@ export function deliveryHistoryWorkbookCellValue(delivery, column, ctx = {}) {
     case 'weight_kg':
       return delivery.weight_kg != null && Number(delivery.weight_kg) > 0 ? formatAmount(delivery.weight_kg) : ''
     case 'pieces':
-      return delivery.pieces != null && Number(delivery.pieces) > 0 ? String(delivery.pieces) : ''
+      return piecesNumber(delivery)
     case 'quantity':
       return qtyCell(delivery)
     case 'unit_price':
