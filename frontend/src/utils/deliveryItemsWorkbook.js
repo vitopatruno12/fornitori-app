@@ -4,7 +4,7 @@ export const DELIVERY_ITEMS_WORKBOOK_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left', readonly: true },
   { id: 'product_description', label: 'Prodotto', width: 200, emphasis: true },
   { id: 'weight_kg', label: 'Peso kg (facolt.)', numeric: true, width: 110 },
-  { id: 'pieces', label: 'Numero cassette (kg)', numeric: true, width: 180 },
+  { id: 'pieces', label: 'numero.cassette(n)', numeric: true, width: 180 },
   { id: 'unit_price', label: 'Prezzo unit. € (facolt.)', numeric: true, width: 130 },
   { id: 'line_total', label: 'Tot. riga (imp.)', numeric: true, width: 120, readonly: true },
   { id: 'list_price', label: 'Listino €', numeric: true, width: 100, readonly: true },

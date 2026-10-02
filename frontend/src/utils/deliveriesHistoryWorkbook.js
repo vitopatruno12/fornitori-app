@@ -8,8 +8,7 @@ export const DELIVERIES_HISTORY_WORKBOOK_COLUMNS = [
   { id: 'product_description', label: 'Prodotto', width: 200 },
   { id: 'unloading_signed_by', label: 'Firma scarico', width: 130 },
   { id: 'weight_kg', label: 'Peso (kg)', numeric: true, width: 90 },
-  { id: 'pieces', label: 'Numero cassette (kg)', numeric: true, width: 170 },
-  { id: 'quantity', label: 'U.M(n)', width: 100 },
+  { id: 'pieces', label: 'numero.cassette(n)', numeric: true, width: 170 },
   { id: 'unit_price', label: 'Prezzo unit.', numeric: true, width: 110 },
   { id: 'list_unit_price', label: 'Listino', numeric: true, width: 100 },
   { id: 'price_diff_vs_list', label: 'Diff.', numeric: true, width: 90 },
@@ -75,14 +74,6 @@ function piecesNumber(d) {
   return String(n)
 }
 
-function qtyCell(d) {
-  const w = d.weight_kg != null && Number(d.weight_kg) > 0
-  const pieces = piecesNumber(d)
-  if (w && pieces !== '') return `${Number(d.weight_kg)} kg + ${pieces}`
-  if (w) return `${Number(d.weight_kg)} kg`
-  return pieces
-}
-
 function formatDiff(value) {
   if (value == null || value === '') return ''
   const n = Number(value)
@@ -116,8 +107,6 @@ export function deliveryHistoryWorkbookCellValue(delivery, column, ctx = {}) {
       return delivery.weight_kg != null && Number(delivery.weight_kg) > 0 ? formatAmount(delivery.weight_kg) : ''
     case 'pieces':
       return piecesNumber(delivery)
-    case 'quantity':
-      return qtyCell(delivery)
     case 'unit_price':
       return formatAmount(delivery.unit_price)
     case 'list_unit_price':

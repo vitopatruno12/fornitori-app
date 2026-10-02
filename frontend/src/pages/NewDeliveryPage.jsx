@@ -1100,7 +1100,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                   </div>
                   <div className="delivery-item-card-row">
                     <div className="form-group">
-                      <label>Numero cassette (kg)</label>
+                      <label>numero.cassette(n)</label>
                       <input
                         className="form-control"
                         type="number"
