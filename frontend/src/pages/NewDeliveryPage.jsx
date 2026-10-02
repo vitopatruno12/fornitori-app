@@ -448,6 +448,23 @@ export default function NewDeliveryPage({ operatorMode = false }) {
     }
   }
 
+  function importPayloadRows() {
+    return importRows.map((row) => ({
+      supplier_name: row.supplier_name || null,
+      delivery_date: row.delivery_date ? `${row.delivery_date}T00:00:00` : null,
+      ddt_number: row.ddt_number || null,
+      product_description: row.product_description || null,
+      weight_kg: row.weight_kg,
+      pieces: row.pieces,
+      unit_price: row.unit_price != null ? row.unit_price : 0,
+      vat_percent: row.vat_percent != null ? row.vat_percent : 23,
+      destination: row.destination || null,
+      document_note: row.document_note || null,
+      anomaly_note: row.anomaly_note || null,
+      unloading_signed_by: row.unloading_signed_by || null,
+    }))
+  }
+
   async function handleImportToHistory() {
     if (!importRows.length) {
       setError('Carica prima un file Excel/ODS.')
@@ -457,27 +474,34 @@ export default function NewDeliveryPage({ operatorMode = false }) {
     setError('')
     setSuccess('')
     try {
-      const payloadRows = importRows.map((row) => ({
-        supplier_name: row.supplier_name || null,
-        delivery_date: row.delivery_date ? `${row.delivery_date}T00:00:00` : null,
-        ddt_number: row.ddt_number || null,
-        product_description: row.product_description || null,
-        weight_kg: row.weight_kg,
-        pieces: row.pieces,
-        unit_price: row.unit_price != null ? row.unit_price : 0,
-        vat_percent: row.vat_percent != null ? row.vat_percent : 23,
-        destination: row.destination || null,
-        document_note: row.document_note || null,
-        anomaly_note: row.anomaly_note || null,
-        unloading_signed_by: row.unloading_signed_by || null,
-      }))
-      const res = await importDeliveriesWorkbook(payloadRows, { skip_duplicate_ddt: true })
+      const res = await importDeliveriesWorkbook(importPayloadRows(), { skip_duplicate_ddt: true })
       setSuccess(res?.message || 'Import nello storico completato.')
       setImportRows([])
       setImportMeta(null)
       setImportFileName('')
     } catch (err) {
       setError(err?.message || 'Import nello storico non riuscito')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  async function handleUpdateHistory() {
+    if (!importRows.length) {
+      setError('Carica prima il file con i dati corretti.')
+      return
+    }
+    setImportBusy(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await importDeliveriesWorkbook(importPayloadRows(), {
+        skip_duplicate_ddt: false,
+        update_existing: true,
+      })
+      setSuccess(res?.message || 'Storico aggiornato. Le altre consegne sono rimaste.')
+    } catch (err) {
+      setError(err?.message || 'Aggiornamento storico non riuscito')
     } finally {
       setImportBusy(false)
     }
@@ -678,8 +702,8 @@ export default function NewDeliveryPage({ operatorMode = false }) {
           <div>
             <h2 className="delivery-hub-work-title">Carica file nello storico</h2>
             <p className="fatture-note" style={{ margin: 0 }}>
-              Excel (.xlsx / .xls) o ODS: legge Data, DDT, Fornitore, Prodotto… elimina duplicati DDT e importa nello
-              storico consegne.
+              Excel (.xlsx / .xls) o ODS. Carica nello storico aggiunge i DDT nuovi. Aggiorna storico corregge
+              peso, prezzo e note dei DDT già presenti, senza cancellare il resto.
             </p>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
@@ -715,6 +739,14 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                 Pulisci anteprima
               </button>
             ) : null}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={importBusy || !importRows.length}
+              onClick={() => void handleUpdateHistory()}
+            >
+              {importBusy ? 'Aggiorno…' : 'Aggiorna storico'}
+            </button>
             <Link className="btn btn-secondary btn-sm" to="/history">
               Apri storico
             </Link>
@@ -1068,7 +1100,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                   </div>
                   <div className="delivery-item-card-row">
                     <div className="form-group">
-                      <label>Pezzi / cassette</label>
+                      <label>Num. cassette</label>
                       <input
                         className="form-control"
                         type="number"

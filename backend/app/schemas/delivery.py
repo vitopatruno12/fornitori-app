@@ -103,12 +103,14 @@ class DeliveryImportRow(BaseModel):
 class DeliveryImportRequest(BaseModel):
   rows: List[DeliveryImportRow]
   skip_duplicate_ddt: bool = True
+  update_existing: bool = False
 
 
 class DeliveryImportResult(BaseModel):
   ok: bool = True
   imported_lines: int = 0
   imported_ddt: int = 0
+  updated_lines: int = 0
   skipped_duplicate_ddt: int = 0
   skipped_unknown_supplier: int = 0
   skipped_empty: int = 0

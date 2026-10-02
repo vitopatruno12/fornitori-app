@@ -390,8 +390,134 @@ def _normalize_supplier_key(name):
   return re.sub(r'\s+', ' ', str(name or '').strip().lower())
 
 
+def _product_key(value) -> str:
+  return re.sub(r'\s+', ' ', str(value or '').strip().lower())
+
+
+def _apply_file_row(db: Session, delivery: Delivery, row: DeliveryImportRow) -> None:
+  """Sovrascrive una riga già salvata con i dati del file. Non cancella altre righe."""
+  product = (row.product_description or '').strip()
+  if product:
+    delivery.product_description = product[:255]
+  if row.delivery_date:
+    delivery.delivery_date = row.delivery_date
+  delivery.weight_kg = Decimal(str(row.weight_kg)) if row.weight_kg is not None else None
+  delivery.pieces = int(row.pieces) if row.pieces is not None else None
+  unit_price = Decimal(str(row.unit_price if row.unit_price is not None else 0))
+  delivery.unit_price = unit_price
+  vat_percent = Decimal(str(row.vat_percent or delivery.vat_percent or '23.0'))
+  delivery.vat_percent = vat_percent
+  weight_kg = Decimal(str(delivery.weight_kg or 0))
+  pieces = delivery.pieces or 0
+  if weight_kg > 0:
+    imponibile = (weight_kg * unit_price).quantize(Decimal('0.01'))
+  else:
+    imponibile = (Decimal(str(pieces)) * unit_price).quantize(Decimal('0.01'))
+  vat_amount, total = calculate_vat(imponibile, vat_percent)
+  delivery.imponibile = imponibile
+  delivery.vat_amount = vat_amount
+  delivery.total = total
+  dest = (row.destination or '').strip()
+  doc_note = (row.document_note or '').strip()
+  if dest or doc_note:
+    delivery.note = _merge_delivery_note(dest or None, doc_note or None)
+  unloading = _norm_signature(row.unloading_signed_by)
+  if unloading:
+    delivery.unloading_signed_by = unloading
+  anomaly = (row.anomaly_note or '').strip()
+  delivery.anomaly_note = anomaly or None
+  list_u, diff = _resolve_listino(db, delivery.supplier_id, delivery.product_description, unit_price)
+  delivery.list_unit_price = list_u
+  delivery.price_diff_vs_list = diff
+  db.add(delivery)
+
+
+def _append_lines_on_existing_ddt(db: Session, supplier: Supplier, rows: List[DeliveryImportRow]) -> int:
+  """Aggiunge righe nuove su un DDT già presente, senza toccare le altre."""
+  if not rows:
+    return 0
+  first = rows[0]
+  delivery_date = first.delivery_date or datetime.utcnow()
+  note = _merge_delivery_note((first.destination or '').strip() or None, (first.document_note or '').strip() or None)
+  unloading = _norm_signature(first.unloading_signed_by)
+  vat_percent = Decimal(str(first.vat_percent or '23.0'))
+  ddt = _norm_ddt(first.ddt_number)
+  created = 0
+  for row in rows:
+    weight_kg = Decimal(str(row.weight_kg or 0))
+    pieces = row.pieces or 0
+    unit_price = Decimal(str(row.unit_price if row.unit_price is not None else 0))
+    if weight_kg > 0:
+      imponibile = (weight_kg * unit_price).quantize(Decimal('0.01'))
+    else:
+      imponibile = (Decimal(str(pieces)) * unit_price).quantize(Decimal('0.01'))
+    vat_amount, total = calculate_vat(imponibile, vat_percent)
+    prod_desc = (row.product_description or '').strip() or None
+    list_u, diff = _resolve_listino(db, supplier.id, prod_desc, unit_price)
+    db.add(Delivery(
+      supplier_id=supplier.id,
+      product_id=None,
+      product_description=prod_desc,
+      user_id=None,
+      delivery_date=row.delivery_date or delivery_date,
+      weight_kg=weight_kg or None,
+      pieces=pieces or None,
+      unit_price=unit_price,
+      imponibile=imponibile,
+      vat_percent=vat_percent,
+      vat_amount=vat_amount,
+      total=total,
+      note=note,
+      invoice_id=None,
+      ddt_number=ddt,
+      order_signed_by=None,
+      unloading_signed_by=unloading,
+      list_unit_price=list_u,
+      price_diff_vs_list=diff,
+      anomaly_note=(row.anomaly_note or '').strip() or None,
+      carrier_id=None,
+    ))
+    created += 1
+  db.commit()
+  return created
+
+
+def _update_existing_ddt_lines(db: Session, existing: List[Delivery], bundle) -> tuple[int, int]:
+  """Allinea le righe del file a quelle già salvate. Le righe dello storico assenti dal file restano."""
+  pool = list(existing)
+  updated = 0
+  pending: List[DeliveryImportRow] = []
+  for _supplier, row in bundle:
+    key = _product_key(row.product_description)
+    hit_i = None
+    if key:
+      for i, delivery in enumerate(pool):
+        if _product_key(delivery.product_description) == key:
+          hit_i = i
+          break
+    if hit_i is None:
+      pending.append(row)
+      continue
+    _apply_file_row(db, pool.pop(hit_i), row)
+    updated += 1
+  if updated == 0 and pending and len(pending) == len(pool):
+    for delivery, row in zip(list(pool), list(pending)):
+      _apply_file_row(db, delivery, row)
+    updated = len(pending)
+    pool.clear()
+    pending.clear()
+  if len(pending) == 1 and len(pool) == 1:
+    _apply_file_row(db, pool.pop(), pending.pop())
+    updated += 1
+  db.commit()
+  inserted = 0
+  if pending:
+    inserted = _append_lines_on_existing_ddt(db, bundle[0][0], pending)
+  return updated, inserted
+
+
 def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryImportResult:
-  """Importa righe da file Excel/ODS nello storico, saltando DDT gia presenti."""
+  """Importa righe da file Excel/ODS. Con update_existing corregge i DDT già presenti."""
   rows = list(data.rows or [])
   if not rows:
     return DeliveryImportResult(ok=True, message='Nessuna riga da importare.')
@@ -401,15 +527,30 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
   by_name = {_normalize_supplier_key(s.name): s for s in suppliers if s.name}
 
   existing_ddt = set()
-  for sid, ddt in (
-    db.query(Delivery.supplier_id, Delivery.ddt_number)
-    .filter(Delivery.ddt_number.isnot(None))
-    .filter(Delivery.ddt_number != '')
-    .all()
-  ):
-    if sid is None or not ddt:
-      continue
-    existing_ddt.add((int(sid), str(ddt).strip().lower()))
+  existing_by = {}
+  if data.update_existing:
+    for delivery in (
+      db.query(Delivery)
+      .filter(Delivery.ddt_number.isnot(None))
+      .filter(Delivery.ddt_number != '')
+      .order_by(Delivery.id.asc())
+      .all()
+    ):
+      if delivery.supplier_id is None or not delivery.ddt_number:
+        continue
+      key = (int(delivery.supplier_id), str(delivery.ddt_number).strip().lower())
+      existing_by.setdefault(key, []).append(delivery)
+      existing_ddt.add(key)
+  else:
+    for sid, ddt in (
+      db.query(Delivery.supplier_id, Delivery.ddt_number)
+      .filter(Delivery.ddt_number.isnot(None))
+      .filter(Delivery.ddt_number != '')
+      .all()
+    ):
+      if sid is None or not ddt:
+        continue
+      existing_ddt.add((int(sid), str(ddt).strip().lower()))
 
   groups = {}
   skipped_unknown = 0
@@ -437,15 +578,16 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
       continue
     ddt = _norm_ddt(row.ddt_number)
     sid = int(supplier.id)
-    if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in existing_ddt:
+    if data.skip_duplicate_ddt and not data.update_existing and ddt and (sid, ddt.lower()) in existing_ddt:
       skipped_dup += 1
       continue
-    date_key = row.delivery_date.date().isoformat() if row.delivery_date else ''
+    date_key = '' if data.update_existing else (row.delivery_date.date().isoformat() if row.delivery_date else '')
     gkey = (sid, (ddt or '').lower(), date_key)
     groups.setdefault(gkey, []).append((supplier, row))
 
   imported_lines = 0
   imported_ddt = 0
+  updated_lines = 0
   created_keys = set()
 
   for (sid, ddt_l, _date_key), bundle in groups.items():
@@ -453,7 +595,12 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
       continue
     supplier, first = bundle[0]
     ddt = _norm_ddt(first.ddt_number)
-    if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in existing_ddt:
+    if data.update_existing and ddt and (sid, ddt.lower()) in existing_by:
+      updated, inserted = _update_existing_ddt_lines(db, existing_by[(sid, ddt.lower())], bundle)
+      updated_lines += updated
+      imported_lines += inserted
+      continue
+    if data.skip_duplicate_ddt and not data.update_existing and ddt and (sid, ddt.lower()) in existing_ddt:
       skipped_dup += len(bundle)
       continue
     if data.skip_duplicate_ddt and ddt and (sid, ddt.lower()) in created_keys:
@@ -501,7 +648,13 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
       created_keys.add((sid, ddt.lower()))
       existing_ddt.add((sid, ddt.lower()))
 
-  bits = [f'Importate {imported_lines} righe ({imported_ddt} DDT).']
+  if data.update_existing:
+    bits = [f'Aggiornate {updated_lines} righe già presenti.']
+    if imported_lines:
+      bits.append(f'Aggiunte {imported_lines} righe nuove ({imported_ddt} DDT).')
+    bits.append('Il resto dello storico non è stato cancellato.')
+  else:
+    bits = [f'Importate {imported_lines} righe ({imported_ddt} DDT).']
   if skipped_dup:
     bits.append(f'Saltati {skipped_dup} duplicati DDT.')
   if skipped_unknown:
@@ -513,6 +666,7 @@ def import_delivery_rows(db: Session, data: DeliveryImportRequest) -> DeliveryIm
     ok=True,
     imported_lines=imported_lines,
     imported_ddt=imported_ddt,
+    updated_lines=updated_lines,
     skipped_duplicate_ddt=skipped_dup,
     skipped_unknown_supplier=skipped_unknown,
     skipped_empty=skipped_empty,

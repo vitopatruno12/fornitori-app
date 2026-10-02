@@ -65,12 +65,13 @@ export async function updateDeliveryLine(id, payload) {
   return updateDeliveryNotes(id, payload)
 }
 
-/** Importa righe da Excel/ODS nello storico consegne (salta DDT già presenti). */
-export async function importDeliveriesWorkbook(rows, { skip_duplicate_ddt = true } = {}) {
+/** Importa righe da Excel/ODS nello storico. update_existing corregge i DDT già presenti. */
+export async function importDeliveriesWorkbook(rows, { skip_duplicate_ddt = true, update_existing = false } = {}) {
   return apiFetch('/deliveries/import', {
     method: 'POST',
     body: JSON.stringify({
       skip_duplicate_ddt: Boolean(skip_duplicate_ddt),
+      update_existing: Boolean(update_existing),
       rows: Array.isArray(rows) ? rows : [],
     }),
   })

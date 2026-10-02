@@ -8,7 +8,7 @@ export const DELIVERIES_HISTORY_WORKBOOK_COLUMNS = [
   { id: 'product_description', label: 'Prodotto', width: 200 },
   { id: 'unloading_signed_by', label: 'Firma scarico', width: 130 },
   { id: 'weight_kg', label: 'Peso (kg)', numeric: true, width: 90 },
-  { id: 'pieces', label: 'Pezzi', numeric: true, width: 72 },
+  { id: 'pieces', label: 'Num. cassetta', numeric: true, width: 120 },
   { id: 'quantity', label: 'Quantità', width: 120 },
   { id: 'unit_price', label: 'Prezzo unit.', numeric: true, width: 110 },
   { id: 'list_unit_price', label: 'Listino', numeric: true, width: 100 },

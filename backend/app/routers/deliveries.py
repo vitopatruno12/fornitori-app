@@ -61,7 +61,7 @@ def create_delivery_batch(payload: DeliveryBatchCreate, db: Session = Depends(ge
 
 @router.post("/import", response_model=DeliveryImportResult)
 def import_deliveries(payload: DeliveryImportRequest, db: Session = Depends(get_db)):
-    """Carica righe da Excel/ODS nello storico (salta DDT già presenti)."""
+    """Carica righe da Excel/ODS. Con update_existing corregge i DDT già presenti, senza svuotare lo storico."""
     return delivery_service.import_delivery_rows(db, payload)
 
 

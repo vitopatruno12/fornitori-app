@@ -363,7 +363,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
             />
           </div>
           <div className="form-group" style={{ flex: '1 1 110px' }}>
-            <label>Pezzi</label>
+            <label>Num. cassetta</label>
             <input
               className="form-control"
               type="number"
@@ -712,7 +712,7 @@ export default function DeliveriesHistoryPage({ operatorMode = false }) {
                             <dd>{d.supplier_name || d.supplier_id || '—'}</dd>
                           </div>
                           <div>
-                            <dt>Pezzi</dt>
+                            <dt>Num. cassetta</dt>
                             <dd>{d.pieces != null && Number(d.pieces) > 0 ? d.pieces : '—'}</dd>
                           </div>
                           <div>
