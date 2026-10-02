@@ -453,8 +453,8 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                 </>
               ) : null}
             </p>
-            <div className="stipendi-edit-row stipendi-draft-row" style={{ alignItems: 'flex-end' }}>
-              <label className="stipendi-edit-field" style={{ minWidth: '14rem', flex: '1 1 14rem' }}>
+            <div className="stipendi-docs-form-row stipendi-draft-row">
+              <label className="stipendi-edit-field stipendi-docs-field-file">
                 <span>PDF buste (multi-pagina)</span>
                 <input
                   ref={importFileRef}
@@ -464,17 +464,17 @@ export default function StipendiDocumentsPanel({ localeName, yearMonth, category
                   onChange={(e) => applyFileCompany(e.target.files?.[0])}
                 />
               </label>
-              <label className="stipendi-edit-field" style={{ minWidth: '10rem' }}>
+              <label className="stipendi-edit-field stipendi-docs-field-sm">
                 <span>Password PDF (P.IVA)</span>
                 <input
                   className="form-control"
                   value={pdfPassword}
                   onChange={(e) => setPdfPassword(e.target.value)}
-                  placeholder="04945600759"
+                  placeholder="P.IVA"
                   autoComplete="off"
                 />
               </label>
-              <label className="stipendi-edit-field" style={{ minWidth: '8rem' }}>
+              <label className="stipendi-edit-field stipendi-docs-field-sm">
                 <span>Società</span>
                 <input className="form-control" value={detectedSocieta || '—'} readOnly />
               </label>

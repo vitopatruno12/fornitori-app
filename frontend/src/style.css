@@ -9693,6 +9693,12 @@ select.form-control {
   grid-template-columns: none;
 }
 
+.stipendi-docs-form .stipendi-docs-form-row.stipendi-draft-row {
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  border-radius: 0.55rem;
+}
+
 .stipendi-docs-form .stipendi-edit-field {
   flex: 1 1 9rem;
   min-width: 8.5rem;
@@ -9732,7 +9738,13 @@ select.form-control {
 .stipendi-docs-form .stipendi-edit-field .form-control {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
+}
+
+.stipendi-docs-form input[type='file'].form-control {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stipendi-edit-hint {
