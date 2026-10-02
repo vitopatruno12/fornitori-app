@@ -135,6 +135,13 @@ const SCADENZIARIO_COLUMNS = [
   { id: 'payment_status', label: 'Stato', width: 12, fluid: true },
 ]
 
+function rowMarkedCash(row) {
+  return (
+    String(row?.match_reason || '') === 'pagata_contanti'
+    || String(row?.payment_method || '').trim().toLowerCase() === 'contanti'
+  )
+}
+
 function paymentStatusText(status, ignored) {
   if (ignored) return 'Ignorata'
   if (status === 'paid') return 'Pagata'
@@ -2101,9 +2108,9 @@ export function FatturePagatePage() {
     if (col.id === 'total') return eur(row.total)
     if (col.id === 'amount_paid') return eur(row.amount_paid ?? (invoiceIsPaidRow(row) ? row.total : 0))
     if (col.id === 'payment_label') return row.payment_label || (invoiceIsPaidRow(row) ? 'Pagata' : 'Da pagare')
-    if (col.id === 'contanti') return row.match_reason === 'pagata_contanti' ? '✔ Pagata in contanti' : ''
+    if (col.id === 'contanti') return rowMarkedCash(row) ? '✔ Annulla contanti' : ''
     if (col.id === 'bank_hit') {
-      if (row.match_reason === 'pagata_contanti') return 'Contanti'
+      if (rowMarkedCash(row)) return 'Contanti'
       const m = row.matched_movement
       if (!m) return invoiceIsPaidRow(row) ? '—' : 'Nessun bonifico'
       return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
@@ -2321,7 +2328,7 @@ export function FatturePagatePage() {
                 rowKey={(row, idx) => `${row.invoice_id || row.invoice_number || 'inv'}-${idx}`}
                 cellValue={invoiceCellValue}
                 renderCell={(row, col) => {
-                  if (col.id !== 'contanti' || row.match_reason !== 'pagata_contanti') return null
+                  if (col.id !== 'contanti' || !rowMarkedCash(row)) return null
                   const id = row.invoice_id || row.id
                   const busy = Number(cashBusyId) === Number(id)
                   return (
@@ -2339,7 +2346,7 @@ export function FatturePagatePage() {
                         setCashUndoRow(row)
                       }}
                     >
-                      {busy ? '…' : '✔ Contanti'}
+                      {busy ? '…' : '✔ Annulla'}
                     </button>
                   )
                 }}

@@ -2547,6 +2547,7 @@ def _invoice_row_out(
     "amount_paid": float(paid),
     "residuo": float(residuo),
     "payment_status": status,
+    "payment_method": getattr(inv, "payment_method", None),
     "company": getattr(inv, "company", None),
     "match_reason": reason,
     "aligned": aligned,
@@ -3167,7 +3168,23 @@ def reconciliation_preview(
         "amount_matched_as": "numeri",
       }
 
-    if found:
+    manual_cash = str(getattr(inv, "payment_method", None) or "").strip().lower() == "contanti"
+    if manual_cash:
+      paid_by_bank.append(
+        _invoice_row_out(
+          inv,
+          reason="pagata_contanti",
+          match_movement={
+            "description": "Pagata in contanti",
+            "causale": "CONTANTI",
+            "amount": float(_dec(getattr(inv, "total", 0))),
+            "id": None,
+          },
+          match_score=100,
+          match_band="auto",
+        )
+      )
+    elif found:
       has_num = _invoice_number_in_text(num, found["blob"])
       if saldo_hit:
         reason = "saldo_fatture"
@@ -3210,21 +3227,6 @@ def reconciliation_preview(
             "description": f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·"),
             "causale": "CONTANTI",
             "amount": cash_hit.get("amount_paid"),
-            "id": None,
-          },
-          match_score=100,
-          match_band="auto",
-        )
-      )
-    elif str(getattr(inv, "payment_method", None) or "").strip().lower() == "contanti":
-      paid_by_bank.append(
-        _invoice_row_out(
-          inv,
-          reason="pagata_contanti",
-          match_movement={
-            "description": "Pagata in contanti",
-            "causale": "CONTANTI",
-            "amount": float(_dec(getattr(inv, "total", 0))),
             "id": None,
           },
           match_score=100,
