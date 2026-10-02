@@ -381,6 +381,7 @@ export function buildSchedaContabileFornitori(
     // Se pagata in Atlas ma senza movimento banca matchato → PG virtuale
     if (paidAmt > 0.009 && !paidInvoiceIds.has(Number(inv?.id)) && !paidByBank) {
       const payDate = isoDate(inv?.paid_at || inv?.updated_at || date)
+      const cashPaid = String(inv?.payment_method || '').trim().toLowerCase() === 'contanti'
       if (inPeriod(payDate) || inPeriod(date)) {
         const useDate = inPeriod(payDate) ? payDate : date
         party.totalDare += paidAmt
@@ -391,9 +392,11 @@ export function buildSchedaContabileFornitori(
           documento: `PG ${number || inv?.id || ''} ${formatDocDate(useDate)}`,
           documentoTipo: 'PG',
           registrationNumber: `PG-INV-${inv?.id ?? ''}`,
-          description: `PAGAMENTO FR ${number || inv?.id || ''}`,
+          description: cashPaid
+            ? `PAGAMENTO CONTANTI FR ${number || inv?.id || ''}`
+            : `PAGAMENTO FR ${number || inv?.id || ''}`,
           documentLabel: `FR ${number || inv?.id || ''}`,
-          contropartita: 'BANCA / CASSA',
+          contropartita: cashPaid ? 'CASSA CONTANTI' : 'BANCA / CASSA',
           counterparty: party.name,
           company: companyId,
           amount: paidAmt,

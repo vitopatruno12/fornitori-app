@@ -18,6 +18,7 @@ class InvoiceBase(BaseModel):
   cash_entry_id: Optional[int] = None
   ignored: bool = False
   bolla_verified: bool = False
+  payment_method: Optional[str] = None
 
 
 class InvoiceCreate(InvoiceBase):

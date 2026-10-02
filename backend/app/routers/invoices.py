@@ -458,6 +458,18 @@ def toggle_invoice_ignore(
   return inv
 
 
+@router.post("/{invoice_id}/paid-cash", response_model=InvoiceRead)
+def toggle_invoice_paid_cash(
+  invoice_id: int,
+  cash: bool = Query(True, description="True = pagata in contanti, False = togli la spunta"),
+  db: Session = Depends(get_db),
+):
+  inv = invoice_service.set_invoice_paid_cash(db, invoice_id, cash=cash)
+  if not inv:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
+  return inv
+
+
 @router.post("/{invoice_id}/bolla-verified", response_model=InvoiceRead)
 def toggle_invoice_bolla_verified(
   invoice_id: int,

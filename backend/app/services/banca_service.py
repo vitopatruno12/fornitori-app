@@ -2533,6 +2533,7 @@ def _invoice_row_out(
     "numero_in_movimento",
     "importo_in_movimento",
     "file_contanti",
+    "pagata_contanti",
     "score_auto",
     "saldo_fatture",
   }
@@ -3215,6 +3216,21 @@ def reconciliation_preview(
           match_band="auto",
         )
       )
+    elif str(getattr(inv, "payment_method", None) or "").strip().lower() == "contanti":
+      paid_by_bank.append(
+        _invoice_row_out(
+          inv,
+          reason="pagata_contanti",
+          match_movement={
+            "description": "Pagata in contanti",
+            "causale": "CONTANTI",
+            "amount": float(_dec(getattr(inv, "total", 0))),
+            "id": None,
+          },
+          match_score=100,
+          match_band="auto",
+        )
+      )
     else:
       # Senza prova in movimenti (score auto) e senza contanti → da pagare
       da_pagare.append(_invoice_row_out(inv, reason="da_pagare"))
@@ -3720,6 +3736,8 @@ def sync_payment_status_from_bank(
   for inv_dto in paid_listed:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    if str(getattr(inv_dto, "payment_method", None) or "").strip().lower() == "contanti":
+      continue
     if inv_id in marked_ids or inv_id in bank_assignments or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
       continue
     if _invoice_protected_by_bank_evidence(inv_dto, mov_meta):
@@ -3746,6 +3764,8 @@ def sync_payment_status_from_bank(
       continue
     row = orm_by_id.get(inv_id)
     if not row:
+      continue
+    if str(getattr(row, "payment_method", None) or "").strip().lower() == "contanti":
       continue
     row.amount_paid = Decimal("0.00")
     row.is_paid = False

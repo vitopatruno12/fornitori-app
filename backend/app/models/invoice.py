@@ -23,4 +23,5 @@ class Invoice(Base):
   cash_entry_id = Column(Integer, ForeignKey("cash_entries.id"), nullable=True, index=True)
   ignored = Column(Boolean, nullable=False, server_default="0")
   bolla_verified = Column(Boolean, nullable=False, server_default="0")
+  payment_method = Column(String(20), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now())

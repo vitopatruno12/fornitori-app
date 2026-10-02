@@ -48,6 +48,29 @@ _ACTIVITY_TO_COMPANY = {
 }
 
 
+_payment_method_col_ready = False
+
+
+def ensure_invoices_payment_method_column(*, force: bool = False) -> bool:
+  """Aggiunge invoices.payment_method se manca (contanti segnati a mano)."""
+  global _payment_method_col_ready
+  if _payment_method_col_ready and not force:
+    return True
+  try:
+    with engine.begin() as conn:
+      conn.execute(
+        text(
+          "ALTER TABLE invoices "
+          "ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20)"
+        )
+      )
+    _payment_method_col_ready = True
+    return True
+  except SQLAlchemyError:
+    logger.exception("Impossibile assicurare colonna invoices.payment_method")
+    return False
+
+
 def ensure_invoices_bolla_verified_column(*, force: bool = False) -> bool:
   """Aggiunge invoices.bolla_verified se manca (deploy senza migrazione)."""
   global _bolla_col_ready
@@ -140,6 +163,7 @@ def list_invoices(
   since_date: Optional[date] = None,
 ) -> List[Union[InvoiceListOut, SimpleNamespace]]:
   ensure_invoices_bolla_verified_column()
+  ensure_invoices_payment_method_column()
   try:
     return _list_invoices_impl(
       db,
@@ -153,10 +177,12 @@ def list_invoices(
     )
   except ProgrammingError as exc:
     err = str(exc).lower()
-    if "bolla_verified" not in err:
+    if "bolla_verified" not in err and "payment_method" not in err:
       raise
     _rollback_db(db)
-    if not ensure_invoices_bolla_verified_column(force=True):
+    if "bolla_verified" in err and not ensure_invoices_bolla_verified_column(force=True):
+      raise
+    if "payment_method" in err and not ensure_invoices_payment_method_column(force=True):
       raise
     return _list_invoices_impl(
       db,
@@ -300,6 +326,7 @@ def _list_invoices_impl(
           total=inv.total,
           amount_paid=inv.amount_paid,
           payment_status=ps,
+          payment_method=getattr(inv, "payment_method", None),
           company=inv_company,
         )
       )
@@ -473,6 +500,42 @@ def set_invoice_ignored(db: Session, invoice_id: int, ignored: bool) -> Optional
   if not inv:
     return None
   inv.ignored = bool(ignored)
+  db.commit()
+  db.refresh(inv)
+  return inv
+
+
+def set_invoice_paid_cash(db: Session, invoice_id: int, cash: bool) -> Optional[Invoice]:
+  """Segna o toglie il pagamento in contanti. Il totale va in amount_paid."""
+  ensure_invoices_payment_method_column()
+  try:
+    return _apply_paid_cash(db, invoice_id, cash)
+  except ProgrammingError as exc:
+    err = str(exc).lower()
+    if "payment_method" not in err:
+      raise
+    _rollback_db(db)
+    if not ensure_invoices_payment_method_column(force=True):
+      raise
+    return _apply_paid_cash(db, invoice_id, cash)
+
+
+def _apply_paid_cash(db: Session, invoice_id: int, cash: bool) -> Optional[Invoice]:
+  inv = get_invoice(db, invoice_id)
+  if not inv:
+    return None
+  if cash:
+    inv.payment_method = "contanti"
+    inv.amount_paid = Decimal(str(inv.total or 0)).quantize(Decimal("0.01"))
+    inv.ignored = False
+    sync_invoice_paid_flag(inv)
+  else:
+    if str(getattr(inv, "payment_method", None) or "").strip().lower() != "contanti":
+      return inv
+    inv.payment_method = None
+    inv.amount_paid = Decimal("0.00")
+    inv.is_paid = False
+    sync_invoice_paid_flag(inv)
   db.commit()
   db.refresh(inv)
   return inv

@@ -1984,6 +1984,15 @@ select.form-control {
   background: #ecfdf5;
 }
 
+.workbook-grid .fatture-cash-check {
+  justify-content: flex-start;
+  gap: 0.35rem;
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .workbook-grid .fatture-bolla-check:disabled {
   opacity: 0.6;
   cursor: wait;

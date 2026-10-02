@@ -29,6 +29,7 @@ import {
   runAdeAgentSync,
   setInvoiceIgnored,
   setInvoiceBollaVerified,
+  setInvoicePaidCash,
   updateAdeFisconlineCredentials,
   fetchAdePasswordRotations,
   fetchIssuedInvoices,
@@ -102,6 +103,7 @@ const DA_REGISTRARE_COLUMNS = [
   { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true, emphasis: true },
   { id: 'bolla_d', label: 'Bolla d.', width: 10, fluid: true },
   { id: 'payment_status', label: 'Stato', width: 10, fluid: true },
+  { id: 'metodo_pag', label: 'Metodo pag.', width: 12, fluid: true },
 ]
 
 const PAGATE_FORNITORI_COLUMNS = [
@@ -118,7 +120,8 @@ const PAGATE_INVOICE_COLUMNS = [
   { id: 'invoice_number', label: 'Numero', width: 12, fluid: true, emphasis: true },
   { id: 'total', label: 'Totale', width: 12, fluid: true, numeric: true },
   { id: 'amount_paid', label: 'Pagato', width: 12, fluid: true, numeric: true },
-  { id: 'payment_label', label: 'Stato', width: 12, fluid: true },
+  { id: 'payment_label', label: 'Stato', width: 14, fluid: true },
+  { id: 'contanti', label: 'Contanti', width: 10, fluid: true },
   { id: 'bank_hit', label: 'Movimento banca', width: 24, fluid: true },
   { id: 'reason', label: 'Esito', width: 14, fluid: true },
 ]
@@ -171,6 +174,7 @@ function matchReasonLabel(reason) {
   if (reason === 'numero_in_movimento') return 'N. in banca'
   if (reason === 'importo_in_movimento') return 'Importo in banca'
   if (reason === 'matched') return 'Riconciliata'
+  if (reason === 'pagata_contanti') return 'Pagata in contanti'
   if (reason === 'file_contanti' || reason === 'file_pagamenti') return 'Contanti'
   if (reason === 'saldo_fatture') return 'Saldo fatture'
   if (reason === 'da_pagare') return 'Da pagare'
@@ -193,6 +197,7 @@ function invoiceIsPaidRow(row) {
     || reason === 'matched'
     || reason === 'file_contanti'
     || reason === 'file_pagamenti'
+    || reason === 'pagata_contanti'
     || reason === 'saldo_fatture'
   ) {
     return true
@@ -231,7 +236,8 @@ function buildBankVerifySuppliers(paidRows, openRows) {
     const paid = row._bucket === 'paid' || invoiceIsPaidRow(row)
     party.invoices.push({
       ...row,
-      payment_label: paid ? 'Pagata' : 'Da pagare',
+      payment_label:
+        String(row?.match_reason || '') === 'pagata_contanti' ? 'Pagata in contanti' : paid ? 'Pagata' : 'Da pagare',
     })
     party.invoice_count += 1
     if (paid) {
@@ -1554,6 +1560,8 @@ export function FattureDaRegistrarePage() {
   const [appliedDateFrom, setAppliedDateFrom] = useState('')
   const [appliedDateTo, setAppliedDateTo] = useState('')
   const [bollaBusyId, setBollaBusyId] = useState(null)
+  const [cashBusyId, setCashBusyId] = useState(null)
+  const [cashMsg, setCashMsg] = useState('')
 
   async function toggleBollaVerified(row) {
     if (!row?.id || bollaBusyId != null) return
@@ -1573,6 +1581,24 @@ export function FattureDaRegistrarePage() {
       setError(err?.message || 'Impossibile aggiornare la spunta bolla')
     } finally {
       setBollaBusyId(null)
+    }
+  }
+
+  async function markPaidCash(row) {
+    if (!row?.id || cashBusyId != null) return
+    setCashBusyId(row.id)
+    setError('')
+    setCashMsg('')
+    try {
+      await setInvoicePaidCash(row.id, true)
+      setInvoices((prev) => (prev || []).filter((inv) => Number(inv.id) !== Number(row.id)))
+      setCashMsg(
+        `Fattura ${row.invoice_number || row.id} segnata pagata in contanti. È in Fatture pagate e nel mastrino del fornitore.`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Impossibile segnare il pagamento in contanti')
+    } finally {
+      setCashBusyId(null)
     }
   }
 
@@ -1621,7 +1647,14 @@ export function FattureDaRegistrarePage() {
         const rows = await fetchInvoices(params)
         const list = Array.isArray(rows) ? rows : []
         if (!cancelled) {
-          setInvoices(list.filter((inv) => !inv.cash_entry_id && inv.payment_status !== 'paid'))
+          setInvoices(
+            list.filter(
+              (inv) =>
+                !inv.cash_entry_id
+                && inv.payment_status !== 'paid'
+                && String(inv.payment_method || '').toLowerCase() !== 'contanti',
+            ),
+          )
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || 'Errore caricamento')
@@ -1686,6 +1719,7 @@ export function FattureDaRegistrarePage() {
         </div>
       ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
+      {cashMsg ? <div className="alert alert-info">{cashMsg}</div> : null}
       <section className="card fatture-panel">
         {scopeReady ? (
           <FattureSupplierDateFilters
@@ -1726,9 +1760,29 @@ export function FattureDaRegistrarePage() {
             if (col.id === 'bolla_d') return row.bolla_verified ? '✔ Verificato' : '○'
             if (col.id === 'imponibile' || col.id === 'vat_amount' || col.id === 'total') return eur(row[col.id])
             if (col.id === 'payment_status') return paymentStatusText(row.payment_status, row.ignored)
+            if (col.id === 'metodo_pag') return 'Contanti'
             return row[col.id] || '—'
           }}
           renderCell={(row, col) => {
+            if (col.id === 'metodo_pag') {
+              const busy = Number(cashBusyId) === Number(row.id)
+              return (
+                <button
+                  type="button"
+                  className="excel-cell pagamenti-cell-readonly fatture-bolla-check fatture-cash-check"
+                  disabled={busy || loading}
+                  title="Spunta contanti: sposta la fattura tra le pagate e aggiorna il mastrino"
+                  aria-label={`Segna ${row.invoice_number || 'fattura'} pagata in contanti`}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    void markPaidCash(row)
+                  }}
+                >
+                  {busy ? '…' : '○ Contanti'}
+                </button>
+              )
+            }
             if (col.id !== 'bolla_d') return null
             const verified = Boolean(row.bolla_verified)
             const busy = Number(bollaBusyId) === Number(row.id)
@@ -1815,6 +1869,7 @@ export function FatturePagatePage() {
   const [appliedDateFrom, setAppliedDateFrom] = useState('')
   const [appliedDateTo, setAppliedDateTo] = useState('')
   const [selectedSupplierKey, setSelectedSupplierKey] = useState('')
+  const [cashBusyId, setCashBusyId] = useState(null)
 
   async function reload(nextCompany = companyId, { auto = false } = {}) {
     if (!nextCompany) {
@@ -1885,6 +1940,21 @@ export function FatturePagatePage() {
     setAppliedDateFrom('')
     setAppliedDateTo('')
     setSelectedSupplierKey('')
+  }
+
+  async function clearPaidCash(row) {
+    const id = row?.invoice_id || row?.id
+    if (!id || cashBusyId != null) return
+    setCashBusyId(id)
+    setError('')
+    try {
+      await setInvoicePaidCash(id, false)
+      await reload(companyId)
+    } catch (e) {
+      setError(e?.message || 'Impossibile togliere la spunta contanti')
+    } finally {
+      setCashBusyId(null)
+    }
   }
 
   function backToSupplierList() {
@@ -1973,7 +2043,9 @@ export function FatturePagatePage() {
     if (col.id === 'total') return eur(row.total)
     if (col.id === 'amount_paid') return eur(row.amount_paid ?? (invoiceIsPaidRow(row) ? row.total : 0))
     if (col.id === 'payment_label') return row.payment_label || (invoiceIsPaidRow(row) ? 'Pagata' : 'Da pagare')
+    if (col.id === 'contanti') return row.match_reason === 'pagata_contanti' ? '✔ Pagata in contanti' : ''
     if (col.id === 'bank_hit') {
+      if (row.match_reason === 'pagata_contanti') return 'Contanti'
       const m = row.matched_movement
       if (!m) return invoiceIsPaidRow(row) ? '—' : 'Nessun bonifico'
       return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
@@ -2190,6 +2262,28 @@ export function FatturePagatePage() {
                 rows={selectedSupplier.invoices}
                 rowKey={(row, idx) => `${row.invoice_id || row.invoice_number || 'inv'}-${idx}`}
                 cellValue={invoiceCellValue}
+                renderCell={(row, col) => {
+                  if (col.id !== 'contanti' || row.match_reason !== 'pagata_contanti') return null
+                  const id = row.invoice_id || row.id
+                  const busy = Number(cashBusyId) === Number(id)
+                  return (
+                    <button
+                      type="button"
+                      className="excel-cell pagamenti-cell-readonly fatture-bolla-check fatture-bolla-check--on fatture-cash-check"
+                      disabled={busy || loading}
+                      title="Pagata in contanti — clic per togliere la spunta e riportarla da pagare"
+                      aria-pressed
+                      aria-label="Pagata in contanti"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        void clearPaidCash(row)
+                      }}
+                    >
+                      {busy ? '…' : '✔ Contanti'}
+                    </button>
+                  )
+                }}
                 totals={selectedSupplier.invoices.length ? invoiceTotals : null}
                 totalsLabel={moneyTotalsLabel}
                 emptyMessage="Nessuna fattura per questo fornitore."

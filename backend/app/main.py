@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI):
         _ensure_pos_receipts_table()
         _ensure_issued_invoices_table()
         _ensure_conservation_tables()
+        from .services.invoice_service import ensure_invoices_payment_method_column
+
+        ensure_invoices_payment_method_column()
     except OperationalError as e:
         _log_startup_exception(
             "PostgreSQL: connessione o autenticazione fallita. "

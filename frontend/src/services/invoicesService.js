@@ -73,6 +73,17 @@ export async function setInvoiceIgnored(id, ignored) {
   return response.json()
 }
 
+export async function setInvoicePaidCash(id, cash) {
+  const response = await fetch(
+    apiUrl(`/invoices/${id}/paid-cash?cash=${cash ? 'true' : 'false'}`),
+    { method: 'POST' },
+  )
+  if (!response.ok) {
+    throw new Error('Errore aggiornamento pagamento in contanti')
+  }
+  return response.json()
+}
+
 export async function setInvoiceBollaVerified(id, verified) {
   const response = await fetch(
     apiUrl(`/invoices/${id}/bolla-verified?verified=${verified ? 'true' : 'false'}`),
