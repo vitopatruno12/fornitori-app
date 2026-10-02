@@ -1927,6 +1927,7 @@ export function FatturePagatePage() {
   const [appliedDateTo, setAppliedDateTo] = useState('')
   const [selectedSupplierKey, setSelectedSupplierKey] = useState('')
   const [cashBusyId, setCashBusyId] = useState(null)
+  const [cashUndoRow, setCashUndoRow] = useState(null)
 
   async function reload(nextCompany = companyId, { auto = false } = {}) {
     if (!nextCompany) {
@@ -2328,13 +2329,14 @@ export function FatturePagatePage() {
                       type="button"
                       className="excel-cell pagamenti-cell-readonly fatture-bolla-check fatture-bolla-check--on fatture-cash-check"
                       disabled={busy || loading}
-                      title="Pagata in contanti — clic per togliere la spunta e riportarla da pagare"
+                      title="Pagata in contanti — clic per annullare e riportarla da pagare"
                       aria-pressed
-                      aria-label="Pagata in contanti"
+                      aria-label="Annulla pagamento in contanti"
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        void clearPaidCash(row)
+                        if (cashBusyId != null) return
+                        setCashUndoRow(row)
                       }}
                     >
                       {busy ? '…' : '✔ Contanti'}
@@ -2348,6 +2350,60 @@ export function FatturePagatePage() {
             </>
           )}
         </section>
+      ) : null}
+      {cashUndoRow ? (
+        <div
+          className="staff-report-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (cashBusyId == null) setCashUndoRow(null)
+          }}
+        >
+          <div
+            className="card staff-report-modal fatture-cash-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fatture-cash-undo-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="fatture-cash-confirm-check" aria-hidden="true">✔</p>
+            <h3 id="fatture-cash-undo-title" className="page-subheader" style={{ marginTop: 0 }}>
+              Annullare la riconciliazione in contanti?
+            </h3>
+            <p className="fatture-cash-confirm-text">
+              Fattura <strong>{cashUndoRow.invoice_number || cashUndoRow.invoice_id || cashUndoRow.id}</strong>
+              {cashUndoRow.supplier_name ? (
+                <>
+                  {' '}
+                  di <strong>{cashUndoRow.supplier_name}</strong>
+                </>
+              ) : null}
+              . Torna in Fatture da pagare e nel mastrino sparisce il pagamento in contanti.
+            </p>
+            <div className="btn-group" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={cashBusyId != null}
+                onClick={() => {
+                  const row = cashUndoRow
+                  setCashUndoRow(null)
+                  void clearPaidCash(row)
+                }}
+              >
+                Torna da pagare
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={cashBusyId != null}
+                onClick={() => setCashUndoRow(null)}
+              >
+                Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </FatturePageShell>
   )
