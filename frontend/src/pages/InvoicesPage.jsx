@@ -138,16 +138,45 @@ export default function InvoicesPage() {
     return Array.from(uniq).sort().reverse()
   }, [invoices])
 
+  const urlFocusId = String(searchParams.get('id') || '').trim()
+  const activeFocusId = String(focusInvoiceId || urlFocusId || '').trim()
+
   const filteredInvoices = useMemo(() => {
     let rows = invoices
     if (monthFilter) {
       rows = rows.filter((inv) => (inv.invoice_date ? String(inv.invoice_date).slice(0, 7) : '') === monthFilter)
     }
-    return filterInvoicesBySupplierAndDate(rows, {
+    rows = filterInvoicesBySupplierAndDate(rows, {
       dateFrom,
       dateTo,
     })
-  }, [invoices, monthFilter, dateFrom, dateTo])
+    if (!activeFocusId) return rows
+    const focused = invoices.find((inv) => String(inv.id) === activeFocusId)
+    const without = rows.filter((inv) => String(inv.id) !== activeFocusId)
+    // Tiene la fattura deep-link in cima e visibile anche se i filtri data la escluderebbero.
+    if (focused) return [focused, ...without]
+    return rows
+  }, [invoices, monthFilter, dateFrom, dateTo, activeFocusId])
+
+  // Dopo reload/lista, riporta lo scroll sulla riga evidenziata.
+  const scrolledFocusRef = useRef('')
+  useEffect(() => {
+    if (loading) {
+      if (activeFocusId) scrolledFocusRef.current = ''
+      return
+    }
+    if (!activeFocusId) return
+    if (!filteredInvoices.some((inv) => String(inv.id) === activeFocusId)) return
+    if (scrolledFocusRef.current === activeFocusId) return
+    scrolledFocusRef.current = activeFocusId
+    const t = window.setTimeout(() => {
+      document.getElementById(`invoice-row-${activeFocusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      window.setTimeout(() => {
+        window.scrollBy({ top: 72, left: 0, behavior: 'smooth' })
+      }, 280)
+    }, 120)
+    return () => window.clearTimeout(t)
+  }, [loading, activeFocusId, filteredInvoices])
 
   const kpi = useMemo(() => {
     let residuoTot = 0
@@ -288,6 +317,8 @@ export default function InvoicesPage() {
     }
     if (monthFilter) setMonthFilter('')
     if (dueFilter) setDueFilter('')
+    if (dateFrom) setDateFrom('')
+    if (dateTo) setDateTo('')
 
     if (loading) return
 
@@ -307,12 +338,6 @@ export default function InvoicesPage() {
       const next = new URLSearchParams()
       next.set('id', String(inv.id))
       setSearchParams(next, { replace: true })
-      window.setTimeout(() => {
-        document.getElementById(`invoice-row-${inv.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        window.setTimeout(() => {
-          window.scrollBy({ top: 72, left: 0, behavior: 'smooth' })
-        }, 280)
-      }, 80)
     }
 
     if (match) {
@@ -895,10 +920,12 @@ export default function InvoicesPage() {
 
         {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
 
-        {!loading && !error && (
+        {(!loading || invoices.length > 0) && !error && (
           <VneWorkbookGrid
             title="Storico fatture"
             sheetLabel={`${filteredInvoices.length} documenti`}
+            loading={loading}
+            loadingLabel="Aggiornamento elenco"
             exportSubtitle={
               [
                 supplierId ? suppliers.find((s) => String(s.id) === String(supplierId))?.name : null,
@@ -947,7 +974,7 @@ export default function InvoicesPage() {
             onRowClick={(inv) => openInvoiceDetail(inv)}
             getRowId={(inv) => `invoice-row-${inv.id}`}
             getRowClassName={(inv) =>
-              focusInvoiceId && String(inv.id) === String(focusInvoiceId) ? 'workbook-row-focus-purple' : ''
+              activeFocusId && String(inv.id) === String(activeFocusId) ? 'workbook-row-focus-purple' : ''
             }
             actionsHeader="Azioni"
             actionsColWidth="8.75rem"
