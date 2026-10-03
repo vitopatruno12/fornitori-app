@@ -301,8 +301,8 @@ export default function InvoicesPage() {
       focusHandledRef.current = `id:${inv.id}`
       setFocusInvoiceId(String(inv.id))
       setError('')
-      openInvoiceDetail(inv)
-      setSuccess(`Documento ${inv.invoice_number || inv.id} selezionato`)
+      // Solo evidenzia + scroll: il dettaglio si apre al click sulla riga.
+      setSuccess(`Documento ${inv.invoice_number || inv.id} evidenziato`)
       // Keep id in URL for share/reload, drop helper params once applied.
       const next = new URLSearchParams()
       next.set('id', String(inv.id))
