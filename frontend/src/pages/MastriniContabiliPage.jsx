@@ -386,15 +386,15 @@ function partitarioCellValue(row, col) {
 }
 
 const PARTITARIO_DETAIL_COLUMNS = [
-  { id: 'date', label: 'Data', width: 120 },
-  { id: 'registrationNumber', label: 'N. registrazione', width: 150, mono: true },
-  { id: 'description', label: 'Descrizione', width: 240 },
-  { id: 'documentLabel', label: 'Documento collegato', width: 200 },
-  { id: 'companyLabel', label: 'Società', width: 120 },
-  { id: 'localeLabel', label: 'Locale', width: 120 },
-  { id: 'dare', label: 'Dare', width: 120, numeric: true },
-  { id: 'avere', label: 'Avere', width: 120, numeric: true },
-  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 140, numeric: true },
+  { id: 'date', label: 'Data', width: 8, fluid: true },
+  { id: 'registrationNumber', label: 'N. registrazione', width: 9, fluid: true, mono: true },
+  { id: 'description', label: 'Descrizione', width: 16, fluid: true, emphasis: true },
+  { id: 'documentLabel', label: 'Documento collegato', width: 12, fluid: true },
+  { id: 'companyLabel', label: 'Società', width: 8, fluid: true },
+  { id: 'localeLabel', label: 'Locale', width: 8, fluid: true },
+  { id: 'dare', label: 'Dare', width: 9, fluid: true, numeric: true },
+  { id: 'avere', label: 'Avere', width: 9, fluid: true, numeric: true },
+  { id: 'progressiveBalance', label: 'Saldo progressivo', width: 10, fluid: true, numeric: true },
 ]
 
 function partitarioDetailCellValue(row, col) {
@@ -505,6 +505,7 @@ export default function MastriniContabiliPage() {
   const [data, setData] = useState(null)
   const [selectedCode, setSelectedCode] = useState('')
   const [selectedPartyKey, setSelectedPartyKey] = useState('')
+  const [partitarioDetailOpen, setPartitarioDetailOpen] = useState(false)
   const [selectedFornitoreKey, setSelectedFornitoreKey] = useState('')
   const [fornitoreDetailOpen, setFornitoreDetailOpen] = useState(false)
   const pendingSchedaCodeRef = React.useRef('')
@@ -532,7 +533,6 @@ export default function MastriniContabiliPage() {
       setWarnings(Array.isArray(res?.warnings) ? res.warnings : [])
       const firstCode = res?.accounts?.[0]?.code
       if (!selectedCode && firstCode) setSelectedCode(firstCode)
-      if (!selectedPartyKey && res?.partitario?.parties?.[0]) setSelectedPartyKey(res.partitario.parties[0].key)
       if (!selectedFornitoreKey && res?.clienti?.parties?.[0]) {
         setSelectedFornitoreKey(res.clienti.parties[0].key)
       }
@@ -554,6 +554,7 @@ export default function MastriniContabiliPage() {
     if (!pendingSchedaCodeRef.current) {
       setSelectedCode('')
       setSelectedPartyKey('')
+      setPartitarioDetailOpen(false)
       setSelectedFornitoreKey('')
       setFornitoreDetailOpen(false)
     }
@@ -824,8 +825,13 @@ export default function MastriniContabiliPage() {
   }, [data, advancedSearch, center])
 
   const selectedParty = useMemo(
-    () => parties.find((p) => p.key === selectedPartyKey) || parties[0],
+    () => parties.find((p) => p.key === selectedPartyKey) || null,
     [parties, selectedPartyKey],
+  )
+
+  const selectedPartyRows = useMemo(
+    () => (selectedParty ? sortMovementsNewestFirst(selectedParty.movements || []) : []),
+    [selectedParty],
   )
 
   const clientiParties = useMemo(() => {
@@ -989,7 +995,10 @@ export default function MastriniContabiliPage() {
           <button
             type="button"
             className={`btn btn-sm ${viewMode === 'partitario' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewMode('partitario')}
+            onClick={() => {
+              setViewMode('partitario')
+              setPartitarioDetailOpen(false)
+            }}
           >
             Partitario PN/banca
           </button>
@@ -1570,59 +1579,105 @@ export default function MastriniContabiliPage() {
 
       {companyId && viewMode === 'partitario' ? (
         <>
-          <section className="card fatture-panel mastrini-fit-panel">
-            <h2 className="fatture-panel-title">Partitario per soggetto</h2>
-            <WorkbookGrid
-              title="Partitario clienti/fornitori"
-              sheetLabel={`${parties.length} soggetti`}
-              columns={PARTITARIO_COLUMNS}
-              rows={parties}
-              cellValue={partitarioCellValue}
-              emptyMessage="Nessun soggetto nel partitario per i filtri attivi."
-              gridClassName="mastrini-fit-grid"
-              rowKey={(row) => row.key}
-              onRowClick={(row) => setSelectedPartyKey(row.key)}
-              getRowClassName={(row) => (selectedParty?.key === row.key ? 'workbook-row-selected' : '')}
-              totals={{
-                dare: parties.reduce((acc, p) => acc + (Number(p.totalDare) || 0), 0),
-                avere: parties.reduce((acc, p) => acc + (Number(p.totalAvere) || 0), 0),
-                saldo: parties.reduce((acc, p) => acc + (Number(p.finalBalance) || 0), 0),
-                movements: parties.reduce((acc, p) => acc + (Number(p.movements?.length) || 0), 0),
-              }}
-              totalsLabel={(colId, totals) => {
-                if (colId === 'name') return 'TOTALI'
-                if (colId === 'dare') return eur(totals?.dare)
-                if (colId === 'avere') return eur(totals?.avere)
-                if (colId === 'saldo') return eur(totals?.saldo)
-                if (colId === 'movements') return String(totals?.movements || 0)
-                return ''
-              }}
-              getCellTitle={(row, col) =>
-                col.id === 'name' ? String(row?.name || '') : col.id === 'type' ? String(row?.type || '') : ''
-              }
-            />
-          </section>
+          {!partitarioDetailOpen ? (
+            <section className="card fatture-panel mastrini-fit-panel">
+              <h2 className="fatture-panel-title">Partitario per soggetto</h2>
+              <p className="fatture-note" style={{ marginTop: 0 }}>
+                Clic su fornitore o cliente per aprire il dettaglio movimenti.
+              </p>
+              <WorkbookGrid
+                title="Partitario clienti/fornitori"
+                sheetLabel={`${parties.length} soggetti`}
+                columns={PARTITARIO_COLUMNS}
+                rows={parties}
+                cellValue={partitarioCellValue}
+                emptyMessage="Nessun soggetto nel partitario per i filtri attivi."
+                gridClassName="mastrini-fit-grid"
+                rowKey={(row) => row.key}
+                onRowClick={(row) => {
+                  setSelectedPartyKey(row.key)
+                  setPartitarioDetailOpen(true)
+                }}
+                rowClickTitle="Apri dettaglio partitario"
+                totals={{
+                  dare: parties.reduce((acc, p) => acc + (Number(p.totalDare) || 0), 0),
+                  avere: parties.reduce((acc, p) => acc + (Number(p.totalAvere) || 0), 0),
+                  saldo: parties.reduce((acc, p) => acc + (Number(p.finalBalance) || 0), 0),
+                  movements: parties.reduce((acc, p) => acc + (Number(p.movements?.length) || 0), 0),
+                }}
+                totalsLabel={(colId, totals) => {
+                  if (colId === 'name') return 'TOTALI'
+                  if (colId === 'dare') return eur(totals?.dare)
+                  if (colId === 'avere') return eur(totals?.avere)
+                  if (colId === 'saldo') return eur(totals?.saldo)
+                  if (colId === 'movements') return String(totals?.movements || 0)
+                  return ''
+                }}
+                getCellTitle={(row, col) =>
+                  col.id === 'name' ? String(row?.name || '') : col.id === 'type' ? String(row?.type || '') : ''
+                }
+              />
+            </section>
+          ) : selectedParty ? (
+            <section className="card fatture-panel mastrini-fit-panel">
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                  alignItems: 'start',
+                }}
+              >
+                <div>
+                  <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                    Dettaglio partitario — {selectedParty.name}
+                  </h2>
+                  <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                    {String(selectedParty.type || '').toUpperCase()} · {selectedPartyRows.length} movimenti · Periodo:{' '}
+                    {periodLabel}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setPartitarioDetailOpen(false)}
+                >
+                  Torna all&apos;elenco
+                </button>
+              </div>
 
-          {selectedParty ? (
-            <section className="card fatture-panel">
-              <h2 className="fatture-panel-title">Dettaglio partitario — {selectedParty.name}</h2>
+              <div className="ui-kpi-row" style={{ marginTop: '0.75rem' }}>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Totale Dare</div>
+                  <div className="ui-kpi-card-value">{eur(selectedParty.totalDare)}</div>
+                </div>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Totale Avere</div>
+                  <div className="ui-kpi-card-value">{eur(selectedParty.totalAvere)}</div>
+                </div>
+                <div className="ui-kpi-card">
+                  <div className="ui-kpi-card-label">Saldo</div>
+                  <div className="ui-kpi-card-value">{eur(selectedParty.finalBalance)}</div>
+                </div>
+              </div>
+
               <WorkbookGrid
                 title={`Dettaglio partitario · ${selectedParty.name}`}
-                sheetLabel={`${selectedParty.movements.length} movimenti`}
+                sheetLabel={`${selectedPartyRows.length} movimenti`}
                 columns={PARTITARIO_DETAIL_COLUMNS}
-                rows={selectedParty.movements}
+                rows={selectedPartyRows}
                 cellValue={partitarioDetailCellValue}
                 emptyMessage="Nessun movimento per questo soggetto."
+                gridClassName="mastrini-fit-grid"
+                actionsColWidth="7%"
                 rowKey={(row, idx) => `${selectedParty.key}-${row.registrationNumber || 'reg'}-${idx}`}
                 actionsHeader="Documento"
                 renderActions={(row) => documentoLink(row)}
                 totals={{
-                  dare: selectedParty.movements.reduce((acc, m) => acc + (Number(m.dare) || 0), 0),
-                  avere: selectedParty.movements.reduce((acc, m) => acc + (Number(m.avere) || 0), 0),
-                  progressiveBalance:
-                    selectedParty.movements.length > 0
-                      ? Number(selectedParty.movements[selectedParty.movements.length - 1].progressiveBalance) || 0
-                      : 0,
+                  dare: selectedPartyRows.reduce((acc, m) => acc + (Number(m.dare) || 0), 0),
+                  avere: selectedPartyRows.reduce((acc, m) => acc + (Number(m.avere) || 0), 0),
+                  progressiveBalance: selectedParty.finalBalance,
                 }}
                 totalsLabel={(colId, totals) => {
                   if (colId === 'description') return 'TOTALI'
