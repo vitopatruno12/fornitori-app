@@ -12,10 +12,20 @@ import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
+import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function findInvoiceByNumber(list, qNum) {
+  const needle = String(qNum || '').trim()
+  if (!needle || !Array.isArray(list)) return null
+  const low = needle.toLowerCase()
+  const exact = list.find((inv) => String(inv?.invoice_number || '').trim().toLowerCase() === low)
+  if (exact) return exact
+  return list.find((inv) => invoiceNumbersMatch(inv?.invoice_number, needle)) || null
 }
 
 const REGISTRATE_COLUMNS = [
@@ -281,18 +291,16 @@ export default function InvoicesPage() {
 
     if (loading) return
 
+    setError('')
     let match = null
     if (qId) match = invoices.find((inv) => String(inv.id) === qId) || null
-    if (!match && qNum) {
-      const norm = qNum.toLowerCase()
-      match =
-        invoices.find((inv) => String(inv.invoice_number || '').trim().toLowerCase() === norm) || null
-    }
+    if (!match && qNum) match = findInvoiceByNumber(invoices, qNum)
 
     const finishFocus = (inv) => {
       if (!inv?.id) return
       focusHandledRef.current = `id:${inv.id}`
       setFocusInvoiceId(String(inv.id))
+      setError('')
       openInvoiceDetail(inv)
       setSuccess(`Documento ${inv.invoice_number || inv.id} selezionato`)
       // Keep id in URL for share/reload, drop helper params once applied.
@@ -312,26 +320,53 @@ export default function InvoicesPage() {
       return
     }
 
-    if (!qId) {
-      focusHandledRef.current = targetKey
-      setError(`Documento n. ${qNum} non trovato nello storico fatture`)
-      return
-    }
-
     let cancelled = false
     ;(async () => {
       try {
-        const full = await fetchInvoice(qId)
-        if (cancelled || !full?.id) {
-          focusHandledRef.current = targetKey
-          setError(`Documento id ${qId} non trovato`)
+        if (qId) {
+          const full = await fetchInvoice(qId)
+          if (cancelled || !full?.id) {
+            focusHandledRef.current = targetKey
+            setError(`Documento id ${qId} non trovato`)
+            return
+          }
+          setInvoices((prev) => (prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev]))
+          finishFocus(full)
           return
         }
-        finishFocus(full)
+
+        // Numero senza id (es. da nota banca): cerca anche ignorate e altre società.
+        const companyHint = qCompany || companyId || ''
+        const attempts = []
+        if (companyHint) {
+          attempts.push({ company: companyHint, include_ignored: true })
+        }
+        attempts.push({ include_ignored: true })
+
+        let hit = null
+        for (const params of attempts) {
+          const pool = await fetchInvoices(params)
+          const rows = Array.isArray(pool) ? pool : []
+          hit = findInvoiceByNumber(rows, qNum)
+          if (hit) break
+        }
+        if (cancelled) return
+        if (!hit?.id) {
+          focusHandledRef.current = targetKey
+          setError(`Documento n. ${qNum} non trovato nello storico fatture`)
+          return
+        }
+        if (hit.ignored) setShowIgnored(true)
+        if (hit.company && gestionaleMode && String(companyId || '') !== String(hit.company)) {
+          changeScopeMode('company')
+          setCompanyId(String(hit.company))
+        }
+        setInvoices((prev) => (prev.some((x) => String(x.id) === String(hit.id)) ? prev : [hit, ...prev]))
+        finishFocus(hit)
       } catch (e) {
         if (!cancelled) {
           focusHandledRef.current = targetKey
-          setError(e?.message || `Documento id ${qId} non trovato`)
+          setError(e?.message || (qId ? `Documento id ${qId} non trovato` : `Documento n. ${qNum} non trovato nello storico fatture`))
         }
       }
     })()
