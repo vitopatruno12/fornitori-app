@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchInvoices, fetchInvoice, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
+import { fetchInvoices, fetchInvoice, fetchInvoiceByNumber, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import { FattureLink, FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
@@ -308,11 +308,7 @@ export default function InvoicesPage() {
       changeScopeMode('company')
       if (companyId !== qCompany) setCompanyId(qCompany)
     }
-    if (qSupplier) {
-      if (supplierId !== qSupplier) setSupplierId(qSupplier)
-    } else if (qSupplierName) {
-      setPendingSupplierLabel(qSupplierName)
-    } else if (supplierId) {
+    if (supplierId) {
       setSupplierId('')
       return
     }
@@ -349,7 +345,7 @@ export default function InvoicesPage() {
     let cancelled = false
     ;(async () => {
       try {
-        if (qId) {
+        if (qId && /^\d+$/.test(qId)) {
           try {
             const full = await fetchInvoice(qId)
             if (cancelled) return
@@ -360,45 +356,36 @@ export default function InvoicesPage() {
             }
           } catch {
             if (cancelled) return
-            // Id assente o 404: prova il numero documento (click da movimenti banca).
           }
         }
 
-        if (!qNum) {
-          if (cancelled) return
-          focusHandledRef.current = targetKey
-          setError(`Documento id ${qId} non trovato`)
-          return
+        const lookupNum = qNum || qId
+        if (lookupNum) {
+          try {
+            const hit = await fetchInvoiceByNumber(lookupNum)
+            if (cancelled) return
+            if (hit?.id) {
+              if (hit.ignored) setShowIgnored(true)
+              if (hit.company && gestionaleMode && String(companyId || '') !== String(hit.company)) {
+                changeScopeMode('company')
+                setCompanyId(String(hit.company))
+              }
+              setInvoices((prev) => (prev.some((x) => String(x.id) === String(hit.id)) ? prev : [hit, ...prev]))
+              finishFocus(hit)
+              return
+            }
+          } catch {
+            if (cancelled) return
+          }
         }
 
-        const companyHint = qCompany || companyId || ''
-        const attempts = []
-        if (companyHint) {
-          attempts.push({ company: companyHint, include_ignored: true })
-        }
-        attempts.push({ include_ignored: true })
-
-        let hit = null
-        for (const params of attempts) {
-          const pool = await fetchInvoices(params)
-          if (cancelled) return
-          const rows = Array.isArray(pool) ? pool : []
-          hit = findInvoiceByNumber(rows, qNum)
-          if (hit) break
-        }
         if (cancelled) return
-        if (!hit?.id) {
-          focusHandledRef.current = targetKey
-          setError(`Documento n. ${qNum} non trovato nello storico fatture`)
-          return
-        }
-        if (hit.ignored) setShowIgnored(true)
-        if (hit.company && gestionaleMode && String(companyId || '') !== String(hit.company)) {
-          changeScopeMode('company')
-          setCompanyId(String(hit.company))
-        }
-        setInvoices((prev) => (prev.some((x) => String(x.id) === String(hit.id)) ? prev : [hit, ...prev]))
-        finishFocus(hit)
+        focusHandledRef.current = targetKey
+        setError(
+          lookupNum
+            ? `N. ${lookupNum} non è nello storico Atlas (nel bonifico può essere un riferimento banca, non il numero fattura).`
+            : `Documento id ${qId} non trovato nello storico fatture`,
+        )
       } catch (e) {
         if (!cancelled) {
           focusHandledRef.current = targetKey

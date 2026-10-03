@@ -17,6 +17,13 @@ export async function fetchInvoice(id) {
   return apiFetch(`/invoices/${id}`)
 }
 
+export async function fetchInvoiceByNumber(number) {
+  const n = String(number || '').trim()
+  if (!n) return null
+  const q = new URLSearchParams({ n })
+  return apiFetch(`/invoices/by-number?${q}`)
+}
+
 export async function fetchInvoicesAnalyticsSummary() {
   return apiFetch('/invoices/analytics/summary')
 }

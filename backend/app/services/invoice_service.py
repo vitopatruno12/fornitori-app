@@ -7,7 +7,7 @@ import logging
 import re
 
 from fastapi import UploadFile
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -343,6 +343,80 @@ def _list_invoices_impl(
 
 def get_invoice(db: Session, invoice_id: int) -> Optional[Invoice]:
   return db.query(Invoice).filter(Invoice.id == invoice_id).first()
+
+
+def _fold_invoice_number(value: Optional[str]) -> str:
+  return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _invoice_digits(value: Optional[str]) -> str:
+  return re.sub(r"\D", "", str(value or ""))
+
+
+def _invoice_main_number(value: Optional[str]) -> str:
+  match = re.search(r"\d+", str(value or ""))
+  return match.group(0).lstrip("0") or match.group(0) if match else ""
+
+
+def invoice_numbers_match(stored: Optional[str], query: Optional[str]) -> bool:
+  cell = _fold_invoice_number(stored)
+  needle = _fold_invoice_number(query)
+  if not cell or not needle:
+    return False
+  if cell == needle:
+    return True
+  cell_digits = _invoice_digits(stored)
+  needle_digits = _invoice_digits(query)
+  if cell_digits and needle_digits and cell_digits == needle_digits:
+    return True
+  cell_main = _invoice_main_number(stored)
+  needle_main = _invoice_main_number(query)
+  if cell_main and needle_main and cell_main == needle_main:
+    cell_year = "".join(re.findall(r"20\d{2}|\d{2}$", str(stored or "")))
+    needle_year = "".join(re.findall(r"20\d{2}", str(query or "")))
+    if not needle_year:
+      return True
+    if needle_year and needle_year[-2:] in cell_year:
+      return True
+  if len(needle) >= 4 and needle in cell:
+    return True
+  return False
+
+
+def find_invoice_id_by_number(db: Session, number: str) -> Optional[int]:
+  needle = str(number or "").strip()
+  if not needle:
+    return None
+  exact = (
+    db.query(Invoice.id)
+    .filter(func.lower(Invoice.invoice_number) == needle.lower())
+    .order_by(Invoice.invoice_date.desc(), Invoice.id.desc())
+    .first()
+  )
+  if exact:
+    return int(exact[0])
+  prefix = _invoice_main_number(needle)
+  candidates = []
+  if prefix:
+    candidates = (
+      db.query(Invoice)
+      .filter(Invoice.invoice_number.ilike(f"%{prefix}%"))
+      .order_by(Invoice.invoice_date.desc(), Invoice.id.desc())
+      .limit(400)
+      .all()
+    )
+  if not candidates:
+    candidates = (
+      db.query(Invoice)
+      .filter(Invoice.invoice_number.isnot(None))
+      .order_by(Invoice.invoice_date.desc(), Invoice.id.desc())
+      .limit(2500)
+      .all()
+    )
+  for inv in candidates:
+    if invoice_numbers_match(inv.invoice_number, needle):
+      return int(inv.id)
+  return None
 
 
 def get_invoice_detail(db: Session, invoice_id: int) -> Optional[InvoiceDetailOut]:

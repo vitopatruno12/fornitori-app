@@ -334,6 +334,20 @@ def list_invoices(
   )
 
 
+@router.get("/by-number", response_model=InvoiceDetailOut)
+def get_invoice_by_number(
+  n: str = Query(..., min_length=1, description="Numero documento (anche 398 o 398/2026)"),
+  db: Session = Depends(get_db),
+):
+  invoice_id = invoice_service.find_invoice_id_by_number(db, n)
+  if not invoice_id:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
+  inv = invoice_service.get_invoice_detail(db, invoice_id)
+  if not inv:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
+  return inv
+
+
 @router.get("/{invoice_id}/pdf")
 def download_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
   """Anteprima PDF: file caricato, allegato FatturaPA, oppure PDF generato dall'XML."""

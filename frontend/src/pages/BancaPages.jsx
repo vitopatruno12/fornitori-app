@@ -412,16 +412,12 @@ function linkedInvoicesForMovement(row) {
 
 function linkedInvoiceHref(inv, movement) {
   const params = new URLSearchParams()
-  if (inv?.id != null && inv.id !== '') params.set('id', String(inv.id))
-  const num = String(inv?.invoice_number || '').trim()
   const idStr = inv?.id != null && inv.id !== '' ? String(inv.id) : ''
-  // Non usare l'id database come "n. fattura": lo storico cerca il numero documento.
-  if (num && num !== idStr) params.set('n', num)
+  if (idStr && idStr !== 'null' && idStr !== 'undefined') params.set('id', idStr)
+  const num = String(inv?.invoice_number || '').trim()
+  if (num) params.set('n', num)
   const company = inv?.company || movement?.account_company
   if (company) params.set('company', String(company))
-  if (inv?.supplier_id != null && inv.supplier_id !== '') {
-    params.set('supplier_id', String(inv.supplier_id))
-  }
   const qs = params.toString()
   return qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'
 }
