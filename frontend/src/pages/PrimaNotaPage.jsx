@@ -82,6 +82,22 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
 }
 
+function addCalendarMonths(ymd, months) {
+  const src = String(ymd || '').slice(0, 10)
+  if (!isIsoDate(src)) return src
+  const [yearRaw, monthRaw, dayRaw] = src.split('-').map(Number)
+  const monthIndex = monthRaw - 1 + Number(months || 0)
+  const year = yearRaw + Math.floor(monthIndex / 12)
+  const month = ((monthIndex % 12) + 12) % 12
+  const lastDay = new Date(year, month + 1, 0).getDate()
+  const day = Math.min(dayRaw, lastDay)
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function defaultMovementPeriodFrom(toYmd) {
+  return addCalendarMonths(toYmd, -1)
+}
+
 function operatorPrimaNotaDateKey(stationId, activitySlug) {
   const sid = String(stationId || 'operatore').trim().toLowerCase()
   const act = String(activitySlug || 'default').trim().toLowerCase()
@@ -196,7 +212,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   })
 
   const [selectedDate, setSelectedDate] = useState(() => initialWorkDate)
-  const [movementPeriodFrom, setMovementPeriodFrom] = useState(() => initialWorkDate)
+  const [movementPeriodFrom, setMovementPeriodFrom] = useState(() => defaultMovementPeriodFrom(initialWorkDate))
   const [movementPeriodTo, setMovementPeriodTo] = useState(() => initialWorkDate)
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
@@ -291,7 +307,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     if (!saved) return
     setSelectedDate(saved)
     setFormEntryDate(saved)
-    setMovementPeriodFrom(saved)
+    setMovementPeriodFrom(defaultMovementPeriodFrom(saved))
     setMovementPeriodTo(saved)
   }, [operatorMode, operatorStationId, activeActivity])
 
@@ -682,7 +698,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (data.date) {
         setSelectedDate(data.date)
         setFormEntryDate(data.date)
-        setMovementPeriodFrom(data.date)
+        setMovementPeriodFrom(defaultMovementPeriodFrom(data.date))
         setMovementPeriodTo(data.date)
       }
       if (data.supplierId) setFormSupplierId(String(data.supplierId))
@@ -786,7 +802,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   function alignMovementPeriodToSelectedDay() {
-    setMovementPeriodFrom(selectedDate)
+    setMovementPeriodFrom(defaultMovementPeriodFrom(selectedDate))
     setMovementPeriodTo(selectedDate)
   }
 
@@ -852,7 +868,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   useEffect(() => {
     if (!operatorMode) return
-    setMovementPeriodFrom(selectedDate)
+    setMovementPeriodFrom(defaultMovementPeriodFrom(selectedDate))
     setMovementPeriodTo(selectedDate)
   }, [operatorMode, selectedDate])
 
@@ -1985,7 +2001,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyMovementPeriodPreset('month')} title="Mese corrente">
               Mese
             </button>
-            <button type="button" className="btn btn-outline-secondary btn-sm" onClick={alignMovementPeriodToSelectedDay} title="Imposta periodo = giornata riepilogo">
+            <button type="button" className="btn btn-outline-secondary btn-sm" onClick={alignMovementPeriodToSelectedDay} title="Dal un mese prima della giornata riepilogo, al quella data">
               = giornata
             </button>
           </div>
