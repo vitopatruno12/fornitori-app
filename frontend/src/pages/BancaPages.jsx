@@ -405,7 +405,7 @@ function linkedInvoicesForMovement(row) {
   if (Array.isArray(row?.linked_invoices) && row.linked_invoices.length) return row.linked_invoices
   if (row?.matched_invoice) return [row.matched_invoice]
   if (row?.matched_invoice_id != null && row.matched_invoice_id !== '') {
-    return [{ id: row.matched_invoice_id, invoice_number: String(row.matched_invoice_id) }]
+    return [{ id: row.matched_invoice_id }]
   }
   return []
 }
@@ -414,7 +414,9 @@ function linkedInvoiceHref(inv, movement) {
   const params = new URLSearchParams()
   if (inv?.id != null && inv.id !== '') params.set('id', String(inv.id))
   const num = String(inv?.invoice_number || '').trim()
-  if (num) params.set('n', num)
+  const idStr = inv?.id != null && inv.id !== '' ? String(inv.id) : ''
+  // Non usare l'id database come "n. fattura": lo storico cerca il numero documento.
+  if (num && num !== idStr) params.set('n', num)
   const company = inv?.company || movement?.account_company
   if (company) params.set('company', String(company))
   if (inv?.supplier_id != null && inv.supplier_id !== '') {
@@ -445,10 +447,10 @@ function bankMovementsCellValue(row, col) {
     const nums = []
     const seen = new Set()
     for (const inv of linked) {
-      const digits = invoiceNumberDigitsOnly(inv?.invoice_number || inv?.id || '')
-      if (!digits || seen.has(digits)) continue
-      seen.add(digits)
-      nums.push(digits)
+      const label = String(inv?.invoice_number || '').trim() || invoiceNumberDigitsOnly(inv?.id || '')
+      if (!label || seen.has(label)) continue
+      seen.add(label)
+      nums.push(label)
     }
     return nums.length ? nums.join(', ') : '—'
   }
@@ -472,26 +474,26 @@ function bankMovementsRenderCell(row, col) {
   const items = []
   const seen = new Set()
   for (const inv of linked) {
-    const digits = invoiceNumberDigitsOnly(inv?.invoice_number || inv?.id || '')
-    if (!digits || seen.has(digits)) continue
-    seen.add(digits)
-    items.push({ inv, digits })
+    const label = String(inv?.invoice_number || '').trim() || invoiceNumberDigitsOnly(inv?.id || '')
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    items.push({ inv, label })
   }
   if (!items.length) return null
   return (
     <div
       className="excel-cell pagamenti-cell-readonly banca-linked-invoice-cell"
-      title={items.map((x) => x.digits).join(', ')}
+      title={items.map((x) => x.label).join(', ')}
     >
-      {items.map(({ inv, digits }, idx) => (
-        <React.Fragment key={`${inv?.id || digits}-${idx}`}>
+      {items.map(({ inv, label }, idx) => (
+        <React.Fragment key={`${inv?.id || label}-${idx}`}>
           {idx > 0 ? <span aria-hidden="true">, </span> : null}
           <Link
             to={linkedInvoiceHref(inv, row)}
             className="banca-linked-invoice-link"
             onClick={(e) => e.stopPropagation()}
           >
-            {digits}
+            {label}
           </Link>
         </React.Fragment>
       ))}

@@ -350,18 +350,27 @@ export default function InvoicesPage() {
     ;(async () => {
       try {
         if (qId) {
-          const full = await fetchInvoice(qId)
-          if (cancelled || !full?.id) {
-            focusHandledRef.current = targetKey
-            setError(`Documento id ${qId} non trovato`)
-            return
+          try {
+            const full = await fetchInvoice(qId)
+            if (cancelled) return
+            if (full?.id) {
+              setInvoices((prev) => (prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev]))
+              finishFocus(full)
+              return
+            }
+          } catch {
+            if (cancelled) return
+            // Id assente o 404: prova il numero documento (click da movimenti banca).
           }
-          setInvoices((prev) => (prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev]))
-          finishFocus(full)
+        }
+
+        if (!qNum) {
+          if (cancelled) return
+          focusHandledRef.current = targetKey
+          setError(`Documento id ${qId} non trovato`)
           return
         }
 
-        // Numero senza id (es. da nota banca): cerca anche ignorate e altre società.
         const companyHint = qCompany || companyId || ''
         const attempts = []
         if (companyHint) {
@@ -372,6 +381,7 @@ export default function InvoicesPage() {
         let hit = null
         for (const params of attempts) {
           const pool = await fetchInvoices(params)
+          if (cancelled) return
           const rows = Array.isArray(pool) ? pool : []
           hit = findInvoiceByNumber(rows, qNum)
           if (hit) break
@@ -460,7 +470,8 @@ export default function InvoicesPage() {
         return
       }
       setLoading(true)
-      setError('')
+      const focusing = String(searchParams.get('id') || searchParams.get('n') || '').trim()
+      if (!focusing) setError('')
       const params = {
         supplier_id: supplierId || undefined,
         due_filter: dueFilter || undefined,
