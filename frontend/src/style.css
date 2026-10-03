@@ -10481,6 +10481,26 @@ select.form-control {
   border-color: #facc15;
 }
 
+.workbook-grid.banca-fit-grid tr.banca-mov-hit-uscita td {
+  background: #fee2e2;
+}
+
+.workbook-grid.banca-fit-grid tr.banca-mov-hit-uscita .excel-cell {
+  background: #fee2e2 !important;
+  border-color: #fca5a5;
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.workbook-grid.banca-fit-grid tr.banca-mov-hit-entrata td {
+  background: #dcfce7;
+}
+
+.workbook-grid.banca-fit-grid tr.banca-mov-hit-entrata .excel-cell {
+  background: #dcfce7 !important;
+  border-color: #86efac;
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
 .workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit td,
 .workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit .excel-cell {
   background: #f3e8ff !important;

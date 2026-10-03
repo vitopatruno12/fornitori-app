@@ -237,8 +237,41 @@ function emesseHref(mv) {
   return qs ? `/fatture/emesse?${qs}` : '/fatture/emesse'
 }
 
+function bancaMovimentiHref(mv) {
+  const params = new URLSearchParams()
+  const movId =
+    mv.linkedBankMovementId ||
+    (String(mv.registrationNumber || '').match(/^BA-(\d+)$/i) || [])[1] ||
+    ''
+  if (movId) params.set('movement_id', String(movId))
+  if (mv.bankAccountId) params.set('account_id', String(mv.bankAccountId))
+  const date = String(mv.date || mv.documentDate || '').slice(0, 10)
+  if (date) {
+    params.set('date_from', date)
+    params.set('date_to', date)
+  }
+  const source = String(mv.source || '').toLowerCase()
+  const sense =
+    source === 'incasso' || (Number(mv.dare) > 0 && !(Number(mv.avere) > 0) && source !== 'pagamento')
+      ? 'entrata'
+      : source === 'pagamento' || source === 'pagamento_fattura_banca' || source === 'pagamento_cc'
+        ? 'uscita'
+        : Number(mv.avere) > 0
+          ? 'uscita'
+          : 'entrata'
+  params.set('sense', sense)
+  const qs = params.toString()
+  return qs ? `/banca/movimenti?${qs}` : '/banca/movimenti'
+}
+
 function documentoLink(mv) {
   const label = mv.documentLabel || ''
+  const path = String(mv.documentPath || '')
+  const isBankDoc =
+    Boolean(mv.linkedBankMovementId) ||
+    mv.documentType === 'movimento_bancario' ||
+    path.startsWith('/banca/movimenti') ||
+    /^banca\b/i.test(label)
 
   if (mv.documentType === 'fattura_emessa' || mv.source === 'fatture_emesse' || mv.invoiceKind === 'emessa') {
     return (
@@ -261,7 +294,7 @@ function documentoLink(mv) {
           Fattura {label.split(' · ')[0]?.replace('Fattura ', '') || mv.linkedInvoiceId}
         </Link>
         <span aria-hidden>↔</span>
-        <Link to="/banca/movimenti" style={{ textDecoration: 'underline' }}>
+        <Link to={bancaMovimentiHref(mv)} style={{ textDecoration: 'underline' }}>
           BA-{mv.linkedBankMovementId}
         </Link>
       </span>
@@ -287,7 +320,13 @@ function documentoLink(mv) {
       </Link>
     )
   }
-  const path = mv.documentPath || ''
+  if (isBankDoc) {
+    return (
+      <Link to={bancaMovimentiHref(mv)} style={{ textDecoration: 'underline' }}>
+        {label || (mv.linkedBankMovementId ? `BA-${mv.linkedBankMovementId}` : 'Movimento banca')}
+      </Link>
+    )
+  }
   if (!path) return <span>{label || '—'}</span>
   return (
     <Link to={path} style={{ textDecoration: 'underline' }}>

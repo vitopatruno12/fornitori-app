@@ -83,6 +83,7 @@ function pushMovement(list, accountCode, raw, amount, side, counterAccountCode =
     linkedInvoiceId: raw.linkedInvoiceId || '',
     linkedCashEntryId: raw.linkedCashEntryId || '',
     linkedBankMovementId: raw.linkedBankMovementId || '',
+    bankAccountId: raw.bankAccountId || '',
     relatedDocumentPath: raw.relatedDocumentPath || '',
     relatedDocumentLabel: raw.relatedDocumentLabel || '',
   })

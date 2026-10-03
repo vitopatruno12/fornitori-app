@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   AmministrazionePageShell,
   BancaPageShell,
@@ -2018,11 +2018,14 @@ export function BancaContiPage() {
 }
 
 export function BancaMovimentiPage() {
+  const [searchParams] = useSearchParams()
+  const highlightMovementId = Number(searchParams.get('movement_id') || 0) || null
+  const highlightSense = String(searchParams.get('sense') || '').toLowerCase()
   const [items, setItems] = useState([])
   const [accounts, setAccounts] = useState([])
-  const [accountId, setAccountId] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [accountId, setAccountId] = useState(() => String(searchParams.get('account_id') || ''))
+  const [dateFrom, setDateFrom] = useState(() => String(searchParams.get('date_from') || ''))
+  const [dateTo, setDateTo] = useState(() => String(searchParams.get('date_to') || ''))
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [syncBusy, setSyncBusy] = useState(false)
@@ -2048,15 +2051,18 @@ export function BancaMovimentiPage() {
       ? `Ultimo aggiornamento: ${lastSyncedLabel}. Seleziona un conto nel filtro per vedere solo quello.`
       : 'Seleziona banca/conto e Periodo da/a, poi Filtra o Aggiorna (Aggiorna scarica i movimenti sull’intervallo da Enable Banking).'
 
-  async function load() {
+  async function load(opts = {}) {
+    const nextAccount = opts.account_id !== undefined ? opts.account_id : accountId
+    const nextFrom = opts.date_from !== undefined ? opts.date_from : dateFrom
+    const nextTo = opts.date_to !== undefined ? opts.date_to : dateTo
     setLoading(true)
     setError('')
     try {
       const [mov, acc] = await Promise.all([
         fetchBancaMovimenti({
-          account_id: accountId || undefined,
-          date_from: dateFrom || undefined,
-          date_to: dateTo || undefined,
+          account_id: nextAccount || undefined,
+          date_from: nextFrom || undefined,
+          date_to: nextTo || undefined,
         }),
         fetchBancaAccounts(),
       ])
@@ -2132,6 +2138,23 @@ export function BancaMovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
 
+  // Deep-link da partitario: filtri URL + evidenzia bonifico.
+  useEffect(() => {
+    if (!searchParams.get('movement_id')) return
+    const nextAccount = String(searchParams.get('account_id') || '')
+    const nextFrom = String(searchParams.get('date_from') || '')
+    const nextTo = String(searchParams.get('date_to') || '')
+    if (nextAccount) setAccountId(nextAccount)
+    setDateFrom(nextFrom)
+    setDateTo(nextTo)
+    void load({
+      account_id: nextAccount || '',
+      date_from: nextFrom,
+      date_to: nextTo,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
   const searchHitIds = useMemo(() => {
     const q = searchQuery.trim()
     if (!q) return new Set()
@@ -2139,23 +2162,30 @@ export function BancaMovimentiPage() {
   }, [items, searchQuery])
 
   const displayRows = useMemo(() => {
-    if (!searchHitIds.size) return items
-    const hits = []
-    const rest = []
-    for (const row of items) {
-      if (searchHitIds.has(row.id)) hits.push(row)
-      else rest.push(row)
+    const prioritize = (row) => {
+      if (highlightMovementId && Number(row.id) === highlightMovementId) return 0
+      if (searchHitIds.has(row.id)) return 1
+      return 2
     }
-    return [...hits, ...rest]
-  }, [items, searchHitIds])
+    if (!highlightMovementId && !searchHitIds.size) return items
+    return [...items].sort((a, b) => prioritize(a) - prioritize(b))
+  }, [items, searchHitIds, highlightMovementId])
 
   const searchStatusNote = useMemo(() => {
+    if (highlightMovementId) {
+      const found = items.some((m) => Number(m.id) === highlightMovementId)
+      if (found) {
+        const senseLabel = highlightSense === 'entrata' ? 'entrata (verde)' : 'uscita (rosso)'
+        return `Bonifico BA-${highlightMovementId} evidenziato: ${senseLabel}.`
+      }
+      return `Bonifico BA-${highlightMovementId} non trovato nei movimenti caricati. Allarga il periodo o il conto.`
+    }
     const q = searchQuery.trim()
     if (!q) return ''
     const n = searchHitIds.size
     if (n > 0) return `Trovati ${n} bonifici/movimenti per «${q}» (evidenziati in giallo).`
     return `Nessun bonifico con fattura/testo «${q}» nei movimenti caricati. Allarga il periodo e premi Cerca.`
-  }, [searchQuery, searchHitIds])
+  }, [searchQuery, searchHitIds, highlightMovementId, highlightSense, items])
 
   const companyGroups = []
   const byCompany = new Map()
@@ -2372,7 +2402,19 @@ export function BancaMovimentiPage() {
             emptyMessage={`Nessun movimento per «${viewAccountLabel}». Usa Aggiorna oppure Sincronizza in Conti correnti.`}
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
-            getRowClassName={(row) => (searchHitIds.has(row.id) ? 'banca-mov-hit' : '')}
+            getRowClassName={(row) => {
+              if (highlightMovementId && Number(row.id) === highlightMovementId) {
+                const type = String(row?.movement_type || '').toLowerCase()
+                const sense =
+                  highlightSense === 'entrata' || highlightSense === 'uscita'
+                    ? highlightSense
+                    : type === 'entrata'
+                      ? 'entrata'
+                      : 'uscita'
+                return sense === 'entrata' ? 'banca-mov-hit-entrata' : 'banca-mov-hit-uscita'
+              }
+              return searchHitIds.has(row.id) ? 'banca-mov-hit' : ''
+            }}
             totals={{
               amountEntrate: items.reduce(
                 (acc, m) => acc + (String(m?.movement_type || '').toLowerCase() === 'entrata' ? Number(m?.amount) || 0 : 0),
