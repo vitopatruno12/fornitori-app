@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   AmministrazionePageShell,
   BancaPageShell,
@@ -326,6 +326,37 @@ function bankLastMovementsCellValue(row, col) {
   if (col.id === 'amount') return eur(row?.amount)
   if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
   return ''
+}
+
+function bancaMovimentoDetailHref(row) {
+  if (!row?.id) return '/banca/movimenti'
+  const params = new URLSearchParams()
+  params.set('movement_id', String(row.id))
+  if (row.bank_account_id) params.set('account_id', String(row.bank_account_id))
+  const date = String(row.movement_date || '').slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    params.set('date_from', date)
+    params.set('date_to', date)
+  }
+  const sense = String(row.movement_type || '').toLowerCase() === 'entrata' ? 'entrata' : 'uscita'
+  params.set('sense', sense)
+  return `/banca/movimenti?${params.toString()}`
+}
+
+function bankLastMovementsRenderCell(row, col) {
+  if (col.id !== 'description') return null
+  const text = row?.description || '—'
+  if (!row?.id) return null
+  return (
+    <Link
+      to={bancaMovimentoDetailHref(row)}
+      className="excel-cell pagamenti-cell-readonly banca-linked-invoice-link"
+      title="Apri dettaglio bonifico"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {text}
+    </Link>
+  )
 }
 
 const BANK_ACCOUNTS_COLUMNS = [
@@ -810,6 +841,7 @@ export function AmministrazioneImpostazioniPage() {
 }
 
 export function BancaDashboardPage() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -859,12 +891,14 @@ export function BancaDashboardPage() {
             ) : (
               row.ultimi_movimenti.map((mov) => (
                 <li key={mov.id}>
-                  <span>{formatDate(mov.movement_date)}</span>
-                  <span>{mov.description || '—'}</span>
-                  <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
-                    {mov.movement_type === 'uscita' ? '−' : '+'}
-                    {eur(mov.amount)}
-                  </span>
+                  <Link to={bancaMovimentoDetailHref(mov)} className="banca-hero-move-link" title="Apri dettaglio bonifico">
+                    <span>{formatDate(mov.movement_date)}</span>
+                    <span>{mov.description || '—'}</span>
+                    <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
+                      {mov.movement_type === 'uscita' ? '−' : '+'}
+                      {eur(mov.amount)}
+                    </span>
+                  </Link>
                 </li>
               ))
             )}
@@ -927,9 +961,15 @@ export function BancaDashboardPage() {
               columns={BANK_LAST_MOVEMENTS_COLUMNS}
               rows={data.ultimi_movimenti || []}
               cellValue={bankLastMovementsCellValue}
+              renderCell={bankLastMovementsRenderCell}
               emptyMessage="Nessun movimento. Sincronizza un conto da Conti correnti."
               gridClassName="banca-fit-grid"
               rowKey={(row) => row.id}
+              rowClickTitle="Apri dettaglio bonifico"
+              onRowClick={(row) => {
+                if (!row?.id) return
+                navigate(bancaMovimentoDetailHref(row))
+              }}
             />
           </section>
 
