@@ -152,10 +152,11 @@ export default function InvoicesPage() {
     })
     if (!activeFocusId) return rows
     const focused = invoices.find((inv) => String(inv.id) === activeFocusId)
-    const without = rows.filter((inv) => String(inv.id) !== activeFocusId)
-    // Tiene la fattura deep-link in cima e visibile anche se i filtri data la escluderebbero.
-    if (focused) return [focused, ...without]
-    return rows
+    if (!focused || rows.some((inv) => String(inv.id) === activeFocusId)) return rows
+    const origIdx = invoices.findIndex((inv) => String(inv.id) === activeFocusId)
+    const insertAt = rows.findIndex((inv) => invoices.findIndex((x) => String(x.id) === String(inv.id)) > origIdx)
+    if (insertAt < 0) return [...rows, focused]
+    return [...rows.slice(0, insertAt), focused, ...rows.slice(insertAt)]
   }, [invoices, monthFilter, dateFrom, dateTo, activeFocusId])
 
   // Dopo reload/lista, riporta lo scroll sulla riga evidenziata.

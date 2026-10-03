@@ -2250,15 +2250,7 @@ export function BancaMovimentiPage() {
     return new Set(items.filter((m) => movementMatchesSearch(m, q)).map((m) => m.id))
   }, [items, searchQuery])
 
-  const displayRows = useMemo(() => {
-    const prioritize = (row) => {
-      if (highlightMovementId && Number(row.id) === highlightMovementId) return 0
-      if (searchHitIds.has(row.id)) return 1
-      return 2
-    }
-    if (!highlightMovementId && !searchHitIds.size) return items
-    return [...items].sort((a, b) => prioritize(a) - prioritize(b))
-  }, [items, searchHitIds, highlightMovementId])
+  const displayRows = items
 
   useEffect(() => {
     if (!highlightMovementId || loading) return
