@@ -103,6 +103,9 @@ export default function PagamentiPage() {
   const uploadInputRef = useRef(null)
   const highlightMenuRef = useRef(null)
   const gridWrapRef = useRef(null)
+  const workbookRef = useRef(workbook)
+  const persistInFlightRef = useRef(false)
+  workbookRef.current = workbook
 
   function handleBackToList() {
     navigate('/fatture')
@@ -308,30 +311,61 @@ export default function PagamentiPage() {
     applyWorkbook({ ...workbook, sheets })
   }
 
+  const persistWorkbook = useCallback(
+    async (source, { successMessage } = {}) => {
+      if (persistInFlightRef.current) return null
+      persistInFlightRef.current = true
+      setSaving(true)
+      setError('')
+      try {
+        const payload = recalculateWorkbook(source || workbookRef.current)
+        const saved = await saveSupplierPaymentsWorkbook(
+          {
+            title: payload.title,
+            sheets: payload.sheets,
+            highlights: payload.highlights || {},
+          },
+          workbookKey,
+        )
+        const next = recalculateWorkbook(workbookFromApi(saved, workbookKey))
+        setWorkbook(next)
+        setUpdatedAt(saved?.updated_at || '')
+        setDirty(false)
+        if (successMessage) setSuccess(successMessage)
+        return next
+      } catch (err) {
+        setError(err?.message || 'Salvataggio non riuscito')
+        return null
+      } finally {
+        persistInFlightRef.current = false
+        setSaving(false)
+      }
+    },
+    [workbookKey],
+  )
+
   async function handleSave() {
-    setSaving(true)
-    setError('')
     setSuccess('')
-    try {
-      const payload = recalculateWorkbook(workbook)
-      const saved = await saveSupplierPaymentsWorkbook(
-        {
-          title: payload.title,
-          sheets: payload.sheets,
-          highlights: payload.highlights || {},
-        },
-        workbookKey,
-      )
-      setWorkbook(recalculateWorkbook(workbookFromApi(saved, workbookKey)))
-      setUpdatedAt(saved?.updated_at || '')
-      setDirty(false)
-      setSuccess(`Salvato: ${workbookLabel(workbookKey)}`)
-    } catch (err) {
-      setError(err?.message || 'Salvataggio non riuscito')
-    } finally {
-      setSaving(false)
-    }
+    await persistWorkbook(workbookRef.current, { successMessage: `Salvato: ${workbookLabel(workbookKey)}` })
   }
+
+  useEffect(() => {
+    if (!dirty || loading || importing || saving) return undefined
+    const timer = window.setTimeout(() => {
+      void persistWorkbook(workbookRef.current, { successMessage: 'Modifiche salvate.' })
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [dirty, workbook, loading, importing, saving, persistWorkbook])
+
+  useEffect(() => {
+    if (!dirty) return undefined
+    function onBeforeUnload(event) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
 
   function handleAddInvoiceRow() {
     if (!isMonthlySheet(activeSheet)) return
@@ -379,10 +413,10 @@ export default function PagamentiPage() {
       })
       setWorkbook(next)
       setActiveSheet(next.sheets[0]?.name || 'GENNAIO')
-      setDirty(true)
-      setSuccess(
-        `File "${file.name}" caricato in «${workbookLabel(workbookKey)}». Clicca Salva per registrarlo sul database.`,
-      )
+      const saved = await persistWorkbook(next, {
+        successMessage: `File "${file.name}" salvato in «${workbookLabel(workbookKey)}». Resta in archivio: non serve ricaricarlo.`,
+      })
+      if (!saved) setDirty(true)
     } catch (err) {
       setError(err?.message || 'Caricamento Excel non riuscito')
     } finally {
@@ -409,7 +443,7 @@ export default function PagamentiPage() {
       setWorkbook(next)
       setActiveSheet(createdName)
       setDirty(true)
-      setSuccess(`Foglio "${createdName}" aggiunto. Clicca Salva per registrarlo.`)
+      setSuccess(`Foglio "${createdName}" aggiunto.`)
       closeNewSheetModal()
     } catch (err) {
       setError(err?.message || 'Impossibile creare il foglio')
@@ -452,7 +486,7 @@ export default function PagamentiPage() {
     }
     setError('')
     try {
-      applyWorkbook(removeWorkbookColumn(workbook, currentSheet.name, index), 'Colonna eliminata. Clicca Salva per aggiornare il database.')
+      applyWorkbook(removeWorkbookColumn(workbook, currentSheet.name, index), 'Colonna eliminata.')
     } catch (err) {
       setError(err?.message || 'Eliminazione colonna non riuscita')
     }
@@ -466,7 +500,7 @@ export default function PagamentiPage() {
     }
     if (
       !window.confirm(
-        `Eliminare il foglio "${name}" dal registro?\nI dati di questo foglio andranno persi. Clicca Salva dopo per confermare sul database.`,
+        `Eliminare il foglio "${name}" dal registro?\nI dati di questo foglio andranno persi e la modifica verrà salvata in automatico.`,
       )
     ) {
       return
@@ -482,7 +516,7 @@ export default function PagamentiPage() {
       setWorkbook(next)
       setActiveSheet(fallback)
       setDirty(true)
-      setSuccess(`Foglio "${name}" eliminato. Clicca Salva per aggiornare il database.`)
+      setSuccess(`Foglio "${name}" eliminato.`)
     } catch (err) {
       setError(err?.message || 'Eliminazione foglio non riuscita')
     }
@@ -537,8 +571,8 @@ export default function PagamentiPage() {
           <div className="pagamenti-hero-copy">
             <h1 className="page-header staff-page-title">Pagamenti fornitori</h1>
             <p className="staff-page-lead">
-              Un file Excel per società (Mediazione, Via Lattea, Risacca, PG). Scegli il file dal menu, carica o modifica, poi
-              Salva.
+              Un file Excel per società (Mediazione, Via Lattea, Risacca, PG). Caricalo una volta: resta in archivio.
+              Le modifiche in tabella si salvano da sole, senza ricaricare il file.
             </p>
           </div>
           <button

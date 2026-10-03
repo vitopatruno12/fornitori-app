@@ -567,11 +567,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setSelectedIndex(null)
     resetDraft()
     setError('')
-    setSuccess(`Inserite ${incoming.length} righe nella tabella. Premi Salva mese per registrarle.`)
-    window.setTimeout(() => {
-      document.getElementById('stipendi-foglio-tabella')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 50)
-    return true
+    return incoming
   }
 
   async function persistImportedMonth(locale, ym, importedLines, archiveList) {
@@ -657,7 +653,28 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         )
         return
       }
-      applyImportedLines(Array.isArray(parsed) ? parsed : parsed?.lines || [])
+        const incoming = applyImportedLines(Array.isArray(parsed) ? parsed : parsed?.lines || [])
+        if (incoming?.length) {
+          if (!operatorMode && (!gestionaleLocale || !gestionaleSessionOpen)) {
+            setError('Apri il locale con Accedi prima di caricare gli stipendi.')
+            return
+          }
+          const locale = operatorMode ? await resolveOperatorLocaleName() : gestionaleLocale
+          if (!locale) {
+            setError('Locale personale non disponibile. Apri di nuovo il locale con il codice.')
+            return
+          }
+          const saved = await persistImportedMonth(locale, yearMonth, incoming, archives)
+          const rows = await loadArchives()
+          const opened = saved || (rows || []).find((a) => a.year_month === yearMonth)
+          if (opened) openArchive(opened)
+          setSuccess(
+            `Salvate ${incoming.length} voci in ${ymLabel(opened?.year_month || yearMonth)}. Restano in archivio: non serve ricaricare il file.`,
+          )
+          window.setTimeout(() => {
+            document.getElementById('stipendi-foglio-tabella')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }, 50)
+        }
     } catch (e) {
       setError(e?.message || 'Lettura del file non riuscita')
     } finally {
