@@ -288,10 +288,29 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setNotes(row.notes || '')
       setSelectedIndex(null)
       resetDraft()
-      setSuccess(`Aperto archivio ${ymLabel(row.year_month)}`)
     },
     [resetDraft],
   )
+
+  async function selectYearMonth(ym) {
+    const next = String(ym || '').trim()
+    if (!next) return
+    setYearMonth(next)
+    const hit = archives.find((a) => a.year_month === next)
+    if (hit) {
+      openArchive(hit)
+      setError('')
+      setSuccess(`Foglio ${ymLabel(next)}`)
+      return
+    }
+    setActiveId(null)
+    setNotes('')
+    setSelectedIndex(null)
+    resetDraft()
+    await bootstrapFromMembers()
+    setError('')
+    setSuccess(`Nuovo foglio ${ymLabel(next)} — compila e salva, o scegli un mese già caricato`)
+  }
 
   useEffect(() => {
     if (operatorMode && !operatorSessionOpen) {
@@ -626,13 +645,15 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
             : [...latestArchives, saved]
         }
         const rows = await loadArchives()
-        const lastYm = months[months.length - 1]?.yearMonth
-        const opened = (rows || []).find((a) => a.year_month === lastYm) || lastSaved
+        const preferredYm = months.some((m) => m.yearMonth === yearMonth)
+          ? yearMonth
+          : months[months.length - 1]?.yearMonth
+        const opened = (rows || []).find((a) => a.year_month === preferredYm) || lastSaved
         if (opened) openArchive(opened)
         setSuccess(
           months.length > 1
-            ? `File unico suddiviso in ${savedCount} mesi (2024–2026). Aperto ${ymLabel(opened?.year_month || lastYm)}.`
-            : `Inserite le voci di ${ymLabel(opened?.year_month || lastYm)}. Archivio salvato.`,
+            ? `File unico suddiviso in ${savedCount} mesi (2024–2026). Usa il selettore mese per sfogliarli — aperto ${ymLabel(opened?.year_month || preferredYm)}.`
+            : `Inserite le voci di ${ymLabel(opened?.year_month || preferredYm)}. Archivio salvato.`,
         )
         return
       }
@@ -723,7 +744,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                 type="month"
                 className="form-control form-control-sm"
                 value={yearMonth}
-                onChange={(e) => setYearMonth(e.target.value)}
+                onChange={(e) => void selectYearMonth(e.target.value)}
               />
             </label>
             <strong className="stipendi-month-label">{ymLabel(yearMonth)}</strong>
@@ -764,19 +785,10 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
           </div>
         </div>
 
-        {archives.length > 0 && activeSheet === 'stipendi' ? (
-          <div className="pagamenti-sheet-tabs stipendi-month-tabs" style={{ marginBottom: '0.75rem' }}>
-            {archives.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className={`pagamenti-sheet-tab${a.id === activeId ? ' is-active' : ''}`}
-                onClick={() => openArchive(a)}
-              >
-                {ymLabel(a.year_month)}
-              </button>
-            ))}
-          </div>
+        {activeSheet === 'stipendi' && archives.length > 0 ? (
+          <p className="muted" style={{ margin: '0.5rem 0 0.75rem' }}>
+            {archives.length} mesi in archivio. Cambia mese/anno dal selettore (es. Ottobre 2026).
+          </p>
         ) : null}
 
         {activeSheet === 'stipendi' ? (
