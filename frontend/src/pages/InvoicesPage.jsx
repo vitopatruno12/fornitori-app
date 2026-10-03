@@ -918,13 +918,15 @@ export default function InvoicesPage() {
           )}
         </form>
 
-        {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
+        {loading && invoices.length === 0 ? (
+          <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />
+        ) : null}
 
         {(!loading || invoices.length > 0) && !error && (
           <VneWorkbookGrid
             title="Storico fatture"
             sheetLabel={`${filteredInvoices.length} documenti`}
-            loading={loading}
+            loading={loading && invoices.length > 0}
             loadingLabel="Aggiornamento elenco"
             exportSubtitle={
               [
