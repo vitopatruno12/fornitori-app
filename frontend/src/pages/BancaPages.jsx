@@ -370,6 +370,29 @@ function invoiceNumberDigitsOnly(value) {
   return parts.join(', ')
 }
 
+function linkedInvoicesForMovement(row) {
+  if (Array.isArray(row?.linked_invoices) && row.linked_invoices.length) return row.linked_invoices
+  if (row?.matched_invoice) return [row.matched_invoice]
+  if (row?.matched_invoice_id != null && row.matched_invoice_id !== '') {
+    return [{ id: row.matched_invoice_id, invoice_number: String(row.matched_invoice_id) }]
+  }
+  return []
+}
+
+function linkedInvoiceHref(inv, movement) {
+  const params = new URLSearchParams()
+  if (inv?.id != null && inv.id !== '') params.set('id', String(inv.id))
+  const num = String(inv?.invoice_number || '').trim()
+  if (num) params.set('n', num)
+  const company = inv?.company || movement?.account_company
+  if (company) params.set('company', String(company))
+  if (inv?.supplier_id != null && inv.supplier_id !== '') {
+    params.set('supplier_id', String(inv.supplier_id))
+  }
+  const qs = params.toString()
+  return qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'
+}
+
 function bankMovementsCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement_date)
   if (col.id === 'counterparty') {
@@ -387,11 +410,7 @@ function bankMovementsCellValue(row, col) {
     return desc || who || '—'
   }
   if (col.id === 'linked_invoice') {
-    const linked = Array.isArray(row?.linked_invoices) && row.linked_invoices.length
-      ? row.linked_invoices
-      : row?.matched_invoice
-        ? [row.matched_invoice]
-        : []
+    const linked = linkedInvoicesForMovement(row)
     const nums = []
     const seen = new Set()
     for (const inv of linked) {
@@ -400,11 +419,7 @@ function bankMovementsCellValue(row, col) {
       seen.add(digits)
       nums.push(digits)
     }
-    if (!nums.length) {
-      const fallback = invoiceNumberDigitsOnly(row?.matched_invoice_id)
-      return fallback || '—'
-    }
-    return nums.join(', ')
+    return nums.length ? nums.join(', ') : '—'
   }
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
@@ -417,6 +432,40 @@ function bankMovementsCellValue(row, col) {
   }
   if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
   return ''
+}
+
+function bankMovementsRenderCell(row, col) {
+  if (col.id !== 'linked_invoice') return null
+  const linked = linkedInvoicesForMovement(row)
+  if (!linked.length) return null
+  const items = []
+  const seen = new Set()
+  for (const inv of linked) {
+    const digits = invoiceNumberDigitsOnly(inv?.invoice_number || inv?.id || '')
+    if (!digits || seen.has(digits)) continue
+    seen.add(digits)
+    items.push({ inv, digits })
+  }
+  if (!items.length) return null
+  return (
+    <div
+      className="excel-cell pagamenti-cell-readonly banca-linked-invoice-cell"
+      title={items.map((x) => x.digits).join(', ')}
+    >
+      {items.map(({ inv, digits }, idx) => (
+        <React.Fragment key={`${inv?.id || digits}-${idx}`}>
+          {idx > 0 ? <span aria-hidden="true">, </span> : null}
+          <Link
+            to={linkedInvoiceHref(inv, row)}
+            className="banca-linked-invoice-link"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {digits}
+          </Link>
+        </React.Fragment>
+      ))}
+    </div>
+  )
 }
 
 function movementSearchBlob(mov) {
@@ -2415,6 +2464,7 @@ export function BancaMovimentiPage() {
             columns={BANK_MOVEMENTS_COLUMNS}
             rows={displayRows}
             cellValue={bankMovementsCellValue}
+            renderCell={bankMovementsRenderCell}
             emptyMessage={`Nessun movimento per «${viewAccountLabel}». Usa Aggiorna oppure Sincronizza in Conti correnti.`}
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}

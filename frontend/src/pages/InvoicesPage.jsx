@@ -301,6 +301,9 @@ export default function InvoicesPage() {
       setSearchParams(next, { replace: true })
       window.setTimeout(() => {
         document.getElementById(`invoice-row-${inv.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        window.setTimeout(() => {
+          window.scrollBy({ top: 72, left: 0, behavior: 'smooth' })
+        }, 280)
       }, 80)
     }
 
