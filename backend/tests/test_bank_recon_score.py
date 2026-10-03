@@ -507,7 +507,9 @@ def test_build_linked_invoices_from_causale_and_note():
   from app.services.banca_service import (
     _build_linked_invoices,
     _normalize_doc_token,
+    _ref_matches_number,
     _set_linked_invoices_note,
+    extract_invoice_digit_tokens,
   )
 
   inv_a = _inv(id=1, invoice_number="8947/01", supplier_name="Fornitore A", supplier_id=1)
@@ -530,3 +532,23 @@ def test_build_linked_invoices_from_causale_and_note():
   _set_linked_invoices_note(mov2, ["8947/01", "7684/01"], reason="saldo cumulativo")
   linked2 = _build_linked_invoices(mov2, invoices_by_norm=by_norm, suppliers_by_id={1: "Fornitore A"})
   assert [x["invoice_number"] for x in linked2] == ["8947/01", "7684/01"]
+
+  # F24 / tributi: niente falsi positivi tipo 050-2024-10 o CRO banca
+  inv_fake = _inv(id=9, invoice_number="050-2024-10", supplier_name="Altro", supplier_id=2)
+  inv_cro = _inv(id=10, invoice_number="01-08-02-000008", supplier_name="Altro", supplier_id=2)
+  by_bad = {
+    **by_norm,
+    _normalize_doc_token(inv_fake.invoice_number): inv_fake,
+    _normalize_doc_token(inv_cro.invoice_number): inv_cro,
+  }
+  f24 = _mov(
+    causale="050 - UN - PAGAMENTO NO F24 TRIBUTI 01-08-02-000008 2250000",
+    description="TRIB. - UNI - PAGAMENTO AD F24",
+    matched_invoice_id=None,
+  )
+  assert extract_invoice_digit_tokens(f"{f24.description} {f24.causale}") == []
+  linked_f24 = _build_linked_invoices(f24, invoices_by_norm=by_bad, suppliers_by_id={2: "Altro"})
+  assert linked_f24 == []
+  assert not _ref_matches_number("050", "050-2024-10")
+  assert not _ref_matches_number("01-08", "01-08-02-000008")
+  assert not _ref_matches_number("050-2024", "050-2024-10")

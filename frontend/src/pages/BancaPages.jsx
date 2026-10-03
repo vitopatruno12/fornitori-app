@@ -402,8 +402,17 @@ function invoiceNumberDigitsOnly(value) {
 }
 
 function linkedInvoicesForMovement(row) {
-  if (Array.isArray(row?.linked_invoices) && row.linked_invoices.length) return row.linked_invoices
-  if (row?.matched_invoice) return [row.matched_invoice]
+  // Solo fatture reali (con id): niente CRO/codici banca mostrati come «fattura collegata»
+  if (Array.isArray(row?.linked_invoices) && row.linked_invoices.length) {
+    const real = row.linked_invoices.filter((inv) => {
+      const id = inv?.id
+      return id != null && id !== '' && String(id) !== 'null' && String(id) !== 'undefined'
+    })
+    if (real.length) return real
+  }
+  if (row?.matched_invoice?.id != null && row.matched_invoice.id !== '') {
+    return [row.matched_invoice]
+  }
   if (row?.matched_invoice_id != null && row.matched_invoice_id !== '') {
     return [{ id: row.matched_invoice_id }]
   }

@@ -1253,23 +1253,58 @@ def invoice_ref_digits(value: Optional[str]) -> str:
   return ", ".join(parts) if parts else ""
 
 
+_BANKISH_MULTI_DASH_RE = re.compile(
+  r"^\d{1,4}([-/]\d{1,4}){2,}$"  # es. 01-08-02-000008, 050-2024-10 (codici banca/F24)
+)
+
+
+def _looks_like_tax_or_f24(blob: str) -> bool:
+  """Pagamenti tributi / F24: non vanno letti come fatture fornitore."""
+  t = str(blob or "").lower()
+  return bool(
+    re.search(
+      r"\b(?:f24|tribut|agenzia\s+entrate|pagament[oi]\s+ad\b|trib\.?\s*[-–]|uni\s*[-–]\s*pagament)\b",
+      t,
+    )
+  )
+
+
+def _is_bankish_doc_token(token: str) -> bool:
+  """Riferimenti CRO/CBI/F24 con più segmenti, non numeri fattura tipo 8947/01."""
+  raw = re.sub(r"\s+", "", str(token or "").strip())
+  if not raw:
+    return False
+  if _BANKISH_MULTI_DASH_RE.fullmatch(raw):
+    return True
+  digits = re.sub(r"\D", "", raw)
+  # CRO lunghi senza slash tipico fattura
+  if len(digits) >= 10 and "/" not in raw:
+    return True
+  return False
+
+
 def extract_invoice_digit_tokens(blob: str) -> List[str]:
   """Token numerici fattura: prima da ancore FT/SALDO, poi cifre isolate in causale.
 
-  Esclude anni (20xx) e riferimenti bancari troppo lunghi (CRO/PV).
+  Esclude anni (20xx), F24/tributi e riferimenti bancari (CRO/PV).
   """
+  if _looks_like_tax_or_f24(blob):
+    return []
+
   primary = extract_invoice_refs(blob)
   out: List[str] = []
   seen: set[str] = set()
 
-  def add(token: str) -> None:
+  def add(token: str, *, min_digits: int = 2) -> None:
     cleaned = invoice_ref_digits(token) or str(token or "").strip()
     if not cleaned:
       return
     # un solo gruppo principale
     first = cleaned.split(",")[0].strip()
+    if _is_bankish_doc_token(first):
+      return
     digits = re.sub(r"\D", "", first)
-    if len(digits) < 2 or len(digits) > 12:
+    if len(digits) < min_digits or len(digits) > 12:
       return
     if re.fullmatch(r"20\d{2}", digits):
       return
@@ -1289,8 +1324,9 @@ def extract_invoice_digit_tokens(blob: str) -> List[str]:
   lower = text.lower()
   if re.search(r"saldo\s+(?:ft|fattur)", lower) and not re.search(r"\d{2,}", text):
     return []
+  # Senza ancora FT/fattura: solo token abbastanza lunghi (evita 050, 01-08 da F24/bonifici)
   for match in _INVOICE_DIGIT_TOKEN_RE.finditer(text):
-    add(match.group(1))
+    add(match.group(1), min_digits=4)
   return out
 
 
@@ -1378,9 +1414,23 @@ def _ref_matches_number(ref: str, invoice_number: Optional[str]) -> bool:
     return False
   if ref_s == num_s:
     return True
-  if num_s.startswith(ref_s) and num_s[len(ref_s):len(ref_s) + 1] in {"/", "-", "."}:
-    return True
-  if len(ref_s) >= 8 and num_s.startswith(ref_s):
+  # Prefissi corti (050, 01-08) collegano per errore codici banca/F24 a fatture
+  ref_digits = re.sub(r"\D", "", ref_s)
+  if len(ref_digits) < 4:
+    return False
+  if _is_bankish_doc_token(ref_s) or _is_bankish_doc_token(num_s):
+    return False
+  if num_s.startswith(ref_s):
+    sep = num_s[len(ref_s) : len(ref_s) + 1]
+    rest = num_s[len(ref_s) + 1 :]
+    # Tipico n. fattura: 8947 → 8947/01 (un suffisso, ref senza già - / .)
+    if (
+      sep in {"/", "-", "."}
+      and re.fullmatch(r"[A-Z0-9]{1,6}", rest or "")
+      and not re.search(r"[-/.]", ref_s)
+    ):
+      return True
+  if len(ref_digits) >= 8 and num_s.startswith(ref_s) and not re.search(r"[-/.]", ref_s):
     return True
   return False
 
@@ -2338,9 +2388,11 @@ def _build_linked_invoices(
     name = sn or suppliers.get(getattr(inv, "supplier_id", None) or 0, "") or ""
     out.append(_invoice_brief(inv, supplier_name=name, account=account))
 
-  def _add_number(raw: str) -> None:
+  def _add_number(raw: str, *, require_match: bool = True) -> None:
     n = invoice_ref_digits(raw) or str(raw or "").strip()
     if not n:
+      return
+    if _is_bankish_doc_token(n):
       return
     key = _normalize_doc_token(n)
     if not key or key in seen_norm:
@@ -2353,6 +2405,9 @@ def _build_linked_invoices(
           break
     if inv is not None:
       _add_inv(inv)
+      return
+    # Solo fatture reali in Atlas: niente link a CRO/codici banca non trovati
+    if require_match:
       return
     seen_norm.add(key)
     out.append(
@@ -2371,12 +2426,13 @@ def _build_linked_invoices(
     _add_inv(matched, supplier_name or "")
 
   for num in _parse_linked_invoices_note(getattr(mov, "notes", None)):
-    _add_number(num)
+    _add_number(num, require_match=True)
 
   # Causale: numeri fattura (anche senza prefisso FT) da collegare al beneficiario
-  if len(out) <= 1:
-    for ref in extract_invoice_digit_tokens(_movement_search_blob(mov)):
-      _add_number(ref)
+  blob = _movement_search_blob(mov)
+  if len(out) <= 1 and not _looks_like_tax_or_f24(blob):
+    for ref in extract_invoice_digit_tokens(blob):
+      _add_number(ref, require_match=True)
 
   return out
 
