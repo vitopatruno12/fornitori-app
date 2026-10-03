@@ -78,6 +78,37 @@ function currentYearMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
+function latestArchiveRow(rows) {
+  const list = (Array.isArray(rows) ? rows : []).filter((row) => row?.year_month)
+  if (!list.length) return null
+  const sorted = [...list].sort((a, b) => String(a.year_month).localeCompare(String(b.year_month)))
+  return sorted[sorted.length - 1]
+}
+
+function previousYearMonth(ym) {
+  const [y, m] = String(ym || '').split('-').map(Number)
+  if (!y || !m) return ''
+  if (m === 1) return `${y - 1}-12`
+  return `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+/** Mese corrente solo se è davvero in archivio; altrimenti l’ultimo foglio del file. */
+function pickOpenArchive(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  const ym = currentYearMonth()
+  const hit = list.find((row) => row.year_month === ym)
+  const latest = latestArchiveRow(list)
+  if (hit && latest && hit.year_month === latest.year_month) {
+    const prev = previousYearMonth(ym)
+    const hasPrevious = list.some((row) => row.year_month === prev)
+    const hasOlder = list.some((row) => String(row.year_month) < ym)
+    if (!hasPrevious && hasOlder) {
+      return latestArchiveRow(list.filter((row) => String(row.year_month) < ym))
+    }
+  }
+  return hit || latest
+}
+
 function periodForYm(ym) {
   const [y, m] = String(ym).split('-').map(Number)
   const from = new Date(y, m - 1, 1)
@@ -292,10 +323,18 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     [resetDraft],
   )
 
+  function openEmptyMonth(ym) {
+    setYearMonth(ym)
+    setActiveId(null)
+    setLines([])
+    setNotes('')
+    setSelectedIndex(null)
+    resetDraft()
+  }
+
   async function selectYearMonth(ym) {
     const next = String(ym || '').trim()
     if (!next) return
-    setYearMonth(next)
     const hit = archives.find((a) => a.year_month === next)
     if (hit) {
       openArchive(hit)
@@ -303,13 +342,11 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setSuccess(`Foglio ${ymLabel(next)}`)
       return
     }
-    setActiveId(null)
-    setNotes('')
-    setSelectedIndex(null)
-    resetDraft()
-    await bootstrapFromMembers()
+    openEmptyMonth(next)
     setError('')
-    setSuccess(`Nuovo foglio ${ymLabel(next)} — compila e salva, o scegli un mese già caricato`)
+    setSuccess(
+      `Nessun foglio per ${ymLabel(next)} (non è nel file caricato). Scegli un mese in archivio oppure «Nuovo da dipendenti».`,
+    )
   }
 
   useEffect(() => {
@@ -331,14 +368,11 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       try {
         const rows = await loadArchives()
         if (cancelled) return
-        const ym = currentYearMonth()
-        const hit = rows.find((r) => r.year_month === ym)
+        const hit = pickOpenArchive(rows)
         if (hit) {
           openArchive(hit)
         } else {
-          setYearMonth(ym)
-          setActiveId(null)
-          await bootstrapFromMembers()
+          openEmptyMonth(currentYearMonth())
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || 'Errore caricamento stipendi')
@@ -525,8 +559,10 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setError('')
     try {
       await deleteStaffStipendiMonth(activeId)
-      await loadArchives()
-      await bootstrapFromMembers()
+      const rows = await loadArchives()
+      const next = latestArchiveRow(rows)
+      if (next) openArchive(next)
+      else openEmptyMonth(yearMonth)
       setSuccess('Archivio eliminato')
     } catch (e) {
       setError(e?.message || 'Eliminazione non riuscita')
@@ -640,15 +676,23 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
             ? latestArchives.map((a) => (a.year_month === month.yearMonth ? saved : a))
             : [...latestArchives, saved]
         }
+        const lastFileYm = months[months.length - 1]?.yearMonth
+        for (const extra of latestArchives) {
+          if (lastFileYm && extra?.id && String(extra.year_month) > lastFileYm) {
+            try {
+              await deleteStaffStipendiMonth(extra.id)
+            } catch {
+              // ignora mesi extra non eliminabili
+            }
+          }
+        }
         const rows = await loadArchives()
-        const preferredYm = months.some((m) => m.yearMonth === yearMonth)
-          ? yearMonth
-          : months[months.length - 1]?.yearMonth
+        const preferredYm = months[months.length - 1]?.yearMonth
         const opened = (rows || []).find((a) => a.year_month === preferredYm) || lastSaved
         if (opened) openArchive(opened)
         setSuccess(
           months.length > 1
-            ? `File unico suddiviso in ${savedCount} mesi (2024–2026). Usa il selettore mese per sfogliarli — aperto ${ymLabel(opened?.year_month || preferredYm)}.`
+            ? `File unico suddiviso in ${savedCount} mesi. Aperto ${ymLabel(opened?.year_month || preferredYm)} (ultimo mese presente nel file).`
             : `Inserite le voci di ${ymLabel(opened?.year_month || preferredYm)}. Archivio salvato.`,
         )
         return
@@ -804,7 +848,11 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
 
         {activeSheet === 'stipendi' && archives.length > 0 ? (
           <p className="muted" style={{ margin: '0.5rem 0 0.75rem' }}>
-            {archives.length} mesi in archivio. Cambia mese/anno dal selettore (es. Ottobre 2026).
+            {archives.length} mesi in archivio
+            {latestArchiveRow(archives)
+              ? ` (ultimo foglio: ${ymLabel(latestArchiveRow(archives).year_month)}).`
+              : '.'}{' '}
+            Il selettore apre solo i mesi salvati; un mese assente nel file resta vuoto.
           </p>
         ) : null}
 
