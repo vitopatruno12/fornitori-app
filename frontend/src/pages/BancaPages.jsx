@@ -2171,6 +2171,22 @@ export function BancaMovimentiPage() {
     return [...items].sort((a, b) => prioritize(a) - prioritize(b))
   }, [items, searchHitIds, highlightMovementId])
 
+  useEffect(() => {
+    if (!highlightMovementId || loading) return
+    if (!items.some((m) => Number(m.id) === highlightMovementId)) return
+    const timer = window.setTimeout(() => {
+      const el =
+        document.getElementById(`banca-mov-${highlightMovementId}`) ||
+        document.querySelector('tr.banca-mov-hit-entrata, tr.banca-mov-hit-uscita')
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      window.setTimeout(() => {
+        window.scrollBy({ top: 72, left: 0, behavior: 'smooth' })
+      }, 320)
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [highlightMovementId, items, loading])
+
   const searchStatusNote = useMemo(() => {
     if (highlightMovementId) {
       const found = items.some((m) => Number(m.id) === highlightMovementId)
@@ -2402,6 +2418,7 @@ export function BancaMovimentiPage() {
             emptyMessage={`Nessun movimento per «${viewAccountLabel}». Usa Aggiorna oppure Sincronizza in Conti correnti.`}
             gridClassName="banca-fit-grid"
             rowKey={(row) => row.id}
+            getRowId={(row) => (row?.id != null ? `banca-mov-${row.id}` : undefined)}
             getRowClassName={(row) => {
               if (highlightMovementId && Number(row.id) === highlightMovementId) {
                 const type = String(row?.movement_type || '').toLowerCase()
