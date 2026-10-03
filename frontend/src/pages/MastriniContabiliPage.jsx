@@ -577,6 +577,20 @@ export default function MastriniContabiliPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
+  // Entrando in Partitario (o cambiando società mentre sei lì): carica i dati subito.
+  React.useEffect(() => {
+    if (viewMode !== 'partitario' || !companyId) return
+    let cancelled = false
+    ;(async () => {
+      await load({ company: companyId })
+      if (cancelled) return
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, companyId])
+
   const periodLabel = useMemo(() => {
     const companyPart = selectedCompanyLabel ? `${selectedCompanyLabel} · ` : ''
     if (!dateFrom && !dateTo) return `${companyPart}Esercizio corrente`
