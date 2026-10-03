@@ -529,7 +529,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     }
     if (!incoming.length) {
       setError('Nessuna riga con nominativo nel file. Servono le colonne Nominativo, Busta, Fuori, TFR.')
-      return
+      return false
     }
     setLines((prev) => {
       const byKey = new Map()
@@ -552,6 +552,39 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     window.setTimeout(() => {
       document.getElementById('stipendi-foglio-tabella')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 50)
+    return true
+  }
+
+  async function persistImportedMonth(locale, ym, importedLines, archiveList) {
+    const seen = new Set()
+    const cleaned = []
+    for (const partial of importedLines) {
+      const row = emptyLine(partial)
+      const name = String(row.name || '').trim()
+      const key = memberNameKey(name)
+      if (!name || !key || seen.has(key)) continue
+      seen.add(key)
+      cleaned.push(row)
+    }
+    if (!cleaned.length) return null
+    const period = periodForYm(ym)
+    const payload = {
+      locale_name: locale,
+      year_month: ym,
+      ...period,
+      lines: cleaned,
+      notes: null,
+    }
+    const existing = (archiveList || []).find((a) => a.year_month === ym)
+    if (existing) {
+      return updateStaffStipendiMonth(existing.id, {
+        lines: cleaned,
+        notes: null,
+        period_from: period.period_from,
+        period_to: period.period_to,
+      })
+    }
+    return createStaffStipendiMonth(payload)
   }
 
   async function handleImportFile(event) {
@@ -565,9 +598,45 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     }
     setBusy(true)
     setError('')
+    setSuccess('')
     try {
       const buffer = await file.arrayBuffer()
-      applyImportedLines(await readStipendiWorkbook(buffer))
+      const parsed = await readStipendiWorkbook(buffer)
+      const months = Array.isArray(parsed?.months) ? parsed.months : []
+      if (months.length >= 1) {
+        if (!operatorMode && (!gestionaleLocale || !gestionaleSessionOpen)) {
+          setError('Apri il locale con Accedi prima di caricare gli stipendi.')
+          return
+        }
+        const locale = operatorMode ? await resolveOperatorLocaleName() : gestionaleLocale
+        if (!locale) {
+          setError('Locale personale non disponibile. Apri di nuovo il locale con il codice.')
+          return
+        }
+        let savedCount = 0
+        let lastSaved = null
+        let latestArchives = archives
+        for (const month of months) {
+          const saved = await persistImportedMonth(locale, month.yearMonth, month.lines || [], latestArchives)
+          if (!saved) continue
+          lastSaved = saved
+          savedCount += 1
+          latestArchives = latestArchives.some((a) => a.year_month === month.yearMonth)
+            ? latestArchives.map((a) => (a.year_month === month.yearMonth ? saved : a))
+            : [...latestArchives, saved]
+        }
+        const rows = await loadArchives()
+        const lastYm = months[months.length - 1]?.yearMonth
+        const opened = (rows || []).find((a) => a.year_month === lastYm) || lastSaved
+        if (opened) openArchive(opened)
+        setSuccess(
+          months.length > 1
+            ? `File unico suddiviso in ${savedCount} mesi (2024–2026). Aperto ${ymLabel(opened?.year_month || lastYm)}.`
+            : `Inserite le voci di ${ymLabel(opened?.year_month || lastYm)}. Archivio salvato.`,
+        )
+        return
+      }
+      applyImportedLines(Array.isArray(parsed) ? parsed : parsed?.lines || [])
     } catch (e) {
       setError(e?.message || 'Lettura del file non riuscita')
     } finally {
@@ -678,6 +747,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                   className="btn btn-secondary btn-sm"
                   disabled={busy || loading}
                   onClick={() => importFileRef.current?.click()}
+                  title="Un foglio con Anno e Mese viene diviso nei mesi 2024–2026"
                 >
                   Carica Excel / ODS
                 </button>
