@@ -40,7 +40,7 @@ export const LOCALE_ACCOUNT_CODES = {
   pg: { cassa: '1005', ricavi: '4105', costi: '5105' },
 }
 
-/** Conti ausiliari cassa (POS, NC, refill, stacker). */
+/** Conti ausiliari (POS, NC, refill, stacker). */
 export const AUXILIARY_ACCOUNTS = {
   pos: { code: '1010', description: 'Incassi POS' },
   nonFiscale: { code: '1020', description: 'Cassa non fiscale' },
@@ -235,7 +235,7 @@ export function mapPrimaNotaToPasscomAccounts(row, { linkedInvoice = false } = {
       : { dare: accounts.costi, avere: AUXILIARY_ACCOUNTS.refill.code, causale: 'PAG' }
   }
   if (conto === PN_CONTO.STACKER) {
-    return { dare: accounts.cassa, avere: AUXILIARY_ACCOUNTS.stacker.code, causale: 'STK' }
+    return { dare: AUXILIARY_ACCOUNTS.stacker.code, avere: accounts.cassa, causale: 'STK' }
   }
   if (conto === PN_CONTO.VERSAMENTO_BANCA) {
     return { dare: GENERAL_ACCOUNTS.banca.code, avere: accounts.cassa, causale: 'VRB' }

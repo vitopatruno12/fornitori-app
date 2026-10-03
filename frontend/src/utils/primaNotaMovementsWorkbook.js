@@ -73,7 +73,7 @@ function isVersamentoBancaEntry(entry) {
 }
 
 export function isExtraCassaMovement(entry) {
-  return isPosEntry(entry) || isRefillEntry(entry) || isStackerSvuotamentoEntry(entry)
+  return isPosEntry(entry) || isRefillEntry(entry)
 }
 
 function movementDescription(entry) {
@@ -91,7 +91,7 @@ function movementDescription(entry) {
 
 export function movementIncassoTone(entry) {
   if (isExtraCassaMovement(entry)) return 'workbook-cell-muted'
-  if (isVersamentoBancaEntry(entry)) return 'workbook-cell-alert'
+  if (isStackerSvuotamentoEntry(entry) || isVersamentoBancaEntry(entry)) return 'workbook-cell-alert'
   if (entry?.type === 'entrata') return 'workbook-cell-yes'
   if (entry?.type === 'uscita') return 'workbook-cell-alert'
   return ''

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
 from ..constants.prima_nota import (
     DEFAULT_PRIMA_NOTA_ACTIVITY,
@@ -21,7 +21,8 @@ POS_CONTO = "POS"
 REFILL_CONTO = "REFILL"
 STACKER_SVUOTAMENTO_CONTO = "SVUOTAMENTO_STACKER"
 VERSAMENTO_BANCA_CONTO = "VERSAMENTO_BANCA"
-EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO, STACKER_SVUOTAMENTO_CONTO)
+EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO)
+CASSA_USCITA_FORCED_CONTI = (STACKER_SVUOTAMENTO_CONTO, VERSAMENTO_BANCA_CONTO)
 
 
 def normalize_activity(activity: Optional[str]) -> str:
@@ -68,12 +69,31 @@ def _is_fiscale_filter():
 
 
 def _is_cassa_contanti_filter():
-    """Movimenti che muovono contanti in cassa (fiscale + non fiscale, esclusi POS e Refill)."""
+    """Movimenti che muovono contanti in cassa (fiscale + NC + stacker + versamento, esclusi POS e Refill)."""
     return or_(CashEntry.conto.is_(None), CashEntry.conto.notin_(EXTRA_CASSA_CONTI))
 
 
 def _is_extra_cassa(conto: Optional[str]) -> bool:
     return conto in EXTRA_CASSA_CONTI
+
+
+def _is_cassa_uscita_forced(conto: Optional[str]) -> bool:
+    return conto in CASSA_USCITA_FORCED_CONTI
+
+
+def _cash_in_filter():
+    return and_(
+        CashEntry.type == "entrata",
+        _is_cassa_contanti_filter(),
+        or_(CashEntry.conto.is_(None), CashEntry.conto.notin_(CASSA_USCITA_FORCED_CONTI)),
+    )
+
+
+def _cash_out_filter():
+    return or_(
+        and_(CashEntry.type == "uscita", _is_cassa_contanti_filter()),
+        CashEntry.conto.in_(CASSA_USCITA_FORCED_CONTI),
+    )
 
 
 def _net_amount_for_day(
@@ -107,8 +127,18 @@ def _net_amount_for_day(
         entrate_q = entrate_q.filter(_is_fiscale_filter())
         uscite_q = uscite_q.filter(_is_fiscale_filter())
     elif cassa_contanti_only:
-        entrate_q = entrate_q.filter(_is_cassa_contanti_filter())
-        uscite_q = uscite_q.filter(_is_cassa_contanti_filter())
+        entrate_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            _cash_in_filter(),
+            act_clause,
+        )
+        uscite_q = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            _cash_out_filter(),
+            act_clause,
+        )
     entrate = Decimal(str(entrate_q.scalar() or 0)).quantize(Decimal("0.01"))
     uscite = Decimal(str(uscite_q.scalar() or 0)).quantize(Decimal("0.01"))
     return (entrate - uscite).quantize(Decimal("0.01"))
@@ -138,10 +168,36 @@ def _entrata_amount_for_day(
     return Decimal(str(total or 0)).quantize(Decimal("0.01"))
 
 
+def _conto_amount_for_day(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    activity: Optional[str],
+    *,
+    conto: str,
+) -> Decimal:
+    """Somma gli importi di un conto nel giorno, indipendentemente dal tipo salvato."""
+    act_clause = _activity_filter(activity)
+    total = (
+        db.query(func.coalesce(func.sum(CashEntry.amount), 0))
+        .filter(
+            CashEntry.entry_date >= start,
+            CashEntry.entry_date <= end,
+            CashEntry.conto == conto,
+            act_clause,
+        )
+        .scalar()
+    )
+    return Decimal(str(total or 0)).quantize(Decimal("0.01"))
+
+
 def _normalize_cash_entry_payload(payload: dict) -> dict:
-    """POS ammette solo entrata (pagamenti merce ricevuti)."""
-    if payload.get("conto") == POS_CONTO:
+    """POS solo entrata; svuotamento stacker e versamento banca solo uscita di cassa."""
+    conto = payload.get("conto")
+    if conto == POS_CONTO:
         payload = {**payload, "type": "entrata"}
+    elif conto in CASSA_USCITA_FORCED_CONTI:
+        payload = {**payload, "type": "uscita"}
     return payload
 
 
@@ -178,8 +234,7 @@ def list_entries_with_balance(
             db.query(func.coalesce(func.sum(CashEntry.amount), 0))
             .filter(
                 CashEntry.entry_date < start,
-                CashEntry.type == "entrata",
-                _is_cassa_contanti_filter(),
+                _cash_in_filter(),
                 _activity_filter(activity),
             )
             .scalar()
@@ -188,8 +243,7 @@ def list_entries_with_balance(
             db.query(func.coalesce(func.sum(CashEntry.amount), 0))
             .filter(
                 CashEntry.entry_date < start,
-                CashEntry.type == "uscita",
-                _is_cassa_contanti_filter(),
+                _cash_out_filter(),
                 _activity_filter(activity),
             )
             .scalar()
@@ -201,8 +255,13 @@ def list_entries_with_balance(
     result = []
     saldo = opening
     for e in entries:
-        if not _is_extra_cassa(e.conto):
+        if _is_extra_cassa(e.conto):
+            delta = Decimal("0")
+        elif _is_cassa_uscita_forced(e.conto):
+            delta = -abs(Decimal(str(e.amount)))
+        else:
             delta = Decimal(str(e.amount)) if e.type == "entrata" else -Decimal(str(e.amount))
+        if delta:
             saldo = (saldo + delta).quantize(Decimal("0.01"))
         result.append({
             "id": e.id,
@@ -338,15 +397,14 @@ def _get_period_summary_metrics(
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
     totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
-    totale_stacker_svuotamento = (
-        -_entrata_amount_for_day(db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO)
-    ).quantize(Decimal("0.01"))
+    totale_stacker_svuotamento = _conto_amount_for_day(
+        db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO
+    )
     totale_vendita = (
         totale_fiscale
         + totale_non_fiscale
         + totale_pos
         + totale_refill
-        + totale_stacker_svuotamento
     ).quantize(Decimal("0.01"))
 
     entrate = (
@@ -354,8 +412,7 @@ def _get_period_summary_metrics(
         .filter(
             CashEntry.entry_date >= start,
             CashEntry.entry_date <= end,
-            CashEntry.type == "entrata",
-            _is_cassa_contanti_filter(),
+            _cash_in_filter(),
             act_clause,
         )
         .scalar()
@@ -365,8 +422,7 @@ def _get_period_summary_metrics(
         .filter(
             CashEntry.entry_date >= start,
             CashEntry.entry_date <= end,
-            CashEntry.type == "uscita",
-            _is_cassa_contanti_filter(),
+            _cash_out_filter(),
             act_clause,
         )
         .scalar()
@@ -378,12 +434,12 @@ def _get_period_summary_metrics(
 
     entrate_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "entrata", _is_cassa_contanti_filter(), act_clause)
+        .filter(CashEntry.entry_date <= end, _cash_in_filter(), act_clause)
         .scalar()
     )
     uscite_cum = (
         db.query(func.coalesce(func.sum(CashEntry.amount), 0))
-        .filter(CashEntry.entry_date <= end, CashEntry.type == "uscita", _is_cassa_contanti_filter(), act_clause)
+        .filter(CashEntry.entry_date <= end, _cash_out_filter(), act_clause)
         .scalar()
     )
     saldo_cum = (
