@@ -10501,6 +10501,25 @@ select.form-control {
   box-shadow: inset 3px 0 0 #16a34a;
 }
 
+.banca-linked-invoice-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.15rem;
+  white-space: normal;
+  min-height: 100%;
+}
+
+.banca-linked-invoice-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.banca-linked-invoice-link:hover {
+  color: #1e40af;
+}
+
 .workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit td,
 .workbook-grid.banca-fit-grid tr.banca-recon-supplier-hit .excel-cell {
   background: #f3e8ff !important;
