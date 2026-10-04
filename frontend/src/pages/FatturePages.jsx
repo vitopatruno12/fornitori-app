@@ -3209,51 +3209,82 @@ export function FattureImpostazioniPage() {
     })
   }
 
-  async function copyPassword(text) {
+  async function copySecret(text, what) {
     try {
       await navigator.clipboard.writeText(String(text || ''))
-      setSuccess('Password copiata negli appunti.')
+      setSuccess(`${what} copiato negli appunti.`)
     } catch {
-      setError('Copia password non riuscita')
+      setError(`Copia ${what} non riuscita`)
     }
   }
 
-  const agentMirror = rotations.length > 0 ? (
-    <div className="ade-pwd-mirror-banner" role="region" aria-label="Password rinnovate dall’agent">
-      <div className="ade-pwd-mirror-banner-head">
-        <strong>Password società rinnovate dall’agent</strong>
-        <span>Cambiate su Fisconline e ricopiate in Impostazioni</span>
-      </div>
-      <ul className="ade-pwd-mirror-list">
-        {rotations.map((row) => {
-          const pid = row.profile_id
-          const show = Boolean(revealed[pid])
-          return (
-            <li key={pid} className="ade-pwd-mirror-item">
-              <div className="ade-pwd-mirror-item-main">
-                <strong>{row.label || pid}</strong>
-                <code className="ade-pwd-mirror-pwd">{show ? row.password : '••••••••••••'}</code>
-              </div>
-              <div className="ade-pwd-mirror-item-meta">
-                <span>{formatChangedAt(row.changed_at)}</span>
+  function mirrorItem(row, keyPrefix) {
+    const pid = row.profile_id
+    const key = `${keyPrefix}${pid}`
+    const showPwd = Boolean(revealed[`${key}-pwd`])
+    const showPin = Boolean(revealed[`${key}-pin`])
+    return (
+      <li key={key} className="ade-pwd-mirror-item ade-pwd-mirror-item--stack">
+        <div className="ade-pwd-mirror-item-main">
+          <strong>{row.label || pid}</strong>
+          <span>{formatChangedAt(row.pin_changed_at || row.changed_at)}</span>
+        </div>
+        <div className="ade-pwd-mirror-secrets">
+          <div className="ade-pwd-mirror-line">
+            <span className="ade-pwd-mirror-label">Password</span>
+            <code className="ade-pwd-mirror-pwd">{showPwd ? row.password : '••••••••••••'}</code>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setRevealed((prev) => ({ ...prev, [`${key}-pwd`]: !showPwd }))}
+            >
+              {showPwd ? 'Nascondi' : 'Mostra'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void copySecret(row.password, 'Password')}
+            >
+              Copia
+            </button>
+          </div>
+          <div className="ade-pwd-mirror-line">
+            <span className="ade-pwd-mirror-label">PIN</span>
+            <code className="ade-pwd-mirror-pwd">
+              {row.pin ? (showPin ? row.pin : '••••••••••') : '—'}
+            </code>
+            {row.pin ? (
+              <>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => setRevealed((prev) => ({ ...prev, [pid]: !prev[pid] }))}
+                  onClick={() => setRevealed((prev) => ({ ...prev, [`${key}-pin`]: !showPin }))}
                 >
-                  {show ? 'Nascondi' : 'Mostra'}
+                  {showPin ? 'Nascondi' : 'Mostra'}
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => void copyPassword(row.password)}
+                  onClick={() => void copySecret(row.pin, 'PIN')}
                 >
                   Copia
                 </button>
-              </div>
-            </li>
-          )
-        })}
+              </>
+            ) : null}
+          </div>
+        </div>
+      </li>
+    )
+  }
+
+  const agentMirror = rotations.length > 0 ? (
+    <div className="ade-pwd-mirror-banner" role="region" aria-label="Password e PIN rinnovati dall’agent">
+      <div className="ade-pwd-mirror-banner-head">
+        <strong>Password e PIN rinnovati dall’agent</strong>
+        <span>Cambiati su Fisconline e ricopiati in Impostazioni</span>
+      </div>
+      <ul className="ade-pwd-mirror-list">
+        {rotations.map((row) => mirrorItem(row, 'banner-'))}
       </ul>
     </div>
   ) : null
@@ -3261,7 +3292,7 @@ export function FattureImpostazioniPage() {
   return (
     <FatturePageShell
       title="Impostazioni"
-      lead="L’agent AdE lavora in background per tutte le società: rinnova le password Fisconline prima della scadenza, le ricopia qui, e scarica le fatture (richieste + risposte)."
+      lead="L’agent AdE lavora in background per tutte le società: rinnova password e PIN Fisconline prima della scadenza, li ricopia qui, e scarica le fatture (richieste + risposte)."
       heroExtra={agentMirror}
     >
       {loading && <AnalisiLoadingBar active label="Caricamento impostazioni" variant="subtle" />}
@@ -3271,45 +3302,14 @@ export function FattureImpostazioniPage() {
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Credenziali Fisconline (Agenzia Entrate)</h2>
         <p className="fatture-note" style={{ marginTop: 0 }}>
-          L’agent cambia automaticamente la password sul sito Fisconline quando sta per scadere (o è scaduta),
-          per ogni società, durante i sync in background; poi la salva qui. Nelle card vedi solo se è configurata;
-          nello specchietto verde sopra trovi quelle rinnovate dall’agent.
+          L’agent cambia automaticamente password e PIN sul sito Fisconline quando mancano 7 giorni
+          alla scadenza di 90 giorni, o quando il sito avvisa che stanno per scadere. Poi li salva qui.
         </p>
         {rotations.length > 0 ? (
           <div className="ade-pwd-mirror-panel">
-            <h3 className="ade-pwd-mirror-panel-title">Specchietto password agent</h3>
+            <h3 className="ade-pwd-mirror-panel-title">Specchietto password e PIN</h3>
             <ul className="ade-pwd-mirror-list ade-pwd-mirror-list--panel">
-              {rotations.map((row) => {
-                const pid = row.profile_id
-                const show = Boolean(revealed[`panel-${pid}`])
-                return (
-                  <li key={`panel-${pid}`} className="ade-pwd-mirror-item">
-                    <div className="ade-pwd-mirror-item-main">
-                      <strong>{row.label || pid}</strong>
-                      <code className="ade-pwd-mirror-pwd">{show ? row.password : '••••••••••••'}</code>
-                    </div>
-                    <div className="ade-pwd-mirror-item-meta">
-                      <span>{formatChangedAt(row.changed_at)}</span>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() =>
-                          setRevealed((prev) => ({ ...prev, [`panel-${pid}`]: !prev[`panel-${pid}`] }))
-                        }
-                      >
-                        {show ? 'Nascondi' : 'Mostra'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => void copyPassword(row.password)}
-                      >
-                        Copia
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
+              {rotations.map((row) => mirrorItem(row, 'panel-'))}
             </ul>
           </div>
         ) : null}

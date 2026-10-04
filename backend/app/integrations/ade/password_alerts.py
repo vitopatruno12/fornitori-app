@@ -99,10 +99,10 @@ def dismiss_alert(profile_id: str) -> None:
 
 
 def notice_from_page_text(body: str) -> Optional[Dict[str, Any]]:
-  """Estrae l'avviso password dal testo della pagina AdE. Non restituisce credenziali."""
+  """Estrae l'avviso password/PIN dal testo della pagina AdE. Non restituisce credenziali."""
   compact = re.sub(r"\s+", " ", body or "").strip()
   low = compact.lower()
-  if "password" not in low:
+  if "password" not in low and not re.search(r"\bpin\b", low):
     return None
   expired = any(
     s in low
@@ -112,6 +112,11 @@ def notice_from_page_text(body: str) -> Optional[Dict[str, Any]]:
       "password è scaduta",
       "password e' scaduta",
       "password scaduta",
+      "pin è scaduto",
+      "pin e' scaduto",
+      "pin scaduto",
+      "codice pin è scaduto",
+      "codice pin e' scaduto",
     )
   )
   expiring = any(
@@ -120,9 +125,13 @@ def notice_from_page_text(body: str) -> Optional[Dict[str, Any]]:
       "password scadrà",
       "password scadra",
       "password in scadenza",
+      "pin scadrà",
+      "pin scadra",
+      "pin in scadenza",
       "sta per scadere",
       "prossima alla scadenza",
       "scadenza della password",
+      "scadenza del pin",
     )
   )
   if not expired and not expiring:
@@ -135,14 +144,14 @@ def notice_from_page_text(body: str) -> Optional[Dict[str, Any]]:
   snippet = ""
   for sentence in re.split(r"(?<=[.!])\s+", compact):
     sl = sentence.lower()
-    if "password" in sl and any(k in sl for k in ("scad", "cambio")):
+    if any(k in sl for k in ("password", "pin")) and any(k in sl for k in ("scad", "cambio", "rinnovo")):
       snippet = sentence.strip()
       break
   if not snippet:
     snippet = (
-      "La password del tuo account è scaduta. Effettua l'operazione di cambio password."
+      "Password o PIN Fisconline scaduti. Vanno rinnovati."
       if expired
-      else "La password Fisconline sta per scadere."
+      else "Password o PIN Fisconline stanno per scadere."
     )
   return {
     "level": "expired" if expired else "expiring",

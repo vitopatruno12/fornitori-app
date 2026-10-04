@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  AdE su questo PC, con la rotazione gia' prevista (ogni 3 / ogni 4 giorni).
-
-  -Phase request   alle 14:00: solo richieste del giorno
-  -Phase download  alle 05:00: scarica le richieste del giorno prima
+  AdE su questo PC.
+  Ogni 3 giorni alle 14:00: Mediazione A+Z e Via Lattea.
+  Ogni 4 giorni alle 14:00: Risacca e PG.
+  Scarico il mattino dopo alle 05:00.
 
 .PARAMETER CatchUp
   Solo richieste, tutte le societa', ultimi 21 giorni. Lo scarico resta alle 05:00.
@@ -40,6 +40,10 @@ if (-not (Test-Path -LiteralPath $Profiles)) {
 }
 
 $env:ADE_PROFILES_PATH = $Profiles
+$env:ADE_PROFILE_TIMEOUT_SEC = "900"
+# Il .env punta ancora alle cartelle di un altro utente Windows: da qui non si possono creare.
+$env:ADE_XML_DROP_DIR = Join-Path $Backend "uploads\ade"
+$env:ADE_DEBUG_DIR = Join-Path $Backend "uploads\ade_debug"
 $env:ADE_ROTATION_LOOKBACK_DAYS = "21"
 # Ricevute (emesse verso le società, anche se il fornitore non è in anagrafica) ed emesse nostre.
 $env:ADE_MASS_KINDS = "ricevute,emesse"
@@ -60,15 +64,20 @@ $tag = if ($CatchUp) { "catchup" } elseif ($Phase) { $Phase } else { "rotation" 
 $LogFile = Join-Path $LogDir ("ade_{0}_{1}.log" -f $tag, $stamp)
 
 function Invoke-Rotation([string[]]$Extra) {
-  & $Python -u $Script @Extra 2>&1 | Tee-Object -FilePath $LogFile -Append
+  # Redirect nel file: la pipe di PowerShell 5.1 si blocca sullo stderr di Chrome.
+  $argList = @("-u", $Script) + $Extra
+  $quoted = $argList | ForEach-Object {
+    if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+  }
+  cmd /c "`"$Python`" $($quoted -join ' ') >> `"$LogFile`" 2>&1"
   if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
     Write-Host "Rotazione uscita $LASTEXITCODE"
   }
 }
 
 if ($CatchUp) {
-  Invoke-Rotation @("--force", "mediazione,via_lattea,risacca", "--phase", "request")
-  Invoke-Rotation @("--force", "pg", "--phase", "request")
+  Invoke-Rotation @("--force", "mediazione,via_lattea", "--phase", "request")
+  Invoke-Rotation @("--force", "risacca,pg", "--phase", "request")
   exit 0
 }
 

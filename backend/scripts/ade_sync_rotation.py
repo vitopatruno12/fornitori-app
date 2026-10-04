@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Rotazione scarichi AdE (date recenti): max 3 societa'/giorno.
+"""Rotazione scarichi AdE (date recenti).
 
 Regola operativa:
-  - Gruppo da 3: ogni 3 giorni  -> mediazione, via_lattea, risacca
-  - Gruppo da 2: ogni 4 giorni  -> pg, via_lattea
-  - Se coincidono, unione senza duplicati e tetto MAX 3 AdE/giorno
-  - Richieste alle 14:00. Scarico il mattino dopo alle 05:00 (non dopo 15 minuti):
+  - Ogni 3 giorni alle 14:00 -> Mediazione A+Z e Via Lattea
+  - Ogni 4 giorni alle 14:00 -> Risacca e PG
+  - Se i due giorni coincidono, partono tutte e quattro
+  - Scarico il mattino dopo alle 05:00 (non dopo 15 minuti):
     l'Agenzia delle Entrate puo' impiegare molte ore a preparare i file.
 
 Uso (PC ufficio):
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -33,20 +34,20 @@ ROOT = _HERE.parent if (_HERE.parent / "app").is_dir() else _HERE
 if str(ROOT) not in sys.path:
   sys.path.insert(0, str(ROOT))
 
-# Gruppo 3 ogni 3 giorni | gruppo 2 ogni 4 giorni
+# Ogni 3 giorni: Mediazione A+Z (un accesso AdE) e Via Lattea.
+# Ogni 4 giorni: Risacca e PG.
 GROUP_EVERY_3: List[Tuple[str, str]] = [
   ("mediazione", "Mediazione A+Z"),
   ("via_lattea", "Via Lattea"),
-  ("risacca", "Risacca · Bar Momento"),
 ]
 GROUP_EVERY_4: List[Tuple[str, str]] = [
+  ("risacca", "Risacca · Bar Momento"),
   ("pg", "PG · Gazza Ladra"),
-  ("via_lattea", "Via Lattea"),
 ]
 
-# Priorita' se il giorno ha troppi profili (max 3)
+# Priorita' se un giorno ha troppi profili
 PRIORITY = ["mediazione", "via_lattea", "risacca", "pg"]
-MAX_PER_DAY = 3
+MAX_PER_DAY = 4
 EPOCH = date(2026, 10, 1)  # inizio modalita' "date recenti"
 
 
@@ -96,7 +97,7 @@ def plan_for_day(day: date) -> dict:
     reasons.append("gruppo-3 (ogni 3 giorni)")
   if g4:
     selected.extend(GROUP_EVERY_4)
-    reasons.append("gruppo-2 (ogni 4 giorni)")
+    reasons.append("gruppo-4 (ogni 4 giorni)")
 
   # Dedup preservando ordine
   seen = set()
@@ -139,7 +140,84 @@ def _available_ids() -> set[str]:
   return ids
 
 
+def _profile_timeout_sec() -> int:
+  try:
+    return max(180, min(2400, int(os.getenv("ADE_PROFILE_TIMEOUT_SEC") or "900")))
+  except ValueError:
+    return 900
+
+
+def _kill_process_tree(pid: int) -> None:
+  if pid <= 0:
+    return
+  if os.name == "nt":
+    subprocess.run(
+      ["taskkill", "/PID", str(pid), "/T", "/F"],
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL,
+    )
+    return
+  try:
+    os.kill(pid, 15)
+  except OSError:
+    pass
+
+
 def _run_phase(
+  profiles: Sequence[Tuple[str, str]],
+  *,
+  d_from: str,
+  d_to: str,
+  phase: str,
+  available: set[str],
+) -> int:
+  """Ogni società gira in un processo proprio: se Chrome si blocca, viene chiuso."""
+  if os.environ.get("ADE_INLINE") == "1":
+    return _run_phase_inline(
+      profiles, d_from=d_from, d_to=d_to, phase=phase, available=available
+    )
+  title = "RICHIESTE" if phase == "request" else "SCARICO"
+  print(f"\n########## FASE {title} ##########", flush=True)
+  timeout = _profile_timeout_sec()
+  script = str(Path(__file__).resolve())
+  rc = 0
+  ran = 0
+  for pid, label in profiles:
+    if pid.lower() not in available:
+      print(f"  skip {pid}: profilo assente ({label})", flush=True)
+      continue
+    print(
+      f"\n=== {title} · {label} [{pid}] {d_from} -> {d_to} (max {timeout}s) ===",
+      flush=True,
+    )
+    env = os.environ.copy()
+    env["ADE_INLINE"] = "1"
+    env["ADE_ONLY_PROFILE"] = pid
+    proc = subprocess.Popen(
+      [sys.executable, "-u", script, "--phase", phase, "--force", pid, "--date", d_to],
+      cwd=str(ROOT),
+      env=env,
+    )
+    try:
+      code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+      _kill_process_tree(proc.pid)
+      print(
+        f"  ERR {pid}: superati {timeout}s, browser chiuso per non restare bloccato",
+        flush=True,
+      )
+      rc = 1
+      continue
+    ran += 1
+    if code not in (0, None):
+      print(f"  ERR {pid}: uscita {code}", flush=True)
+      rc = 1
+  if ran == 0 and rc == 0:
+    return 2
+  return rc
+
+
+def _run_phase_inline(
   profiles: Sequence[Tuple[str, str]],
   *,
   d_from: str,
@@ -203,7 +281,7 @@ def _save_state(plan: dict, rc: int) -> None:
 
 
 def main() -> int:
-  parser = argparse.ArgumentParser(description="Rotazione AdE max 3/giorno")
+  parser = argparse.ArgumentParser(description="Rotazione AdE: ogni 3 giorni Mediazione e Via Lattea, ogni 4 Risacca e PG")
   parser.add_argument("--date", help="Giorno di piano YYYY-MM-DD (default oggi)")
   parser.add_argument("--dry-run", action="store_true", help="Mostra piano senza eseguire")
   parser.add_argument(

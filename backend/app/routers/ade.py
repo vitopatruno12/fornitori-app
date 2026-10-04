@@ -152,6 +152,7 @@ class AdePasswordRotationIn(BaseModel):
   profile_id: str
   label: str = ""
   password: str = Field(..., min_length=1, max_length=128)
+  pin: Optional[str] = Field(default=None, max_length=20)
   source: str = "agent"
   message: str = ""
   days_left: Optional[int] = None
@@ -183,11 +184,16 @@ def post_ade_password_rotation(
       profile_id=body.profile_id,
       label=body.label,
       password=body.password,
+      pin=body.pin,
       source=body.source or "agent",
       message=body.message,
       days_left=body.days_left,
     )
-    update_fisconline_credentials(body.profile_id, password=body.password)
+    update_fisconline_credentials(
+      body.profile_id,
+      password=body.password,
+      pin=body.pin,
+    )
     dismiss_alert(body.profile_id)
   except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e)) from e

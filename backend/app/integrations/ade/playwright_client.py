@@ -408,7 +408,17 @@ class AdePlaywrightClient:
         self._pause(page, 300 if self.fast_login else 1200)
         self._dismiss_ade_modals(page)
         body = self._page_text(page, 800).lower()
-        if any(s in body for s in ("codice fiscale", "password", "fisconline", "entratel")):
+        has_password = False
+        try:
+          has_password = page.locator(
+            'input[type="password"], input[name="IDToken2"]'
+          ).count() > 0
+        except Exception:
+          has_password = False
+        # Il tab «Fisconline/Entratel» è solo un'etichetta: non è ancora il form.
+        if has_password or (
+          "codice fiscale" in body and "password" in body and "entra con spid" not in body
+        ):
           self._shot(page, "01_login_direct", shots)
           return
       except Exception:
@@ -449,28 +459,69 @@ class AdePlaywrightClient:
     except Exception:
       return ""
 
+  def _step(self, msg: str) -> None:
+    line = f"[{self.profile.id}] {msg}"
+    print(line, flush=True)
+    try:
+      path = Path(__file__).resolve().parents[2] / "uploads" / "ade_logs" / "ade_steps.log"
+      path.parent.mkdir(parents=True, exist_ok=True)
+      with path.open("a", encoding="utf-8") as fh:
+        fh.write(datetime.now().isoformat(timespec="seconds") + " " + line + "\n")
+    except Exception:
+      pass
+
   def _select_auth_tab(self, page: Any, mode: str) -> None:
-    """Seleziona tab CNS o Fisconline/Entratel."""
+    """Apre la scheda CNS o Fisconline. Il clic non deve attendere una navigazione."""
     mode_l = (mode or "").lower()
+    clicked = False
+    try:
+      page.set_default_timeout(8000)
+    except Exception:
+      pass
     if mode_l == "fisconline":
-      patterns = (r"Fisconline", r"Entratel", r"Fisconline/Entratel")
+      locators = (
+        page.get_by_role("tab", name=re.compile(r"Fisconline\s*/\s*Entratel", re.I)),
+        page.get_by_text(re.compile(r"^\s*Fisconline\s*/\s*Entratel\s*$", re.I)),
+      )
     else:
-      patterns = (r"CNS",)
-    for pat in patterns:
+      locators = (
+        page.get_by_role("tab", name=re.compile(r"^CNS$", re.I)),
+        page.get_by_text(re.compile(r"^\s*CNS\s*$", re.I)),
+      )
+    for loc in locators:
       try:
-        tab = page.get_by_role("tab", name=re.compile(pat, re.I))
-        if tab.count() > 0:
-          tab.first.click(timeout=5000)
-          page.wait_for_timeout(800)
-          return
-      except Exception:
-        pass
-      try:
-        page.get_by_text(re.compile(f"^{pat}$", re.I)).first.click(timeout=3000)
-        page.wait_for_timeout(800)
-        return
+        loc.first.click(timeout=4000, force=True, no_wait_after=True)
+        clicked = True
+        break
       except Exception:
         continue
+    if not clicked:
+      try:
+        clicked = bool(page.evaluate(
+          """(kind) => {
+            const all = Array.from(document.querySelectorAll('a,button,[role="tab"],li,span,div'));
+            const hits = all.filter((el) => {
+              const t = (el.innerText || '').replace(/\\s+/g, ' ').trim();
+              if (!t || t.length > 28) return false;
+              const r = el.getBoundingClientRect();
+              if (r.width < 20 || r.height < 8) return false;
+              if (kind === 'fisconline') return /fisconline\\s*\\/\\s*entratel/i.test(t);
+              return /^cns$/i.test(t);
+            });
+            hits.sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width);
+            const hit = hits[0];
+            if (!hit) return false;
+            hit.click();
+            return true;
+          }""",
+          "fisconline" if mode_l == "fisconline" else "cns",
+        ))
+      except Exception as exc:
+        self._step(f"tab {mode_l} non cliccato: {exc}")
+        return
+    self._step(f"tab {mode_l} ok={clicked}")
+    if clicked:
+      time.sleep(0.8)
 
   def _report_password_notice(self, body: str) -> None:
     """Registra l'avviso di scadenza password letto dalla pagina AdE."""
@@ -509,11 +560,13 @@ class AdePlaywrightClient:
     from .password_rotations import (
       apply_rotated_password_locally,
       generate_fisconline_password,
+      generate_fisconline_pin,
       publish_rotation,
       push_remote_credentials,
     )
 
     old_password = (self.profile.fisconline_password or _env("ADE_FISCONLINE_PASSWORD")).strip()
+    old_pin = (self.profile.fisconline_pin or _env("ADE_FISCONLINE_PIN")).strip()
     if not old_password:
       return False
 
@@ -521,40 +574,62 @@ class AdePlaywrightClient:
       old_password=old_password,
       codice_fiscale=self.profile.codice_fiscale or self.profile.partita_iva or "",
     )
-    ok = self._change_fisconline_password_on_site(page, shots, old_password=old_password, new_password=new_password)
+    new_pin = generate_fisconline_pin(old_pin=old_pin) if old_pin else ""
+    self._step("rinnovo password e PIN prima della scadenza")
+    ok = self._change_fisconline_password_on_site(
+      page,
+      shots,
+      old_password=old_password,
+      new_password=new_password,
+      old_pin=old_pin,
+      new_pin=new_pin,
+    )
     if not ok:
-      print(
-        f"[{self.profile.id}] Auto-rinnovo password Fisconline non riuscito "
-        f"(form cambio password non trovato o rifiutato).",
-        flush=True,
-      )
+      self._step("rinnovo non riuscito: form non trovato o rifiutato")
       return False
 
+    if new_pin and not getattr(self, "_pin_change_ok", False):
+      self._pin_change_ok = self._change_fisconline_pin_on_site(
+        page, shots, old_pin=old_pin, new_pin=new_pin
+      )
+
+    pin_changed = bool(getattr(self, "_pin_change_ok", False))
     self.profile.fisconline_password = new_password
+    if pin_changed and new_pin:
+      self.profile.fisconline_pin = new_pin
     try:
-      apply_rotated_password_locally(profile_id=self.profile.id, password=new_password)
+      apply_rotated_password_locally(
+        profile_id=self.profile.id,
+        password=new_password,
+        pin=new_pin if pin_changed else None,
+      )
     except Exception as exc:
-      print(f"[{self.profile.id}] Salvataggio password locale fallito: {exc}", flush=True)
-    push_remote_credentials(profile_id=self.profile.id, password=new_password)
+      self._step(f"salvataggio credenziali locale fallito: {exc}")
+    push_remote_credentials(
+      profile_id=self.profile.id,
+      password=new_password,
+      pin=new_pin if pin_changed else None,
+    )
     try:
       publish_rotation(
         profile_id=self.profile.id,
         label=self.profile.label or self.profile.id,
         password=new_password,
+        pin=new_pin if pin_changed else None,
         source="agent",
-        message=str(notice.get("message") or "Password rinnovata automaticamente dall'agent AdE."),
+        message=str(notice.get("message") or "Password e PIN rinnovati automaticamente dall'agent AdE."),
         days_left=notice.get("days_left") if isinstance(notice.get("days_left"), int) else None,
       )
     except Exception as exc:
-      print(f"[{self.profile.id}] Specchietto rotazione non salvato: {exc}", flush=True)
+      self._step(f"specchietto rotazione non salvato: {exc}")
     try:
       dismiss_alert(self.profile.id)
     except Exception:
       pass
     self._password_rotated = True
-    print(
-      f"[{self.profile.id}] Password Fisconline rinnovata dall'agent e copiata in Impostazioni.",
-      flush=True,
+    self._step(
+      "credenziali rinnovate e copiate in Impostazioni"
+      + (" (password e PIN)" if pin_changed else " (password; pagina PIN non trovata)")
     )
     self._shot(page, "01_password_rotated", shots, force=True)
     return True
@@ -566,6 +641,8 @@ class AdePlaywrightClient:
     *,
     old_password: str,
     new_password: str,
+    old_pin: str = "",
+    new_pin: str = "",
   ) -> bool:
     """Best-effort sul form «Cambio password» AdE / IAM."""
     self._shot(page, "01_password_change_start", shots)
@@ -576,6 +653,8 @@ class AdePlaywrightClient:
       r"Cambio\s+password",
       r"Cambia\s+password",
       r"Modifica\s+password",
+      r"Cambio\s+PIN",
+      r"Cambia\s+PIN",
       r"Effettua\s+l['’]?operazione\s+di\s+cambio\s+password",
       r"cambio\s+della\s+password",
     ):
@@ -662,13 +741,25 @@ class AdePlaywrightClient:
         self._shot(page, "01_password_change_form_missing", shots, force=True)
         return False
     elif not filled_old:
-      # Form a 2 campi (solo nuova+conferma) ok; altrimenti prova a riempire il primo password rimasto
       try:
         inputs = page.locator('input[type="password"]')
         if inputs.count() >= 3:
           inputs.nth(0).fill(old_password, timeout=5000)
       except Exception:
         pass
+
+    self._pin_change_ok = False
+    if new_pin:
+      filled_old_pin = _fill_by_labels(
+        (r"pin\s+attual", r"pin\s+corrent", r"vecchio\s+pin", r"pin\s+in\s+uso"),
+        old_pin,
+      ) if old_pin else False
+      filled_new_pin = _fill_by_labels((r"nuovo\s+pin", r"pin\s+nuovo"), new_pin)
+      filled_pin_confirm = _fill_by_labels(
+        (r"conferma.*pin", r"ripeti.*pin", r"conferma\s+nuovo\s+pin"),
+        new_pin,
+      )
+      self._pin_change_ok = bool(filled_new_pin and (filled_pin_confirm or filled_old_pin or filled_new_pin))
 
     self._shot(page, "01_password_change_filled", shots)
 
@@ -757,6 +848,113 @@ class AdePlaywrightClient:
       return False
     return False
 
+  def _change_fisconline_pin_on_site(
+    self,
+    page: Any,
+    shots: List[str],
+    *,
+    old_pin: str,
+    new_pin: str,
+  ) -> bool:
+    """Apre «Cambio PIN» se non era nello stesso form della password."""
+    if not new_pin:
+      return False
+    opened = False
+    for pat in (r"Cambio\s+PIN", r"Cambia\s+PIN", r"Modifica\s+PIN", r"Rinnovo\s+PIN"):
+      for role in ("link", "button"):
+        try:
+          loc = page.get_by_role(role, name=re.compile(pat, re.I))
+          if loc.count() > 0:
+            loc.first.click(timeout=4000, no_wait_after=True)
+            opened = True
+            break
+        except Exception:
+          continue
+      if opened:
+        break
+    if not opened:
+      return False
+    time.sleep(0.8)
+
+    def _fill(patterns: tuple[str, ...], value: str) -> bool:
+      if not value:
+        return False
+      for pat in patterns:
+        try:
+          loc = page.get_by_label(re.compile(pat, re.I))
+          if loc.count() > 0:
+            loc.first.fill(value, timeout=4000)
+            return True
+        except Exception:
+          continue
+      return False
+
+    filled_new = _fill((r"nuovo\s+pin", r"pin\s+nuovo"), new_pin)
+    filled_confirm = _fill((r"conferma.*pin", r"ripeti.*pin"), new_pin)
+    if old_pin:
+      _fill((r"pin\s+attual", r"pin\s+corrent", r"vecchio\s+pin"), old_pin)
+    if not filled_new:
+      self._shot(page, "01_pin_change_form_missing", shots, force=True)
+      return False
+    if not filled_confirm:
+      filled_confirm = filled_new
+    submitted = False
+    for btn_name in (r"^OK$", r"Conferma", r"Salva", r"Cambia PIN", r"Invia"):
+      try:
+        page.get_by_role("button", name=re.compile(btn_name, re.I)).first.click(timeout=4000, no_wait_after=True)
+        submitted = True
+        break
+      except Exception:
+        continue
+    if not submitted:
+      return False
+    time.sleep(1.0)
+    try:
+      body = (page.inner_text("body") or "")[:2000].lower()
+    except Exception:
+      body = ""
+    if any(h in body for h in ("non valido", "non corretto", "errat", "non coincid")):
+      return False
+    self._shot(page, "01_pin_rotated", shots, force=True)
+    return True
+
+  def _rotate_credentials_if_due(self, page: Any, shots: List[str]) -> None:
+    """Dopo un accesso riuscito, rinnova password e PIN se mancano 7 giorni ai 90."""
+    from .password_alerts import notice_from_page_text
+    from .password_rotations import (
+      auto_rotate_enabled,
+      credentials_due,
+      remember_credential_baseline,
+      should_auto_rotate,
+    )
+
+    if not auto_rotate_enabled():
+      return
+    if (self.profile.auth_mode or "").lower() not in ("fisconline", "storage", ""):
+      return
+    notice = None
+    try:
+      notice = notice_from_page_text((page.inner_text("body") or "")[:3000])
+    except Exception:
+      notice = None
+    due = credentials_due(self.profile.id)
+    site_asks = bool(notice and should_auto_rotate(notice))
+    if not due.get("due") and not site_asks:
+      if not due.get("known"):
+        remember_credential_baseline(self.profile.id)
+        self._step("scadenza credenziali conteggiata da oggi (90 giorni)")
+      return
+    days = due.get("password_days_left")
+    if not isinstance(days, int):
+      days = due.get("pin_days_left") if isinstance(due.get("pin_days_left"), int) else None
+    if not notice:
+      notice = {
+        "level": "expiring",
+        "message": "Rinnovo automatico di password e PIN prima della scadenza di 90 giorni.",
+        "days_left": days if isinstance(days, int) else 7,
+      }
+    self._try_auto_rotate_password(page, shots, notice)
+
   def _login_fisconline(self, page: Any, shots: List[str]) -> bool:
     """
     Login Fisconline/Entratel (form web): CF + password + PIN — completamente automatico.
@@ -771,65 +969,95 @@ class AdePlaywrightClient:
       return False
 
     self._open_login_page(page, shots)
+    try:
+      page.set_default_timeout(8000)
+    except Exception:
+      pass
     self._select_auth_tab(page, "fisconline")
-    self._pause(page, 250)
-    self._shot(page, "01b_fisconline_tab", shots)
-
-    def _fill_field(locators: list, value: str) -> bool:
-      for loc in locators:
-        try:
-          if loc.count() == 0:
-            continue
-          el = loc.first
-          el.click(timeout=4000)
-          el.fill("")
-          el.fill(value, timeout=5000)
-          return True
-        except Exception:
-          continue
-      return False
-
-    filled_user = _fill_field(
-      [
-        page.get_by_label(re.compile(r"codice fiscale|nome utente", re.I)),
-        page.locator('input[name="IDToken1"], input#username, input[name="username"]'),
-      ],
-      cf,
+    self._step("compilo form fisconline")
+    filled_flags: dict = {}
+    for _attempt in (1, 2):
+      try:
+        filled_flags = page.evaluate(
+          """({cf, password, pin}) => {
+            const visible = (el) => {
+              const r = el.getBoundingClientRect();
+              const st = getComputedStyle(el);
+              return r.width > 8 && r.height > 8 && st.visibility !== 'hidden' && st.display !== 'none';
+            };
+            const setVal = (el, value) => {
+              el.focus();
+              const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+              if (desc && desc.set) desc.set.call(el, value);
+              else el.value = value;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+            const texts = inputs.filter((el) => {
+              const t = (el.type || 'text').toLowerCase();
+              return t === 'text' || t === 'tel' || t === '';
+            });
+            const pwds = inputs.filter((el) => (el.type || '').toLowerCase() === 'password');
+            const user = texts[0];
+            const pwd = pwds[0];
+            const pinEl = pwds[1];
+            if (user) setVal(user, cf);
+            if (pwd) setVal(pwd, password);
+            if (pinEl) setVal(pinEl, pin);
+            const okUser = !!(user && (user.value || '').length);
+            const okPwd = !!(pwd && (pwd.value || '').length);
+            const okPin = !!(pinEl && (pinEl.value || '').length);
+            let submitted = false;
+            if (okUser && okPwd && okPin) {
+              const btn = Array.from(document.querySelectorAll('button,input[type="submit"],a')).find((el) => {
+                const t = ((el.innerText || el.value || '') + '').replace(/\\s+/g, ' ').trim();
+                return /^accedi$/i.test(t);
+              });
+              if (btn) { btn.click(); submitted = true; }
+            }
+            return {
+              utente: okUser,
+              password: okPwd,
+              pin: okPin,
+              submitted: submitted,
+              testi: texts.length,
+              password_n: pwds.length,
+            };
+          }""",
+          {"cf": cf, "password": password, "pin": pin},
+        ) or {}
+      except Exception as exc:
+        filled_flags = {}
+        self._step(f"form evaluate fail: {exc}")
+      if filled_flags.get("utente") and filled_flags.get("password") and filled_flags.get("pin"):
+        break
+      time.sleep(0.8)
+    filled = bool(filled_flags.get("utente") and filled_flags.get("password") and filled_flags.get("pin"))
+    self._step(
+      f"form utente={bool(filled_flags.get('utente'))} "
+      f"password={bool(filled_flags.get('password'))} pin={bool(filled_flags.get('pin'))} "
+      f"invio={bool(filled_flags.get('submitted'))}"
     )
-    filled_pwd = _fill_field(
-      [
-        page.get_by_label(re.compile(r"password", re.I)),
-        page.locator('input[name="IDToken2"]'),
-      ],
-      password,
-    )
-    filled_pin = _fill_field(
-      [
-        page.get_by_label(re.compile(r"^pin", re.I)),
-        page.locator('input[name="IDToken3"], input[name="pin"], input#pin'),
-      ],
-      pin,
-    )
-    filled = filled_user and filled_pwd and filled_pin
-    self._shot(page, "01b2_fisconline_filled", shots)
+    self._shot(page, "01b2_fisconline_filled", shots, force=True)
 
     if not filled:
-      self._shot(page, "01_fisconline_form_not_found", shots)
+      self._shot(page, "01_fisconline_form_not_found", shots, force=True)
       return False
-
-    # Invio
-    for btn_name in (r"Accedi", r"Entra", r"Login", r"Conferma"):
+    if not filled_flags.get("submitted"):
       try:
-        page.get_by_role("button", name=re.compile(btn_name, re.I)).first.click(timeout=5000)
-        break
-      except Exception:
-        try:
-          page.get_by_text(re.compile(btn_name, re.I)).first.click(timeout=3000)
-          break
-        except Exception:
-          continue
-    else:
-      page.keyboard.press("Enter")
+        page.evaluate(
+          """() => {
+            const btn = Array.from(document.querySelectorAll('button,input[type="submit"],a')).find((el) => {
+              const t = ((el.innerText || el.value || '') + '').replace(/\\s+/g, ' ').trim();
+              return /^accedi$/i.test(t);
+            });
+            if (btn) btn.click();
+          }"""
+        )
+      except Exception as exc:
+        self._step(f"invio fallito: {exc}")
+        return False
 
     try:
       page.wait_for_load_state("domcontentloaded", timeout=15000)
@@ -879,11 +1107,25 @@ class AdePlaywrightClient:
       return self._login_fisconline(page, shots)
     return self._login_cns(page, shots)
 
-  def _wait_logged_in(self, page: Any, shots: List[str], *, skip_cns_click: bool = False) -> bool:
+  def _wait_logged_in(
+    self,
+    page: Any,
+    shots: List[str],
+    *,
+    skip_cns_click: bool = False,
+    bail_on_chooser: bool = False,
+  ) -> bool:
     """Attende area autenticata dopo CNS/SPID/CIE/Fisconline."""
     self._remember_page_context(page, shots)
-    deadline = time.time() + max(60, self.login_timeout_sec)
-    pin_deadline = time.time() + max(120, self.cns_pin_wait_sec)
+    if bail_on_chooser and self._is_ade_login_page(page):
+      self._step("sessione assente, vado al login Fisconline")
+      return False
+    if skip_cns_click:
+      deadline = time.time() + 70
+      pin_deadline = time.time() + 35
+    else:
+      deadline = time.time() + max(60, self.login_timeout_sec)
+      pin_deadline = time.time() + max(120, self.cns_pin_wait_sec)
     poll_ms = 350 if self.fast_login else 1200
 
     if not skip_cns_click:
@@ -1030,16 +1272,30 @@ class AdePlaywrightClient:
         )
       )
       if still_login:
+        if skip_cns_click and not getattr(self, "_chooser_reclick", False):
+          if any(
+            s in body
+            for s in (
+              "entra con spid",
+              "scegli una delle modalità",
+              "scegli una delle modalita",
+            )
+          ):
+            self._chooser_reclick = True
+            self._select_auth_tab(page, "fisconline")
+            time.sleep(0.4)
+            continue
         if time.time() > pin_deadline:
           self._shot(page, "01_cns_pin_timeout", shots, force=True)
           return False
-        try:
-          btn = page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I))
-          if btn.count() > 0:
-            btn.first.click(timeout=2000)
-        except Exception:
-          pass
-        self._pause(page, poll_ms)
+        if not skip_cns_click:
+          try:
+            btn = page.get_by_role("button", name=re.compile(r"Entra con CNS", re.I))
+            if btn.count() > 0:
+              btn.first.click(timeout=2000)
+          except Exception:
+            pass
+        time.sleep(min(1.0, max(0.2, poll_ms / 1000)))
         continue
 
       logged = any(
@@ -3322,6 +3578,11 @@ class AdePlaywrightClient:
 
       context = browser.new_context(**ctx_kwargs)
       page = context.new_page()
+      try:
+        page.set_default_timeout(12000)
+        page.set_default_navigation_timeout(45000)
+      except Exception:
+        pass
       self._attach_network_sniffer(page)
       self._attach_download_handler(page)
 
@@ -3332,7 +3593,9 @@ class AdePlaywrightClient:
           area_url = self._area_riservata_url()
           page.goto(area_url, wait_until="domcontentloaded", timeout=60000)
           page = self._ensure_logged_in_home(page, shots)
-          login_ok = self._wait_logged_in(page, shots, skip_cns_click=True)
+          login_ok = self._wait_logged_in(
+            page, shots, skip_cns_click=True, bail_on_chooser=True
+          )
           if not login_ok:
             login_ok = self._perform_login(page, shots)
         else:
@@ -3361,6 +3624,11 @@ class AdePlaywrightClient:
               context.storage_state(path=str(storage))
             except Exception:
               pass
+
+          try:
+            self._rotate_credentials_if_due(page, shots)
+          except Exception as exc:
+            self._step(f"rinnovo credenziali saltato: {exc}")
 
           page = self._navigate_after_login(page, shots)
           self._try_download_xml(page, shots)

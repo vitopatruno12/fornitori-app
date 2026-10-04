@@ -4953,6 +4953,31 @@ select.form-control {
   word-break: break-all;
 }
 
+.ade-pwd-mirror-item--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ade-pwd-mirror-secrets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.ade-pwd-mirror-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.ade-pwd-mirror-label {
+  min-width: 5.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .ade-pwd-mirror-item-meta {
   display: flex;
   flex-wrap: wrap;
