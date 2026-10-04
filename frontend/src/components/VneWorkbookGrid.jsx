@@ -53,6 +53,8 @@ export default function VneWorkbookGrid({
       >
         Stampa / PDF
       </button>
+      {/* Azioni documento selezionato: subito accanto a Stampa / PDF */}
+      {toolbarActionsProp}
       <button
         type="button"
         className="btn btn-secondary btn-sm"
@@ -70,14 +72,11 @@ export default function VneWorkbookGrid({
         Scarica CSV
       </button>
     </div>
-  ) : null
-
-  const toolbarActions = (
-    <>
-      {exportActions}
-      {toolbarActionsProp}
-    </>
+  ) : (
+    toolbarActionsProp
   )
+
+  const toolbarActions = exportActions
 
   return (
     <>

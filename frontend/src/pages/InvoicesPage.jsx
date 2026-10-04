@@ -143,6 +143,7 @@ export default function InvoicesPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showIgnored, setShowIgnored] = useState(false)
+  const [selectedInv, setSelectedInv] = useState(null)
   const [pendingSupplierLabel, setPendingSupplierLabel] = useState('')
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
   const [dashboardAppliedMonth, setDashboardAppliedMonth] = useState(false)
@@ -182,6 +183,10 @@ export default function InvoicesPage() {
     if (insertAt < 0) return [...rows, focused]
     return [...rows.slice(0, insertAt), focused, ...rows.slice(insertAt)]
   }, [invoices, monthFilter, dateFrom, dateTo, activeFocusId])
+
+  const toolbarInvoice =
+    selectedInv ||
+    (activeFocusId ? filteredInvoices.find((inv) => String(inv.id) === activeFocusId) || null : null)
 
   // Da movimenti banca: vai all’elenco storico (non restare sui box Nuova fattura) e tieni la riga evidenziata.
   const scrolledFocusRef = useRef('')
@@ -1080,54 +1085,70 @@ export default function InvoicesPage() {
             emptyMessage={
               invoices.length === 0 ? 'Nessuna fattura registrata.' : 'Nessuna fattura per i filtri selezionati.'
             }
-            getRowId={(inv) => `invoice-row-${inv.id}`}
-            getRowClassName={(inv) =>
-              activeFocusId && String(inv.id) === String(activeFocusId) ? 'workbook-row-focus-purple' : ''
+            toolbarActions={
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={!toolbarInvoice}
+                  onClick={() => toolbarInvoice && openPrimaNota(toolbarInvoice)}
+                  title={
+                    toolbarInvoice
+                      ? `Apri Prima Nota per n. ${toolbarInvoice.invoice_number || toolbarInvoice.id}`
+                      : 'Seleziona una fattura nell’elenco'
+                  }
+                >
+                  Prima Nota
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={!toolbarInvoice}
+                  onClick={() => toolbarInvoice && handleEdit(toolbarInvoice)}
+                  title={
+                    toolbarInvoice
+                      ? `Modifica n. ${toolbarInvoice.invoice_number || toolbarInvoice.id}`
+                      : 'Seleziona una fattura nell’elenco'
+                  }
+                >
+                  Modifica
+                </button>
+              </>
             }
+            onRowClick={(inv) => setSelectedInv(inv)}
+            rowClickTitle="Seleziona fattura per Prima Nota / Modifica"
+            getRowId={(inv) => `invoice-row-${inv.id}`}
+            getRowClassName={(inv) => {
+              if (selectedInv && String(inv.id) === String(selectedInv.id)) return 'workbook-row-selected'
+              if (activeFocusId && String(inv.id) === String(activeFocusId)) return 'workbook-row-focus-purple'
+              return ''
+            }}
             actionsHeader="Azioni"
-            actionsColWidth="16.5rem"
+            actionsColWidth="9.5rem"
             renderActions={(inv) => (
               <FattureActionsMenu
                 primary={
-                  <div className="fatture-row-actions-primary">
-                    {inv.file_path ? (
-                      <a
-                        href={getInvoicePdfUrl(inv.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-primary btn-sm"
-                        title="Apri / stampa PDF"
-                      >
-                        PDF
-                      </a>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleMarkPaid(inv)}
-                        disabled={inv.payment_status === 'paid'}
-                        title="Segna come pagata"
-                      >
-                        Pagata
-                      </button>
-                    )}
+                  inv.file_path ? (
+                    <a
+                      href={getInvoicePdfUrl(inv.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-primary btn-sm"
+                      title="Apri / stampa PDF"
+                    >
+                      PDF
+                    </a>
+                  ) : (
                     <button
                       type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => openPrimaNota(inv)}
-                      title="Apri Prima Nota sul registro della fattura"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleMarkPaid(inv)}
+                      disabled={inv.payment_status === 'paid'}
+                      title="Segna come pagata"
                     >
-                      Prima Nota
+                      Pagata
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleEdit(inv)}
-                      title="Modifica fattura"
-                    >
-                      Modifica
-                    </button>
-                  </div>
+                  )
                 }
                 items={[
                   inv.file_path

@@ -10415,16 +10415,23 @@ select.form-control {
 
 .fatture-page .workbook-grid.fatture-excel-grid .sup-actions-col {
   width: 9.5rem;
-  min-width: 0;
+  min-width: 9.5rem;
   vertical-align: middle;
 }
 
 .fatture-excel-actions {
-  display: flex;
+  display: inline-flex;
+  flex-direction: row;
   flex-wrap: nowrap;
   gap: 0.3rem;
   align-items: center;
   padding: 0.2rem 0.3rem;
+  white-space: nowrap;
+}
+
+.fatture-excel-actions .btn-sm {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .fatture-actions-menu {
@@ -10539,13 +10546,11 @@ select.form-control {
 
 .fatture-row-actions-primary {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 0.3rem;
   align-items: center;
-}
-
-.fatture-excel-grid .sup-actions-col {
-  min-width: 16.5rem;
+  white-space: nowrap;
 }
 
 @keyframes fatture-focus-pulse {
