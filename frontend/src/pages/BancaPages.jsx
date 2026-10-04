@@ -681,9 +681,8 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'bundle_fornitore') return '✔ Bonifico multi-fattura'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
-    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti') {
-      return '✔ Pagato (file Pagamenti)'
-    }
+    if (row?.match_reason === 'file_pagamenti') return '✔ File Pagamenti (fino a luglio)'
+    if (row?.match_reason === 'file_contanti') return '✔ Contanti/carta (file Pagamenti)'
     if (row?.match_reason === 'pagata_contanti') return '✔ Pagata in contanti'
     if (row?.match_reason === 'acconto') {
       const left = Number(row?.residuo) || 0

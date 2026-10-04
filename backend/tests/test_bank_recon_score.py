@@ -578,3 +578,13 @@ def test_bank_versamento_detection_for_prima_nota():
   assert _activity_for_bank_company("risacca") == "risacca"
   assert _activity_for_bank_company("mediazione_a") == "via_abba"
   assert _activity_for_bank_company("mediazione_z") == "via_zanardelli"
+
+
+def test_pagamenti_file_window_before_august_2026():
+  from app.services.banca_service import _uses_pagamenti_file_recon
+
+  assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 1, 1)))
+  assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 7, 31)))
+  assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 8, 1)))
+  assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 10, 4)))
+  assert not _uses_pagamenti_file_recon(_inv(invoice_date=None))

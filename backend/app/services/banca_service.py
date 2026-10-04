@@ -2899,6 +2899,14 @@ def _open_invoices_near_amount(indexed: List[tuple], amount: Decimal) -> List[An
 
 _RECON_INVOICE_LOOKBACK_DAYS = 800  # ~26 mesi: abbastanza per bonifici ritardati
 _RECON_MOVEMENT_LIMIT = 1200
+# PSD2/Enable Banking non copre mesi troppo vecchi: fino al 31/07 si usa il file Pagamenti.
+BANK_AUTO_RECON_FROM = date(2026, 8, 1)
+
+
+def _uses_pagamenti_file_recon(inv: Any) -> bool:
+  """True se la fattura è anteriore al 1/8/2026: niente movimenti banca recuperabili."""
+  d = _as_date(getattr(inv, "invoice_date", None))
+  return d is not None and d < BANK_AUTO_RECON_FROM
 
 
 def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
@@ -3246,6 +3254,8 @@ def reconciliation_preview(
 
   # Il saldo di un mese può coprire la stessa fornitura su più società.
   invoices, match_invoices = _load_recon_invoices(db, company_id)
+  bank_invoices = [inv for inv in invoices if not _uses_pagamenti_file_recon(inv)]
+  bank_match_invoices = [inv for inv in match_invoices if not _uses_pagamenti_file_recon(inv)]
 
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -3255,11 +3265,13 @@ def reconciliation_preview(
   from . import supplier_payments_service
 
   try:
-    cash_file_rows = supplier_payments_service.list_cash_paid_document_rows(
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
       db, company=company_id, all_workbooks=False
     )
   except Exception:
-    cash_file_rows = []
+    paid_file_rows = []
+  cash_file_rows = [row for row in paid_file_rows if row.get("is_cash_payment")]
+  paid_file_by_number = _cash_rows_by_number(paid_file_rows)
   cash_by_number = _cash_rows_by_number(cash_file_rows)
 
   paid_by_bank: List[Dict[str, Any]] = []
@@ -3269,7 +3281,7 @@ def reconciliation_preview(
   # Prima passata: candidati auto solo tra i bonifici con importo vicino
   mov_index = _index_uscita_by_amount(mov_meta)
   auto_pairs: List[Dict[str, Any]] = []
-  for inv in invoices:
+  for inv in bank_invoices:
     inv_id = int(inv.id)
     already = mov_index["by_invoice"].get(inv_id)
     if already:
@@ -3330,19 +3342,19 @@ def reconciliation_preview(
     inv_to_pair[inv_id] = pair
 
   saldo_by_invoice = allocate_saldo_fatture(
-    match_invoices,
+    bank_match_invoices,
     mov_meta,
     skip_invoice_ids=set(inv_to_pair.keys()),
     skip_movement_ids=used_mov_ids,
   )
   cited_by_invoice = allocate_cited_invoices(
-    match_invoices,
+    bank_match_invoices,
     mov_meta,
     skip_invoice_ids=set(inv_to_pair.keys()) | set(saldo_by_invoice.keys()),
     skip_movement_ids=used_mov_ids,
   )
   for iid, hit in allocate_number_ranges(
-    match_invoices,
+    bank_match_invoices,
     mov_meta,
     skip_invoice_ids=set(inv_to_pair.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
     skip_movement_ids=used_mov_ids,
@@ -3357,19 +3369,28 @@ def reconciliation_preview(
     found_score = pair["sc"] if pair else None
 
     cash_hit = None
-    if not found and cash_file_rows:
-      cash_subset = cash_by_number.get(supplier_payments_service._normalize_doc(num)) or []
-      cash_hit = supplier_payments_service.find_paid_row_for_invoice(
-        cash_subset,
-        invoice_number=num,
-        supplier_name=getattr(inv, "supplier_name", None),
-        supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
-        invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
-        invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
-      )
-
-    saldo_hit = None if found else saldo_by_invoice.get(inv_id)
-    cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
+    file_window = _uses_pagamenti_file_recon(inv)
+    if not found:
+      file_grouped = paid_file_by_number if file_window else cash_by_number
+      file_rows = paid_file_rows if file_window else cash_file_rows
+      if file_rows:
+        cash_subset = file_grouped.get(supplier_payments_service._normalize_doc(num)) or []
+        cash_hit = supplier_payments_service.find_paid_row_for_invoice(
+          cash_subset,
+          invoice_number=num,
+          supplier_name=getattr(inv, "supplier_name", None),
+          supplier_vat=getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None),
+          invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
+          invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
+        )
+    if file_window:
+      found = None
+      found_score = None
+      saldo_hit = None
+      cited_hit = None
+    else:
+      saldo_hit = None if found else saldo_by_invoice.get(inv_id)
+      cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
     if saldo_hit and not found:
       found = saldo_hit["meta"]
       found_score = {
@@ -3440,11 +3461,15 @@ def reconciliation_preview(
       paid_by_bank.append(
         _invoice_row_out(
           inv,
-          reason="file_contanti",
+          reason="file_pagamenti" if file_window else "file_contanti",
           match_movement={
             "movement_date": (cash_hit.get("payment_date") or "")[:10] or None,
-            "description": f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·"),
-            "causale": "CONTANTI",
+            "description": (
+              f"File Pagamenti · {cash_hit.get('sheet') or ''}".strip(" ·")
+              if file_window
+              else f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·")
+            ),
+            "causale": "PAGAMENTI" if file_window else "CONTANTI",
             "amount": cash_hit.get("amount_paid"),
             "id": None,
           },
@@ -3552,7 +3577,7 @@ def reconciliation_preview(
     "da_pagare": da_pagare,
     "open_invoices_count": len(da_pagare),
     "paid_count": len(paid_by_bank),
-    "pagamenti_paid_rows": len(cash_file_rows),
+    "pagamenti_paid_rows": len(paid_file_rows),
     "pagamenti_cash_rows": len(cash_file_rows),
     "unmatched_movements": len([s for s in suggestions if s["status"] == "unmatched"]),
     "score_thresholds": {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE},
@@ -3576,8 +3601,10 @@ def sync_payment_status_from_bank(
 ) -> Dict[str, Any]:
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
-  - bonifici sui conti (score auto: importo + fornitore e/o n. documento, anche ritardati)
-  - file Pagamenti: solo CONTANTI/CARTA/assegno (senza bonifico)
+  - fino al 31/07/2026: file Pagamenti (colonna PAGATO DARE > 0). I movimenti
+    banca di quel periodo non sono più recuperabili.
+  - dal 1/08/2026: bonifici sui conti (score auto: importo + fornitore e/o n. documento)
+    e, senza bonifico, CONTANTI/CARTA/assegno nel file Pagamenti.
 
   Un movimento con importo di una sola fattura paga quella fattura.
   Un bonifico «saldo fatture <mese>» che quadra con più fatture dello stesso fornitore
@@ -3594,6 +3621,7 @@ def sync_payment_status_from_bank(
     for inv in listed
     if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
   ]
+  bank_unpaid = [inv for inv in unpaid if not _uses_pagamenti_file_recon(inv)]
   paid_listed = [
     inv
     for inv in listed
@@ -3605,19 +3633,20 @@ def sync_payment_status_from_bank(
   mov_meta = _load_recon_movements(db, account_ids)
 
   try:
-    cash_file_rows = supplier_payments_service.list_cash_paid_document_rows(
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
       db, company=company_id, all_workbooks=False
     )
   except Exception:
-    cash_file_rows = []
-
+    paid_file_rows = []
+  cash_file_rows = [row for row in paid_file_rows if row.get("is_cash_payment")]
+  paid_file_by_number = _cash_rows_by_number(paid_file_rows)
   cash_by_number = _cash_rows_by_number(cash_file_rows)
 
-  def _cash_file_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
+  def _file_hit(inv_dto: Any, grouped: Dict[str, List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if not num or not cash_file_rows:
+    if not num or not grouped:
       return None
-    subset = cash_by_number.get(supplier_payments_service._normalize_doc(num)) or []
+    subset = grouped.get(supplier_payments_service._normalize_doc(num)) or []
     if not subset:
       return None
     return supplier_payments_service.find_paid_row_for_invoice(
@@ -3632,6 +3661,12 @@ def sync_payment_status_from_bank(
       invoice_total=float(_dec(getattr(inv_dto, "total", 0)) or 0),
       invoice_amount_paid=float(_dec(getattr(inv_dto, "amount_paid", 0)) or 0),
     )
+
+  def _cash_file_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
+    return _file_hit(inv_dto, cash_by_number)
+
+  def _pagamenti_file_hit(inv_dto: Any) -> Optional[Dict[str, Any]]:
+    return _file_hit(inv_dto, paid_file_by_number)
 
   def _pair_rank(inv_dto: Any, mov: Any, blob: str, sc: Dict[str, Any]) -> tuple:
     """Ordine: score, n. in causale, vicinanza data, fattura più vecchia."""
@@ -3688,7 +3723,7 @@ def sync_payment_status_from_bank(
     return best_mov
 
   # Acconti / multi-fattura: solo fatture ancora aperte (pool molto più piccolo)
-  acconti = allocate_acconti(unpaid, mov_meta)
+  acconti = allocate_acconti(bank_unpaid, mov_meta)
   acconto_mov_ids = {
     int(part["mov"].id)
     for hit in acconti.values()
@@ -3698,9 +3733,8 @@ def sync_payment_status_from_bank(
 
   # --- Assegnazione esclusiva bonifico → fattura da pagare ---
   candidates: List[Dict[str, Any]] = []
-  for inv_dto in unpaid:
+  for inv_dto in bank_unpaid:
     inv_id = int(getattr(inv_dto, "id"))
-    # Se già collegata a un movimento valido, ha priorità assoluta
     already = mov_index["by_invoice"].get(inv_id)
     if already and _bank_movement_pays_invoice(inv_dto, already["mov"], already["blob"]):
       sc = score_movement_invoice(inv_dto, already["mov"], already["blob"])
@@ -3757,19 +3791,19 @@ def sync_payment_status_from_bank(
     bank_assignments[inv_id] = cand
 
   saldo_by_invoice = allocate_saldo_fatture(
-    unpaid,
+    bank_unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   cited_by_invoice = allocate_cited_invoices(
-    unpaid,
+    bank_unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
   )
   for iid, hit in allocate_number_ranges(
-    unpaid,
+    bank_unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
@@ -3777,7 +3811,7 @@ def sync_payment_status_from_bank(
     cited_by_invoice[iid] = hit
 
   bundle_by_invoice = allocate_supplier_bundles(
-    unpaid,
+    bank_unpaid,
     mov_meta,
     skip_invoice_ids=set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys()),
     skip_movement_ids=assigned_mov | acconto_mov_ids,
@@ -3812,8 +3846,16 @@ def sync_payment_status_from_bank(
     found = cand["mov"] if cand else None
     saldo_hit = None if found else saldo_by_invoice.get(inv_id)
     cited_hit = None if found or saldo_hit else cited_by_invoice.get(inv_id)
-    cash_hit = None if (found or saldo_hit or cited_hit) else _cash_file_hit(inv_dto)
-    acconto_hit = None if (found or saldo_hit or cited_hit or cash_hit) else acconti.get(inv_id)
+    file_window = _uses_pagamenti_file_recon(inv_dto)
+    if file_window:
+      found = None
+      saldo_hit = None
+      cited_hit = None
+      cash_hit = _pagamenti_file_hit(inv_dto)
+      acconto_hit = None
+    else:
+      cash_hit = None if (found or saldo_hit or cited_hit) else _cash_file_hit(inv_dto)
+      acconto_hit = None if (found or saldo_hit or cited_hit or cash_hit) else acconti.get(inv_id)
     if not found and not saldo_hit and not cited_hit and not cash_hit and not acconto_hit:
       continue
 
@@ -3835,7 +3877,7 @@ def sync_payment_status_from_bank(
       continue
     row.amount_paid = _dec(row.total)
     row.is_paid = True
-    reason = "file_contanti"
+    reason = "file_pagamenti" if file_window else "file_contanti"
     movement_id = None
     match_score = None
     match_band = None
@@ -3876,6 +3918,7 @@ def sync_payment_status_from_bank(
         group_mov.difference_amount = None
     else:
       marked_from_file += 1
+      reason = "file_pagamenti" if file_window else "file_contanti"
     changed = True
     item = {
       "invoice_id": inv_id,
@@ -3980,6 +4023,8 @@ def sync_payment_status_from_bank(
       "matched",
       "difference",
     }:
+      continue
+    if _uses_pagamenti_file_recon(inv_dto):
       continue
     if _cash_file_hit(inv_dto):
       continue
@@ -4087,7 +4132,7 @@ def sync_payment_status_from_bank(
     "reopened_unpaid": len(reopened),
     "da_pagare": da_pagare_count,
     "accounts_checked": len(account_ids),
-    "pagamenti_paid_rows": len(cash_file_rows),
+    "pagamenti_paid_rows": len(paid_file_rows),
     "pagamenti_cash_rows": len(cash_file_rows),
     "items": marked,
     "reopened_items": reopened[:80],
