@@ -8,11 +8,20 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from zoneinfo import ZoneInfo
 
 from ..constants.prima_nota import PRIMA_NOTA_ACTIVITIES
 from ..models.cash_entry import CashEntry
-from .cash_service import CONTANTI_CONTO, NON_FISCALE_CONTO, POS_CONTO, normalize_activity
+from .cash_service import (
+    CONTANTI_CONTO,
+    NON_FISCALE_CONTO,
+    POS_CONTO,
+    REFILL_CONTO,
+    STACKER_SVUOTAMENTO_CONTO,
+    VERSAMENTO_BANCA_CONTO,
+    normalize_activity,
+)
 from .pos_receipts_service import load_pos_daily_incasso
 
 logger = logging.getLogger(__name__)
@@ -31,6 +40,15 @@ _ACTIVITY_POS_SOURCE = {
     "via_lattea": ("model-3", ("model-3", "via_lattea", "lattea", "mucche")),
     "pg": ("model-5", ("gazza_ladra", "gazza", "model-5")),
 }
+
+_PROTECTED_CONTI = (
+    CONTANTI_CONTO,
+    POS_CONTO,
+    NON_FISCALE_CONTO,
+    REFILL_CONTO,
+    STACKER_SVUOTAMENTO_CONTO,
+    VERSAMENTO_BANCA_CONTO,
+)
 
 _KIND_META = {
     "contanti": {
@@ -156,7 +174,104 @@ def _upsert_auto_entry(
             activity=activity,
         )
     )
+    db.flush()
     return "created"
+
+
+def _is_auto_entry(entry: CashEntry) -> bool:
+    return AUTO_NOTE in str(entry.note or "")
+
+
+def _rome_day(entry: CashEntry) -> Optional[date]:
+    when = entry.entry_date
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(ROME).date()
+
+
+def remove_manual_closing_duplicates(
+    db: Session,
+    *,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    activity: Optional[str] = None,
+) -> int:
+    """Se esiste la riga sync, elimina le copie inserite a mano (stesso giorno/registro/conto)."""
+    today = rome_now().date()
+    end = min(date_to or today, today)
+    start = date_from or (end - timedelta(days=MAX_BACKFILL_DAYS - 1))
+    if start > end:
+        return 0
+    day_start, _ = _day_bounds_utc(start)
+    _, day_end = _day_bounds_utc(end)
+
+    q = db.query(CashEntry).filter(
+        CashEntry.entry_date >= day_start,
+        CashEntry.entry_date < day_end,
+        CashEntry.type == "entrata",
+        CashEntry.conto.in_(tuple(_KIND_META[k]["conto"] for k in _KIND_META)),
+    )
+    if activity:
+        act = normalize_activity(activity)
+        if act == "via_abba":
+            q = q.filter(CashEntry.activity.in_((act, "mediazione")))
+        else:
+            q = q.filter(CashEntry.activity == act)
+    rows = q.all()
+    groups: Dict[Tuple[str, date, Optional[str]], List[CashEntry]] = {}
+    for entry in rows:
+        day = _rome_day(entry)
+        if day is None:
+            continue
+        act = normalize_activity(entry.activity)
+        groups.setdefault((act, day, entry.conto), []).append(entry)
+
+    deleted = 0
+    auto_amounts: Dict[Tuple[str, date, Optional[str]], Decimal] = {}
+    for (_act, _day, _conto), items in groups.items():
+        autos = [e for e in items if _is_auto_entry(e)]
+        manuals = [e for e in items if not _is_auto_entry(e)]
+        if not autos:
+            continue
+        autos.sort(key=lambda e: e.id or 0)
+        keep_id = autos[0].id
+        for extra in autos[1:]:
+            db.delete(extra)
+            deleted += 1
+        for manual in manuals:
+            if manual.id == keep_id:
+                continue
+            db.delete(manual)
+            deleted += 1
+        keep = autos[0]
+        auto_amounts[(normalize_activity(keep.activity), _rome_day(keep), keep.conto)] = _dec(keep.amount)
+
+    fiscale_q = db.query(CashEntry).filter(
+        CashEntry.entry_date >= day_start,
+        CashEntry.entry_date < day_end,
+        CashEntry.type == "entrata",
+        or_(CashEntry.conto.is_(None), CashEntry.conto.notin_(_PROTECTED_CONTI)),
+    )
+    if activity:
+        act = normalize_activity(activity)
+        if act == "via_abba":
+            fiscale_q = fiscale_q.filter(CashEntry.activity.in_((act, "mediazione")))
+        else:
+            fiscale_q = fiscale_q.filter(CashEntry.activity == act)
+    for entry in fiscale_q.all():
+        if _is_auto_entry(entry):
+            continue
+        day = _rome_day(entry)
+        if day is None:
+            continue
+        act = normalize_activity(entry.activity)
+        cash_auto = auto_amounts.get((act, day, CONTANTI_CONTO))
+        if cash_auto is not None and _dec(entry.amount) == cash_auto:
+            db.delete(entry)
+            deleted += 1
+    return deleted
 
 
 def sync_daily_closings_to_prima_nota(
@@ -168,8 +283,21 @@ def sync_daily_closings_to_prima_nota(
 ) -> Dict[str, Any]:
     """Crea/aggiorna movimenti automatici da scontrini (contanti, POS, preventivi NC)."""
     days = _eligible_days(date_from, date_to)
+    act_filter = normalize_activity(activity) if activity else None
     if not days:
-        return {"ok": True, "created": 0, "updated": 0, "removed": 0, "days": 0}
+        deduped = remove_manual_closing_duplicates(
+            db, date_from=date_from, date_to=date_to, activity=act_filter
+        )
+        if deduped:
+            db.commit()
+        return {
+            "ok": True,
+            "created": 0,
+            "updated": 0,
+            "removed": 0,
+            "deduped_manual": deduped,
+            "days": 0,
+        }
 
     if activity:
         activities = [normalize_activity(activity)]
@@ -211,13 +339,20 @@ def sync_daily_closings_to_prima_nota(
                 elif action == "removed":
                     removed += 1
 
-    if created or updated or removed:
+    deduped = remove_manual_closing_duplicates(
+        db,
+        date_from=date_from or range_from,
+        date_to=date_to or range_to,
+        activity=None if not activity else activities[0],
+    )
+    if created or updated or removed or deduped:
         db.commit()
     return {
         "ok": True,
         "created": created,
         "updated": updated,
         "removed": removed,
+        "deduped_manual": deduped,
         "days": len(days),
         "activities": activities,
     }
