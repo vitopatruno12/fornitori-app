@@ -79,6 +79,32 @@ def _lookback_days() -> int:
     return 10
 
 
+# Ultime fatture già in Atlas al 4 ott 2026. Vale solo per la richiesta del 5 ott
+# e lo scarico del 6 ott: poi torna il lookback normale.
+# PG: emesse fino al 10 set, ricevute fino al 15 set → si parte dal 10 set.
+# Risacca: ricevute fino al 18 set.
+_CATCHUP_UNTIL = date(2026, 10, 6)
+_LAST_INVOICE_ON = {
+  "pg": date(2026, 9, 10),
+  "risacca": date(2026, 9, 18),
+}
+
+
+def _profile_date_from(pid: str, day: date) -> date:
+  """Inizio periodo: lookback, avvicinato all'ultima fattura già scaricata."""
+  lookback_from = day - timedelta(days=_lookback_days())
+  if day > _CATCHUP_UNTIL:
+    return lookback_from
+  anchor = _LAST_INVOICE_ON.get((pid or "").strip().lower())
+  if anchor is None or anchor > day:
+    return lookback_from
+  if anchor >= lookback_from:
+    return anchor
+  if (lookback_from - anchor).days <= 10:
+    return anchor
+  return lookback_from
+
+
 def _parse_day(raw: Optional[str]) -> date:
   if not raw:
     return date.today()
@@ -116,16 +142,23 @@ def plan_for_day(day: date) -> dict:
     unique = unique[:MAX_PER_DAY]
     reasons.append(f"taglio a max {MAX_PER_DAY}/giorno")
 
-  lookback = _lookback_days()
-  d_from = (day - timedelta(days=lookback)).isoformat()
   d_to = day.isoformat()
+  profiles = [
+    {
+      "id": p,
+      "label": lab,
+      "date_from": _profile_date_from(p, day).isoformat(),
+    }
+    for p, lab in unique
+  ]
+  d_from = min((item["date_from"] for item in profiles), default=d_to)
   return {
     "day": day.isoformat(),
     "day_index": idx,
     "run_group3": g3,
     "run_group2": g4,
     "reasons": reasons,
-    "profiles": [{"id": p, "label": lab} for p, lab in unique],
+    "profiles": profiles,
     "date_from": d_from,
     "date_to": d_to,
     "skip": len(unique) == 0,
@@ -186,8 +219,9 @@ def _run_phase(
     if pid.lower() not in available:
       print(f"  skip {pid}: profilo assente ({label})", flush=True)
       continue
+    start = _profile_date_from(pid, _parse_day(d_to)).isoformat()
     print(
-      f"\n=== {title} · {label} [{pid}] {d_from} -> {d_to} (max {timeout}s) ===",
+      f"\n=== {title} · {label} [{pid}] {start} -> {d_to} (max {timeout}s) ===",
       flush=True,
     )
     env = os.environ.copy()
@@ -323,15 +357,18 @@ def main() -> int:
       seen.add(pid)
       uniq.append((pid, lab))
     uniq = uniq[:MAX_PER_DAY]
-    lookback = _lookback_days()
+    froms = [_profile_date_from(pid, day) for pid, _lab in uniq]
     plan = {
       "day": day.isoformat(),
       "day_index": (day - EPOCH).days,
       "run_group3": False,
       "run_group2": False,
       "reasons": ["--force"],
-      "profiles": [{"id": p, "label": lab} for p, lab in uniq],
-      "date_from": (day - timedelta(days=lookback)).isoformat(),
+      "profiles": [
+        {"id": p, "label": lab, "date_from": _profile_date_from(p, day).isoformat()}
+        for p, lab in uniq
+      ],
+      "date_from": (min(froms) if froms else day).isoformat(),
       "date_to": day.isoformat(),
       "skip": len(uniq) == 0,
     }
@@ -347,7 +384,8 @@ def main() -> int:
     _save_state(plan, 0)
     return 0
   for item in plan["profiles"]:
-    print(f"  - {item['id']:12} {item['label']}", flush=True)
+    span = item.get("date_from") or plan["date_from"]
+    print(f"  - {item['id']:12} {item['label']}  {span} -> {plan['date_to']}", flush=True)
 
   if args.dry_run:
     return 0
