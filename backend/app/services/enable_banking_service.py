@@ -899,7 +899,19 @@ def sync_enable_banking_account(
     db.refresh(row)
 
   bank_sync = None
+  versamenti = None
   company = (getattr(row, "company", None) or "").strip() or None
+  try:
+    from . import banca_service
+
+    versamenti = banca_service.link_versamenti_to_prima_nota(
+      db,
+      account_id=account_id,
+      date_from=date_from,
+      date_to=date_to,
+    )
+  except Exception:
+    logger.warning("Auto-link versamenti → Prima Nota fallito account %s", account_id, exc_info=True)
   if sync_payments and (company or imported):
     try:
       from . import banca_service
@@ -909,6 +921,7 @@ def sync_enable_banking_account(
       logger.warning("Sync stato pagamenti da banca fallito account %s", account_id, exc_info=True)
 
   marked = int((bank_sync or {}).get("marked_paid") or 0)
+  vers_n = int((versamenti or {}).get("created") or 0)
   period_bits = []
   if date_from:
     period_bits.append(date_from.isoformat())
@@ -916,12 +929,15 @@ def sync_enable_banking_account(
     period_bits.append(date_to.isoformat())
   period_note = f" (periodo {' → '.join(period_bits)})" if period_bits else ""
   msg = f"Sync Enable Banking: {imported} nuovi movimenti{period_note}."
+  if vers_n:
+    msg += f" Versamenti → Prima Nota: {vers_n}."
   if marked:
     msg += f" Segnate pagate {marked} fatture (bonifico riconosciuto)."
 
   return {
     "ok": True,
     "imported": imported,
+    "versamenti_prima_nota": versamenti,
     "date_from": date_from.isoformat() if date_from else None,
     "date_to": date_to.isoformat() if date_to else None,
     "bank_sync": bank_sync,

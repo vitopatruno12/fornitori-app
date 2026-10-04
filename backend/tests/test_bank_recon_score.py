@@ -552,3 +552,29 @@ def test_build_linked_invoices_from_causale_and_note():
   assert not _ref_matches_number("050", "050-2024-10")
   assert not _ref_matches_number("01-08", "01-08-02-000008")
   assert not _ref_matches_number("050-2024", "050-2024-10")
+
+
+def test_bank_versamento_detection_for_prima_nota():
+  from app.services.banca_service import (
+    _activity_for_bank_company,
+    _is_bank_versamento_movement,
+  )
+
+  assert _is_bank_versamento_movement(
+    _mov(movement_type="entrata", description="309 - TR - VERSAM. CONTANTI")
+  )
+  assert _is_bank_versamento_movement(
+    _mov(movement_type="entrata", description="VERSAMENTO CONTANTE")
+  )
+  assert not _is_bank_versamento_movement(
+    _mov(movement_type="uscita", description="309 - TR - VERSAM. CONTANTI")
+  )
+  assert not _is_bank_versamento_movement(
+    _mov(movement_type="entrata", description="Pagamento diversi fornitori")
+  )
+  assert not _is_bank_versamento_movement(
+    _mov(movement_type="entrata", description="309 - PS - ACCREDITO POS")
+  )
+  assert _activity_for_bank_company("risacca") == "risacca"
+  assert _activity_for_bank_company("mediazione_a") == "via_abba"
+  assert _activity_for_bank_company("mediazione_z") == "via_zanardelli"

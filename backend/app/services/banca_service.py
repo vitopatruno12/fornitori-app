@@ -3,9 +3,12 @@ from decimal import Decimal
 from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import bisect
+import logging
 import re
 
-from sqlalchemy import func, or_
+logger = logging.getLogger(__name__)
+
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from ..models.bank_account import BankAccount
@@ -19,8 +22,28 @@ from ..constants.company_banks import (
   expected_banks_for_company,
   normalize_iban,
 )
-from .cash_service import NON_FISCALE_CONTO
+from ..constants.prima_nota import DEFAULT_PRIMA_NOTA_ACTIVITY
+from .cash_service import (
+  NON_FISCALE_CONTO,
+  STACKER_SVUOTAMENTO_CONTO,
+  VERSAMENTO_BANCA_CONTO,
+  normalize_activity,
+)
 from .invoice_service import list_invoices, payment_status_label
+
+# Società conto banca → attività Prima Nota (registro cassa)
+_COMPANY_TO_PRIMA_NOTA_ACTIVITY = {
+  "risacca": "risacca",
+  "via_lattea": "via_lattea",
+  "mediazione_a": "via_abba",
+  "mediazione_z": "via_zanardelli",
+  "pg": "pg",
+}
+
+# Es. «309 - TR - VERSAM. CONTANTI», «VERSAMENTO CONTANTE» (non «diversi»)
+_BANK_VERSAMENTO_RE = re.compile(
+  r"(?i)(?:\bVERSAM(?:ENTO)?\.?\b|\bVERS\.?\s*CONTANT|\bVERSAMENTO\b)"
+)
 
 
 def _fiscale_filter():
@@ -28,16 +51,145 @@ def _fiscale_filter():
 
 
 def _banca_conto_sql():
+  """Conti Prima Nota «da banca», esclusi versamento/stacker (uscite cassa, non da reimportare)."""
   c = func.lower(func.coalesce(CashEntry.conto, ""))
-  return or_(
-    c.like("%banca%"),
-    c.like("%bonific%"),
-    c.like("%conto corrente%"),
-    c.like("%cc %"),
-    c.like("%iban%"),
-    c.like("%intesa%"),
-    c.like("%unicredit%"),
+  return and_(
+    or_(
+      c.like("%banca%"),
+      c.like("%bonific%"),
+      c.like("%conto corrente%"),
+      c.like("%cc %"),
+      c.like("%iban%"),
+      c.like("%intesa%"),
+      c.like("%unicredit%"),
+    ),
+    c != VERSAMENTO_BANCA_CONTO.lower(),
+    c != STACKER_SVUOTAMENTO_CONTO.lower(),
   )
+
+
+def _activity_for_bank_company(company: Optional[str]) -> str:
+  key = str(company or "").strip().lower()
+  return normalize_activity(_COMPANY_TO_PRIMA_NOTA_ACTIVITY.get(key) or DEFAULT_PRIMA_NOTA_ACTIVITY)
+
+
+def _is_bank_versamento_movement(mov: BankMovement) -> bool:
+  """Entrata banca con descrizione versamento contanti (codice VERS / VERSAM.)."""
+  if str(getattr(mov, "movement_type", "") or "").lower() != "entrata":
+    return False
+  blob = " ".join(
+    [
+      str(getattr(mov, "description", None) or ""),
+      str(getattr(mov, "causale", None) or ""),
+      str(getattr(mov, "notes", None) or ""),
+    ]
+  )
+  return bool(_BANK_VERSAMENTO_RE.search(blob))
+
+
+def link_versamenti_to_prima_nota(
+  db: Session,
+  *,
+  account_id: Optional[int] = None,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+  limit: int = 500,
+) -> Dict[str, Any]:
+  """Crea in automatico uscite Prima Nota VERSAMENTO_BANCA dai versamenti in banca.
+
+  Legge «VERS» / «VERSAM.» nella descrizione del movimento, scrive sul registro
+  della società del conto e collega matched_cash_entry_id.
+  """
+  q = db.query(BankMovement, BankAccount).join(
+    BankAccount, BankMovement.bank_account_id == BankAccount.id
+  )
+  q = q.filter(
+    BankMovement.matched_cash_entry_id.is_(None),
+    func.lower(BankMovement.movement_type) == "entrata",
+  )
+  if account_id:
+    q = q.filter(BankMovement.bank_account_id == account_id)
+  if date_from:
+    q = q.filter(BankMovement.movement_date >= date_from)
+  if date_to:
+    q = q.filter(BankMovement.movement_date <= date_to)
+  rows = q.order_by(BankMovement.movement_date.asc(), BankMovement.id.asc()).limit(limit).all()
+
+  created = 0
+  linked = 0
+  skipped = 0
+  for mov, account in rows:
+    if not _is_bank_versamento_movement(mov):
+      skipped += 1
+      continue
+    amount = abs(_dec(getattr(mov, "amount", 0)))
+    if amount <= 0:
+      skipped += 1
+      continue
+    mov_date = getattr(mov, "movement_date", None)
+    if mov_date is None:
+      skipped += 1
+      continue
+    activity = _activity_for_bank_company(getattr(account, "company", None))
+    day_start = datetime.combine(mov_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    # Idempotenza: se esiste già un versamento stesso giorno/importo/attività, solo collega
+    existing = (
+      db.query(CashEntry)
+      .filter(
+        CashEntry.conto == VERSAMENTO_BANCA_CONTO,
+        CashEntry.activity == activity,
+        CashEntry.entry_date >= day_start,
+        CashEntry.entry_date < day_end,
+        CashEntry.amount == amount,
+      )
+      .order_by(CashEntry.id.asc())
+      .first()
+    )
+    # Evita di riusare una riga già collegata a un altro movimento banca
+    if existing is not None:
+      already = (
+        db.query(BankMovement.id)
+        .filter(BankMovement.matched_cash_entry_id == existing.id)
+        .first()
+      )
+      if already:
+        existing = None
+
+    if existing is not None:
+      ce = existing
+    else:
+      desc = (str(getattr(mov, "description", None) or "").strip() or "Versamento banca")[:255]
+      ce = CashEntry(
+        entry_date=day_start,
+        type="uscita",
+        amount=amount,
+        description=desc,
+        note=f"Auto da movimento banca #{mov.id}",
+        conto=VERSAMENTO_BANCA_CONTO,
+        activity=activity,
+      )
+      db.add(ce)
+      db.flush()
+      created += 1
+
+    mov.matched_cash_entry_id = ce.id
+    if str(getattr(mov, "reconciliation_status", "") or "") == "unmatched":
+      mov.reconciliation_status = "matched"
+    if not (getattr(mov, "category", None) or "").strip():
+      mov.category = "versamento"
+    linked += 1
+
+  if created or linked:
+    db.commit()
+  return {
+    "ok": True,
+    "created": created,
+    "linked": linked,
+    "scanned": len(rows),
+    "skipped": skipped,
+  }
 
 
 def _dec(v) -> Decimal:
@@ -641,6 +793,16 @@ def list_movements(
   limit: int = 200,
 ) -> List[Dict[str, Any]]:
   ensure_default_account(db)
+  # Versamenti banca (VERS/VERSAM) → Prima Nota colonna versamento, senza inserimento manuale
+  try:
+    link_versamenti_to_prima_nota(
+      db,
+      account_id=account_id,
+      date_from=date_from,
+      date_to=date_to,
+    )
+  except Exception:
+    logger.warning("Auto-link versamenti → Prima Nota fallito in list_movements", exc_info=True)
   q = db.query(BankMovement, BankAccount).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
   if account_id:
     q = q.filter(BankMovement.bank_account_id == account_id)
@@ -4115,10 +4277,16 @@ def import_ban_movements(db: Session, account_id: int, movements: List[Dict[str,
   _refresh_account_balances(db, account)
   db.commit()
   db.refresh(account)
+  versamenti = link_versamenti_to_prima_nota(db, account_id=account_id)
+  vers_n = int((versamenti or {}).get("created") or 0)
+  msg = f"Import BAN: {created} nuovi movimenti ({skipped} già presenti o non validi)."
+  if vers_n:
+    msg += f" Versamenti → Prima Nota: {vers_n}."
   return {
     "ok": True,
     "created": created,
     "skipped": skipped,
+    "versamenti_prima_nota": versamenti,
     "account": _account_out(account),
-    "message": f"Import BAN: {created} nuovi movimenti ({skipped} già presenti o non validi).",
+    "message": msg,
   }
