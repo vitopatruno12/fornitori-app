@@ -1,6 +1,7 @@
 import io
 from datetime import datetime, date
 from typing import List, Optional
+import logging
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -24,9 +25,27 @@ from ..constants.prima_nota_staff_locale import (
     match_staff_locale_name,
     staff_locale_link_for_activity,
 )
-from ..services import cash_service, prima_nota_locale_service, staff_service
+from ..services import cash_closing_sync, cash_service, prima_nota_locale_service, staff_service
 
 router = APIRouter(prefix="/cash", tags=["cash"])
+logger = logging.getLogger(__name__)
+
+
+def _maybe_sync_daily_closings(
+    db: Session,
+    activity: Optional[str],
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> None:
+    try:
+        cash_closing_sync.sync_daily_closings_to_prima_nota(
+            db,
+            activity=None,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except Exception:
+        logger.warning("Sync chiusure fiscali Prima Nota fallita", extra={"activity": activity}, exc_info=True)
 
 
 def _validate_activity(activity: Optional[str]) -> Optional[str]:
@@ -150,6 +169,12 @@ def list_entries(
     dt_to = datetime.fromisoformat(date_to + "T23:59:59") if date_to else None
     act = _validate_activity(activity)
     _verify_activity_access(db, act, code)
+    _maybe_sync_daily_closings(
+        db,
+        act,
+        date_from=dt_from.date() if dt_from else None,
+        date_to=date.fromisoformat(date_to) if date_to else None,
+    )
     return cash_service.list_entries_with_balance(db, date_from=dt_from, date_to=dt_to, activity=act)
 
 
@@ -256,6 +281,7 @@ def get_daily_summary(
         raise HTTPException(status_code=400, detail="Data non valida")
     act = _validate_activity(activity)
     _verify_activity_access(db, act, code)
+    _maybe_sync_daily_closings(db, act, date_from=d, date_to=d)
     return cash_service.get_daily_summary(db, d, activity=act)
 
 
@@ -274,6 +300,7 @@ def get_range_summary(
         raise HTTPException(status_code=400, detail="Data non valida")
     act = _validate_activity(activity)
     _verify_activity_access(db, act, code)
+    _maybe_sync_daily_closings(db, act, date_from=d_from, date_to=d_to)
     return cash_service.get_range_summary(db, d_from, d_to, activity=act)
 
 

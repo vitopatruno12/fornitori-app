@@ -1,9 +1,15 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-function eur(value) {
+function eur(value, entry) {
   const n = Number(value || 0)
-  return `€ ${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const formatted = `€ ${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const note = String(entry?.note || '')
+  const desc = String(entry?.description || '')
+  if (entry && (note.includes('[auto-chiusura]') || /\(\s*A\s*\)/.test(desc))) {
+    return `${formatted} (A)`
+  }
+  return formatted
 }
 
 function formatDate(value) {
@@ -37,17 +43,18 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
     formatDate(entry.entry_date),
     String(idx + 1),
     entry.description || '—',
-    entry.entrata > 0 ? eur(entry.entrata) : '—',
-    entry.uscita > 0 ? eur(entry.uscita) : '—',
-    entry.fiscaleEntrata > 0 ? eur(entry.fiscaleEntrata) : '—',
-    entry.fiscaleUscita > 0 ? eur(entry.fiscaleUscita) : '—',
-    entry.nonFiscaleEntrata > 0 ? eur(entry.nonFiscaleEntrata) : '—',
-    entry.nonFiscaleUscita > 0 ? eur(entry.nonFiscaleUscita) : '—',
-    entry.pos !== 0 ? eur(entry.pos) : '—',
-    entry.refill !== 0 ? eur(entry.refill) : '—',
-    entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento) : '—',
-    entry.versamentoBanca !== 0 ? eur(entry.versamentoBanca) : '—',
-    eur(entry.incasso),
+    entry.entrata > 0 ? eur(entry.entrata, entry) : '—',
+    entry.uscita > 0 ? eur(entry.uscita, entry) : '—',
+    entry.fiscaleEntrata > 0 ? eur(entry.fiscaleEntrata, entry) : '—',
+    entry.fiscaleUscita > 0 ? eur(entry.fiscaleUscita, entry) : '—',
+    entry.nonFiscaleEntrata > 0 ? eur(entry.nonFiscaleEntrata, entry) : '—',
+    entry.nonFiscaleUscita > 0 ? eur(entry.nonFiscaleUscita, entry) : '—',
+    entry.pos !== 0 ? eur(entry.pos, entry) : '—',
+    entry.contanti !== 0 ? eur(entry.contanti, entry) : '—',
+    entry.refill !== 0 ? eur(entry.refill, entry) : '—',
+    entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento, entry) : '—',
+    entry.versamentoBanca !== 0 ? eur(entry.versamentoBanca, entry) : '—',
+    eur(entry.incasso, entry),
   ])
 
   if (totals?.count > 0) {
@@ -62,6 +69,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       eur(totals.nonFiscaleEntrata),
       eur(totals.nonFiscaleUscita),
       eur(totals.pos),
+      eur(totals.contanti),
       eur(totals.refill),
       eur(totals.stackerSvuotamento),
       eur(totals.versamentoBanca),
@@ -82,6 +90,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       'NC ent',
       'NC usc',
       'POS',
+      'Contanti',
       'Refill',
       'Stacker',
       'Banca',

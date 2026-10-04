@@ -18,6 +18,7 @@ from ..schemas.cash import CashEntryCreate
 
 NON_FISCALE_CONTO = "NON_FISCALE"
 POS_CONTO = "POS"
+CONTANTI_CONTO = "CONTANTI"
 REFILL_CONTO = "REFILL"
 STACKER_SVUOTAMENTO_CONTO = "SVUOTAMENTO_STACKER"
 VERSAMENTO_BANCA_CONTO = "VERSAMENTO_BANCA"
@@ -396,6 +397,7 @@ def _get_period_summary_metrics(
     totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
     totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
+    totale_contanti = _entrata_amount_for_day(db, start, end, activity, conto=CONTANTI_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
     totale_stacker_svuotamento = _conto_amount_for_day(
         db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO
@@ -454,6 +456,7 @@ def _get_period_summary_metrics(
         "totale_fiscale": totale_fiscale,
         "totale_non_fiscale": totale_non_fiscale,
         "totale_pos": totale_pos,
+        "totale_contanti": totale_contanti,
         "totale_refill": totale_refill,
         "totale_stacker_svuotamento": totale_stacker_svuotamento,
         "totale_vendita": totale_vendita,

@@ -9,6 +9,7 @@ import { activityLabel, companyFromActivity } from '../utils/fattureCompany.js'
 export const PN_CONTO = {
   NON_FISCALE: 'NON_FISCALE',
   POS: 'POS',
+  CONTANTI: 'CONTANTI',
   REFILL: 'REFILL',
   STACKER: 'SVUOTAMENTO_STACKER',
   VERSAMENTO_BANCA: 'VERSAMENTO_BANCA',

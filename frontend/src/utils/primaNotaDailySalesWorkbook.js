@@ -26,6 +26,7 @@ export function buildPrimaNotaDailySalesRows(totals) {
       rowClass: 'prima-nota-row-nf',
     },
     { id: 'pos', label: 'Totale POS', amount: amountCell(totals.pos) },
+    { id: 'contanti', label: 'Totale Contanti', amount: amountCell(totals.contanti) },
     { id: 'refill', label: 'Totale Refill', amount: amountCell(totals.refill) },
     {
       id: 'totale',

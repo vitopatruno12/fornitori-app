@@ -1,5 +1,6 @@
 const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
+const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
 const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
@@ -18,6 +19,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'non_fiscale_ent', label: 'NC ent', numeric: true, width: 90 },
   { id: 'non_fiscale_usc', label: 'NC usc', numeric: true, width: 90 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
+  { id: 'contanti', label: 'Contanti', numeric: true, width: 100 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
   { id: 'stacker_svuotamento', label: 'Stacker', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
@@ -53,12 +55,28 @@ function formatAmountClean(value) {
   return formatAmount(n)
 }
 
+export function isAutoPrimaNotaEntry(entry) {
+  const note = String(entry?.note || '')
+  const desc = String(entry?.description || '')
+  return note.includes('[auto-chiusura]') || /\(\s*A\s*\)/.test(desc)
+}
+
+function formatFlowAmount(value, entry) {
+  const formatted = formatAmountClean(value)
+  if (!formatted) return ''
+  return isAutoPrimaNotaEntry(entry) ? `${formatted} (A)` : formatted
+}
+
 function isNonFiscaleEntry(entry) {
   return entry?.conto === CONTO_NON_FISCALE
 }
 
 function isPosEntry(entry) {
   return entry?.conto === CONTO_POS
+}
+
+function isContantiEntry(entry) {
+  return entry?.conto === CONTO_CONTANTI
 }
 
 function isRefillEntry(entry) {
@@ -84,6 +102,7 @@ function movementDescription(entry) {
   }
   if (isNonFiscaleEntry(entry)) text = text ? `${text} [NC]` : '[NC]'
   else if (isPosEntry(entry)) text = text ? `${text} [POS]` : '[POS]'
+  else if (isContantiEntry(entry)) text = text ? `${text} [Contanti]` : '[Contanti]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
   else if (isVersamentoBancaEntry(entry)) text = text ? `${text} [Banca]` : '[Banca]'
@@ -118,31 +137,33 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
     case 'description':
       return movementDescription(entry)
     case 'entrata':
-      return entry.entrata > 0 ? formatAmount(entry.entrata) : ''
+      return entry.entrata > 0 ? formatFlowAmount(entry.entrata, entry) : ''
     case 'uscita':
-      return entry.uscita > 0 ? formatAmount(entry.uscita) : ''
+      return entry.uscita > 0 ? formatFlowAmount(entry.uscita, entry) : ''
     case 'fiscale_ent':
-      return formatAmountClean(entry.fiscaleEntrata)
+      return formatFlowAmount(entry.fiscaleEntrata, entry)
     case 'fiscale_usc':
-      return formatAmountClean(entry.fiscaleUscita)
+      return formatFlowAmount(entry.fiscaleUscita, entry)
     case 'non_fiscale_ent':
-      return formatAmountClean(entry.nonFiscaleEntrata)
+      return formatFlowAmount(entry.nonFiscaleEntrata, entry)
     case 'non_fiscale_usc':
-      return formatAmountClean(entry.nonFiscaleUscita)
+      return formatFlowAmount(entry.nonFiscaleUscita, entry)
     case 'pos':
-      return formatAmountClean(entry.pos)
+      return formatFlowAmount(entry.pos, entry)
+    case 'contanti':
+      return formatFlowAmount(entry.contanti, entry)
     case 'refill':
-      return formatAmountClean(entry.refill)
+      return formatFlowAmount(entry.refill, entry)
     case 'stacker_svuotamento':
-      return formatAmountClean(entry.stackerSvuotamento)
+      return formatFlowAmount(entry.stackerSvuotamento, entry)
     case 'incasso':
-      return formatAmount(entry.incasso)
+      return formatFlowAmount(entry.incasso, entry) || formatAmount(entry.incasso)
     case 'cassa_mattina':
       return formatAmount(entry.cassaMattina)
     case 'cassa_sera':
       return formatAmount(entry.cassaSera)
     case 'versamento_banca':
-      return formatAmountClean(entry.versamentoBanca)
+      return formatFlowAmount(entry.versamentoBanca, entry)
     default:
       return ''
   }
@@ -158,6 +179,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'non_fiscale_ent') return formatAmount(totals.nonFiscaleEntrata)
   if (columnId === 'non_fiscale_usc') return formatAmount(totals.nonFiscaleUscita)
   if (columnId === 'pos') return formatAmount(totals.pos)
+  if (columnId === 'contanti') return formatAmount(totals.contanti)
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
   if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)
