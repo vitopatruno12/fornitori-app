@@ -689,35 +689,75 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
+  function applyPrimaNotaFocusPayload(data) {
+    if (!data || typeof data !== 'object') return
+    if (data.activity && !operatorMode) {
+      const nextAct = normalizePrimaNotaActivity(String(data.activity), locales)
+      desiredActivityRef.current = String(nextAct || '').trim().toLowerCase()
+      setLocaleAccessCode('')
+      setActiveActivity(nextAct)
+      try {
+        sessionStorage.setItem('primaNotaActivity', nextAct)
+      } catch {
+        // ignore
+      }
+      setDrawerEntry(null)
+      setOpeningCashInput('')
+      setSuccess(`Registro «${localeLabel(nextAct, locales)}» aperto dalla fattura`)
+    }
+    if (data.date) {
+      setSelectedDate(data.date)
+      setFormEntryDate(data.date)
+      setMovementPeriodFrom(defaultMovementPeriodFrom(data.date))
+      setMovementPeriodTo(data.date)
+    }
+    if (data.supplierId) setFormSupplierId(String(data.supplierId))
+    if (data.invoiceId) setFormInvoiceId(String(data.invoiceId))
+    setFormType('uscita')
+    if (data.description) setFormDescription(String(data.description))
+    if (data.invoiceNumber) {
+      const rif = String(data.invoiceNumber).trim()
+      if (rif) setFormRifDocumento(`Fattura n. ${rif}`)
+    }
+    if (data.cashEntryId != null && data.cashEntryId !== '') {
+      setHighlightEntryId(Number(data.cashEntryId))
+      setFocusEntryMessage('')
+      highlightScrollDoneRef.current = null
+    } else {
+      setHighlightEntryId(null)
+    }
+  }
+
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('primaNotaFocus')
       if (!raw) return
       const data = JSON.parse(raw)
       sessionStorage.removeItem('primaNotaFocus')
-      if (data.date) {
-        setSelectedDate(data.date)
-        setFormEntryDate(data.date)
-        setMovementPeriodFrom(defaultMovementPeriodFrom(data.date))
-        setMovementPeriodTo(data.date)
-      }
-      if (data.supplierId) setFormSupplierId(String(data.supplierId))
-      if (data.invoiceId) setFormInvoiceId(String(data.invoiceId))
-      setFormType('uscita')
-      if (data.description) setFormDescription(String(data.description))
-      if (data.invoiceNumber) {
-        const rif = String(data.invoiceNumber).trim()
-        if (rif) setFormRifDocumento(`Fattura n. ${rif}`)
-      }
-      if (data.cashEntryId != null && data.cashEntryId !== '') {
-        setHighlightEntryId(Number(data.cashEntryId))
-        setFocusEntryMessage('')
-        highlightScrollDoneRef.current = null
-      }
+      applyPrimaNotaFocusPayload(data)
     } catch {
       sessionStorage.removeItem('primaNotaFocus')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Se Prima Nota è già aperta, applica subito il registro corretto dalla fattura
+  useEffect(() => {
+    const onFocus = () => {
+      try {
+        const raw = sessionStorage.getItem('primaNotaFocus')
+        if (!raw) return
+        const data = JSON.parse(raw)
+        sessionStorage.removeItem('primaNotaFocus')
+        applyPrimaNotaFocusPayload(data)
+      } catch {
+        sessionStorage.removeItem('primaNotaFocus')
+      }
+    }
+    window.addEventListener('open-prima-nota', onFocus)
+    return () => window.removeEventListener('open-prima-nota', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operatorMode, locales])
 
   useEffect(() => {
     try {

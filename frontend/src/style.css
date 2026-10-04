@@ -6389,6 +6389,61 @@ select.form-control {
   color: #fecaca;
 }
 
+.banca-kpi-by-company-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.banca-kpi-company-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 0.85rem;
+}
+
+.banca-kpi-company-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  padding: 0.75rem 0.85rem 0.35rem;
+  background: #f8fafc;
+}
+
+.banca-kpi-company-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.banca-kpi-company-card-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--primary, #1e3a5f);
+}
+
+.banca-kpi-company-card-head span {
+  font-size: 0.78rem;
+  color: var(--text-muted, #64748b);
+}
+
+.banca-kpi-company-row {
+  margin: 0;
+}
+
+.banca-kpi-company-row .ui-kpi-card {
+  padding: 0.55rem 0.65rem;
+  min-width: 0;
+}
+
+.banca-kpi-company-row .ui-kpi-card-value {
+  font-size: 1.05rem;
+}
+
 .staff-page-hero-inner--with-locale {
   display: flex;
   flex-wrap: wrap;
@@ -10480,6 +10535,17 @@ select.form-control {
   color: #5b21b6;
   background: #ede9fe;
   border: 1px solid #c4b5fd;
+}
+
+.fatture-row-actions-primary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.fatture-excel-grid .sup-actions-col {
+  min-width: 16.5rem;
 }
 
 @keyframes fatture-focus-pulse {

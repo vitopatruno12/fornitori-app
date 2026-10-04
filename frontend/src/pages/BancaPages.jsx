@@ -925,28 +925,56 @@ export function BancaDashboardPage() {
       {loading && <AnalisiLoadingBar active label="Caricamento banca" variant="subtle" />}
       {!loading && data && (
         <>
-          <div className="ui-kpi-row">
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Saldo totale</div>
-              <div className="ui-kpi-card-value">{eur(data.saldo_totale)}</div>
+          <section className="card fatture-panel banca-kpi-by-company" aria-label="Saldi e flussi per società">
+            <div className="banca-kpi-by-company-head">
+              <h2 className="fatture-panel-title" style={{ margin: 0 }}>
+                Saldi e flussi per società
+              </h2>
+              <p className="fatture-note" style={{ margin: 0 }}>
+                Totale tutte: saldo {eur(data.saldo_totale)} · entrate oggi{' '}
+                <span style={{ color: 'var(--success)' }}>{eur(data.entrate_oggi)}</span> · uscite oggi{' '}
+                <span style={{ color: 'var(--danger)' }}>{eur(data.uscite_oggi)}</span>
+              </p>
             </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Entrate di oggi</div>
-              <div className="ui-kpi-card-value" style={{ color: 'var(--success)' }}>
-                {eur(data.entrate_oggi)}
+            {societa.length === 0 ? (
+              <p className="fatture-note">Nessun conto collegato a una società.</p>
+            ) : (
+              <div className="banca-kpi-company-grid">
+                {societa.map((row) => (
+                  <article key={row.company} className="banca-kpi-company-card">
+                    <header className="banca-kpi-company-card-head">
+                      <h3>{row.label}</h3>
+                      <span>{(row.conti || []).length} conti</span>
+                    </header>
+                    <div className="ui-kpi-row banca-kpi-company-row">
+                      <div className="ui-kpi-card">
+                        <div className="ui-kpi-card-label">Saldo totale</div>
+                        <div className="ui-kpi-card-value">{eur(row.saldo)}</div>
+                      </div>
+                      <div className="ui-kpi-card">
+                        <div className="ui-kpi-card-label">Entrate di oggi</div>
+                        <div className="ui-kpi-card-value" style={{ color: 'var(--success)' }}>
+                          {eur(row.entrate_oggi)}
+                        </div>
+                      </div>
+                      <div className="ui-kpi-card">
+                        <div className="ui-kpi-card-label">Uscite di oggi</div>
+                        <div className="ui-kpi-card-value" style={{ color: 'var(--danger)' }}>
+                          {eur(row.uscite_oggi)}
+                        </div>
+                      </div>
+                      <div className="ui-kpi-card">
+                        <div className="ui-kpi-card-label">Liquidità disponibile</div>
+                        <div className="ui-kpi-card-value">
+                          {eur(row.liquidita_disponibile ?? row.saldo)}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Uscite di oggi</div>
-              <div className="ui-kpi-card-value" style={{ color: 'var(--danger)' }}>
-                {eur(data.uscite_oggi)}
-              </div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Liquidità disponibile</div>
-              <div className="ui-kpi-card-value">{eur(data.liquidita_disponibile)}</div>
-            </div>
-          </div>
+            )}
+          </section>
 
           <section className="card fatture-panel">
             <h2 className="fatture-panel-title">Flusso di cassa (6 mesi)</h2>

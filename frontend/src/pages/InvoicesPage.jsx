@@ -4,15 +4,41 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, fetchInvoiceByNumber, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureLink, FattureNavBaseContext, FatturePageShell, PaymentBadge, formatDate } from '../components/FattureShared.jsx'
+import { FattureLink, FattureNavBaseContext, FatturePageShell, formatDate } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
 import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
-import { isGestionaleFattureContext } from '../utils/fattureCompany.js'
+import { activitiesForCompany, isGestionaleFattureContext } from '../utils/fattureCompany.js'
 import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
+
+/** Registro Prima Nota corretto per la fattura (società / attività / testo righe). */
+function resolvePrimaNotaActivityFromInvoice(inv) {
+  const direct = String(inv?.activity || '').trim().toLowerCase()
+  if (direct && direct !== 'mediazione') return direct
+
+  const company = String(inv?.company || '').trim().toLowerCase()
+  const fromCompany = activitiesForCompany(company)
+  if (fromCompany.length) return fromCompany[0]
+
+  const blob = [
+    inv?.note,
+    inv?.supplier_name,
+    ...(Array.isArray(inv?.rows)
+      ? inv.rows.map((r) => r?.description || r?.product_description || r?.name || r?.denominazione || '')
+      : []),
+  ]
+    .join(' ')
+    .toLowerCase()
+  if (/via\s*lattea|mucche\s*volanti/.test(blob)) return 'via_lattea'
+  if (/risacca|bar\s*momento/.test(blob)) return 'risacca'
+  if (/zanardelli/.test(blob)) return 'via_zanardelli'
+  if (/\babba\b|mani\s*in\s*pasta/.test(blob)) return 'via_abba'
+  if (/gazza\s*ladra|\bpg\b/.test(blob)) return 'pg'
+  return ''
+}
 
 function formatAmount(value) {
   if (value == null || value === '') return '–'
@@ -113,8 +139,6 @@ export default function InvoicesPage() {
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [detailInv, setDetailInv] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
   const [monthFilter, setMonthFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -508,25 +532,6 @@ export default function InvoicesPage() {
     }
   }
 
-  async function openInvoiceDetail(inv) {
-    setDetailInv({ ...inv, rows: inv.rows || [] })
-    setDetailLoading(true)
-    try {
-      const full = await fetchInvoice(inv.id)
-      setDetailInv({
-        ...inv,
-        ...full,
-        supplier_name: full.supplier_name || inv.supplier_name,
-        payment_status: full.payment_status || inv.payment_status,
-        rows: Array.isArray(full.rows) ? full.rows : [],
-      })
-    } catch (e) {
-      setError(e?.message || 'Errore caricamento dettaglio fattura')
-    } finally {
-      setDetailLoading(false)
-    }
-  }
-
   function handleFilterSubmit(e) {
     e.preventDefault()
     loadInvoices()
@@ -616,6 +621,9 @@ export default function InvoicesPage() {
     setNote(inv.note || '')
     setFile(null)
     setError('')
+    window.setTimeout(() => {
+      document.getElementById('fatture-form-inserimento')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 80)
   }
 
   function handleCancelEdit() {
@@ -693,18 +701,27 @@ export default function InvoicesPage() {
 
   async function openPrimaNota(inv) {
     let dateStr = inv.invoice_date ? inv.invoice_date.slice(0, 10) : ''
+    let activityFromCash = ''
     if (inv.cash_entry_id) {
       try {
         const entry = await fetchCashEntry(inv.cash_entry_id)
         if (entry?.entry_date) {
           dateStr = entry.entry_date.slice(0, 10)
         }
+        if (entry?.activity) activityFromCash = String(entry.activity).trim().toLowerCase()
       } catch {
         // movimento non trovato: resta la data documento
       }
     }
+    const activity =
+      activityFromCash ||
+      resolvePrimaNotaActivityFromInvoice(inv) ||
+      (scopeMode === 'locale' ? String(localeId || '').trim().toLowerCase() : '') ||
+      (scopeMode === 'company' ? activitiesForCompany(companyId)[0] || '' : '')
     sessionStorage.setItem('primaNotaFocus', JSON.stringify({
       date: dateStr,
+      activity: activity || null,
+      company: inv.company || companyId || null,
       supplierId: inv.supplier_id,
       cashEntryId: inv.cash_entry_id || null,
       invoiceId: inv.id || null,
@@ -759,7 +776,7 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <section className="card">
+      <section className="card" id="fatture-form-inserimento">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
             {editingId ? 'Modifica fattura' : 'Nuova fattura'}
@@ -1063,36 +1080,54 @@ export default function InvoicesPage() {
             emptyMessage={
               invoices.length === 0 ? 'Nessuna fattura registrata.' : 'Nessuna fattura per i filtri selezionati.'
             }
-            onRowClick={(inv) => openInvoiceDetail(inv)}
             getRowId={(inv) => `invoice-row-${inv.id}`}
             getRowClassName={(inv) =>
               activeFocusId && String(inv.id) === String(activeFocusId) ? 'workbook-row-focus-purple' : ''
             }
             actionsHeader="Azioni"
-            actionsColWidth="8.75rem"
+            actionsColWidth="16.5rem"
             renderActions={(inv) => (
               <FattureActionsMenu
                 primary={
-                  inv.file_path ? (
-                    <a
-                      href={getInvoicePdfUrl(inv.id)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn btn-primary btn-sm"
-                      title="Apri PDF"
-                    >
-                      PDF
-                    </a>
-                  ) : (
+                  <div className="fatture-row-actions-primary">
+                    {inv.file_path ? (
+                      <a
+                        href={getInvoicePdfUrl(inv.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-primary btn-sm"
+                        title="Apri / stampa PDF"
+                      >
+                        PDF
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleMarkPaid(inv)}
+                        disabled={inv.payment_status === 'paid'}
+                        title="Segna come pagata"
+                      >
+                        Pagata
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => handleMarkPaid(inv)}
-                      disabled={inv.payment_status === 'paid'}
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => openPrimaNota(inv)}
+                      title="Apri Prima Nota sul registro della fattura"
                     >
-                      Pagata
+                      Prima Nota
                     </button>
-                  )
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleEdit(inv)}
+                      title="Modifica fattura"
+                    >
+                      Modifica
+                    </button>
+                  </div>
                 }
                 items={[
                   inv.file_path
@@ -1103,13 +1138,11 @@ export default function InvoicesPage() {
                         onClick: () => handleMarkPaid(inv),
                       }
                     : null,
-                  { key: 'cassa', label: 'Cassa', onClick: () => openPrimaNota(inv) },
                   {
                     key: 'ignore',
                     label: inv.ignored ? 'Ripristina' : 'Ignora',
                     onClick: () => handleToggleIgnore(inv),
                   },
-                  { key: 'edit', label: 'Modifica', onClick: () => handleEdit(inv) },
                   {
                     key: 'delete',
                     label: 'Elimina',
@@ -1122,75 +1155,6 @@ export default function InvoicesPage() {
           />
         )}
       </section>
-
-      {detailInv && (
-        <>
-          <div className="ui-drawer-backdrop" onClick={() => setDetailInv(null)} aria-hidden />
-          <aside className="ui-drawer" role="dialog" aria-label="Dettaglio fattura">
-            <div className="ui-drawer-header">
-              <div>
-                <h2 className="ui-drawer-title">Fattura {detailInv.invoice_number}</h2>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{detailInv.supplier_name}</div>
-              </div>
-              <button type="button" className="ui-drawer-close" onClick={() => setDetailInv(null)} aria-label="Chiudi">×</button>
-            </div>
-            <div className="ui-drawer-body">
-              {detailLoading ? <AnalisiLoadingBar active label="Caricamento dettaglio" variant="subtle" /> : null}
-              <p style={{ marginTop: 0 }}><PaymentBadge status={detailInv.payment_status} ignored={detailInv.ignored} /></p>
-              <p><strong>Data documento:</strong> {formatDate(detailInv.invoice_date)}</p>
-              <p><strong>Scadenza:</strong> {formatDate(detailInv.due_date)}</p>
-              <p><strong>Imponibile:</strong> € {formatAmount(detailInv.imponibile)}</p>
-              <p><strong>IVA:</strong> € {formatAmount(detailInv.vat_amount)} ({detailInv.vat_percent}%)</p>
-              <p><strong>Totale:</strong> € {formatAmount(detailInv.total)}</p>
-              <p><strong>Già pagato:</strong> € {formatAmount(detailInv.amount_paid)}</p>
-              <p><strong>Residuo:</strong> € {formatAmount(Number(detailInv.total) - Number(detailInv.amount_paid || 0))}</p>
-              {detailInv.note && <p><strong>Note:</strong> {detailInv.note}</p>}
-
-              <hr style={{ margin: '1rem 0', border: 0, borderTop: '1px solid var(--border, #ddd)' }} />
-              <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>Righe</h3>
-              <div className="table-wrap">
-                <table className="app-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Descrizione</th>
-                      <th className="text-end">Q.tà</th>
-                      <th className="text-end">Imponibile</th>
-                      <th className="text-end">IVA %</th>
-                      <th className="text-end">Totale</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(detailInv.rows || []).map((ln) => (
-                      <tr key={ln.line_no}>
-                        <td>{ln.line_no}</td>
-                        <td>{ln.description || '—'}</td>
-                        <td className="text-end">{ln.quantity != null ? Number(ln.quantity).toLocaleString('it-IT') : '—'}</td>
-                        <td className="text-end">€ {formatAmount(ln.imponibile)}</td>
-                        <td className="text-end">{ln.vat_percent != null ? `${ln.vat_percent}%` : '—'}</td>
-                        <td className="text-end">€ {formatAmount(ln.total_line)}</td>
-                      </tr>
-                    ))}
-                    {!detailLoading && !(detailInv.rows || []).length ? (
-                      <tr>
-                        <td colSpan={6} className="empty-state">Nessuna riga</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="btn-group" style={{ marginTop: '1rem' }}>
-                <button type="button" className="btn btn-primary" onClick={() => { handleEdit(detailInv); setDetailInv(null) }}>Modifica</button>
-                <button type="button" className="btn btn-secondary" onClick={() => openPrimaNota(detailInv)}>Apri Prima Nota</button>
-                <button type="button" className="btn btn-secondary" onClick={() => handleToggleIgnore(detailInv)}>
-                  {detailInv.ignored ? 'Ripristina' : 'Ignora'}
-                </button>
-              </div>
-            </div>
-          </aside>
-        </>
-      )}
     </FatturePageShell>
   )
 }

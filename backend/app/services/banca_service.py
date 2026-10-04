@@ -1112,6 +1112,7 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
         "saldo": float(saldo_c),
         "entrate_oggi": float(ent_c),
         "uscite_oggi": float(usc_c),
+        "liquidita_disponibile": float(saldo_c),
         "conti": [
           {
             "id": a.get("id"),
