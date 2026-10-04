@@ -11,15 +11,12 @@ import {
   printSchedaContabileFornitore,
 } from '../services/schedaContabileFornitore.js'
 import { companyLabel } from '../utils/fattureCompany.js'
+import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import { printVneTable } from '../utils/vneTableExport.js'
 
-function monthBounds(d = new Date()) {
+function yearBounds(d = new Date()) {
   const y = d.getFullYear()
-  const m = d.getMonth()
-  const from = new Date(y, m, 1)
-  const to = new Date(y, m + 1, 0)
-  const iso = (x) => x.toISOString().slice(0, 10)
-  return { from: iso(from), to: iso(to) }
+  return { from: `${y}-01-01`, to: `${y}-12-31` }
 }
 
 function eurPlain(value) {
@@ -88,7 +85,7 @@ export function SchedaContabileFornitorePage({
   /** amministrazione = sotto Mastrini; fatture = postazioni operative */
   shell = 'amministrazione',
 } = {}) {
-  const bounds = useMemo(() => monthBounds(), [])
+  const bounds = useMemo(() => yearBounds(), [])
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
   const [dateFrom, setDateFrom] = useState(bounds.from)
   const [dateTo, setDateTo] = useState(bounds.to)
@@ -111,6 +108,11 @@ export function SchedaContabileFornitorePage({
     setLoading(true)
     setError('')
     try {
+      try {
+        await postBancaRiconciliazioneAuto(companyId)
+      } catch {
+        /* scheda comunque in lettura; riconciliazione può già essere stata fatta in Banca */
+      }
       const res = await loadSchedaContabileFornitori({
         company: companyId,
         dateFrom,
@@ -163,7 +165,7 @@ export function SchedaContabileFornitorePage({
       title="Scheda contabile fornitori"
       lead={
         companyId
-          ? `${companyName}: fornitori di questa società (fatture ricevute / pagamenti). I clienti con fatture emesse sono in Mastrini → Scheda clienti.`
+          ? `${companyName}: esercizio ${dateFrom.slice(0, 4)}. Aggiorna allinea i pagamenti (file Pagamenti fino a luglio, banca da agosto) e ricarica le schede. I clienti sono in Mastrini → Scheda clienti.`
           : 'Scegli la società nel banner, poi Aggiorna per aprire le schede fornitore di quel registro.'
       }
       actions={
@@ -193,14 +195,14 @@ export function SchedaContabileFornitorePage({
               </Link>
             ) : null}
             <button type="button" className="btn btn-primary btn-sm" disabled={!companyId || loading} onClick={reload}>
-              {loading ? 'Carico…' : 'Aggiorna'}
+              {loading ? 'Aggiorno…' : 'Aggiorna'}
             </button>
           </div>
         </aside>
       }
     >
       {error ? <p className="form-error">{error}</p> : null}
-      {loading ? <AnalisiLoadingBar active label="Caricamento fatture e pagamenti" variant="subtle" /> : null}
+      {loading ? <AnalisiLoadingBar active label="Riconcilio pagamenti e carico le schede" variant="subtle" /> : null}
 
       {!companyId ? (
         <p className="fatture-note">Seleziona una società per vedere i fornitori.</p>

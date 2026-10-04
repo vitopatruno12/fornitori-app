@@ -76,7 +76,7 @@ export async function loadSchedaContabileFornitori({
   dateFrom,
   dateTo,
   signal,
-  timeoutMs = 45000,
+  timeoutMs = 90000,
 } = {}) {
   const companyId = String(company || '').trim()
   if (!companyId) {
@@ -379,9 +379,11 @@ export function buildSchedaContabileFornitori(
     })
 
     // Se pagata in Atlas ma senza movimento banca matchato → PG virtuale
+    // (gennaio–luglio: file Pagamenti; poi contanti/banca)
     if (paidAmt > 0.009 && !paidInvoiceIds.has(Number(inv?.id)) && !paidByBank) {
       const payDate = isoDate(inv?.paid_at || inv?.updated_at || date)
       const cashPaid = String(inv?.payment_method || '').trim().toLowerCase() === 'contanti'
+      const fromPagamentiFile = Boolean(date && date < '2026-08-01')
       if (inPeriod(payDate) || inPeriod(date)) {
         const useDate = inPeriod(payDate) ? payDate : date
         party.totalDare += paidAmt
@@ -392,11 +394,17 @@ export function buildSchedaContabileFornitori(
           documento: `PG ${number || inv?.id || ''} ${formatDocDate(useDate)}`,
           documentoTipo: 'PG',
           registrationNumber: `PG-INV-${inv?.id ?? ''}`,
-          description: cashPaid
-            ? `PAGAMENTO CONTANTI FR ${number || inv?.id || ''}`
-            : `PAGAMENTO FR ${number || inv?.id || ''}`,
+          description: fromPagamentiFile
+            ? `PAGAMENTO FILE PAGAMENTI FR ${number || inv?.id || ''}`
+            : cashPaid
+              ? `PAGAMENTO CONTANTI FR ${number || inv?.id || ''}`
+              : `PAGAMENTO FR ${number || inv?.id || ''}`,
           documentLabel: `FR ${number || inv?.id || ''}`,
-          contropartita: cashPaid ? 'CASSA CONTANTI' : 'BANCA / CASSA',
+          contropartita: fromPagamentiFile
+            ? 'FILE PAGAMENTI'
+            : cashPaid
+              ? 'CASSA CONTANTI'
+              : 'BANCA / CASSA',
           counterparty: party.name,
           company: companyId,
           amount: paidAmt,

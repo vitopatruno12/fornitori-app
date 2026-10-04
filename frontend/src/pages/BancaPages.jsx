@@ -2651,16 +2651,31 @@ export function BancaRiconciliazionePage() {
     setLoading(true)
     setError('')
     try {
-      const res = auto
-        ? await postBancaRiconciliazioneAuto(nextCompany)
-        : await fetchBancaRiconciliazione(nextCompany)
+      let res
+      try {
+        res = auto
+          ? await postBancaRiconciliazioneAuto(nextCompany)
+          : await fetchBancaRiconciliazione(nextCompany)
+      } catch (firstErr) {
+        if (!auto) throw firstErr
+        res = await fetchBancaRiconciliazione(nextCompany)
+        setError(
+          'Riconciliazione banca lenta: elenco aggiornato da file Pagamenti (fino a luglio) e stato già salvato.',
+        )
+      }
       setData({ ...res, suggestions_pending: true })
       setLoading(false)
       const n = Number(res?.auto_applied) || 0
-      if (auto && n > 0) {
-        setSuccess(`Riconciliati automaticamente ${n} documenti.`)
+      const fromFile = Number(res?.bank_sync?.marked_from_pagamenti ?? res?.marked_from_pagamenti) || 0
+      if (auto && (n > 0 || fromFile > 0)) {
+        setSuccess(
+          `Elenco aggiornato: ${n} da banca, ${fromFile} dal file Pagamenti (gennaio–luglio).`.replace(
+            /\s+/g,
+            ' ',
+          ).trim(),
+        )
       } else if (auto) {
-        setSuccess('Nessun nuovo match auto.')
+        setSuccess('Elenco pagate / da pagare aggiornato. Nessun nuovo match.')
       }
       // Proposte in parallelo dopo lo snapshot (non bloccano la griglia principale)
       void fetchBancaRiconciliazioneProposte(nextCompany)
@@ -2718,8 +2733,7 @@ export function BancaRiconciliazionePage() {
   }
 
   useEffect(() => {
-    // Legge lo stato già salvato. Il ricalcolo completo resta sul pulsante.
-    reload(companyId, { auto: false })
+    reload(companyId, { auto: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
@@ -2905,8 +2919,8 @@ export function BancaRiconciliazionePage() {
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName}: l'agente legge le causali dei bonifici (destinatario / n. fattura), collega i movimenti e per i contanti usa il file fornitori.`
-          : "L'agente sincronizza i movimenti banca e riconcilia automaticamente le fatture (bonifico + contanti da Pagamenti)."
+          ? `Fatture ${companyName}: pagate / da pagare aggiornate all’apertura. Fino a luglio dal file Pagamenti, da agosto dai bonifici (importo + fornitore / n. fattura).`
+          : 'Scegli la società: l’elenco pagate e da pagare si aggiorna (file Pagamenti fino a luglio, banca da agosto).'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
@@ -2962,7 +2976,7 @@ export function BancaRiconciliazionePage() {
         <>
           <div className="ui-kpi-row">
             <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Pagate / trovate in banca</div>
+              <div className="ui-kpi-card-label">Pagate</div>
               <div className="ui-kpi-card-value">{data?.paid_count ?? paidRows.length ?? '—'}</div>
             </div>
             <div className="ui-kpi-card">
@@ -2989,7 +3003,7 @@ export function BancaRiconciliazionePage() {
           </div>
 
           {loading && !data ? (
-            <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />
+            <AnalisiLoadingBar active label="Aggiorno pagate e da pagare" variant="subtle" />
           ) : null}
 
           {data ? (
@@ -2999,7 +3013,7 @@ export function BancaRiconciliazionePage() {
                   <div>
                     <h2 className="fatture-panel-title">Da pagare</h2>
                     <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
-                      Numero fattura ed emittente non ancora collegati a un bonifico.
+                      Fino a luglio: senza PAGATO nel file. Da agosto: senza bonifico abbinato.
                     </p>
                   </div>
                   <form
@@ -3083,7 +3097,7 @@ export function BancaRiconciliazionePage() {
                   <div>
                     <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
                     <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
-                      Numero fattura, emittente e beneficiario del bonifico coincidono.
+                      Bonifico da agosto, oppure PAGATO nel file Pagamenti fino a luglio.
                     </p>
                   </div>
                   <form
@@ -3131,7 +3145,7 @@ export function BancaRiconciliazionePage() {
                   columns={BANK_INVOICE_STATUS_COLUMNS}
                   rows={paidRows}
                   cellValue={bankInvoiceStatusCellValue}
-                  emptyMessage="Nessuna fattura ancora abbinata ai movimenti."
+                  emptyMessage="Nessuna fattura ancora pagata (file Pagamenti o banca)."
                   gridClassName="banca-fit-grid"
                   rowKey={(row) => `paid-${row.invoice_id}`}
                   getRowId={(row) => `banca-recon-paid-${row.invoice_id}`}

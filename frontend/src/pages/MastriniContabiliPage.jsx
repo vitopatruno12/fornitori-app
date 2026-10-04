@@ -6,6 +6,7 @@ import { AmministrazionePageShell, eur, formatDate } from '../components/BancaSh
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
+import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
 import { accountCodesForCompany, GENERAL_ACCOUNTS } from '../constants/mastriniPasscom.js'
 import { companyLabel } from '../utils/fattureCompany.js'
@@ -563,6 +564,11 @@ export default function MastriniContabiliPage() {
     setLoading(true)
     setError('')
     try {
+      try {
+        await postBancaRiconciliazioneAuto(nextCompany)
+      } catch {
+        /* i mastrini restano in lettura anche se la sync banca è lenta */
+      }
       const res = await fetchMastriniData({
         dateFrom: (opts.dateFrom ?? dateFrom) || undefined,
         dateTo: (opts.dateTo ?? dateTo) || undefined,

@@ -2752,9 +2752,11 @@ def _invoice_row_out(
     "numero_in_movimento",
     "importo_in_movimento",
     "file_contanti",
+    "file_pagamenti",
     "pagata_contanti",
     "score_auto",
     "saldo_fatture",
+    "bundle_fornitore",
   }
   out = {
     "invoice_id": getattr(inv, "id", None),
@@ -2909,6 +2911,68 @@ def _uses_pagamenti_file_recon(inv: Any) -> bool:
   return d is not None and d < BANK_AUTO_RECON_FROM
 
 
+def apply_pagamenti_file_window_payments(
+  db: Session,
+  company: Optional[str] = None,
+) -> int:
+  """Chiude le fatture fino al 31/07 se PAGATO (DARE) > 0 nel file Pagamenti."""
+  from . import supplier_payments_service
+
+  company_id = (company or "").strip() or None
+  listed, _ = _load_recon_invoices(db, company_id)
+  unpaid = [
+    inv
+    for inv in listed
+    if _uses_pagamenti_file_recon(inv)
+    and (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+  ]
+  if not unpaid:
+    return 0
+  try:
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
+      db, company=company_id, all_workbooks=False
+    )
+  except Exception:
+    logger.warning("File Pagamenti non leggibile per riconciliazione scheda", exc_info=True)
+    return 0
+  by_number = _cash_rows_by_number(paid_file_rows)
+  ids = [int(getattr(inv, "id")) for inv in unpaid if getattr(inv, "id", None) is not None]
+  if not ids:
+    return 0
+  orm_by_id = {
+    int(row.id): row for row in db.query(Invoice).filter(Invoice.id.in_(ids)).all()
+  }
+  marked = 0
+  for inv in unpaid:
+    num = str(getattr(inv, "invoice_number", None) or "").strip()
+    if not num:
+      continue
+    subset = by_number.get(supplier_payments_service._normalize_doc(num)) or []
+    if not subset:
+      continue
+    hit = supplier_payments_service.find_paid_row_for_invoice(
+      subset,
+      invoice_number=num,
+      supplier_name=str(getattr(inv, "supplier_name", None) or "").strip(),
+      supplier_vat=str(
+        getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None) or ""
+      ).strip(),
+      invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
+      invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
+    )
+    if not hit:
+      continue
+    row = orm_by_id.get(int(getattr(inv, "id")))
+    if not row:
+      continue
+    row.amount_paid = _dec(row.total)
+    row.is_paid = True
+    marked += 1
+  if marked:
+    db.commit()
+  return marked
+
+
 def _load_recon_invoices(db: Session, company_id: Optional[str]) -> tuple:
   """Una sola lettura fatture (periodo recente) per la società in esame."""
   since = date.today() - timedelta(days=_RECON_INVOICE_LOOKBACK_DAYS)
@@ -3006,12 +3070,17 @@ def reconciliation_snapshot(
   limit: int = 40,
   company: Optional[str] = None,
 ) -> Dict[str, Any]:
-  """Elenco pagate/da pagare dallo stato già salvato, senza ricalcolare ogni bonifico.
+  """Elenco pagate/da pagare: chiude subito gennaio–luglio dal file Pagamenti.
 
-  L'apertura della pagina non può rifare il confronto completo: supera il timeout
-  del gateway e la griglia resta vuota.
+  Il confronto completo sui bonifici (da agosto) resta su POST /riconciliazione/auto.
   """
   company_id = (company or "").strip() or None
+  marked_from_file = 0
+  try:
+    marked_from_file = apply_pagamenti_file_window_payments(db, company_id)
+  except Exception:
+    logger.warning("Chiusura da file Pagamenti in snapshot fallita", exc_info=True)
+
   invoices, _match_invoices = _load_recon_invoices(db, company_id)
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -3039,13 +3108,22 @@ def reconciliation_snapshot(
     status = str(getattr(inv, "payment_status", None) or "")
     linked = linked_by_invoice.get(inv_id)
     if status == "paid":
+      cash_method = str(getattr(inv, "payment_method", None) or "").strip().lower() == "contanti"
+      if linked:
+        reason = "matched"
+      elif cash_method:
+        reason = "pagata_contanti"
+      elif _uses_pagamenti_file_recon(inv):
+        reason = "file_pagamenti"
+      else:
+        reason = "file_contanti"
       paid_by_bank.append(
         _invoice_row_out(
           inv,
           match_movement=_enrich_movement_out(linked["out"], linked["mov"], linked["blob"]) if linked else None,
-          reason="matched",
-          match_score=100 if linked else None,
-          match_band="auto" if linked else None,
+          reason=reason,
+          match_score=100,
+          match_band="auto",
         )
       )
     elif status == "partial":
@@ -3091,8 +3169,9 @@ def reconciliation_snapshot(
     "da_pagare": da_pagare,
     "open_invoices_count": len(da_pagare),
     "paid_count": len(paid_by_bank),
-    "pagamenti_paid_rows": 0,
+    "pagamenti_paid_rows": marked_from_file,
     "pagamenti_cash_rows": 0,
+    "marked_from_pagamenti": marked_from_file,
     "unmatched_movements": unmatched_count,
     "score_thresholds": {"auto": _SCORE_AUTO, "probable": _SCORE_PROBABLE},
     "accounts_used": [
