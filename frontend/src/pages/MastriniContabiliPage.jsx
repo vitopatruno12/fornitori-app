@@ -947,11 +947,51 @@ export default function MastriniContabiliPage() {
   }
 
   function exportListExcel() {
+    if (viewMode === 'partitario') {
+      if (partitarioDetailOpen && selectedParty) {
+        const rows = [
+          ['Soggetto', selectedParty.name || ''],
+          ['Tipo', selectedParty.type || ''],
+          ['Periodo', periodLabel],
+          [],
+          ['Data', 'N. registrazione', 'Descrizione', 'Documento', 'Società', 'Locale', 'Dare', 'Avere', 'Saldo progressivo'],
+          ...selectedPartyRows.map((m) => [
+            m.date || '',
+            m.registrationNumber || '',
+            m.description || '',
+            m.documentLabel || '',
+            m.companyLabel || '',
+            m.localeLabel || m.locale || m.center || '',
+            Number(m.dare) || 0,
+            Number(m.avere) || 0,
+            Number(m.progressiveBalance) || 0,
+          ]),
+        ]
+        const slug = String(selectedParty.name || 'soggetto')
+          .replace(/[^\w\-]+/g, '_')
+          .slice(0, 40)
+        downloadFile(`partitario_${slug || 'soggetto'}.csv`, `\uFEFF${toCsv(rows)}`, 'text/csv;charset=utf-8')
+        return
+      }
+      const rows = [
+        ['Soggetto', 'Tipo', 'Dare', 'Avere', 'Saldo', 'Movimenti'],
+        ...parties.map((p) => [
+          p.name || '',
+          p.type || '',
+          Number(p.totalDare) || 0,
+          Number(p.totalAvere) || 0,
+          Number(p.finalBalance) || 0,
+          p.movements?.length || 0,
+        ]),
+      ]
+      downloadFile('partitario_soggetti.csv', `\uFEFF${toCsv(rows)}`, 'text/csv;charset=utf-8')
+      return
+    }
     const rows = [
       ['Codice', 'Descrizione', 'Categoria', 'Dare', 'Avere', 'Saldo', 'Stato'],
       ...filteredAccounts.map((r) => [r.code, r.description, r.category, r.totalDare, r.totalAvere, r.finalBalance, r.status]),
     ]
-    downloadFile('mastrini_elenco.csv', toCsv(rows), 'text/csv;charset=utf-8')
+    downloadFile('mastrini_elenco.csv', `\uFEFF${toCsv(rows)}`, 'text/csv;charset=utf-8')
   }
 
   function exportListPdf() {
@@ -1065,7 +1105,14 @@ export default function MastriniContabiliPage() {
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={exportListExcel}
-            disabled={!filteredAccounts.length || !companyId}
+            disabled={
+              !companyId ||
+              (viewMode === 'partitario'
+                ? partitarioDetailOpen
+                  ? !selectedPartyRows.length
+                  : !parties.length
+                : !filteredAccounts.length)
+            }
           >
             Elenco Excel
           </button>
