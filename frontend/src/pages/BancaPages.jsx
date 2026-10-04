@@ -2114,6 +2114,7 @@ export function BancaContiPage() {
 }
 
 export function BancaMovimentiPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const highlightMovementId = Number(searchParams.get('movement_id') || 0) || null
   const highlightSense = String(searchParams.get('sense') || '').toLowerCase()
@@ -2128,6 +2129,21 @@ export function BancaMovimentiPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [lastSyncedLabel, setLastSyncedLabel] = useState('')
+
+  const showingSingleAccount = Boolean(accountId) || Boolean(highlightMovementId)
+
+  function tornaElencoMovimenti() {
+    setAccountId('')
+    setSearchQuery('')
+    setSuccess('')
+    setError('')
+    const params = new URLSearchParams(searchParams)
+    params.delete('account_id')
+    params.delete('movement_id')
+    params.delete('sense')
+    const qs = params.toString()
+    navigate(`/banca/movimenti${qs ? `?${qs}` : ''}`, { replace: true })
+  }
 
   const selectedAccount = accountId
     ? accounts.find((a) => String(a.id) === String(accountId)) || null
@@ -2390,6 +2406,17 @@ export function BancaMovimentiPage() {
             >
               {syncBusy ? 'Aggiorno…' : 'Aggiorna'}
             </button>
+            {showingSingleAccount ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={loading || syncBusy}
+                onClick={tornaElencoMovimenti}
+                title="Togli il filtro sul conto e torna all’elenco di tutti i movimenti"
+              >
+                ← Torna all&apos;elenco
+              </button>
+            ) : null}
             <button
               type="button"
               className="btn btn-secondary"
@@ -2472,13 +2499,40 @@ export function BancaMovimentiPage() {
             {searchStatusNote}
           </p>
         ) : null}
-        <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-          Stai vedendo:{' '}
-          <strong>{viewAccountLabel}</strong>
-          {selectedAccount?.company ? (
-            <> · società mastrini: <strong>{companyLabel(selectedAccount.company)}</strong></>
+        <div
+          className="fatture-note"
+          style={{
+            marginTop: '0.75rem',
+            marginBottom: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.65rem',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            Stai vedendo:{' '}
+            <strong>{viewAccountLabel}</strong>
+            {selectedAccount?.company ? (
+              <>
+                {' '}
+                · società mastrini: <strong>{companyLabel(selectedAccount.company)}</strong>
+              </>
+            ) : null}
+          </p>
+          {showingSingleAccount ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loading || syncBusy}
+              onClick={tornaElencoMovimenti}
+              title="Togli il filtro sul conto e torna all’elenco di tutti i movimenti"
+            >
+              ← Torna all&apos;elenco
+            </button>
           ) : null}
-        </p>
+        </div>
       </section>
 
       <section className="card fatture-panel banca-fit-panel">

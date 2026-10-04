@@ -10464,8 +10464,32 @@ select.form-control {
 .fatture-page .workbook-row-focus-purple .excel-cell,
 .fatture-page .workbook-row-focus-purple .workbook-col-sticky-left,
 .fatture-page .workbook-row-focus-purple .sup-actions-col {
-  background: #ede9fe !important;
-  box-shadow: inset 3px 0 0 #7c3aed;
+  background: #ddd6fe !important;
+  box-shadow: inset 4px 0 0 #6d28d9;
+  animation: fatture-focus-pulse 1.1s ease-in-out 3;
+}
+
+.fatture-focus-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5b21b6;
+  background: #ede9fe;
+  border: 1px solid #c4b5fd;
+}
+
+@keyframes fatture-focus-pulse {
+  0%,
+  100% {
+    background: #ddd6fe !important;
+  }
+  50% {
+    background: #c4b5fd !important;
+  }
 }
 
 .fatture-header.staff-page-hero:has(.mastrini-hero-tools) {

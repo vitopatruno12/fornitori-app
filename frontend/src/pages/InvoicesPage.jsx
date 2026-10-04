@@ -159,7 +159,7 @@ export default function InvoicesPage() {
     return [...rows.slice(0, insertAt), focused, ...rows.slice(insertAt)]
   }, [invoices, monthFilter, dateFrom, dateTo, activeFocusId])
 
-  // Dopo reload/lista, riporta lo scroll sulla riga evidenziata.
+  // Da movimenti banca: vai all’elenco storico (non restare sui box Nuova fattura) e tieni la riga evidenziata.
   const scrolledFocusRef = useRef('')
   useEffect(() => {
     if (loading) {
@@ -170,13 +170,33 @@ export default function InvoicesPage() {
     if (!filteredInvoices.some((inv) => String(inv.id) === activeFocusId)) return
     if (scrolledFocusRef.current === activeFocusId) return
     scrolledFocusRef.current = activeFocusId
-    const t = window.setTimeout(() => {
-      document.getElementById(`invoice-row-${activeFocusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+    let cancelled = false
+    let attempts = 0
+    const maxAttempts = 8
+
+    const scrollToFocusedInvoice = () => {
+      if (cancelled) return
+      const listEl = document.getElementById('fatture-storico-elenco')
+      const rowEl = document.getElementById(`invoice-row-${activeFocusId}`)
+      if (!rowEl) {
+        attempts += 1
+        if (attempts < maxAttempts) window.setTimeout(scrollToFocusedInvoice, 120)
+        return
+      }
+      // Prima porta in vista la sezione elenco (sotto i box di inserimento), poi la riga.
+      listEl?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       window.setTimeout(() => {
-        window.scrollBy({ top: 72, left: 0, behavior: 'smooth' })
-      }, 280)
-    }, 120)
-    return () => window.clearTimeout(t)
+        if (cancelled) return
+        rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 220)
+    }
+
+    const t = window.setTimeout(scrollToFocusedInvoice, 80)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
   }, [loading, activeFocusId, filteredInvoices])
 
   const kpi = useMemo(() => {
@@ -328,9 +348,10 @@ export default function InvoicesPage() {
       if (!inv?.id) return
       focusHandledRef.current = `id:${inv.id}`
       setFocusInvoiceId(String(inv.id))
+      scrolledFocusRef.current = '' // forza nuovo scroll verso l’elenco
       setError('')
       // Solo evidenzia + scroll: il dettaglio si apre al click sulla riga.
-      setSuccess(`Documento ${inv.invoice_number || inv.id} evidenziato`)
+      setSuccess(`Documento ${inv.invoice_number || inv.id} evidenziato nell’elenco sotto`)
       // Keep id in URL for share/reload, drop helper params once applied.
       const next = new URLSearchParams()
       next.set('id', String(inv.id))
@@ -457,7 +478,7 @@ export default function InvoicesPage() {
         return
       }
       setLoading(true)
-      const focusing = String(searchParams.get('id') || searchParams.get('n') || '').trim()
+      const focusing = String(searchParams.get('id') || searchParams.get('n') || focusInvoiceId || '').trim()
       if (!focusing) setError('')
       const params = {
         supplier_id: supplierId || undefined,
@@ -469,7 +490,17 @@ export default function InvoicesPage() {
         if (scopeMode === 'locale' && localeId) params.activity = localeId
       }
       const data = await fetchInvoices(params)
-      setInvoices(data)
+      const list = Array.isArray(data) ? data : []
+      // Non perdere la fattura appena aperta da movimenti se il reload lista la esclude
+      const keepId = String(focusInvoiceId || searchParams.get('id') || '').trim()
+      if (keepId && !list.some((inv) => String(inv.id) === keepId)) {
+        setInvoices((prev) => {
+          const kept = prev.find((inv) => String(inv.id) === keepId)
+          return kept ? [kept, ...list] : list
+        })
+      } else {
+        setInvoices(list)
+      }
     } catch (e) {
       setError('Errore nel caricamento delle fatture')
     } finally {
@@ -733,11 +764,50 @@ export default function InvoicesPage() {
           <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
             {editingId ? 'Modifica fattura' : 'Nuova fattura'}
           </h2>
-          <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
-            ← Torna all&apos;elenco
-          </FattureLink>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            {activeFocusId && !editingId ? (
+              <>
+                <a className="btn btn-secondary btn-sm" href="#fatture-storico-elenco">
+                  Vai all&apos;elenco evidenziato
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setFocusInvoiceId('')
+                    scrolledFocusRef.current = ''
+                    focusHandledRef.current = ''
+                    setSuccess('')
+                    const next = new URLSearchParams(searchParams)
+                    next.delete('id')
+                    next.delete('n')
+                    setSearchParams(next, { replace: true })
+                  }}
+                  title="Togli evidenziazione e mostra di nuovo il form di inserimento"
+                >
+                  Mostra inserimento
+                </button>
+              </>
+            ) : null}
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+              ← Torna all&apos;elenco
+            </FattureLink>
+          </div>
         </div>
-        <div className="form-group" style={{ marginBottom: '0.9rem', marginTop: '0.9rem' }}>
+        {activeFocusId && !editingId ? (
+          <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+            Arrivo da movimenti banca: il documento è evidenziato nello{' '}
+            <a href="#fatture-storico-elenco">Storico fatture</a> sotto.
+          </p>
+        ) : null}
+        <div
+          className="form-group"
+          style={{
+            marginBottom: '0.9rem',
+            marginTop: '0.9rem',
+            display: activeFocusId && !editingId ? 'none' : undefined,
+          }}
+        >
           <label>Comando AI fattura</label>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <input
@@ -757,7 +827,10 @@ export default function InvoicesPage() {
             </div>
           )}
         </div>
-        <form onSubmit={handleCreateInvoice}>
+        <form
+          onSubmit={handleCreateInvoice}
+          style={activeFocusId && !editingId ? { display: 'none' } : undefined}
+        >
           <div className="form-row">
             <div className="form-group">
               <label>Fornitore</label>
@@ -823,8 +896,26 @@ export default function InvoicesPage() {
         </form>
       </section>
 
-      <section className="card">
-        <h2 className="page-subheader" style={{ marginTop: 0 }}>Storico fatture</h2>
+      <section className="card" id="fatture-storico-elenco">
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            marginBottom: '0.35rem',
+          }}
+        >
+          <h2 className="page-subheader" style={{ marginTop: 0, marginBottom: 0 }}>
+            Storico fatture
+          </h2>
+          {activeFocusId ? (
+            <span className="fatture-focus-banner" role="status">
+              Documento evidenziato nell&apos;elenco
+            </span>
+          ) : null}
+        </div>
         <form onSubmit={handleFilterSubmit} className="ui-toolbar-one">
           <div className="form-group">
             <label>Fornitore</label>
