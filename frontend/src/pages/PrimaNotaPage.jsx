@@ -1621,6 +1621,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       return {
         ...entry,
         ...ledger,
+        registroLabel: localeLabel(entry.activity || activeActivity, locales),
         cassaMattina: cassaIniziale,
         cassaSera: running,
       }
@@ -1636,7 +1637,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       ? Number(firstCash.saldo_progressivo) - cashDeltaFromRaw(firstCash)
       : Number(entries[0].saldo_progressivo || 0)
     return mapEntriesWithLedger(entries, defaultOpening)
-  }, [entries, openingCashInput])
+  }, [entries, openingCashInput, activeActivity, locales])
 
   const entriesForSummary = useMemo(() => {
     if (!entries?.length) return []
@@ -1661,7 +1662,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       ? Number(firstCash.saldo_progressivo) - cashDeltaFromRaw(firstCash)
       : Number(entriesForSummary[0].saldo_progressivo || 0)
     return mapEntriesWithLedger(entriesForSummary, defaultOpening, summaryScope === 'day' ? undefined : '')
-  }, [entriesForSummary, openingCashInput, summaryScope])
+  }, [entriesForSummary, openingCashInput, summaryScope, activeActivity, locales])
 
   const filteredMovementRows = useMemo(() => {
     let from = movementPeriodFrom
@@ -1686,7 +1687,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
       if (movementKind === 'versamento_banca' && !isVersamentoBanca(entry)) return false
       if (!q) return true
-      const blob = [entry.description, entry.riferimento_documento].filter(Boolean).join(' ').toLowerCase()
+      const blob = [entry.description, entry.riferimento_documento, entry.registroLabel, entry.activity]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
       return blob.includes(q)
     })
   }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
@@ -2412,8 +2416,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           </div>
         )}
         <WorkbookGrid
-          title={PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE}
-          sheetLabel={`${filteredMovementRows.length} righe`}
+          title={`${PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE} — ${activeActivityLabel}`}
+          sheetLabel={`${filteredMovementRows.length} righe · registro ${activeActivityLabel}`}
           columns={PRIMA_NOTA_MOVEMENTS_COLUMNS}
           rows={filteredMovementRows}
           cellValue={primaNotaMovementCellValue}

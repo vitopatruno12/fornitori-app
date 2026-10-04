@@ -2967,7 +2967,47 @@ select.form-control {
 }
 
 .prima-nota-movements-grid {
-  min-width: 2100px;
+  min-width: 2220px;
+  /* sticky thead non funziona bene con border-collapse: collapse */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.workbook-card-nested:has(.prima-nota-movements-grid) .pagamenti-grid-wrap {
+  max-height: min(70vh, 820px);
+  overflow: auto;
+}
+
+.prima-nota-movements-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: #e2efda;
+  box-shadow: inset 0 -1px 0 #c5d6b8;
+}
+
+.prima-nota-movements-grid thead .workbook-col-sticky-left {
+  z-index: 7;
+  left: 0;
+  background: #e2efda;
+}
+
+/* # e Registro restano visibili anche con scroll orizzontale */
+.prima-nota-movements-grid thead th.workbook-col-sticky-left + th.workbook-col-sticky-left,
+.prima-nota-movements-grid tbody td.workbook-col-sticky-left + td.workbook-col-sticky-left {
+  left: 44px;
+}
+
+.prima-nota-movements-grid tbody td.workbook-col-sticky-left {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #fff;
+}
+
+.prima-nota-movements-grid tbody tr:hover td.workbook-col-sticky-left,
+.prima-nota-movements-grid .workbook-row-selected td.workbook-col-sticky-left {
+  background: #f8fafc;
 }
 
 .prima-nota-form-grid {

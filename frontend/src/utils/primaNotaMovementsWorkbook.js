@@ -8,8 +8,9 @@ export const PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE = 'Movimenti cassa'
 
 export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left' },
-  { id: 'entry_date', label: 'Data', width: 130 },
-  { id: 'description', label: 'Operazioni', width: 260, emphasis: true },
+  { id: 'registro', label: 'Registro', width: 120, sticky: 'left' },
+  { id: 'entry_date', label: 'Data', width: 110 },
+  { id: 'description', label: 'Operazioni', width: 240, emphasis: true },
   { id: 'entrata', label: 'Cassa entrata', numeric: true, width: 110 },
   { id: 'uscita', label: 'Cassa uscita', numeric: true, width: 110 },
   { id: 'fiscale_ent', label: 'Fiscale ent', numeric: true, width: 100 },
@@ -107,6 +108,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
   switch (column.id) {
     case 'row':
       return String(rowIndex + 1)
+    case 'registro':
+      return String(entry.registroLabel || entry.activity || '').trim() || '—'
     case 'entry_date': {
       const date = formatDate(entry.entry_date)
       const time = formatTime(entry.entry_date)
@@ -146,6 +149,7 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
 }
 
 export function primaNotaMovementTotalsLabel(columnId, totals) {
+  if (columnId === 'registro') return ''
   if (columnId === 'description') return `TOTALI (${totals.count})`
   if (columnId === 'entrata') return formatAmount(totals.entrata)
   if (columnId === 'uscita') return formatAmount(totals.uscita)
