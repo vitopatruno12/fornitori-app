@@ -17,7 +17,10 @@ from ..models.cash_entry import CashEntry
 from ..models.invoice import Invoice
 from ..models.supplier import Supplier
 from ..constants.company_banks import (
+  IBAN_MEDIAZIONE_BPPB,
+  IBAN_RISACCA_INTESA,
   IBAN_TO_COMPANY,
+  IBAN_VIA_LATTEA_BCC,
   account_matches_company,
   expected_banks_for_company,
   normalize_iban,
@@ -583,6 +586,49 @@ def accounts_for_company(db: Session, company: Optional[str] = None) -> List[Dic
     )
   ]
   return [_account_out(r) for r in matched]
+
+
+# Conto da guardare per primo in riconciliazione. Gli altri conti della società,
+# poi tutti i conti restanti, si usano solo se su questo non c'è riscontro.
+_PRIMARY_RECON_IBANS: Dict[str, frozenset] = {
+  "mediazione_a": frozenset({normalize_iban(IBAN_MEDIAZIONE_BPPB)}),
+  "mediazione_z": frozenset({normalize_iban(IBAN_MEDIAZIONE_BPPB)}),
+  "mediazione": frozenset({normalize_iban(IBAN_MEDIAZIONE_BPPB)}),
+  "via_lattea": frozenset({normalize_iban(IBAN_VIA_LATTEA_BCC)}),
+  "risacca": frozenset({normalize_iban(IBAN_RISACCA_INTESA)}),
+}
+
+
+def recon_account_tiers(
+  db: Session,
+  company: Optional[str] = None,
+) -> Tuple[set, set, set]:
+  """(conto principale, altri conti della società, tutti gli altri conti attivi)."""
+  company_id = (company or "").strip().lower() or None
+  if not company_id:
+    rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).all()
+    return {int(r.id) for r in rows}, set(), set()
+
+  company_ids = {
+    int(a["id"]) for a in accounts_for_company(db, company_id) if a.get("id") is not None
+  }
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).all()
+  primary_ibans = _PRIMARY_RECON_IBANS.get(company_id, frozenset())
+  primary: set = set()
+  secondary: set = set()
+  rest: set = set()
+  for row in rows:
+    rid = int(row.id)
+    iban_n = normalize_iban(row.iban)
+    if primary_ibans and iban_n in primary_ibans:
+      primary.add(rid)
+    elif rid in company_ids:
+      secondary.add(rid)
+    else:
+      rest.add(rid)
+  if not primary:
+    return secondary, set(), rest
+  return primary, secondary, rest
 
 
 def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any]:
@@ -3065,6 +3111,28 @@ def _load_recon_movements(
   return mov_meta
 
 
+def _load_recon_movements_by_tiers(
+  db: Session,
+  tiers: Sequence[set],
+) -> Tuple[List[Dict[str, Any]], Dict[int, int]]:
+  """Carica le uscite partendo dal conto principale. tier 2 = principale, 1 = società, 0 = altri."""
+  seen: set[int] = set()
+  out: List[Dict[str, Any]] = []
+  tier_of: Dict[int, int] = {}
+  for level, ids in enumerate(reversed(list(tiers))):
+    if not ids:
+      continue
+    for aid in ids:
+      tier_of[int(aid)] = level
+    for meta in _load_recon_movements(db, ids):
+      mid = int(meta["mov"].id)
+      if mid in seen:
+        continue
+      seen.add(mid)
+      out.append(meta)
+  return out, tier_of
+
+
 def reconciliation_snapshot(
   db: Session,
   limit: int = 40,
@@ -3336,10 +3404,10 @@ def reconciliation_preview(
   bank_invoices = [inv for inv in invoices if not _uses_pagamenti_file_recon(inv)]
   bank_match_invoices = [inv for inv in match_invoices if not _uses_pagamenti_file_recon(inv)]
 
-  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
-  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
-
-  mov_meta = _load_recon_movements(db, account_ids)
+  primary_ids, secondary_ids, other_ids = recon_account_tiers(db, company_id)
+  mov_meta, tier_of = _load_recon_movements_by_tiers(
+    db, (primary_ids, secondary_ids, other_ids)
+  )
 
   from . import supplier_payments_service
 
@@ -3382,6 +3450,7 @@ def reconciliation_preview(
         continue
     best_sc = None
     best_m = None
+    best_key = None
     for m in _uscita_near_targets(mov_index, _invoice_amount_targets(inv)):
       linked = m["mov"].matched_invoice_id
       if linked and int(linked) != inv_id:
@@ -3389,7 +3458,12 @@ def reconciliation_preview(
       sc = score_movement_invoice(inv, m["mov"], m["blob"])
       if sc["band"] != "auto":
         continue
-      if best_sc is None or sc["score"] > best_sc["score"]:
+      key = (
+        tier_of.get(int(m["mov"].bank_account_id or 0), 0),
+        int(sc.get("score") or 0),
+      )
+      if best_key is None or key > best_key:
+        best_key = key
         best_sc = sc
         best_m = m
     if best_m is not None and best_sc is not None:
@@ -3399,6 +3473,7 @@ def reconciliation_preview(
           "found": best_m,
           "sc": best_sc,
           "rank": (
+            tier_of.get(int(best_m["mov"].bank_account_id or 0), 0),
             int(best_sc.get("score") or 0),
             1 if _invoice_number_in_text(str(inv.invoice_number or ""), best_m["blob"]) else 0,
             -int(best_m["mov"].id or 0),
@@ -3706,10 +3781,11 @@ def sync_payment_status_from_bank(
     for inv in listed
     if (getattr(inv, "payment_status", None) or "unpaid") == "paid"
   ]
-  account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
-  account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
-
-  mov_meta = _load_recon_movements(db, account_ids)
+  primary_ids, secondary_ids, other_ids = recon_account_tiers(db, company_id)
+  account_ids = primary_ids | secondary_ids | other_ids
+  mov_meta, tier_of = _load_recon_movements_by_tiers(
+    db, (primary_ids, secondary_ids, other_ids)
+  )
 
   try:
     paid_file_rows = supplier_payments_service.list_paid_document_rows(
@@ -3758,6 +3834,7 @@ def sync_payment_status_from_bank(
     date_gap = abs((mov_d - anchor).days) if mov_d and anchor else 9999
     inv_ord = inv_d.toordinal() if inv_d else 0
     return (
+      tier_of.get(int(getattr(mov, "bank_account_id") or 0), 0),
       int(sc.get("score") or 0),
       has_num,
       -date_gap,

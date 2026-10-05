@@ -155,8 +155,16 @@ function printMastro(account, periodLabel) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
-function exportElencoPdf({ accounts, companyLabelText, periodLabel }) {
-  const rows = Array.isArray(accounts) ? accounts : []
+function pdfSlug(value, fallback) {
+  return (
+    String(value || fallback || 'export')
+      .replace(/[^\w\-]+/g, '_')
+      .slice(0, 40) || fallback || 'export'
+  )
+}
+
+function exportTablePdf({ title, companyLabelText, periodLabel, filename, head, body, columnStyles }) {
+  const rows = Array.isArray(body) ? body : []
   if (!rows.length) return
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
@@ -164,40 +172,25 @@ function exportElencoPdf({ accounts, companyLabelText, periodLabel }) {
   const generatedAt = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
 
   doc.setFontSize(16)
-  doc.text('Elenco mastrini / piano dei conti', 14, 14)
+  doc.text(title, 14, 14)
   doc.setFontSize(10)
   doc.setTextColor(60, 60, 60)
   doc.text(`Società: ${companyLabelText || '—'}`, 14, 21)
   doc.text(`Periodo: ${periodLabel || '—'}`, 14, 27)
   doc.text(`Generato: ${generatedAt}`, pageW - 14, 14, { align: 'right' })
 
-  const body = rows.map((r) => [
-    r.code || '',
-    r.description || '',
-    r.category || '',
-    eur(r.totalDare),
-    eur(r.totalAvere),
-    eur(r.finalBalance),
-    r.status || '',
-  ])
-
   autoTable(doc, {
     startY: 32,
-    head: [['Codice', 'Descrizione', 'Categoria', 'Dare', 'Avere', 'Saldo', 'Stato']],
-    body,
-    styles: { fontSize: 8, cellPadding: 1.8 },
+    head: [head],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 1.6 },
     headStyles: { fillColor: [17, 76, 95], textColor: 255 },
     alternateRowStyles: { fillColor: [245, 248, 250] },
     margin: { left: 10, right: 10 },
-    columnStyles: {
-      1: { cellWidth: 70 },
-    },
+    columnStyles: columnStyles || {},
   })
 
-  const safeCompany = String(companyLabelText || 'mastrini')
-    .replace(/[^\w\-]+/g, '_')
-    .slice(0, 40)
-  doc.save(`mastrini_elenco_${safeCompany || 'export'}.pdf`)
+  doc.save(filename)
 }
 
 function registrateHref(mv) {
@@ -995,10 +988,77 @@ export default function MastriniContabiliPage() {
   }
 
   function exportListPdf() {
-    exportElencoPdf({
-      accounts: filteredAccounts,
+    const companySlug = pdfSlug(selectedCompanyLabel, 'mastrini')
+    if (viewMode === 'partitario') {
+      if (partitarioDetailOpen && selectedParty) {
+        exportTablePdf({
+          title: `Partitario — ${selectedParty.name || 'soggetto'}`,
+          companyLabelText: selectedCompanyLabel,
+          periodLabel,
+          filename: `partitario_${pdfSlug(selectedParty.name, 'soggetto')}.pdf`,
+          head: ['Data', 'N. registrazione', 'Descrizione', 'Documento', 'Società', 'Locale', 'Dare', 'Avere', 'Saldo'],
+          body: selectedPartyRows.map((m) => [
+            formatDate(m.date),
+            m.registrationNumber || '',
+            m.description || '',
+            m.documentLabel || '',
+            m.companyLabel || '',
+            m.localeLabel || m.locale || m.center || '',
+            m.dare ? eur(m.dare) : '—',
+            m.avere ? eur(m.avere) : '—',
+            eur(m.progressiveBalance),
+          ]),
+          columnStyles: { 2: { cellWidth: 55 } },
+        })
+        return
+      }
+      const totals = parties.reduce(
+        (acc, p) => {
+          acc.dare += Number(p.totalDare) || 0
+          acc.avere += Number(p.totalAvere) || 0
+          acc.saldo += Number(p.finalBalance) || 0
+          acc.movements += p.movements?.length || 0
+          return acc
+        },
+        { dare: 0, avere: 0, saldo: 0, movements: 0 },
+      )
+      exportTablePdf({
+        title: 'Partitario clienti/fornitori',
+        companyLabelText: selectedCompanyLabel,
+        periodLabel,
+        filename: `partitario_${companySlug}.pdf`,
+        head: ['Soggetto', 'Tipo', 'Dare', 'Avere', 'Saldo', 'Movimenti'],
+        body: [
+          ...parties.map((p) => [
+            p.name || '',
+            String(p.type || '').toUpperCase(),
+            eur(p.totalDare),
+            eur(p.totalAvere),
+            eur(p.finalBalance),
+            String(p.movements?.length || 0),
+          ]),
+          ['TOTALI', '', eur(totals.dare), eur(totals.avere), eur(totals.saldo), String(totals.movements)],
+        ],
+        columnStyles: { 0: { cellWidth: 90 } },
+      })
+      return
+    }
+    exportTablePdf({
+      title: 'Elenco mastrini / piano dei conti',
       companyLabelText: selectedCompanyLabel,
       periodLabel,
+      filename: `mastrini_elenco_${companySlug}.pdf`,
+      head: ['Codice', 'Descrizione', 'Categoria', 'Dare', 'Avere', 'Saldo', 'Stato'],
+      body: filteredAccounts.map((r) => [
+        r.code || '',
+        r.description || '',
+        r.category || '',
+        eur(r.totalDare),
+        eur(r.totalAvere),
+        eur(r.finalBalance),
+        r.status || '',
+      ]),
+      columnStyles: { 1: { cellWidth: 70 } },
     })
   }
 
@@ -1120,7 +1180,14 @@ export default function MastriniContabiliPage() {
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={exportListPdf}
-            disabled={!filteredAccounts.length || !companyId}
+            disabled={
+              !companyId ||
+              (viewMode === 'partitario'
+                ? partitarioDetailOpen
+                  ? !selectedPartyRows.length
+                  : !parties.length
+                : !filteredAccounts.length)
+            }
           >
             Elenco PDF
           </button>

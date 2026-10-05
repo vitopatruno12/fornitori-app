@@ -4,7 +4,7 @@
 - Scarica i bonifici Enable Banking
 - Legge causale/descrizione (n. fattura, fornitore, importo) → Fattura collegata
 - Contanti: prova dal file fornitori (Pagamenti)
-- Timer: martedì, mercoledì e venerdì alle 9:30 e alle 23:00 (ora di Roma, systemd Timezone=Europe/Rome)
+- Timer: martedì, mercoledì, giovedì e venerdì alle 9:30 e alle 18:30 (ora di Roma, systemd Timezone=Europe/Rome)
 
 Uso sul server:
   cd /opt/fornitori-app/backend
