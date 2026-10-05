@@ -37,7 +37,7 @@ const HOME_CASSA_LOCALE_TUTTI = 'tutti'
 const HOME_SOCIETA_STORAGE_KEY = 'homeKpiSocieta'
 const HOME_SOCIETA_TUTTE = 'tutte'
 
-/** Locali mostrati nel KPI Saldo cassa (slug Prima Nota → etichetta Home). */
+/** Locali mostrati nel KPI Saldo cassa Prima Nota (slug → etichetta Home). */
 const HOME_CASSA_LOCALI = [
   { id: 'risacca', label: 'Risacca' },
   { id: 'via_abba', label: 'Mani_In_Pasta_Abba' },
@@ -280,10 +280,10 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
 
   const cassaLocaleHint = useMemo(() => {
     if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) {
-      return 'Totale movimenti non bancari (tutti i locali)'
+      return 'Saldo cassa Prima Nota · tutti i registri'
     }
     const hit = HOME_CASSA_LOCALI.find((l) => l.id === cassaLocale)
-    return hit ? `Saldo cassa · ${hit.label}` : 'Movimenti non bancari (cassa / contanti default)'
+    return hit ? `Saldo cassa Prima Nota · ${hit.label}` : 'Movimenti non bancari (cassa / contanti default)'
   }, [cassaLocale])
 
   function onCassaLocaleChange(next) {
@@ -523,7 +523,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           <section className="dashboard-kpi-grid">
             <div className="dashboard-kpi dashboard-kpi--primary">
               <div className="dashboard-kpi-label-row">
-                <div className="dashboard-kpi-label">Saldo cassa</div>
+                <div className="dashboard-kpi-label">Saldo cassa Prima Nota</div>
                 <label className="dashboard-kpi-locale-label" htmlFor="home-saldo-cassa-locale">
                   <span className="sr-only">Locale</span>
                   <select

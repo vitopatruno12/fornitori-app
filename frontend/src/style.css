@@ -9951,12 +9951,6 @@ select.form-control {
   color: var(--text-muted, #6b7280);
 }
 
-.stipendi-notes {
-  display: grid;
-  gap: 0.25rem;
-  margin-top: 0.85rem;
-}
-
 .stipendi-excel-card .workbook-card-nested {
   border: 1px solid #c5d6b8;
   border-radius: 0.65rem;

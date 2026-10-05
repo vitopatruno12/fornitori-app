@@ -192,7 +192,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   const [archives, setArchives] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [lines, setLines] = useState([])
-  const [notes, setNotes] = useState('')
   const [draft, setDraft] = useState(() => emptyLine())
   const [editIndex, setEditIndex] = useState(null)
   const [selectedIndex, setSelectedIndex] = useState(null)
@@ -296,7 +295,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       )
     }
     setLines(next)
-    setNotes('')
     setActiveId(null)
     setSelectedIndex(null)
     resetDraft()
@@ -316,7 +314,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         deduped.push(emptyLine(l))
       }
       setLines(deduped)
-      setNotes(row.notes || '')
       setSelectedIndex(null)
       resetDraft()
     },
@@ -327,7 +324,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setYearMonth(ym)
     setActiveId(null)
     setLines([])
-    setNotes('')
     setSelectedIndex(null)
     resetDraft()
   }
@@ -497,13 +493,13 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         year_month: yearMonth,
         ...period,
         lines: cleaned,
-        notes: notes || null,
+        notes: null,
       }
       let saved
       if (activeId) {
         saved = await updateStaffStipendiMonth(activeId, {
           lines: cleaned,
-          notes: notes || null,
+          notes: null,
           period_from: period.period_from,
           period_to: period.period_to,
         })
@@ -512,7 +508,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
         if (existing) {
           saved = await updateStaffStipendiMonth(existing.id, {
             lines: cleaned,
-            notes: notes || null,
+            notes: null,
             period_from: period.period_from,
             period_to: period.period_to,
           })
@@ -960,16 +956,6 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                     </button>
                   </div>
                 </div>
-
-                <label className="stipendi-notes">
-                  <span className="muted">Note</span>
-                  <input
-                    className="form-control"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Note mese (opzionale)"
-                  />
-                </label>
               </div>
 
               <div id="stipendi-foglio-tabella">
