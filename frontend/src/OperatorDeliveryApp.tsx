@@ -33,8 +33,16 @@ import {
 } from './pages/FatturePages.jsx'
 import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import {
+  BancaContiPage,
+  BancaDashboardPage,
+  BancaMovimentiPage,
+  BancaRiconciliazionePage,
+} from './pages/BancaPages.jsx'
+import { BancaNavBaseProvider } from './components/BancaShared.jsx'
+import {
   getOperatorDeliveryRouterPath,
   getOperatorDeliveryView,
+  OPERATOR_DELIVERY_BANCA_PATH,
   OPERATOR_DELIVERY_FATTURE_PATH,
   type OperatorDeliveryView,
 } from './utils/operatorMode.ts'
@@ -60,6 +68,7 @@ const PERSONALE_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
 const ADMIN_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'fatturazione', label: 'Fatture fornitori' },
   { id: 'prima-nota', label: 'Prima Nota' },
+  { id: 'banca', label: 'Banca' },
 ]
 
 const DELIVERY_MENU_VIEWS: OperatorDeliveryView[] = ['new-delivery', 'magazzino', 'trasportatori']
@@ -70,7 +79,7 @@ const PANORAMICA_MENU_VIEWS: OperatorDeliveryView[] = [
   'analisi-mensile',
 ]
 const PERSONALE_MENU_VIEWS: OperatorDeliveryView[] = ['staff-report', 'stipendi']
-const ADMIN_MENU_VIEWS: OperatorDeliveryView[] = ['fatturazione', 'prima-nota']
+const ADMIN_MENU_VIEWS: OperatorDeliveryView[] = ['fatturazione', 'prima-nota', 'banca']
 
 const TITLES: Record<OperatorDeliveryView, string> = {
   overview: 'Panoramica',
@@ -86,6 +95,7 @@ const TITLES: Record<OperatorDeliveryView, string> = {
   stipendi: 'Stipendi',
   fatturazione: 'Fatture fornitori',
   'prima-nota': 'Prima Nota',
+  banca: 'Banca',
 }
 
 function DeliveryFattureRoutes() {
@@ -112,6 +122,20 @@ function DeliveryFattureRoutes() {
         <Route path="*" element={<Navigate to="." replace />} />
       </Routes>
     </FattureNavBaseProvider>
+  )
+}
+
+function DeliveryBancaRoutes() {
+  return (
+    <BancaNavBaseProvider base={OPERATOR_DELIVERY_BANCA_PATH}>
+      <Routes>
+        <Route index element={<BancaDashboardPage />} />
+        <Route path="conti" element={<BancaContiPage />} />
+        <Route path="movimenti" element={<BancaMovimentiPage />} />
+        <Route path="riconciliazione" element={<BancaRiconciliazionePage />} />
+        <Route path="*" element={<Navigate to="." replace />} />
+      </Routes>
+    </BancaNavBaseProvider>
   )
 }
 
@@ -244,6 +268,9 @@ export default function OperatorDeliveryApp() {
   const onFatturePath =
     location.pathname === OPERATOR_DELIVERY_FATTURE_PATH ||
     location.pathname.startsWith(`${OPERATOR_DELIVERY_FATTURE_PATH}/`)
+  const onBancaPath =
+    location.pathname === OPERATOR_DELIVERY_BANCA_PATH ||
+    location.pathname.startsWith(`${OPERATOR_DELIVERY_BANCA_PATH}/`)
 
   React.useEffect(() => {
     markCarrierPwaLaunchPreferred()
@@ -295,6 +322,10 @@ export default function OperatorDeliveryApp() {
         setDeliveryView('prima-nota')
         return
       }
+      if (key === 'banca') {
+        setDeliveryView('banca')
+        return
+      }
       if (key === 'staff-report' || key === 'report' || key === 'report-personale' || key === 'personale') {
         setDeliveryView('staff-report')
         return
@@ -320,7 +351,11 @@ export default function OperatorDeliveryApp() {
     [setDeliveryView],
   )
 
-  const effectiveView: OperatorDeliveryView = onFatturePath ? 'fatturazione' : view
+  const effectiveView: OperatorDeliveryView = onFatturePath
+    ? 'fatturazione'
+    : onBancaPath
+      ? 'banca'
+      : view
   const headerTitle = TITLES[effectiveView] || 'Postazione trasportatore'
   const deliveryMenuActive = DELIVERY_MENU_VIEWS.includes(effectiveView)
   const panoramicaMenuActive = PANORAMICA_MENU_VIEWS.includes(effectiveView)
@@ -403,6 +438,7 @@ export default function OperatorDeliveryApp() {
     >
       <Routes>
         <Route path="fatture/*" element={<DeliveryFattureRoutes />} />
+        <Route path="banca/*" element={<DeliveryBancaRoutes />} />
         <Route
           path="*"
           element={

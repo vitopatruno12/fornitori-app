@@ -2,10 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   AmministrazionePageShell,
+  BancaLink,
   BancaPageShell,
   eur,
   formatDate,
   reconciliationStatusLabel,
+  resolveBancaPath,
+  useBancaBase,
 } from '../components/BancaShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
@@ -328,8 +331,9 @@ function bankLastMovementsCellValue(row, col) {
   return ''
 }
 
-function bancaMovimentoDetailHref(row) {
-  if (!row?.id) return '/banca/movimenti'
+function bancaMovimentoDetailHref(row, base = '/banca') {
+  const root = resolveBancaPath('/banca', base)
+  if (!row?.id) return resolveBancaPath('/banca/movimenti', base)
   const params = new URLSearchParams()
   params.set('movement_id', String(row.id))
   if (row.bank_account_id) params.set('account_id', String(row.bank_account_id))
@@ -340,16 +344,16 @@ function bancaMovimentoDetailHref(row) {
   }
   const sense = String(row.movement_type || '').toLowerCase() === 'entrata' ? 'entrata' : 'uscita'
   params.set('sense', sense)
-  return `/banca/movimenti?${params.toString()}`
+  return `${root}/movimenti?${params.toString()}`
 }
 
-function bankLastMovementsRenderCell(row, col) {
+function bankLastMovementsRenderCell(row, col, base = '/banca') {
   if (col.id !== 'description') return null
   const text = row?.description || '—'
   if (!row?.id) return null
   return (
     <Link
-      to={bancaMovimentoDetailHref(row)}
+      to={bancaMovimentoDetailHref(row, base)}
       className="excel-cell pagamenti-cell-readonly banca-linked-invoice-link"
       title="Apri dettaglio bonifico"
       onClick={(e) => e.stopPropagation()}
@@ -848,6 +852,7 @@ export function AmministrazioneImpostazioniPage() {
 
 export function BancaDashboardPage() {
   const navigate = useNavigate()
+  const bancaBase = useBancaBase()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -897,7 +902,7 @@ export function BancaDashboardPage() {
             ) : (
               row.ultimi_movimenti.map((mov) => (
                 <li key={mov.id}>
-                  <Link to={bancaMovimentoDetailHref(mov)} className="banca-hero-move-link" title="Apri dettaglio bonifico">
+                  <Link to={bancaMovimentoDetailHref(mov, bancaBase)} className="banca-hero-move-link" title="Apri dettaglio bonifico">
                     <span>{formatDate(mov.movement_date)}</span>
                     <span>{mov.description || '—'}</span>
                     <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
@@ -985,9 +990,9 @@ export function BancaDashboardPage() {
               <h2 className="fatture-panel-title" style={{ margin: 0 }}>
                 Ultimi movimenti
               </h2>
-              <Link className="btn btn-secondary btn-sm" to="/banca/movimenti">
+              <BancaLink className="btn btn-secondary btn-sm" to="/banca/movimenti">
                 Vedi tutti
-              </Link>
+              </BancaLink>
             </div>
             <WorkbookGrid
               title="Ultimi movimenti"
@@ -995,14 +1000,14 @@ export function BancaDashboardPage() {
               columns={BANK_LAST_MOVEMENTS_COLUMNS}
               rows={data.ultimi_movimenti || []}
               cellValue={bankLastMovementsCellValue}
-              renderCell={bankLastMovementsRenderCell}
+              renderCell={(row, col) => bankLastMovementsRenderCell(row, col, bancaBase)}
               emptyMessage="Nessun movimento. Sincronizza un conto da Conti correnti."
               gridClassName="banca-fit-grid"
               rowKey={(row) => row.id}
               rowClickTitle="Apri dettaglio bonifico"
               onRowClick={(row) => {
                 if (!row?.id) return
-                navigate(bancaMovimentoDetailHref(row))
+                navigate(bancaMovimentoDetailHref(row, bancaBase))
               }}
             />
           </section>
@@ -1094,9 +1099,9 @@ function BankSyncCard({
         >
           Scollega e svuota
         </button>
-        <Link className="btn btn-secondary" to="/banca/movimenti">
+        <BancaLink className="btn btn-secondary" to="/banca/movimenti">
           Movimenti
-        </Link>
+        </BancaLink>
       </div>
       {!syncEnabled ? <p className="banca-sync-note">Enable Banking non configurato sul server.</p> : null}
     </section>
@@ -2142,6 +2147,7 @@ export function BancaContiPage() {
 
 export function BancaMovimentiPage() {
   const navigate = useNavigate()
+  const bancaBase = useBancaBase()
   const [searchParams] = useSearchParams()
   const highlightMovementId = Number(searchParams.get('movement_id') || 0) || null
   const highlightSense = String(searchParams.get('sense') || '').toLowerCase()
@@ -2169,7 +2175,7 @@ export function BancaMovimentiPage() {
     params.delete('movement_id')
     params.delete('sense')
     const qs = params.toString()
-    navigate(`/banca/movimenti${qs ? `?${qs}` : ''}`, { replace: true })
+    navigate(`${resolveBancaPath('/banca/movimenti', bancaBase)}${qs ? `?${qs}` : ''}`, { replace: true })
   }
 
   const selectedAccount = accountId

@@ -45,9 +45,12 @@ export type OperatorDeliveryView =
   | 'stipendi'
   | 'fatturazione'
   | 'prima-nota'
+  | 'banca'
 
 /** Sotto-percorso fatture nella postazione trasportatore (resta autenticato carrier). */
 export const OPERATOR_DELIVERY_FATTURE_PATH = `${OPERATOR_DELIVERY_PATH}/fatture`
+/** Sotto-percorso banca nella postazione trasportatore. */
+export const OPERATOR_DELIVERY_BANCA_PATH = `${OPERATOR_DELIVERY_PATH}/banca`
 
 export type OperatorStationView =
   | 'overview'
@@ -341,6 +344,7 @@ const DELIVERY_VIEW_BY_PAGINA: Record<string, OperatorDeliveryView> = {
   fatture: 'fatturazione',
   'prima-nota': 'prima-nota',
   primanota: 'prima-nota',
+  banca: 'banca',
 }
 
 const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
@@ -357,6 +361,7 @@ const DELIVERY_PAGINA_BY_VIEW: Record<OperatorDeliveryView, string | null> = {
   stipendi: 'stipendi',
   fatturazione: null,
   'prima-nota': 'prima-nota',
+  banca: null,
 }
 
 export function getOperatorDeliveryView(): OperatorDeliveryView {
@@ -365,6 +370,9 @@ export function getOperatorDeliveryView(): OperatorDeliveryView {
   const hash = normalizeHash()
   if (path === OPERATOR_DELIVERY_FATTURE_PATH || path.startsWith(`${OPERATOR_DELIVERY_FATTURE_PATH}/`)) {
     return 'fatturazione'
+  }
+  if (path === OPERATOR_DELIVERY_BANCA_PATH || path.startsWith(`${OPERATOR_DELIVERY_BANCA_PATH}/`)) {
+    return 'banca'
   }
   if (
     path.endsWith(`${OPERATOR_DELIVERY_PATH}${OPERATOR_DELIVERY_HISTORY_SUFFIX}`) ||
@@ -388,6 +396,7 @@ export function getOperatorOrderPublicUrl(): string {
 /** Link postazione trasportatore (panoramica / fornitori / consegne). */
 export function getOperatorDeliveryPublicUrl(view: OperatorDeliveryView = 'overview'): string {
   if (view === 'fatturazione') return buildPublicUrl(OPERATOR_DELIVERY_FATTURE_PATH)
+  if (view === 'banca') return buildPublicUrl(OPERATOR_DELIVERY_BANCA_PATH)
   const base = buildPublicUrl(OPERATOR_DELIVERY_PATH)
   const pagina = DELIVERY_PAGINA_BY_VIEW[view]
   if (!pagina) return base
@@ -398,6 +407,7 @@ export function getOperatorDeliveryPublicUrl(view: OperatorDeliveryView = 'overv
 /** Path relativo per React Router sulla postazione trasportatore. */
 export function getOperatorDeliveryRouterPath(view: OperatorDeliveryView = 'overview'): string {
   if (view === 'fatturazione') return OPERATOR_DELIVERY_FATTURE_PATH
+  if (view === 'banca') return OPERATOR_DELIVERY_BANCA_PATH
   const pagina = DELIVERY_PAGINA_BY_VIEW[view]
   if (!pagina) return OPERATOR_DELIVERY_PATH
   return `${OPERATOR_DELIVERY_PATH}?pagina=${pagina}`

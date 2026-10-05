@@ -17,6 +17,40 @@ export const BANCA_NAV_ITEMS = [
   { to: '/banca/riconciliazione', label: 'Riconciliazione' },
 ]
 
+/** Base path banca: `/banca` nel gestionale, oppure `/operatore-consegne/banca` in postazione trasportatore. */
+export const BancaNavBaseContext = React.createContext('/banca')
+
+export function BancaNavBaseProvider({ base = '/banca', children }) {
+  const normalized = String(base || '/banca').replace(/\/+$/, '') || '/banca'
+  return <BancaNavBaseContext.Provider value={normalized}>{children}</BancaNavBaseContext.Provider>
+}
+
+export function useBancaBase() {
+  return React.useContext(BancaNavBaseContext) || '/banca'
+}
+
+/** Risolve un path `/banca/...` rispetto alla base corrente. */
+export function resolveBancaPath(to, base = '/banca') {
+  const root = String(base || '/banca').replace(/\/+$/, '') || '/banca'
+  const raw = String(to || '').trim()
+  if (!raw) return root
+  if (raw === '/banca' || raw === '/banca/') return root
+  if (raw.startsWith('/banca/')) return `${root}/${raw.slice('/banca/'.length)}`
+  if (raw.startsWith('/banca?')) return `${root}${raw.slice('/banca'.length)}`
+  if (raw.startsWith('/')) return raw
+  return `${root}/${raw.replace(/^\//, '')}`
+}
+
+export function useBancaTo(to) {
+  const base = useBancaBase()
+  return resolveBancaPath(to, base)
+}
+
+export function BancaLink({ to, ...props }) {
+  const resolved = useBancaTo(to)
+  return <Link to={resolved} {...props} />
+}
+
 export function eur(n) {
   if (n == null || n === '') return '—'
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(n))
@@ -104,18 +138,22 @@ export function AmministrazioneSubnav() {
 }
 
 export function BancaSubnav() {
+  const base = useBancaBase()
   return (
     <nav className="fatture-subnav" aria-label="Sezioni Banca">
-      {BANCA_NAV_ITEMS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={Boolean(item.end)}
-          className={({ isActive }) => `fatture-subnav-link${isActive ? ' is-active' : ''}`}
-        >
-          {item.label}
-        </NavLink>
-      ))}
+      {BANCA_NAV_ITEMS.map((item) => {
+        const to = resolveBancaPath(item.to, base)
+        return (
+          <NavLink
+            key={item.to}
+            to={to}
+            end={Boolean(item.end)}
+            className={({ isActive }) => `fatture-subnav-link${isActive ? ' is-active' : ''}`}
+          >
+            {item.label}
+          </NavLink>
+        )
+      })}
     </nav>
   )
 }
@@ -142,16 +180,24 @@ export function AmministrazionePageShell({ title, lead, children, actions = null
 }
 
 export function BancaPageShell({ title, lead, children, actions = null, banner = null }) {
+  const base = useBancaBase()
+  const isCarrier = base !== '/banca'
   return (
     <div className="fatture-page banca-page">
       <header className="fatture-header staff-page-hero">
         <div className="fatture-header-row">
           <div>
             <p className="fatture-kicker">
-              <Link to="/amministrazione" style={{ color: 'inherit', textDecoration: 'none' }}>
-                Amministrazione
-              </Link>
-              {' · Banca'}
+              {isCarrier ? (
+                'Amministrazione · Banca'
+              ) : (
+                <>
+                  <Link to="/amministrazione" style={{ color: 'inherit', textDecoration: 'none' }}>
+                    Amministrazione
+                  </Link>
+                  {' · Banca'}
+                </>
+              )}
             </p>
             <h1 className="page-header staff-page-title" style={{ marginBottom: '0.25rem' }}>
               {title}
