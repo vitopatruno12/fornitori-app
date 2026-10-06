@@ -3172,6 +3172,25 @@ select.form-control {
   gap: 0.65rem;
 }
 
+.dashboard-movements-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.dashboard-movements-societa-label {
+  min-width: 0;
+}
+
+.dashboard-movements-societa-select {
+  min-width: 11rem;
+  max-width: 16rem;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.45rem;
+}
+
 .pagamenti-workbook-actions {
   display: flex;
   flex-wrap: wrap;

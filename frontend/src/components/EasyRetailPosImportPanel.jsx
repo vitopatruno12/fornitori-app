@@ -265,13 +265,7 @@ export function EasyRetailPosImportPanel({ onImported } = {}) {
 
   return (
     <section className="card analisi-panel" style={{ marginBottom: '1rem' }}>
-      <h2 className="analisi-panel-title">Scontrini EasyRetail (visite e pagamenti)</h2>
-      <p className="analisi-machine-scope">
-        Sul <strong>PC cassa</strong> l’agent legge il database Firebird EasyRetail (<code>DBRETAIL.GDB</code>) ogni
-        pochi minuti e invia gli scontrini ad ATLAS, includendo la ripartizione <strong>contanti</strong> vs{' '}
-        <strong>carta/POS</strong> quando il GDB espone le forme di pagamento. Resta disponibile anche l’import CSV
-        manuale.
-      </p>
+      <h2 className="analisi-panel-title">Scontrini EasyRetail visite e pagamenti</h2>
       <p className="analisi-machine-scope" role="status">
         Modalità sync:{' '}
         <strong>{mode === 'server-gdb' ? 'server legge GDB' : 'agent PC cassa → ATLAS'}</strong>

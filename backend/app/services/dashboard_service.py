@@ -16,6 +16,7 @@ from ..schemas.dashboard import (
     DashboardCashMovement,
     DashboardCompanyCharts,
     DashboardCompanyKpi,
+    DashboardCompanyMovements,
     DashboardDeliveryRow,
     DashboardInvoiceSnippet,
     DashboardLocaleSaldo,
@@ -188,6 +189,40 @@ def _kpi_per_societa(db: Session, start: datetime, end: datetime) -> List[Dashbo
             )
         )
     return rows
+
+
+def _cash_movement(e: CashEntry) -> DashboardCashMovement:
+    return DashboardCashMovement(
+        id=e.id,
+        entry_date=e.entry_date,
+        type=e.type,
+        amount=e.amount,
+        description=e.description,
+        conto=e.conto,
+        activity=e.activity,
+    )
+
+
+def _ultimi_movimenti(db: Session, activities: Optional[Tuple[str, ...]] = None, limit: int = 10) -> List[DashboardCashMovement]:
+    q = db.query(CashEntry).filter(_fiscale_filter())
+    if activities:
+        clauses = [_activity_filter(act) for act in activities]
+        q = q.filter(or_(*clauses) if len(clauses) > 1 else clauses[0])
+    rows = q.order_by(desc(CashEntry.entry_date), desc(CashEntry.id)).limit(limit).all()
+    return [_cash_movement(e) for e in rows]
+
+
+def _ultimi_movimenti_per_societa(db: Session, limit: int = 10) -> List[DashboardCompanyMovements]:
+    return [
+        DashboardCompanyMovements(
+            company=company_id,
+            label=label,
+            activity=activities[0],
+            movements=_ultimi_movimenti(db, activities=activities, limit=limit),
+        )
+        for company_id, label, activities in HOME_SOCIETA
+        if activities
+    ]
 
 
 def _iter_months_back(now: datetime, count: int) -> List[Tuple[int, int]]:
@@ -413,24 +448,8 @@ def get_summary(db: Session) -> DashboardSummary:
     da_pagare_residuo = da_pagare_residuo.quantize(Decimal("0.01"))
     scadute_residuo = scadute_residuo.quantize(Decimal("0.01"))
 
-    mov_rows = (
-        db.query(CashEntry)
-        .filter(_fiscale_filter())
-        .order_by(desc(CashEntry.entry_date), desc(CashEntry.id))
-        .limit(10)
-        .all()
-    )
-    ultimi = [
-        DashboardCashMovement(
-            id=e.id,
-            entry_date=e.entry_date,
-            type=e.type,
-            amount=e.amount,
-            description=e.description,
-            conto=e.conto,
-        )
-        for e in mov_rows
-    ]
+    ultimi = _ultimi_movimenti(db, limit=10)
+    ultimi_per_societa = _ultimi_movimenti_per_societa(db, limit=10)
 
     del_rows = (
         db.query(Delivery, Supplier.name)
@@ -523,6 +542,7 @@ def get_summary(db: Session) -> DashboardSummary:
         fatture_scadute_count=scadute_count,
         fatture_scadute_residuo=scadute_residuo,
         ultimi_movimenti=ultimi,
+        ultimi_movimenti_per_societa=ultimi_per_societa,
         consegne_recenti=consegne,
         fornitori_prezzi_in_aumento=increases,
         fatture_scadute_elenco=fatture_snip,

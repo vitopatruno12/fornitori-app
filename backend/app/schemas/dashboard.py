@@ -12,6 +12,7 @@ class DashboardCashMovement(BaseModel):
     amount: Decimal
     description: Optional[str] = None
     conto: Optional[str] = None
+    activity: Optional[str] = None
 
 
 class DashboardDeliveryRow(BaseModel):
@@ -69,6 +70,15 @@ class DashboardLocaleSaldo(BaseModel):
     saldo: Decimal
 
 
+class DashboardCompanyMovements(BaseModel):
+    """Ultimi movimenti cassa di un registro società."""
+
+    company: str
+    label: str
+    activity: str
+    movements: List[DashboardCashMovement]
+
+
 class DashboardCompanyKpi(BaseModel):
     """KPI Home divisi per società (banca + flussi mese Prima Nota)."""
 
@@ -101,6 +111,7 @@ class DashboardSummary(BaseModel):
     fatture_scadute_count: int
     fatture_scadute_residuo: Decimal
     ultimi_movimenti: List[DashboardCashMovement]
+    ultimi_movimenti_per_societa: List[DashboardCompanyMovements] = []
     consegne_recenti: List[DashboardDeliveryRow]
     fornitori_prezzi_in_aumento: List[DashboardPriceIncrease]
     fatture_scadute_elenco: List[DashboardInvoiceSnippet]

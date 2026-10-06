@@ -75,7 +75,7 @@ export function PosOnlyMachineCard({ machine }) {
       <p className="analisi-machine-scope" style={{ marginTop: '-0.35rem' }}>
         {isGazza
           ? 'Scontrini POS Poste · contanti / elettronico'
-          : 'Scontrini EasyRetail (agent PC cassa) · contanti / elettronico'}
+          : 'Scontrini EasyRetail visite e pagamenti · contanti / elettronico'}
       </p>
       <div className="analisi-machine-kpis">
         <div>

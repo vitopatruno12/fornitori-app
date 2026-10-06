@@ -36,6 +36,7 @@ const HOME_CASSA_LOCALE_STORAGE_KEY = 'homeSaldoCassaLocale'
 const HOME_CASSA_LOCALE_TUTTI = 'tutti'
 const HOME_SOCIETA_STORAGE_KEY = 'homeKpiSocieta'
 const HOME_SOCIETA_TUTTE = 'tutte'
+const HOME_MOVIMENTI_SOCIETA_STORAGE_KEY = 'homeMovimentiCassaSocieta'
 
 /** Locali mostrati nel KPI Saldo cassa Prima Nota (slug → etichetta Home). */
 const HOME_CASSA_LOCALI = [
@@ -44,6 +45,15 @@ const HOME_CASSA_LOCALI = [
   { id: 'via_zanardelli', label: 'Mani_in_pasta_Z.delli' },
   { id: 'via_lattea', label: 'La Via Lattea Registro' },
 ]
+
+/** Società SDI → registro Prima Nota. */
+const HOME_SOCIETA_ACTIVITY = {
+  mediazione_a: 'via_abba',
+  mediazione_z: 'via_zanardelli',
+  via_lattea: 'via_lattea',
+  risacca: 'risacca',
+  pg: 'pg',
+}
 
 /** Società per Saldo banca / Entrate / Uscite del mese. */
 const HOME_SOCIETA = [
@@ -70,6 +80,18 @@ function readStoredCassaLocale() {
 function readStoredSocieta() {
   try {
     const raw = sessionStorage.getItem(HOME_SOCIETA_STORAGE_KEY)
+    if (!raw) return HOME_SOCIETA_TUTTE
+    if (raw === HOME_SOCIETA_TUTTE) return HOME_SOCIETA_TUTTE
+    if (HOME_SOCIETA.some((s) => s.id === raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  return HOME_SOCIETA_TUTTE
+}
+
+function readStoredMovimentiSocieta() {
+  try {
+    const raw = sessionStorage.getItem(HOME_MOVIMENTI_SOCIETA_STORAGE_KEY)
     if (!raw) return HOME_SOCIETA_TUTTE
     if (raw === HOME_SOCIETA_TUTTE) return HOME_SOCIETA_TUTTE
     if (HOME_SOCIETA.some((s) => s.id === raw)) return raw
@@ -220,6 +242,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   const [analisiSnap, setAnalisiSnap] = useState(null)
   const [cassaLocale, setCassaLocale] = useState(readStoredCassaLocale)
   const [societaKpi, setSocietaKpi] = useState(readStoredSocieta)
+  const [movimentiSocieta, setMovimentiSocieta] = useState(readStoredMovimentiSocieta)
 
   const saldiCassaLocali = useMemo(() => {
     const fromApi = Array.isArray(data?.saldi_cassa_locali) ? data.saldi_cassa_locali : []
@@ -415,17 +438,21 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
 
   const chartActivity = useMemo(() => {
     if (societaKpi === HOME_SOCIETA_TUTTE) return ''
-    const map = {
-      mediazione_a: 'via_abba',
-      mediazione_z: 'via_zanardelli',
-      via_lattea: 'via_lattea',
-      risacca: 'risacca',
-      pg: 'pg',
-    }
-    return map[societaKpi] || ''
+    return HOME_SOCIETA_ACTIVITY[societaKpi] || ''
   }, [societaKpi])
   const pendingOrders = data?.ordini_consegna_in_ritardo || []
-  const latestMovements = data?.ultimi_movimenti || []
+  const latestMovements = useMemo(() => {
+    if (movimentiSocieta === HOME_SOCIETA_TUTTE) return data?.ultimi_movimenti || []
+    const fromApi = Array.isArray(data?.ultimi_movimenti_per_societa) ? data.ultimi_movimenti_per_societa : []
+    const hit = fromApi.find((row) => String(row.company || '').toLowerCase() === movimentiSocieta)
+    return hit?.movements || []
+  }, [data, movimentiSocieta])
+  const movimentiSocietaLabel =
+    movimentiSocieta === HOME_SOCIETA_TUTTE
+      ? 'tutte le società'
+      : HOME_SOCIETA.find((s) => s.id === movimentiSocieta)?.label || movimentiSocieta
+  const movimentiActivity =
+    movimentiSocieta === HOME_SOCIETA_TUTTE ? '' : HOME_SOCIETA_ACTIVITY[movimentiSocieta] || ''
   const recentDeliveries = data?.consegne_recenti || []
   const overdueInvoices = data?.fatture_scadute_elenco || []
   const priceIncreases = data?.fornitori_prezzi_in_aumento || []
@@ -455,6 +482,15 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     }, 0)
   }
 
+  function onMovimentiSocietaChange(next) {
+    setMovimentiSocieta(next)
+    try {
+      sessionStorage.setItem(HOME_MOVIMENTI_SOCIETA_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }
+
   function openPrimaNotaWithFilter(monthKey, movementKind = 'all', search = '') {
     if (!monthKey && !operatorMode) return
     if (monthKey) {
@@ -467,6 +503,22 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           ...(chartActivity ? { activity: chartActivity } : {}),
         }),
       )
+    }
+    if (operatorMode) {
+      onOperatorNavigate?.('prima-nota')
+      return
+    }
+    onNavigate?.('prima-nota')
+  }
+
+  function openPrimaNotaFromMovimenti() {
+    try {
+      if (movimentiActivity) {
+        sessionStorage.setItem('primaNotaDashboardFilter', JSON.stringify({ activity: movimentiActivity }))
+        sessionStorage.setItem('primaNotaActivity', movimentiActivity)
+      }
+    } catch {
+      /* ignore */
     }
     if (operatorMode) {
       onOperatorNavigate?.('prima-nota')
@@ -738,24 +790,53 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
 
           <div className="dashboard-two-col">
             <section className="card dashboard-panel pagamenti-workbook-card">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm dashboard-panel-action"
-                onClick={() => (operatorMode ? onOperatorNavigate?.('prima-nota') : onNavigate?.('prima-nota'))}
-              >
-                Prima Nota
-              </button>
               <WorkbookGrid
                 title={DASHBOARD_MOVEMENTS_TITLE}
-                sheetLabel={`${latestMovements.length} movimenti`}
+                sheetLabel={`${latestMovements.length} movimenti · ${movimentiSocietaLabel}`}
                 columns={DASHBOARD_MOVEMENTS_COLUMNS}
                 rows={latestMovements}
                 cellValue={dashboardMovementCellValue}
                 totalsLabel={dashboardMovementsTotalsLabel}
                 totals={movementsTotals}
                 gridClassName="dashboard-movements-grid"
-                emptyMessage="Nessun movimento registrato."
+                emptyMessage={
+                  movimentiSocieta === HOME_SOCIETA_TUTTE
+                    ? 'Nessun movimento registrato.'
+                    : `Nessun movimento per ${movimentiSocietaLabel}.`
+                }
                 rowKey={(row) => String(row.id)}
+                toolbarActions={
+                  <div className="dashboard-movements-toolbar">
+                    <label className="dashboard-movements-societa-label" htmlFor="home-movimenti-cassa-societa">
+                      <span className="sr-only">Società ultimi movimenti cassa</span>
+                      <select
+                        id="home-movimenti-cassa-societa"
+                        className="dashboard-kpi-locale-select dashboard-movements-societa-select"
+                        value={movimentiSocieta}
+                        onChange={(e) => onMovimentiSocietaChange(e.target.value)}
+                      >
+                        <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
+                        {HOME_SOCIETA.map((soc) => (
+                          <option key={soc.id} value={soc.id}>
+                            {soc.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={openPrimaNotaFromMovimenti}
+                      title={
+                        movimentiActivity
+                          ? `Apri Prima Nota · registro ${movimentiSocietaLabel}`
+                          : 'Apri Prima Nota'
+                      }
+                    >
+                      Prima Nota
+                    </button>
+                  </div>
+                }
               />
             </section>
 

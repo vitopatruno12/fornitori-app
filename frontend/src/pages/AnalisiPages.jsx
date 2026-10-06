@@ -230,6 +230,10 @@ function DataNote({ text }) {
   const cleaned = String(text)
     .replace(/\s*Aggiornamento live dal portale remoto;?\s*risultati in cache\s*~?\s*20\s*minuti\.?/gi, '')
     .replace(/\s*risultati in cache\s*~?\s*20\s*minuti\.?/gi, '')
+    .replace(
+      /\s*Incassi e pagamenti \(contanti vs carta\/POS\) solo da scontrini agent sulle casse \(EasyRetail\) e POS Poste — la Dashboard Analitica non legge più le VNE\.\s*Visite = numero scontrini\.\s*Cinque locali: Risacca, Abba, Mucche, Zanardelli, Gazza Ladra\.?/gi,
+      '',
+    )
     .trim()
   if (!cleaned) return null
   return <p className="analisi-note">{cleaned}</p>

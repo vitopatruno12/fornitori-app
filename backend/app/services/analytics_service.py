@@ -42,11 +42,7 @@ MONTH_LABELS_IT = [
 
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 _CACHE_TTL_SEC = float(__import__("os").getenv("ANALYTICS_CACHE_TTL_SEC", "1200"))
-DATA_NOTE = (
-    "Incassi e pagamenti (contanti vs carta/POS) solo da scontrini agent sulle casse "
-    "(EasyRetail) e POS Poste — la Dashboard Analitica non legge più le VNE. "
-    "Visite = numero scontrini. Cinque locali: Risacca, Abba, Mucche, Zanardelli, Gazza Ladra."
-)
+DATA_NOTE = ""
 
 
 def _pos_bucket_hit(buckets, scope_key: str, wd: int, hr: int) -> Optional[Dict[str, Any]]:
