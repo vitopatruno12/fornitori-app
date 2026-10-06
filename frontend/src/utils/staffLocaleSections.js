@@ -37,6 +37,15 @@ export function defaultSectionsForLocale(localeName) {
 /** Piani sempre disponibili nella pianificazione turni. */
 export const CORE_PLANNING_SECTIONS = ['Banco', 'Cucina', 'Forno', 'Pulizie']
 
+/** Banco / Cucina / Forno non si nascondono e non si eliminano (postazioni e gestionale). */
+export const LOCKED_PLANNING_SECTIONS = ['Banco', 'Cucina', 'Forno']
+
+export function isLockedPlanningSection(sectionName) {
+  const key = sectionCompareKey(sectionName)
+  if (!key) return false
+  return LOCKED_PLANNING_SECTIONS.some((name) => sectionCompareKey(name) === key)
+}
+
 /**
  * Unisce sezioni salvate, sezioni presenti sui dipendenti e default del locale.
  * Banco / Cucina / Forno restano sempre presenti (anche se non ancora usati in anagrafica).
@@ -78,6 +87,7 @@ export function mergeHiddenPlanningSections(...lists) {
     for (const raw of Array.isArray(list) ? list : []) {
       const name = normalizeSectionName(raw)
       if (!name) continue
+      if (isLockedPlanningSection(name)) continue
       const key = sectionCompareKey(name)
       if (seen.has(key)) continue
       seen.add(key)
@@ -91,6 +101,7 @@ export function mergeHiddenPlanningSections(...lists) {
 export function isPlanningSectionHidden(section, hiddenSections = [], staticHidden = []) {
   const key = sectionCompareKey(section)
   if (!key) return false
+  if (isLockedPlanningSection(section)) return false
   const hidden = mergeHiddenPlanningSections(staticHidden, hiddenSections)
   return hidden.some((name) => sectionCompareKey(name) === key)
 }

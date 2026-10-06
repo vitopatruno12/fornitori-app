@@ -3018,9 +3018,6 @@ export function BancaRiconciliazionePage() {
                 <div className="banca-recon-panel-head">
                   <div>
                     <h2 className="fatture-panel-title">Da pagare</h2>
-                    <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
-                      Fino a luglio: senza PAGATO nel file. Da agosto: senza bonifico abbinato.
-                    </p>
                   </div>
                   <form
                     className="banca-recon-supplier-search"
@@ -3102,9 +3099,6 @@ export function BancaRiconciliazionePage() {
                 <div className="banca-recon-panel-head">
                   <div>
                     <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
-                    <p className="fatture-note" style={{ marginTop: 0, marginBottom: 0 }}>
-                      Bonifico da agosto, oppure PAGATO nel file Pagamenti fino a luglio.
-                    </p>
                   </div>
                   <form
                     className="banca-recon-supplier-search"

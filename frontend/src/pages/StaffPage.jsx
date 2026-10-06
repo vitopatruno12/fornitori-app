@@ -64,6 +64,7 @@ import {
   CORE_PLANNING_SECTIONS,
   canonicalSectionName,
   defaultSectionsForLocale,
+  isLockedPlanningSection,
   isPlanningSectionHidden,
   mergeHiddenPlanningSections,
   memberMatchesSection,
@@ -89,6 +90,7 @@ import { matchStaffLocaleName, staffLocaleCompareKey } from '../utils/primaNotaS
 import {
   closeOtherOperatorStationStaffSessions,
   isOperatorStationStaffSessionOpen,
+  readOperatorStationStaffSession,
   setOperatorStationStaffSession,
 } from '../utils/operatorStationStaffSession.js'
 import {
@@ -2074,6 +2076,10 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       setError('Serve almeno una sezione')
       return
     }
+    if (isLockedPlanningSection(name)) {
+      setError(`«${name}» è una sezione fissa: non si elimina.`)
+      return
+    }
     const hasMembers = members.some((m) => memberMatchesSection(m, name, localeSections) && normalizeSectionName(m.section))
     if (hasMembers) {
       setError(`Non puoi eliminare "${name}": ci sono dipendenti assegnati. Spostali prima in un’altra sezione.`)
@@ -2112,6 +2118,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   function handleHidePlanningSection(sectionName) {
     const name = normalizeSectionName(sectionName)
     if (!name) return
+    if (isLockedPlanningSection(name)) return
     if (isPlanningSectionHidden(name, hiddenPlanningSections, HIDDEN_PLANNING_SECTIONS)) return
     const next = mergeHiddenPlanningSections(hiddenPlanningSections, [name])
     setHiddenPlanningSections(next)
@@ -3593,10 +3600,14 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     if (!linked) return
     setLocaleStaffName(linked)
     setMembersBackupLocale(linked)
-    if (!isOperatorStationStaffSessionOpen(operatorStationId, linked)) {
+    const sessionOpen =
+      isOperatorStationStaffSessionOpen(operatorStationId, linked) ||
+      readOperatorStationStaffSession(operatorStationId).open
+    if (!sessionOpen) {
       clearStaffDataFromMemory()
       return
     }
+    setOperatorStationStaffSession(operatorStationId, linked, true)
     void (async () => {
       const stored = await readStoredLocaleAccessCode(linked)
       const code = isValidLocaleAccessCode(stored) ? stored : normalizeLocaleAccessCode(localeAccessCode)
@@ -3633,6 +3644,20 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     try {
       setError('')
       const snapshot = memberRows.map(memberSnapshotFromRow)
+      if (operatorMode && operatorStationId) {
+        if (!snapshot.length) {
+          setError('Aggiungi almeno un dipendente prima di salvare.')
+          return
+        }
+        await persistOperatorLocaleMembers(memberRows)
+        const canonical = stationStaffLocaleName || localeName
+        setOperatorStationStaffSession(operatorStationId, canonical, true)
+        if (canonical && canonical !== localeStaffName) setLocaleStaffName(canonical)
+        if (!quiet) {
+          setSuccess(`Lista dipendenti salvata per «${canonical}» (${snapshot.length} elementi).`)
+        }
+        return
+      }
       const sectionsForPack = resolveLocaleSections({
         localeName: localeName,
         savedSections: localeSections,
@@ -5687,8 +5712,12 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               type="button"
               className="btn btn-outline-danger btn-sm"
               onClick={handleRemoveActiveSection}
-              disabled={localeSections.length <= 1}
-              title="Elimina la sezione attiva se non ha dipendenti assegnati"
+              disabled={localeSections.length <= 1 || isLockedPlanningSection(activeSection)}
+              title={
+                isLockedPlanningSection(activeSection)
+                  ? `«${activeSection}» è una sezione fissa`
+                  : 'Elimina la sezione attiva se non ha dipendenti assegnati'
+              }
             >
               Elimina sezione
             </button>
@@ -6526,6 +6555,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
                     <span className="staff-section-week-title-count">
                       {members.filter((m) => memberMatchesSection(m, block.section, localeSections)).length} dipendenti
                     </span>
+                    {!isLockedPlanningSection(block.section) ? (
                     <button
                       type="button"
                       className="staff-section-week-remove"
@@ -6536,6 +6566,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
                     >
                       ×
                     </button>
+                    ) : null}
                   </span>
                 </h3>
                 <div
