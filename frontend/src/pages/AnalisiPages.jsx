@@ -83,6 +83,8 @@ function kpisFromPaySummary(payData) {
     cashEur,
     cardEur,
     receipts: Number(totals?.receipts || 0),
+    quoteEur: Number(totals?.quote_eur || 0),
+    quoteReceipts: Number(totals?.quote_receipts || 0),
   }
 }
 

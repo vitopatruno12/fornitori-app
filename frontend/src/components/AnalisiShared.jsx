@@ -409,7 +409,7 @@ export function AnalisiAttrTag({ children }) {
   return <p className="analisi-attr-tag">{children}</p>
 }
 
-/** KPI incasso: totale fiscale, contanti, carta/POS, scontrini (NC solo in Prima Nota). */
+/** KPI incasso: fiscale in alto, preventivi nei box a parte (non nello Storico barre). */
 export function AnalisiIncassoAttrPanel({
   title,
   hint,
@@ -417,6 +417,8 @@ export function AnalisiIncassoAttrPanel({
   cashEur = 0,
   cardEur = 0,
   receipts = 0,
+  quoteEur = 0,
+  quoteReceipts = 0,
   amountLabel = 'Incasso periodo',
 }) {
   return (
@@ -439,6 +441,14 @@ export function AnalisiIncassoAttrPanel({
         <div className="dashboard-kpi">
           <div className="dashboard-kpi-label">Scontrini fiscali</div>
           <div className="dashboard-kpi-value">{Number(receipts) || 0}</div>
+        </div>
+        <div className="dashboard-kpi dashboard-kpi--warn">
+          <div className="dashboard-kpi-label">Preventivi / non fiscali</div>
+          <div className="dashboard-kpi-value">{eur(quoteEur)}</div>
+        </div>
+        <div className="dashboard-kpi">
+          <div className="dashboard-kpi-label">N. preventivi</div>
+          <div className="dashboard-kpi-value">{Number(quoteReceipts) || 0}</div>
         </div>
       </div>
     </section>
