@@ -1965,6 +1965,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [])
 
   const suppressStaffAutoOpenRef = useRef(false)
+  const operatorLinkedLoadKeyRef = useRef('')
 
   useEffect(() => {
     if (!operatorMode || !operatorStationId) return undefined
@@ -3267,13 +3268,6 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       const mem = await loadMembersFromLocalePackSilently(localeName, code)
       if (operatorMode && operatorStationId) {
         invalidateOperatorStationMembersCache(operatorStationId, localeName)
-        if (Array.isArray(mem) && mem.length) {
-          try {
-            await persistOperatorLocaleMembers(mem)
-          } catch {
-            /* pack locale aggiornato se possibile */
-          }
-        }
       }
       // Passa i dipendenti caricati: altrimenti i turni restano vuoti (cache/pack non allineati).
       await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
@@ -3303,6 +3297,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
     const wasOpen = isStaffLocaleSessionOpen(localeName)
     suppressStaffAutoOpenRef.current = true
+    operatorLinkedLoadKeyRef.current = ''
     setStaffLocaleSessionOpen(localeName, false)
     setLocaleAccessCode('')
     setLocaleSessionBusy(false)
@@ -3561,8 +3556,16 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             )
           : meta,
       )
-      setSavedLocaleNames(finalNames.sort(sortIt))
-      setUserDeletableLocaleNames(finalUserNames.sort(sortIt))
+      const sortedNames = finalNames.sort(sortIt)
+      const sortedUserNames = finalUserNames.sort(sortIt)
+      setSavedLocaleNames((prev) =>
+        prev.length === sortedNames.length && prev.every((n, i) => n === sortedNames[i]) ? prev : sortedNames,
+      )
+      setUserDeletableLocaleNames((prev) =>
+        prev.length === sortedUserNames.length && prev.every((n, i) => n === sortedUserNames[i])
+          ? prev
+          : sortedUserNames,
+      )
     } catch (err) {
       console.warn('refreshSavedLocaleNames:', err)
     }
@@ -3596,17 +3599,23 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
 
   useEffect(() => {
     if (!operatorMode || !operatorStationId) return
-    const linked = getOperatorStationStaffLocaleName(operatorStationId, savedLocaleNames)
+    const linked = stationStaffLocaleName
     if (!linked) return
-    setLocaleStaffName(linked)
+    setLocaleStaffName((prev) =>
+      localeNameCompareKey(prev) === localeNameCompareKey(linked) ? prev : linked,
+    )
     setMembersBackupLocale(linked)
     const sessionOpen =
       isOperatorStationStaffSessionOpen(operatorStationId, linked) ||
       readOperatorStationStaffSession(operatorStationId).open
     if (!sessionOpen) {
+      operatorLinkedLoadKeyRef.current = ''
       clearStaffDataFromMemory()
       return
     }
+    const loadKey = `${operatorStationId}:${localeNameCompareKey(linked)}`
+    if (operatorLinkedLoadKeyRef.current === loadKey) return
+    operatorLinkedLoadKeyRef.current = loadKey
     setOperatorStationStaffSession(operatorStationId, linked, true)
     void (async () => {
       const stored = await readStoredLocaleAccessCode(linked)
@@ -3617,7 +3626,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       const mem = await loadMembersFromLocalePackSilently(linked, code)
       await reloadPlanning(Array.isArray(mem) && mem.length ? mem : undefined)
     })()
-  }, [operatorMode, operatorStationId, savedLocaleNames, clearStaffDataFromMemory, reloadPlanning])
+  }, [operatorMode, operatorStationId, stationStaffLocaleName, clearStaffDataFromMemory, reloadPlanning])
 
   useEffect(() => {
     const onServerDataRefresh = () => {
@@ -5535,7 +5544,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             type="button"
             className="btn btn-primary"
             onClick={() => void handleSaveMembersByLocale()}
-            disabled={shiftBusy || loading || demoLoading || reportLoading}
+            disabled={shiftBusy || demoLoading || reportLoading}
             title="Salva la lista dipendenti corrente associandola al nome locale"
           >
             Salva dipendenti
