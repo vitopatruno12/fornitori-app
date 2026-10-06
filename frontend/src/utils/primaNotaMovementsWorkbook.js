@@ -19,7 +19,6 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'non_fiscale_ent', label: 'NC ent', numeric: true, width: 90 },
   { id: 'non_fiscale_usc', label: 'NC usc', numeric: true, width: 90 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
-  { id: 'contanti', label: 'Contanti', numeric: true, width: 100 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
   { id: 'stacker_svuotamento', label: 'Stacker', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
@@ -212,8 +211,6 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatFlowAmount(entry.nonFiscaleUscita, entry)
     case 'pos':
       return formatFlowAmount(entry.pos, entry)
-    case 'contanti':
-      return formatFlowAmount(entry.contanti, entry)
     case 'refill':
       return formatFlowAmount(entry.refill, entry)
     case 'stacker_svuotamento':
@@ -241,7 +238,6 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'non_fiscale_ent') return formatAmount(totals.nonFiscaleEntrata)
   if (columnId === 'non_fiscale_usc') return formatAmount(totals.nonFiscaleUscita)
   if (columnId === 'pos') return formatAmount(totals.pos)
-  if (columnId === 'contanti') return formatAmount(totals.contanti)
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
   if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)

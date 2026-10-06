@@ -144,7 +144,7 @@ function isCassaUscitaForcedConto(conto) {
 function flowTagFromConto(conto) {
   if (conto === CONTO_NON_FISCALE) return 'non_fiscale'
   if (conto === CONTO_POS) return 'pos'
-  if (conto === CONTO_CONTANTI) return 'contanti'
+  if (conto === CONTO_CONTANTI) return 'fiscale'
   if (conto === CONTO_REFILL) return 'refill'
   if (conto === CONTO_STACKER_SVUOTAMENTO) return 'stacker_svuotamento'
   if (conto === CONTO_VERSAMENTO_BANCA) return 'versamento_banca'
@@ -1930,11 +1930,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         fiscale: fiscaleGiorno,
         nonFiscale: nonFiscaleGiorno,
         pos: posGiorno,
-        contanti: contantiGiorno,
         refill: refillGiorno,
         totale: totaleVenditaGiorno,
       }),
-    [fiscaleGiorno, nonFiscaleGiorno, posGiorno, contantiGiorno, refillGiorno, totaleVenditaGiorno],
+    [fiscaleGiorno, nonFiscaleGiorno, posGiorno, refillGiorno, totaleVenditaGiorno],
   )
 
   const dailyCashRows = useMemo(
@@ -2081,7 +2080,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <option value="nf_ent">NC ent</option>
             <option value="nf_usc">NC usc</option>
             <option value="pos">POS</option>
-            <option value="contanti">Contanti</option>
             <option value="refill">Refill</option>
             <option value="stacker_svuotamento">Svuotamento stacker</option>
             <option value="versamento_banca">Versamento banca</option>
@@ -2162,7 +2160,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                     setFormFlowTag('fiscale')
                     setFormType('entrata')
                   }}
-                  title="Entrata fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero (colonna Fiscale ent)."
+                  title="Entrata fiscale (anche chiusura pagamenti in contanti): Cassa entrata e Fiscale ent."
                 >
                   Fiscale ent
                 </button>
@@ -2209,17 +2207,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   title="Flusso POS/Bancomat: solo pagamenti in entrata, escluso dalla cassa fisica."
                 >
                   POS
-                </button>
-                <button
-                  type="button"
-                  className={formFlowTag === 'contanti' ? 'btn btn-vino' : 'btn btn-secondary'}
-                  onClick={() => {
-                    setFormFlowTag('contanti')
-                    setFormType('entrata')
-                  }}
-                  title="Pagamenti in contanti: cassa in entrata e colonna Contanti."
-                >
-                  Contanti
                 </button>
                 <button
                   type="button"
@@ -2486,9 +2473,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
             </span>
             <span className="pn-movement-totals-item">
-              Contanti: <strong>€ {formatAmount(movementPeriodTotals.contanti)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
               Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
             </span>
             <span className="pn-movement-totals-item">
@@ -2688,7 +2672,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           hint={
             <>
               Fiscale, NC, POS e Refill per <strong>{summaryPeriodLabel}</strong>.
-              Il NC entra in cassa entrata/uscita e nel totale vendita. Svuotamento stacker e versamento banca sono uscite di cassa.
+              I pagamenti in contanti della chiusura fiscale sono in Fiscale ent e Cassa entrata.
             </>
           }
           rows={dailySalesRows}
@@ -2752,8 +2736,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   </span>
                 ) : isPos(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">POS</span>
-                ) : isContanti(drawerEntry) ? (
-                  <span className="badge-pn badge-pn--in">Contanti</span>
                 ) : isRefill(drawerEntry) ? (
                   <span className="badge-pn badge-pn--nf">Refill</span>
                 ) : isStackerSvuotamento(drawerEntry) ? (
