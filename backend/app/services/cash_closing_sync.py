@@ -22,6 +22,7 @@ from .cash_service import (
     VERSAMENTO_BANCA_CONTO,
     normalize_activity,
 )
+from .paper_closing_overrides import paper_amounts as _paper_amounts
 from .pos_receipts_service import load_pos_daily_incasso
 
 logger = logging.getLogger(__name__)
@@ -64,25 +65,6 @@ _KIND_META = {
         "description": "Preventivi / non fiscali (A)",
     },
 }
-
-# Letture operatore / chiusure carta: prevalgono sull'agent se l'incasso GDB è incompleto.
-# Zanardelli 5 ott 2026: Bancomat ATLAS già 2312,35; contanti carta 1366,10 (GDB 803,90).
-_PAPER_CLOSING_OVERRIDES: Dict[Tuple[str, date], Dict[str, Decimal]] = {
-    ("via_zanardelli", date(2026, 10, 5)): {
-        "contanti": Decimal("1366.10"),
-        "pos": Decimal("2312.35"),
-    },
-}
-
-
-def _paper_amounts(activity: str, day: date, cash: Decimal, card: Decimal, quote: Decimal) -> Tuple[Decimal, Decimal, Decimal]:
-    extra = _PAPER_CLOSING_OVERRIDES.get((normalize_activity(activity), day)) or {}
-    return (
-        _dec(extra["contanti"]) if "contanti" in extra else cash,
-        _dec(extra["pos"]) if "pos" in extra else card,
-        _dec(extra["nc"]) if "nc" in extra else quote,
-    )
-
 
 def _dec(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))

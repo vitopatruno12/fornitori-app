@@ -60,7 +60,6 @@ function PaymentIncassiDonut({ payTotals }) {
   const rows = [
     { id: 'cash', label: PAY_LABELS.cash, value: Number(payTotals?.cash_eur || 0), color: PAY_COLORS.cash },
     { id: 'card', label: PAY_LABELS.card, value: Number(payTotals?.card_eur || 0), color: PAY_COLORS.card },
-    { id: 'quote', label: PAY_LABELS.quote, value: Number(payTotals?.quote_eur || 0), color: PAY_COLORS.quote },
     { id: 'unknown', label: PAY_LABELS.unknown, value: Number(payTotals?.unknown_eur || 0), color: PAY_COLORS.unknown },
   ].filter((r) => r.value > 0)
 
@@ -81,7 +80,7 @@ function PaymentIncassiDonut({ payTotals }) {
         Incassi classificati
       </h3>
       <div className="analisi-donut-wrap">
-        <svg className="analisi-donut" viewBox="0 0 120 120" role="img" aria-label="Incassi contanti, carta, preventivi e non classificati">
+        <svg className="analisi-donut" viewBox="0 0 120 120" role="img" aria-label="Incassi contanti e carta">
           {slices.map((s) => (
             <path key={s.id} d={_donutPath(60, 60, 52, 30, s.start, s.sweep)} fill={s.color} />
           ))}
@@ -156,7 +155,6 @@ function PosReceiptCharts({ payTotals, byPayment, byStore }) {
     payTotals &&
     (Number(payTotals.cash_eur) ||
       Number(payTotals.card_eur) ||
-      Number(payTotals.quote_eur) ||
       Number(payTotals.unknown_eur))
   const hasCharts = hasPay || paymentEntries.length > 0 || storeEntries.length > 0
   if (!hasCharts) return null

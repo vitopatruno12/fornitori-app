@@ -28,7 +28,7 @@ import {
 import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
 import { AnalisiMachineCard } from '../components/AnalisiMachineCard.jsx'
 
-const ANALISI_CACHE_PREFIX = 'analisi_cache_v4:'
+const ANALISI_CACHE_PREFIX = 'analisi_cache_v5:'
 const LOCALE_KPI_ALL = 'all'
 const ANALISI_REFRESH_EVERY_MS = 20 * 60 * 1000 // 20 min
 const ANALISI_MORNING_HOUR = 7
@@ -76,13 +76,13 @@ function analisiFocusRange(kind) {
 
 function kpisFromPaySummary(payData) {
   const totals = payData?.totals && typeof payData.totals === 'object' ? payData.totals : null
+  const cashEur = Number(totals?.cash_eur || 0)
+  const cardEur = Number(totals?.card_eur || 0)
   return {
-    amountEur: Number(totals?.amount_eur || 0),
-    cashEur: Number(totals?.cash_eur || 0),
-    cardEur: Number(totals?.card_eur || 0),
+    amountEur: cashEur + cardEur,
+    cashEur,
+    cardEur,
     receipts: Number(totals?.receipts || 0),
-    quoteEur: Number(totals?.quote_eur || 0),
-    quoteReceipts: Number(totals?.quote_receipts || 0),
   }
 }
 
@@ -465,8 +465,8 @@ export function AnalisiGiornalieroPage() {
           <AnalisiAttrTag>Attributo · Storico € per giorno</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultimi 30 giorni · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Storico giorno per giorno, anche dei giorni già chiusi. Verde contanti, blu carta/POS,
-            arancio preventivi non fiscali. Il numero a destra è il totale dei tre.
+            Storico giorno per giorno, anche dei giorni già chiusi. Verde contanti, blu carta/POS.
+            Il numero a destra è l’incasso fiscale (come scontrini di chiusura). I preventivi restano in Prima Nota.
           </p>
           <SeriesBars
             splitPayments
@@ -528,8 +528,8 @@ export function AnalisiSettimanalePage() {
           <AnalisiAttrTag>Attributo · Storico € per settimana</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultime 12 settimane · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Ogni settimana resta in storico: verde contanti, blu carta/POS, arancio preventivi non fiscali.
-            Il numero a destra è il totale.
+            Ogni settimana resta in storico: verde contanti, blu carta/POS.
+            Il numero a destra è l’incasso fiscale. I preventivi restano in Prima Nota.
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="label" />
         </section>
@@ -585,8 +585,8 @@ export function AnalisiMensilePage() {
           <AnalisiAttrTag>Attributo · Storico € per mese</AnalisiAttrTag>
           <h2 className="analisi-panel-title">Ultimi 6 mesi · {machineLabel}</h2>
           <p className="analisi-machine-scope">
-            Ogni mese resta in storico: verde contanti, blu carta/POS, arancio preventivi non fiscali.
-            Il numero a destra è il totale.
+            Ogni mese resta in storico: verde contanti, blu carta/POS.
+            Il numero a destra è l’incasso fiscale. I preventivi restano in Prima Nota.
           </p>
           <SeriesBars splitPayments rows={data.rows || []} labelKey="month_label" />
         </section>
@@ -615,11 +615,12 @@ export function AnalisiOrariaPage() {
   )
   const machines = Array.isArray(data?.by_machine) ? data.by_machine : []
   const kpis = kpisFromPaySummary(payToday)
+  const hourAmount = (row) => Number(row?.cash_eur || 0) + Number(row?.card_eur || 0)
   const hourRows = Array.isArray(payToday?.by_hour) ? payToday.by_hour : []
   const peakHour = hourRows.reduce(
     (best, row) => {
-      const v = Number(row?.amount_eur || 0)
-      if (v <= Number(best?.amount_eur || 0)) return best
+      const v = hourAmount(row)
+      if (v <= hourAmount(best)) return best
       return row
     },
     null,
@@ -658,15 +659,15 @@ export function AnalisiOrariaPage() {
         <p className="analisi-machine-scope">
           Quanto hai incassato in ogni ora di oggi · contanti (verde) e carta/POS (blu). Picco €:{' '}
           <strong>{peakLabel}</strong>
-          {peakHour ? ` · ${eur(peakHour.amount_eur)}` : ''}.
+          {peakHour ? ` · ${eur(hourAmount(peakHour))}` : ''}.
         </p>
-        {hourRows.some((r) => Number(r.amount_eur || 0) > 0) ? (
+        {hourRows.some((r) => hourAmount(r) > 0) ? (
           <SeriesBars
             splitPayments
             rows={hourRows.map((r) => ({
               ...r,
               label: r.slot_label || `${String(r.hour).padStart(2, '0')}:00`,
-              incasso: Number(r.amount_eur || 0),
+              incasso: hourAmount(r),
             }))}
           />
         ) : (

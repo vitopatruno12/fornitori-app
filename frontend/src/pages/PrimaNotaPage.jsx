@@ -24,6 +24,7 @@ import {
   PRIMA_NOTA_MOVEMENTS_COLUMNS,
   PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE,
   primaNotaMovementCellValue,
+  primaNotaMovementMatchesSearch,
   primaNotaMovementTotalsLabel,
 } from '../utils/primaNotaMovementsWorkbook.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
@@ -1739,12 +1740,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
       if (movementKind === 'versamento_banca' && !isVersamentoBanca(entry)) return false
-      if (!q) return true
-      const blob = [entry.description, entry.riferimento_documento, entry.registroLabel, entry.activity]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return blob.includes(q)
+      return primaNotaMovementMatchesSearch(entry, q)
     })
   }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
 
@@ -2074,17 +2070,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </button>
           </div>
         </div>
-        <div className="form-group" style={{ flex: '1 1 200px', minWidth: 160 }}>
-          <label>Cerca movimento</label>
-          <input
-            type="search"
-            className="form-control"
-            value={movementSearch}
-            onChange={e => setMovementSearch(e.target.value)}
-            placeholder="Descrizione, riferimento (nell’elenco del periodo)"
-            aria-label="Filtra movimenti"
-          />
-        </div>
         <div className="form-group">
           <label>Tipo</label>
           <select className="form-control" value={movementKind} onChange={e => setMovementKind(e.target.value)} style={{ minWidth: 130 }}>
@@ -2413,13 +2398,36 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         </form>
       </section>
 
-      <section className="card pagamenti-workbook-card suppliers-workbook-card">
-        <div className="pagamenti-workbook-toolbar">
+      <section className="card pagamenti-workbook-card suppliers-workbook-card" id="prima-nota-movimenti">
+        <div className="pagamenti-workbook-toolbar pn-movements-toolbar">
           <div className="pagamenti-workbook-toolbar-left">
             <span className="pagamenti-workbook-title">{movementsSectionHeading}</span>
             <span className="pagamenti-workbook-sheet-label">
               {filteredMovementRows.length} movimenti visibili
             </span>
+          </div>
+          <div className="pn-movements-toolbar-search">
+            <label className="sr-only" htmlFor="pn-movements-search">Cerca operazioni</label>
+            <input
+              id="pn-movements-search"
+              type="search"
+              className="form-control pn-movements-search-input"
+              value={movementSearch}
+              onChange={(e) => setMovementSearch(e.target.value)}
+              placeholder="Cerca operazione (es. latte 25)"
+              aria-label="Cerca operazioni per descrizione o importo"
+              autoComplete="off"
+            />
+            {movementSearch.trim() ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setMovementSearch('')}
+                title="Azzera ricerca"
+              >
+                Pulisci
+              </button>
+            ) : null}
           </div>
           <div className="pagamenti-workbook-actions">
             <button
@@ -2427,18 +2435,18 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               className="btn btn-secondary btn-sm"
               disabled={loading || pdfBusy || excelBusy || filteredMovementRows.length === 0}
               onClick={handlePrintMovementsPdf}
-              title="Scarica PDF dell'elenco movimenti visibile (periodo e filtri correnti)"
+              title="Scarica PDF delle operazioni visibili (tutte le colonne)"
             >
               {pdfBusy ? 'Generazione…' : 'Stampa PDF'}
             </button>
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-primary btn-sm"
               disabled={loading || pdfBusy || excelBusy || filteredMovementRows.length === 0}
               onClick={handleExportMovementsExcel}
-              title="Scarica Excel (.xlsx) dell'elenco movimenti visibile (periodo e filtri correnti)"
+              title="Scarica Excel (.xlsx) con tutte le righe e colonne visibili (filtrate dalla ricerca)"
             >
-              {excelBusy ? 'Generazione…' : 'Esporta Excel'}
+              {excelBusy ? 'Generazione…' : 'Excel'}
             </button>
           </div>
         </div>
@@ -2452,7 +2460,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           busy={backupBusy}
         />
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 1rem 0.75rem' }}>
-          Clicca una riga per il dettaglio. Periodo e ricerca testuale sono nella barra in alto.
+          Cerca un articolo o un importo senza scorrere l’elenco. Excel e PDF stampano le stesse righe e colonne visibili.
         </p>
         {focusEntryMessage && (
           <div className="alert alert-danger" style={{ margin: '0 1rem 0.75rem' }}>{focusEntryMessage}</div>
@@ -2507,7 +2515,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           emptyMessage={
             rowsWithLedger.rows.length === 0
               ? 'Nessun movimento nel periodo selezionato.'
-              : 'Nessun movimento corrisponde ai filtri.'
+              : movementSearch.trim()
+                ? `Nessuna operazione per «${movementSearch.trim()}». Allarga il periodo o cambia il testo.`
+                : 'Nessun movimento corrisponde ai filtri.'
           }
           rowKey={(row) => String(row.id)}
           getRowId={(row) => `cash-entry-row-${row.id}`}

@@ -327,14 +327,12 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
   if (!rows?.length) return <p className="empty-state">Nessun dato disponibile nel periodo.</p>
   const useSplit =
     splitPayments &&
-    rows.some(
-      (r) => Number(r.cash_eur || 0) > 0 || Number(r.card_eur || 0) > 0 || Number(r.quote_eur || 0) > 0,
-    )
+    rows.some((r) => Number(r.cash_eur || 0) > 0 || Number(r.card_eur || 0) > 0)
   const max = Math.max(
     1,
     ...rows.map((r) =>
       useSplit
-        ? Number(r.cash_eur || 0) + Number(r.card_eur || 0) + Number(r.quote_eur || 0) || Number(r[valueKey] || 0)
+        ? Number(r.cash_eur || 0) + Number(r.card_eur || 0) || Number(r[valueKey] || 0)
         : Number(r[valueKey] || 0),
     ),
   )
@@ -348,20 +346,15 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
           <span className="analisi-payment-legend-item">
             <span className="analisi-payment-swatch analisi-payment-swatch--card" /> Carta/POS
           </span>
-          <span className="analisi-payment-legend-item">
-            <span className="analisi-payment-swatch analisi-payment-swatch--quote" /> Preventivi non fiscali
-          </span>
         </div>
       ) : null}
       {rows.map((r, idx) => {
         const cash = Number(r.cash_eur || 0)
         const card = Number(r.card_eur || 0)
-        const quote = Number(r.quote_eur || 0)
-        const v = useSplit ? cash + card + quote || Number(r[valueKey] || 0) : Number(r[valueKey] || 0)
+        const v = useSplit ? cash + card || Number(r[valueKey] || 0) : Number(r[valueKey] || 0)
         const label = r[labelKey] || r.month_label || r.date || r.week_start || `#${idx + 1}`
         const cashPct = useSplit && max > 0 ? (cash / max) * 100 : 0
         const cardPct = useSplit && max > 0 ? (card / max) * 100 : 0
-        const quotePct = useSplit && max > 0 ? (quote / max) * 100 : 0
         return (
           <div key={label + idx} className="analisi-bar-row">
             <div className="analisi-bar-label" title={label}>
@@ -376,9 +369,6 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
                   {cardPct > 0 ? (
                     <div className="analisi-bar-fill analisi-bar-fill--card" style={{ width: `${cardPct}%` }} />
                   ) : null}
-                  {quotePct > 0 ? (
-                    <div className="analisi-bar-fill analisi-bar-fill--quote" style={{ width: `${quotePct}%` }} />
-                  ) : null}
                 </div>
               ) : (
                 <div className="analisi-bar-fill" style={{ width: `${(v / max) * 100}%` }} />
@@ -387,9 +377,7 @@ export function SeriesBars({ rows, valueKey = 'incasso', labelKey = 'label', spl
             <div
               className="analisi-bar-value"
               title={
-                useSplit
-                  ? `Contanti ${eur(cash)} · Carta/POS ${eur(card)} · Preventivi ${eur(quote)} · Totale ${eur(v)}`
-                  : undefined
+                useSplit ? `Contanti ${eur(cash)} · Carta/POS ${eur(card)} · Totale ${eur(v)}` : undefined
               }
             >
               {eur(v)}
@@ -405,20 +393,13 @@ export function PaymentSplitSummary({ split }) {
   if (!split) return null
   const cash = Number(split.cash_eur || 0)
   const card = Number(split.card_eur || 0)
-  const quote = Number(split.quote_eur || 0)
-  if (cash <= 0 && card <= 0 && quote <= 0) return null
+  if (cash <= 0 && card <= 0) return null
   return (
     <p className="analisi-machine-scope" role="status">
       Contanti <strong>{eur(cash)}</strong>
       {' · '}
       Carta/POS <strong>{eur(card)}</strong>
-      {quote > 0 ? (
-        <>
-          {' · '}
-          Preventivi/non contabilizzati <strong>{eur(quote)}</strong>
-        </>
-      ) : null}
-      {Number(split.receipts || 0) > 0 ? ` · ${split.receipts} scontrini` : ''}
+      {Number(split.receipts || 0) > 0 ? ` · ${split.receipts} scontrini fiscali` : ''}
     </p>
   )
 }
@@ -428,7 +409,7 @@ export function AnalisiAttrTag({ children }) {
   return <p className="analisi-attr-tag">{children}</p>
 }
 
-/** KPI incasso: totale, contanti, carta/POS, scontrini, preventivi (stessa griglia). */
+/** KPI incasso: totale fiscale, contanti, carta/POS, scontrini (NC solo in Prima Nota). */
 export function AnalisiIncassoAttrPanel({
   title,
   hint,
@@ -436,8 +417,6 @@ export function AnalisiIncassoAttrPanel({
   cashEur = 0,
   cardEur = 0,
   receipts = 0,
-  quoteEur = 0,
-  quoteReceipts = 0,
   amountLabel = 'Incasso periodo',
 }) {
   return (
@@ -460,14 +439,6 @@ export function AnalisiIncassoAttrPanel({
         <div className="dashboard-kpi">
           <div className="dashboard-kpi-label">Scontrini fiscali</div>
           <div className="dashboard-kpi-value">{Number(receipts) || 0}</div>
-        </div>
-        <div className="dashboard-kpi dashboard-kpi--warn">
-          <div className="dashboard-kpi-label">Preventivi / non fiscali</div>
-          <div className="dashboard-kpi-value">{eur(quoteEur)}</div>
-        </div>
-        <div className="dashboard-kpi">
-          <div className="dashboard-kpi-label">N. preventivi</div>
-          <div className="dashboard-kpi-value">{Number(quoteReceipts) || 0}</div>
         </div>
       </div>
     </section>

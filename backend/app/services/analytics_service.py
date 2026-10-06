@@ -510,22 +510,18 @@ def _pos_day_quote(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
 def _payment_split_from_pos_daily(pos_daily: Dict[date, Dict[str, Any]]) -> dict:
     cash = Decimal("0.00")
     card = Decimal("0.00")
-    quote = Decimal("0.00")
     receipts = 0
-    quote_receipts = 0
     for hit in (pos_daily or {}).values():
         cash += _dec(hit.get("cash_eur", 0))
         card += _dec(hit.get("card_eur", 0))
-        quote += _dec(hit.get("quote_eur", 0))
         receipts += int(hit.get("movimenti") or 0)
-        quote_receipts += int(hit.get("quote_receipts") or 0)
     return {
         "receipts": receipts,
         "cash_eur": cash,
         "card_eur": card,
         "amount_eur": _dec(cash + card),
-        "quote_eur": quote,
-        "quote_receipts": quote_receipts,
+        "quote_eur": Decimal("0.00"),
+        "quote_receipts": 0,
     }
 
 
@@ -552,6 +548,11 @@ def _empty_peak_slot(today: date) -> dict:
 
 
 def _pos_day_incasso(pos_daily: Dict[date, Dict[str, Any]], day: date) -> Decimal:
+    """Incasso fiscale Storico: solo contanti + POS (i preventivi stanno in Prima Nota)."""
+    cash = _pos_day_cash(pos_daily, day)
+    card = _pos_day_card(pos_daily, day)
+    if cash > 0 or card > 0:
+        return _dec(cash + card)
     hit = pos_daily.get(day) or {}
     return _dec(hit.get("incasso", 0))
 
@@ -702,7 +703,7 @@ def _snapshot_from_events(
         "movimenti_oggi": movimenti_oggi,
         "totale_fiscale": Decimal("0.00"),
         "totale_pos": incasso_pos_oggi,
-        "totale_non_fiscale": _pos_day_quote(pos_daily, today) if use_pos else Decimal("0.00"),
+        "totale_non_fiscale": Decimal("0.00"),
         "payment_split": pay_split,
         "machines": machines,
         "warnings": list(warnings or []),
@@ -749,7 +750,6 @@ def _weekly_from_events(
         movimenti = 0
         cash = Decimal("0.00")
         card = Decimal("0.00")
-        quote = Decimal("0.00")
         d = monday
         while d <= end:
             if revenue_mode == "pos":
@@ -763,7 +763,6 @@ def _weekly_from_events(
                 movimenti += _combined_day_movimenti(scoped, d, pos_daily)
             cash += _pos_day_cash(pos_daily, d)
             card += _pos_day_card(pos_daily, d)
-            quote += _pos_day_quote(pos_daily, d)
             d += timedelta(days=1)
         rows.append(
             {
@@ -774,7 +773,7 @@ def _weekly_from_events(
                 "movimenti": movimenti,
                 "cash_eur": _dec(cash),
                 "card_eur": _dec(card),
-                "quote_eur": _dec(quote),
+                "quote_eur": Decimal("0.00"),
             }
         )
     return {
@@ -1249,7 +1248,6 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
             movimenti = _combined_day_movimenti(scoped, d, pos_daily)
         cash = _pos_day_cash(pos_daily, d)
         card = _pos_day_card(pos_daily, d)
-        quote = _pos_day_quote(pos_daily, d)
         rows.append(
             {
                 "date": d.isoformat(),
@@ -1259,7 +1257,7 @@ def get_daily_series(*, days: int = 30, model_id: Optional[str] = None, location
                 "movimenti": movimenti,
                 "cash_eur": cash,
                 "card_eur": card,
-                "quote_eur": quote,
+                "quote_eur": Decimal("0.00"),
             }
         )
     total = sum((r["incasso"] for r in rows), Decimal("0.00"))
@@ -1361,7 +1359,6 @@ def get_monthly_series(*, months: int = 6, model_id: Optional[str] = None, locat
             buckets[key]["movimenti"] += mov
             buckets[key]["cash_eur"] = _dec(buckets[key]["cash_eur"] + _pos_day_cash(pos_daily, d))
             buckets[key]["card_eur"] = _dec(buckets[key]["card_eur"] + _pos_day_card(pos_daily, d))
-            buckets[key]["quote_eur"] = _dec(buckets[key]["quote_eur"] + _pos_day_quote(pos_daily, d))
         d += timedelta(days=1)
 
     rows = list(buckets.values())

@@ -109,6 +109,68 @@ function movementDescription(entry) {
   return text
 }
 
+const SEARCH_NOISE = new Set(['euro', 'eur', '€', 'e', 'di', 'da', 'del', 'della', 'con'])
+
+function parseSearchAmount(token) {
+  const raw = String(token || '').trim().replace(/\s/g, '')
+  if (!raw) return null
+  if (!/^\d{1,6}([.,]\d{1,2})?$/.test(raw)) return null
+  const n = Number(raw.replace(',', '.'))
+  return Number.isFinite(n) ? n : null
+}
+
+function entrySearchAmounts(entry) {
+  return [
+    entry?.amount,
+    entry?.entrata,
+    entry?.uscita,
+    entry?.fiscaleEntrata,
+    entry?.fiscaleUscita,
+    entry?.nonFiscaleEntrata,
+    entry?.nonFiscaleUscita,
+    entry?.pos,
+    entry?.contanti,
+    entry?.refill,
+    entry?.stackerSvuotamento,
+    entry?.versamentoBanca,
+    entry?.incasso,
+  ].map((value) => Number(value || 0)).filter((n) => Number.isFinite(n) && Math.abs(n) >= 0.005)
+}
+
+function entrySearchText(entry) {
+  return [
+    entry?.description,
+    entry?.riferimento_documento,
+    entry?.note,
+    entry?.registroLabel,
+    entry?.activity,
+    entry?.conto,
+    entry?.type,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+/** Cerca un articolo/operazione: testo + importo (es. "latte 25"). Tutti i token devono matchare. */
+export function primaNotaMovementMatchesSearch(entry, query) {
+  const q = String(query || '').trim().toLowerCase().replace(/€/g, ' ')
+  if (!q) return true
+  const tokens = q
+    .split(/[\s;+/]+/)
+    .map((t) => t.trim())
+    .filter((t) => t && !SEARCH_NOISE.has(t))
+  if (!tokens.length) return true
+  const text = entrySearchText(entry)
+  const amounts = entrySearchAmounts(entry)
+  return tokens.every((token) => {
+    if (text.includes(token)) return true
+    const n = parseSearchAmount(token)
+    if (n == null) return false
+    return amounts.some((amount) => Math.abs(amount - n) < 0.015)
+  })
+}
+
 export function movementIncassoTone(entry) {
   if (isExtraCassaMovement(entry)) return 'workbook-cell-muted'
   if (isStackerSvuotamentoEntry(entry) || isVersamentoBancaEntry(entry)) return 'workbook-cell-alert'

@@ -792,7 +792,9 @@ def load_pos_daily_incasso(
         by_day[day]["cash_eur"] = (by_day[day]["cash_eur"] + cash).quantize(Decimal("0.01"))
         by_day[day]["card_eur"] = (by_day[day]["card_eur"] + card).quantize(Decimal("0.01"))
 
-    return dict(by_day)
+    from .paper_closing_overrides import apply_paper_closing_daily
+
+    return apply_paper_closing_daily(mid, dict(by_day))
 
 
 def ingest_receipt_dicts(db: Session, items: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
