@@ -918,6 +918,16 @@ class AdePlaywrightClient:
     self._shot(page, "01_pin_rotated", shots, force=True)
     return True
 
+  def _publish_saved_pin(self) -> None:
+    """Copia il PIN già usato per il login in Impostazioni, anche se non è in scadenza."""
+    pin = (self.profile.fisconline_pin or _env("ADE_FISCONLINE_PIN")).strip()
+    if not pin:
+      return
+    from .password_rotations import push_remote_credentials
+
+    if push_remote_credentials(profile_id=self.profile.id, pin=pin):
+      self._step("PIN copiato in Impostazioni")
+
   def _rotate_credentials_if_due(self, page: Any, shots: List[str]) -> None:
     """Dopo un accesso riuscito, rinnova password e PIN se mancano 7 giorni ai 90."""
     from .password_alerts import notice_from_page_text
@@ -928,6 +938,7 @@ class AdePlaywrightClient:
       should_auto_rotate,
     )
 
+    self._publish_saved_pin()
     if not auto_rotate_enabled():
       return
     if (self.profile.auth_mode or "").lower() not in ("fisconline", "storage", ""):
@@ -1242,6 +1253,7 @@ class AdePlaywrightClient:
       if "credenziali errate" in body or (
         "autenticazione fallita" in body and "scaduta" not in body
       ):
+        self._login_fail_reason = "bad_credentials"
         self._shot(page, "01_bad_credentials", shots, force=True)
         return False
 
@@ -3603,12 +3615,21 @@ class AdePlaywrightClient:
         if not login_ok:
           # prova comunque sweep drop
           self._sweep_drop_dir()
+          if getattr(self, "_login_fail_reason", "") == "bad_credentials":
+            why = (
+              "Fisconline ha rifiutato utente, password o PIN salvati. "
+              "Aggiornali in Impostazioni fatture: non serve una finestra PIN."
+            )
+          else:
+            why = (
+              "CNS/PIN o sessione. "
+              "Apri con ADE_HEADLESS=0 e inserisci PIN entro ADE_CNS_PIN_WAIT_SEC."
+            )
           result = AdeSyncResult(
             ok=bool(self._xml_captures),
             message=(
               f"[{self.profile.id}] login AdE non completato "
-              f"(CNS/PIN o sessione). XML drop={len(self._xml_captures)}. "
-              f"Apri con ADE_HEADLESS=0 e inserisci PIN entro ADE_CNS_PIN_WAIT_SEC."
+              f"({why}). XML drop={len(self._xml_captures)}."
             ),
             downloaded=list(self._xml_captures),
             screenshots=shots,
