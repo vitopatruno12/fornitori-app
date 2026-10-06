@@ -258,6 +258,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const formAnchorRef = useRef(null)
   const [drawerEntry, setDrawerEntry] = useState(null)
   const [movementSearch, setMovementSearch] = useState('')
+  const [movementSearchDraft, setMovementSearchDraft] = useState('')
   const [movementKind, setMovementKind] = useState('all')
   const [dashboardFilterActive, setDashboardFilterActive] = useState(false)
   const dashboardPreFiltersRef = useRef(null)
@@ -657,12 +658,14 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       }
       if (typeof d?.search === 'string') {
         setMovementSearch(d.search)
+        setMovementSearchDraft(d.search)
         setSuccess('Filtro AI applicato')
       }
     }
     const onAiReset = () => {
       setMovementKind('all')
       setMovementSearch('')
+      setMovementSearchDraft('')
       setDashboardFilterActive(false)
       setSuccess('Filtri resettati da AI')
     }
@@ -791,7 +794,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         applied = true
       }
       if (data?.search) {
-        setMovementSearch(String(data.search))
+        const q = String(data.search)
+        setMovementSearch(q)
+        setMovementSearchDraft(q)
         applied = true
       }
       if (data?.activity && !operatorMode) {
@@ -817,12 +822,15 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     if (prev) {
       setSelectedDate(prev.selectedDate || todayIso)
       setMovementKind(prev.movementKind || 'all')
-      setMovementSearch(prev.movementSearch || '')
+      const q = prev.movementSearch || ''
+      setMovementSearch(q)
+      setMovementSearchDraft(q)
       if (prev.movementPeriodFrom) setMovementPeriodFrom(prev.movementPeriodFrom)
       if (prev.movementPeriodTo) setMovementPeriodTo(prev.movementPeriodTo)
     } else {
       setMovementKind('all')
       setMovementSearch('')
+      setMovementSearchDraft('')
     }
     setDashboardFilterActive(false)
     setSuccess('Filtri dashboard rimossi')
@@ -2399,17 +2407,34 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               id="pn-movements-search"
               type="search"
               className="form-control pn-movements-search-input"
-              value={movementSearch}
-              onChange={(e) => setMovementSearch(e.target.value)}
+              value={movementSearchDraft}
+              onChange={(e) => setMovementSearchDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setMovementSearch(movementSearchDraft.trim())
+                }
+              }}
               placeholder="Cerca operazione (es. latte 25)"
               aria-label="Cerca operazioni per descrizione o importo"
               autoComplete="off"
             />
-            {movementSearch.trim() ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setMovementSearch(movementSearchDraft.trim())}
+              title="Cerca nelle operazioni del periodo"
+            >
+              Cerca
+            </button>
+            {movementSearch.trim() || movementSearchDraft.trim() ? (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setMovementSearch('')}
+                onClick={() => {
+                  setMovementSearch('')
+                  setMovementSearchDraft('')
+                }}
                 title="Azzera ricerca"
               >
                 Pulisci
