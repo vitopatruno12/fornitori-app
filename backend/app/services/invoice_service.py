@@ -51,6 +51,18 @@ _ACTIVITY_TO_COMPANY = {
 _payment_method_col_ready = False
 
 
+def _invoices_has_column(conn, column_name: str) -> bool:
+  row = conn.execute(
+    text(
+      "SELECT 1 FROM information_schema.columns "
+      "WHERE table_schema = 'public' AND table_name = 'invoices' "
+      "AND column_name = :col LIMIT 1"
+    ),
+    {"col": column_name},
+  ).first()
+  return row is not None
+
+
 def ensure_invoices_payment_method_column(*, force: bool = False) -> bool:
   """Aggiunge invoices.payment_method se manca (contanti segnati a mano)."""
   global _payment_method_col_ready
@@ -58,6 +70,9 @@ def ensure_invoices_payment_method_column(*, force: bool = False) -> bool:
     return True
   try:
     with engine.begin() as conn:
+      if _invoices_has_column(conn, "payment_method"):
+        _payment_method_col_ready = True
+        return True
       conn.execute(
         text(
           "ALTER TABLE invoices "
@@ -66,8 +81,19 @@ def ensure_invoices_payment_method_column(*, force: bool = False) -> bool:
       )
     _payment_method_col_ready = True
     return True
-  except SQLAlchemyError:
-    logger.exception("Impossibile assicurare colonna invoices.payment_method")
+  except SQLAlchemyError as exc:
+    # DB user senza ownership: niente ALTER in runtime; usa migrazione da postgres.
+    try:
+      with engine.connect() as conn:
+        if _invoices_has_column(conn, "payment_method"):
+          _payment_method_col_ready = True
+          return True
+    except SQLAlchemyError:
+      pass
+    logger.warning(
+      "Colonna invoices.payment_method non assicurabile (serve migrazione da owner DB): %s",
+      exc,
+    )
     return False
 
 
@@ -78,6 +104,9 @@ def ensure_invoices_bolla_verified_column(*, force: bool = False) -> bool:
     return True
   try:
     with engine.begin() as conn:
+      if _invoices_has_column(conn, "bolla_verified"):
+        _bolla_col_ready = True
+        return True
       conn.execute(
         text(
           "ALTER TABLE invoices "
@@ -92,8 +121,18 @@ def ensure_invoices_bolla_verified_column(*, force: bool = False) -> bool:
       )
     _bolla_col_ready = True
     return True
-  except SQLAlchemyError:
-    logger.exception("Impossibile assicurare colonna invoices.bolla_verified")
+  except SQLAlchemyError as exc:
+    try:
+      with engine.connect() as conn:
+        if _invoices_has_column(conn, "bolla_verified"):
+          _bolla_col_ready = True
+          return True
+    except SQLAlchemyError:
+      pass
+    logger.warning(
+      "Colonna invoices.bolla_verified non assicurabile (serve migrazione da owner DB): %s",
+      exc,
+    )
     return False
 
 

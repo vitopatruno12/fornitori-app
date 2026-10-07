@@ -10,6 +10,7 @@ Group=fornitori
 WorkingDirectory=/opt/fornitori-app/backend
 EnvironmentFile=/opt/fornitori-app/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PAGAMENTI_WATCH_STATE_PATH=/opt/fornitori-app/backend/data/pagamenti_watch_agent.json
 # Libera porta 8000 da uvicorn avviato manualmente (evita Errno 98)
 ExecStartPre=-/usr/bin/fuser -k 8000/tcp
 ExecStartPre=/bin/sleep 1

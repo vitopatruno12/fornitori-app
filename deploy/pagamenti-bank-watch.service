@@ -18,19 +18,20 @@ Wants=network-online.target postgresql.service
 
 [Service]
 Type=oneshot
-# Utente runtime sul VPS atlass (come otp-whatsapp-webhook). Non esiste «fornitori».
+# Stesso tree dell’API (/opt): altrimenti lo stato JSON resta su /var/www e Atlas non lo vede.
 User=mic04
 Group=mic04
-WorkingDirectory=/var/www/app-fornitori/fornitori-app/backend
-EnvironmentFile=-/var/www/app-fornitori/fornitori-app/backend/.env
+WorkingDirectory=/opt/fornitori-app/backend
 EnvironmentFile=-/opt/fornitori-app/backend/.env
+EnvironmentFile=-/var/www/app-fornitori/fornitori-app/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=APP_DIR=/var/www/app-fornitori/fornitori-app
+Environment=APP_DIR=/opt/fornitori-app
+Environment=PAGAMENTI_WATCH_STATE_PATH=/opt/fornitori-app/backend/data/pagamenti_watch_agent.json
 ExecStart=/usr/local/sbin/atlas-pagamenti-watch --force
-# --force: due volte a settimana riconcilia sempre (anche senza nuove variazioni rilevate)
+# --force: riconcilia sempre alle corse programmate (anche senza nuove variazioni rilevate)
 Nice=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/var/www/app-fornitori/fornitori-app/backend/data /var/www/app-fornitori/fornitori-app/backend/app/uploads /opt/fornitori-app/backend/data /opt/fornitori-app/backend/app/uploads
+ReadWritePaths=/opt/fornitori-app/backend/data /opt/fornitori-app/backend/app/uploads /var/www/app-fornitori/fornitori-app/backend/data /var/www/app-fornitori/fornitori-app/backend/app/uploads

@@ -2,7 +2,11 @@
 # Wrapper agente Pagamenti + banca (systemd / cron).
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/app-fornitori/fornitori-app}"
+# Preferisci /opt (dove gira fornitori-api), poi /var/www.
+APP_DIR="${APP_DIR:-/opt/fornitori-app}"
+if [[ ! -d "$APP_DIR/.git" && -d /var/www/app-fornitori/fornitori-app/.git ]]; then
+  APP_DIR="/var/www/app-fornitori/fornitori-app"
+fi
 if [[ ! -d "$APP_DIR/.git" && -d /opt/fornitori-app/.git ]]; then
   APP_DIR="/opt/fornitori-app"
 fi
