@@ -1,5 +1,5 @@
 # Atlas EasyRetail sync - Task Scheduler ogni 3 minuti
-# Esegui in PowerShell come Amministratore da C:\AtlasSync:
+# Preferibile: PowerShell come Amministratore
 #   powershell -ExecutionPolicy Bypass -File C:\AtlasSync\install_sync_task.ps1
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,14 @@ $TaskName = "AtlasEasyRetailGdbSync"
 $WorkDir = "C:\AtlasSync"
 $Script = Join-Path $WorkDir "easyretail_gdb_sync_agent.py"
 
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p = New-Object Security.Principal.WindowsPrincipal($id)
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 $Python = $null
+$PyArgs = $null
 foreach ($candidate in @(
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
@@ -51,15 +58,34 @@ if ($PyArgs) {
 }
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 3) -RepetitionDuration (New-TimeSpan -Days 3650)
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-$Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
-Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action $Action `
-    -Trigger $Trigger `
-    -Settings $Settings `
-    -Principal $Principal `
-    -Description "Sync EasyRetail GDB verso ATLAS ogni 3 minuti" | Out-Null
+$isAdmin = Test-IsAdmin
+if ($isAdmin) {
+    $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    Write-Host "Registro task come SYSTEM (Amministratore)."
+} else {
+    $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    Write-Warning "Non sei Amministratore: registro il task per l'utente $env:USERNAME (serve login attivo)."
+}
+
+try {
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $Action `
+        -Trigger $Trigger `
+        -Settings $Settings `
+        -Principal $Principal `
+        -Description "Sync EasyRetail GDB verso ATLAS ogni 3 minuti" | Out-Null
+} catch {
+    Write-Host ""
+    Write-Host "ERRORE: impossibile creare il task. Apri PowerShell come Amministratore:"
+    Write-Host "  1) Start -> digita PowerShell"
+    Write-Host "  2) tasto destro -> Esegui come amministratore"
+    Write-Host "  3) cd C:\AtlasSync"
+    Write-Host "  4) powershell -ExecutionPolicy Bypass -File .\install_sync_task.ps1"
+    Write-Host ""
+    throw
+}
 
 Start-ScheduledTask -TaskName $TaskName
 Start-Sleep -Seconds 3
