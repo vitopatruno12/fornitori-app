@@ -43,6 +43,13 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("2816.81"),
         "fatture": Decimal("128.73"),
     },
+    # Via Lattea 6 ott 2026 (lettura finanziaria): BANCOMAT 703,90 ok;
+    # CONTANTI 1162,90 − CASSETTO 230,60 = IN CASSA 932,30 (usa IN CASSA).
+    ("via_lattea", date(2026, 10, 6)): {
+        "contanti": Decimal("932.30"),
+        "pos": Decimal("703.90"),
+        "fatture": Decimal("12.30"),
+    },
 }
 
 MODEL_ID_TO_ACTIVITY = {

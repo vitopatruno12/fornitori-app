@@ -111,3 +111,33 @@ def test_storico_abba_6_oct_incasso_is_lettura_cash_plus_pos():
     assert hit["invoice_eur"] == Decimal("128.73")
     assert hit["incasso"] == Decimal("5033.80")
     assert hit.get("paper_closing") is True
+
+
+def test_via_lattea_6_oct_uses_in_cassa_not_contanti_lordi():
+    assert has_paper_override("via_lattea", date(2026, 10, 6))
+    cash, card, quote = _paper_amounts(
+        "via_lattea",
+        date(2026, 10, 6),
+        Decimal("1162.90"),
+        Decimal("703.90"),
+        Decimal("0.00"),
+    )
+    # IN CASSA 932,30 (= CONTANTI 1162,90 − CASSETTO 230,60); bancomat invariato
+    assert cash == Decimal("932.30")
+    assert card == Decimal("703.90")
+    assert quote == Decimal("0.00")
+    hit = apply_paper_closing_hit(
+        "via_lattea",
+        date(2026, 10, 6),
+        {
+            "cash_eur": Decimal("1162.90"),
+            "card_eur": Decimal("703.90"),
+            "quote_eur": Decimal("0.00"),
+            "invoice_eur": Decimal("0.00"),
+            "incasso": Decimal("1866.80"),
+        },
+    )
+    assert hit["cash_eur"] == Decimal("932.30")
+    assert hit["card_eur"] == Decimal("703.90")
+    assert hit["invoice_eur"] == Decimal("12.30")
+    assert hit["incasso"] == Decimal("1636.20")
