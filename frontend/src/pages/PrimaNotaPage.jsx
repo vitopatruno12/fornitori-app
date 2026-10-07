@@ -274,6 +274,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [letturaDay, setLetturaDay] = useState(() => selectedDate)
   const [letturaContanti, setLetturaContanti] = useState('')
   const [letturaPos, setLetturaPos] = useState('')
+  const [letturaNc, setLetturaNc] = useState('')
   const [letturaFatture, setLetturaFatture] = useState('')
   const [letturaBusy, setLetturaBusy] = useState(false)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
@@ -947,6 +948,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (!canQueryCashData() || !activeActivity || !day) {
         setLetturaContanti('')
         setLetturaPos('')
+        setLetturaNc('')
         setLetturaFatture('')
         return
       }
@@ -961,11 +963,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         const row = Array.isArray(data?.rows) ? data.rows.find((r) => r.day === day) : null
         setLetturaContanti(row?.contanti != null ? String(row.contanti) : '')
         setLetturaPos(row?.pos != null ? String(row.pos) : '')
+        setLetturaNc(row?.nc != null ? String(row.nc) : '')
         setLetturaFatture(row?.fatture != null ? String(row.fatture) : '')
       } catch {
         if (!cancelled) {
           setLetturaContanti('')
           setLetturaPos('')
+          setLetturaNc('')
           setLetturaFatture('')
         }
       }
@@ -1177,17 +1181,17 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
     const cash = String(letturaContanti || '').trim().replace(',', '.')
     const cardRaw = String(letturaPos || '').trim().replace(',', '.')
+    const ncRaw = String(letturaNc || '').trim().replace(',', '.')
     const fattureRaw = String(letturaFatture || '').trim().replace(',', '.')
-    if (!cash && !cardRaw && !fattureRaw) {
-      setError('Inserisci contanti e/o bancomat dalla lettura operatore.')
+    if (!cash && !cardRaw && !ncRaw && !fattureRaw) {
+      setError('Inserisci contanti, pagato elettronico o preventivi dalla lettura operatore.')
       return
     }
-    const bancomatTotale = cardRaw ? Number(cardRaw) : null
-    const fatture = fattureRaw ? Number(fattureRaw) : 0
-    // Se sulla lettura BANCOMAT include le fatture, le togliamo dal POS.
-    let pos = bancomatTotale
-    if (pos != null && Number.isFinite(fatture) && fatture > 0 && pos >= fatture) {
-      pos = Math.round((pos - fatture) * 100) / 100
+    const pos = cardRaw ? Number(cardRaw) : null
+    const nc = ncRaw ? Number(ncRaw) : null
+    if ((pos != null && Number.isNaN(pos)) || (nc != null && Number.isNaN(nc))) {
+      setError('Importo non valido nella lettura operatore.')
+      return
     }
     setError('')
     setSuccess('')
@@ -1197,7 +1201,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         activity: activeActivity,
         day,
         contanti: cash || null,
-        pos: pos == null || Number.isNaN(pos) ? null : pos,
+        pos,
+        nc,
         fatture: fattureRaw || null,
         accessCode: resolveActiveAccessCode(),
       })
@@ -1207,12 +1212,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         await loadEntries()
         await loadSummary()
       }
-      const posNote =
-        fatture > 0 && bancomatTotale != null
-          ? ` · POS ${formatAmount(pos)} (bancomat ${formatAmount(bancomatTotale)} − fatture ${formatAmount(fatture)})`
-          : ''
+      const parts = []
+      if (cash) parts.push(`contanti ${formatAmount(Number(cash))}`)
+      if (pos != null) parts.push(`elettronico ${formatAmount(pos)}`)
+      if (nc != null) parts.push(`preventivi ${formatAmount(nc)}`)
+      if (fattureRaw) parts.push(`fatture emesse ${formatAmount(Number(fattureRaw))}`)
       setSuccess(
-        `Lettura operatore salvata · ${formatDate(day)} · chiusura allineata (contanti/POS senza fatture)${posNote}.`,
+        `Lettura operatore salvata · ${formatDate(day)} · ${parts.join(' · ')}. Contanti, elettronico e preventivi restano come scritti.`,
       )
     } catch (err) {
       setError(err?.message || 'Salvataggio lettura operatore non riuscito')
@@ -2851,7 +2857,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               {isIsoDate(letturaDay) ? ` · ${formatDate(letturaDay)}` : ''}
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
-              Copia CONTANTI, BANCOMAT e il totale FATTURE EMESSE dalla lettura operatore. Il bancomat si salva senza le fatture: quelle restano nella colonna Fatture emesse.
+              Contanti = IN CASSA. Pagato elettronico = bancomat già senza fatture (sulla carta di Zanardelli è «PAGATO ELETTRONICO», non la riga BANCOMAT). Preventivi = NC entrata. Le fatture emesse vanno solo nella loro colonna e non cambiano questi tre importi.
             </p>
             <div className="form-row" style={{ alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -2871,7 +2877,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Contanti lettura (€)</label>
+                <label>Contanti IN CASSA (€)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -2884,7 +2890,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Bancomat lettura (€)</label>
+                <label>Pagato elettronico (€)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -2892,8 +2898,23 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   className="form-control"
                   value={letturaPos}
                   onChange={(e) => setLetturaPos(e.target.value)}
-                  placeholder="es. 2016.77"
+                  placeholder="es. 1872.78"
                   style={{ maxWidth: 160 }}
+                  title="Bancomat già senza fatture emesse"
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Preventivi NC (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="form-control"
+                  value={letturaNc}
+                  onChange={(e) => setLetturaNc(e.target.value)}
+                  placeholder="es. 538.72"
+                  style={{ maxWidth: 140 }}
+                  title="Preventivi / non fiscali: solo colonna NC entrata"
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
