@@ -54,6 +54,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
     entry.refill !== 0 ? eur(entry.refill, entry) : '—',
     entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento, entry) : '—',
     entry.versamentoBanca !== 0 ? eur(entry.versamentoBanca, entry) : '—',
+    entry.movimentoCassetto !== 0 ? eur(entry.movimentoCassetto, entry) : '—',
     eur(entry.incasso, entry),
   ])
 
@@ -73,6 +74,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       eur(totals.refill),
       eur(totals.stackerSvuotamento),
       eur(totals.versamentoBanca),
+      eur(totals.movimentoCassetto),
       eur(totals.incasso),
     ])
   }
@@ -94,6 +96,7 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       'Refill',
       'Stacker',
       'Banca',
+      'Cassetto',
       'Totale',
     ]],
     body,

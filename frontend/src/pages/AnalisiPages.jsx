@@ -27,6 +27,7 @@ import {
 } from '../services/analyticsService'
 import { EasyRetailPosImportPanel } from '../components/EasyRetailPosImportPanel.jsx'
 import { AnalisiMachineCard } from '../components/AnalisiMachineCard.jsx'
+import { AnalisiCassettoPanel } from '../components/AnalisiCassettoPanel.jsx'
 
 const ANALISI_CACHE_PREFIX = 'analisi_cache_v5:'
 const LOCALE_KPI_ALL = 'all'
@@ -479,6 +480,12 @@ export function AnalisiGiornalieroPage() {
           />
         </section>
       ) : null}
+      <AnalisiCassettoPanel
+        modelId={modelId}
+        dateFrom={focus.dateFrom}
+        dateTo={focus.dateTo}
+        periodLabel="giorno"
+      />
     </AnalisiPageShell>
   )
 }
@@ -536,6 +543,12 @@ export function AnalisiSettimanalePage() {
           <SeriesBars splitPayments rows={data.rows || []} labelKey="label" />
         </section>
       ) : null}
+      <AnalisiCassettoPanel
+        modelId={modelId}
+        dateFrom={focus.dateFrom}
+        dateTo={focus.dateTo}
+        periodLabel="settimana"
+      />
     </AnalisiPageShell>
   )
 }
@@ -593,6 +606,12 @@ export function AnalisiMensilePage() {
           <SeriesBars splitPayments rows={data.rows || []} labelKey="month_label" />
         </section>
       ) : null}
+      <AnalisiCassettoPanel
+        modelId={modelId}
+        dateFrom={focus.dateFrom}
+        dateTo={focus.dateTo}
+        periodLabel="mese"
+      />
     </AnalisiPageShell>
   )
 }

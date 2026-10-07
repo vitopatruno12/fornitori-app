@@ -63,6 +63,7 @@ const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
 const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
+const CONTO_MOVIMENTO_CASSETTO = 'MOVIMENTO_CASSETTO'
 
 const REGISTRO_CHIUSO_SAVE_MSG =
   'Registro chiuso: non puoi salvare. Apri con Accedi per salvare i movimenti.'
@@ -81,6 +82,7 @@ const MOVEMENT_KIND_OPTIONS = [
   'refill',
   'stacker_svuotamento',
   'versamento_banca',
+  'movimento_cassetto',
 ]
 
 function isIsoDate(value) {
@@ -140,7 +142,7 @@ function isExtraCassaConto(conto) {
 }
 
 function isCassaUscitaForcedConto(conto) {
-  return conto === CONTO_STACKER_SVUOTAMENTO || conto === CONTO_VERSAMENTO_BANCA
+  return conto === CONTO_STACKER_SVUOTAMENTO || conto === CONTO_VERSAMENTO_BANCA || conto === CONTO_MOVIMENTO_CASSETTO
 }
 
 function flowTagFromConto(conto) {
@@ -151,6 +153,7 @@ function flowTagFromConto(conto) {
   if (conto === CONTO_REFILL) return 'refill'
   if (conto === CONTO_STACKER_SVUOTAMENTO) return 'stacker_svuotamento'
   if (conto === CONTO_VERSAMENTO_BANCA) return 'versamento_banca'
+  if (conto === CONTO_MOVIMENTO_CASSETTO) return 'movimento_cassetto'
   return 'fiscale'
 }
 
@@ -233,9 +236,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [formDescription, setFormDescription] = useState('')
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
-  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | fatture_emesse | contanti | refill | stacker_svuotamento | versamento_banca
+  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | fatture_emesse | contanti | refill | stacker_svuotamento | versamento_banca | movimento_cassetto
   const extraCassaEntrataOnly = formFlowTag === 'pos' || formFlowTag === 'fatture_emesse'
-  const cassaUscitaOnly = formFlowTag === 'versamento_banca' || formFlowTag === 'stacker_svuotamento'
+  const cassaUscitaOnly = formFlowTag === 'versamento_banca' || formFlowTag === 'stacker_svuotamento' || formFlowTag === 'movimento_cassetto'
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
   const [formInvoiceId, setFormInvoiceId] = useState('')
@@ -1322,6 +1325,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   ? CONTO_STACKER_SVUOTAMENTO
                   : formFlowTag === 'versamento_banca'
                     ? CONTO_VERSAMENTO_BANCA
+                    : formFlowTag === 'movimento_cassetto'
+                      ? CONTO_MOVIMENTO_CASSETTO
                     : (formConto.trim() || null),
         riferimento_documento: formRifDocumento.trim() || null,
         supplier_id: formSupplierId ? Number(formSupplierId) : null,
@@ -1725,6 +1730,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     return entry?.conto === CONTO_VERSAMENTO_BANCA
   }
 
+  function isMovimentoCassetto(entry) {
+    return entry?.conto === CONTO_MOVIMENTO_CASSETTO
+  }
+
   function isExtraCassa(entry) {
     return isExtraCassaConto(entry?.conto)
   }
@@ -1745,8 +1754,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const refillTag = entry.conto === CONTO_REFILL
     const stackerTag = entry.conto === CONTO_STACKER_SVUOTAMENTO
     const versamentoTag = entry.conto === CONTO_VERSAMENTO_BANCA
+    const cassettoTag = entry.conto === CONTO_MOVIMENTO_CASSETTO
     const extraCassaTag = posTag || refillTag || fattureTag
-    const uscitaForced = stackerTag || versamentoTag
+    const uscitaForced = stackerTag || versamentoTag || cassettoTag
     const isEntrata = !uscitaForced && entry.type === 'entrata'
     const isUscita = uscitaForced || entry.type === 'uscita'
     const entrata = !extraCassaTag && isEntrata ? amount : 0
@@ -1760,6 +1770,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const stackerSvuotamento = stackerTag ? Math.abs(amount) : 0
     const versamentoBanca = versamentoTag ? Math.abs(amount) : 0
+    const movimentoCassetto = cassettoTag ? Math.abs(amount) : 0
     const fiscaleEntrata = !nonFiscaleTag && !extraCassaTag && !uscitaForced ? entrata : 0
     const fiscaleUscita = !nonFiscaleTag && !extraCassaTag && !uscitaForced ? uscita : 0
     const totaleMovimento = fiscaleEntrata - fiscaleUscita
@@ -1778,6 +1789,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       refill,
       stackerSvuotamento,
       versamentoBanca,
+      movimentoCassetto,
       fiscaleEntrata,
       fiscaleUscita,
       totaleMovimento,
@@ -1864,6 +1876,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
       if (movementKind === 'versamento_banca' && !isVersamentoBanca(entry)) return false
+      if (movementKind === 'movimento_cassetto' && !isMovimentoCassetto(entry)) return false
       return primaNotaMovementMatchesSearch(entry, q)
     })
   }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
@@ -1885,6 +1898,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         refill: acc.refill + Number(entry.refill || 0),
         stackerSvuotamento: acc.stackerSvuotamento + Number(entry.stackerSvuotamento || 0),
         versamentoBanca: acc.versamentoBanca + Number(entry.versamentoBanca || 0),
+        movimentoCassetto: acc.movimentoCassetto + Number(entry.movimentoCassetto || 0),
         incasso: acc.incasso + Number(entry.incasso || 0),
         count: acc.count + 1,
       }),
@@ -1903,6 +1917,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         refill: 0,
         stackerSvuotamento: 0,
         versamentoBanca: 0,
+        movimentoCassetto: 0,
         incasso: 0,
         count: 0,
       },
@@ -2221,6 +2236,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <option value="refill">Refill</option>
             <option value="stacker_svuotamento">Svuotamento stacker</option>
             <option value="versamento_banca">Versamento banca</option>
+            <option value="movimento_cassetto">Movimento cassetto</option>
           </select>
         </div>
         <div className="form-group">
@@ -2286,7 +2302,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   {formFlowTag === 'stacker_svuotamento'
                     ? 'Svuotamento stacker: banconote prelevate dallo stacker e uscite dalla cassa fisica.'
-                    : 'Versamento banca: contanti prelevati dalla cassa e versati in banca (uscita cassa).'}
+                    : formFlowTag === 'movimento_cassetto'
+                      ? 'Movimento cassetto: contanti usciti dal cassetto (uscita cassa, non è una vendita).'
+                      : 'Versamento banca: contanti prelevati dalla cassa e versati in banca (uscita cassa).'}
                 </p>
               ) : null}
             </div>
@@ -2391,6 +2409,18 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   title="Versamento banca: contanti prelevati dalla cassa e versati sul conto corrente (uscita cassa)."
                 >
                   Versamento banca
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'movimento_cassetto' ? 'btn btn-vino' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('movimento_cassetto')
+                    setFormType('uscita')
+                    setFormDescription((prev) => (String(prev || '').trim() ? prev : 'Movimento cassetto'))
+                  }}
+                  title="Contanti usciti dal cassetto. Si scrive in prima nota come uscita di cassa."
+                >
+                  Movimento cassetto
                 </button>
               </div>
             </div>
@@ -2652,6 +2682,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </span>
             <span className="pn-movement-totals-item">
               Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Cassetto: <strong>€ {formatAmount(movementPeriodTotals.movimentoCassetto)}</strong>
             </span>
             <span className="pn-movement-totals-item">
               Incasso: <strong>€ {formatAmount(movementPeriodTotals.incasso)}</strong>

@@ -16,6 +16,7 @@ from ..models.cash_entry import CashEntry
 from .cash_service import (
     CONTANTI_CONTO,
     FATTURE_EMESSE_CONTO,
+    MOVIMENTO_CASSETTO_CONTO,
     NON_FISCALE_CONTO,
     POS_CONTO,
     REFILL_CONTO,
@@ -56,6 +57,7 @@ _PROTECTED_CONTI = (
     REFILL_CONTO,
     STACKER_SVUOTAMENTO_CONTO,
     VERSAMENTO_BANCA_CONTO,
+    MOVIMENTO_CASSETTO_CONTO,
 )
 
 _KIND_META = {

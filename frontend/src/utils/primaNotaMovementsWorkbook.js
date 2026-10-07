@@ -5,6 +5,7 @@ const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
 const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
+const CONTO_MOVIMENTO_CASSETTO = 'MOVIMENTO_CASSETTO'
 
 export const PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE = 'Movimenti cassa'
 
@@ -27,6 +28,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'cassa_mattina', label: 'Cassa iniziale', numeric: true, width: 120 },
   { id: 'cassa_sera', label: 'Saldo cassa progressivo', numeric: true, width: 150 },
   { id: 'versamento_banca', label: 'Versamento banca', numeric: true, width: 130 },
+  { id: 'movimento_cassetto', label: 'Cassetto', numeric: true, width: 110 },
 ]
 
 function formatDate(value) {
@@ -96,6 +98,10 @@ function isVersamentoBancaEntry(entry) {
   return entry?.conto === CONTO_VERSAMENTO_BANCA
 }
 
+function isMovimentoCassettoEntry(entry) {
+  return entry?.conto === CONTO_MOVIMENTO_CASSETTO
+}
+
 export function isExtraCassaMovement(entry) {
   return isPosEntry(entry) || isRefillEntry(entry) || isFattureEmesseEntry(entry)
 }
@@ -112,6 +118,7 @@ function movementDescription(entry) {
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
   else if (isVersamentoBancaEntry(entry)) text = text ? `${text} [Banca]` : '[Banca]'
+  else if (isMovimentoCassettoEntry(entry)) text = text ? `${text} [Cassetto]` : '[Cassetto]'
   return text
 }
 
@@ -140,6 +147,7 @@ function entrySearchAmounts(entry) {
     entry?.refill,
     entry?.stackerSvuotamento,
     entry?.versamentoBanca,
+    entry?.movimentoCassetto,
     entry?.incasso,
   ].map((value) => Number(value || 0)).filter((n) => Number.isFinite(n) && Math.abs(n) >= 0.005)
 }
@@ -233,6 +241,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatAmount(entry.cassaSera)
     case 'versamento_banca':
       return formatFlowAmount(entry.versamentoBanca, entry)
+    case 'movimento_cassetto':
+      return formatFlowAmount(entry.movimentoCassetto, entry)
     default:
       return ''
   }
@@ -252,6 +262,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
   if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)
+  if (columnId === 'movimento_cassetto') return formatAmount(totals.movimentoCassetto)
   if (columnId === 'incasso') return formatAmount(totals.incasso)
   return ''
 }
