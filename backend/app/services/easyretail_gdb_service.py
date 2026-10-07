@@ -12,7 +12,7 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -1796,16 +1796,15 @@ def fetch_lettura_operatore_daily(
 
     pos_want = None if numeropos is None or str(numeropos).strip() == "" else str(numeropos).strip()
     try:
-        query_timeout = float(_env("EASYRETAIL_LETTURA_TIMEOUT", "45") or "45")
+        query_timeout = float(_env("EASYRETAIL_LETTURA_TIMEOUT", "120") or "120")
     except ValueError:
-        query_timeout = 45.0
+        query_timeout = 120.0
 
     holder: Dict[str, Any] = {}
 
     def _run() -> None:
         con = connect_gdb(dsn, user=user, password=password, fbclient=fbclient, charset=charset)
         try:
-            # Preferisci read-committed read-only (meno lock con EasyRetail aperto).
             try:
                 import fdb  # type: ignore
 
@@ -1829,143 +1828,140 @@ def fetch_lettura_operatore_daily(
             except Exception as exc:
                 print(f"LETTURA: FORMEPAGAMENTI skip ({exc})", flush=True)
 
-            start = datetime.combine(date_from, time.min)
-            end = datetime.combine(date_to + timedelta(days=1), time.min)
-            # Filtra NUMEROPOS in SQL (su Abba evita di leggere anche POS Zanardelli).
-            if pos_want is not None:
-                sql = (
-                    "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, NUMEROPOS, DATAMOVIMENTO "
-                    "FROM MOVIMENTIT WHERE DATAMOVIMENTO >= ? AND DATAMOVIMENTO < ? "
-                    "AND CAST(NUMEROPOS AS VARCHAR(20)) = ?"
-                )
-                params: List[Any] = [start, end, pos_want]
-            else:
-                sql = (
-                    "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, NUMEROPOS, DATAMOVIMENTO "
-                    "FROM MOVIMENTIT WHERE DATAMOVIMENTO >= ? AND DATAMOVIMENTO < ?"
-                )
-                params = [start, end]
-            print(
-                f"LETTURA: MOVIMENTIT {date_from}…{date_to} NUMEROPOS={pos_want}…",
-                flush=True,
-            )
-            try:
-                cur.execute(sql, params)
-                movs = cur.fetchall()
-            except Exception as exc:
-                # Fallback senza CAST (alcuni Firebird/driver)
-                if pos_want is None:
-                    raise
-                print(f"LETTURA: filtro SQL fallito ({exc}), retry senza CAST…", flush=True)
-                cur.execute(
-                    "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, NUMEROPOS, DATAMOVIMENTO "
-                    "FROM MOVIMENTIT WHERE DATAMOVIMENTO >= ? AND DATAMOVIMENTO < ?",
-                    [start, end],
-                )
-                movs = cur.fetchall()
-            print(f"LETTURA: movimenti grezzi={len(movs)}", flush=True)
-
-            kind_of: Dict[str, str] = {}
-            day_of: Dict[str, date] = {}
-            for mid, tipo, ndoc, npos, when in movs:
-                if when is None or not hasattr(when, "date"):
-                    continue
-                pos_s = "" if npos is None else str(npos).strip()
-                if pos_want is not None and pos_s != pos_want:
-                    continue
-                key = str(mid).strip()
-                kind_of[key] = classify_easyretail_ven_kind(tipo, ndoc)
-                day_of[key] = when.date()
-
-            if not kind_of:
-                holder["result"] = (
-                    [],
-                    {"ok": True, "fetched_days": 0, "numeropos": pos_want, "rows": 0},
-                )
-                return
-
-            ids = list(kind_of.keys())
-            print(f"LETTURA: PAGAMENTI su {len(ids)} movimenti…", flush=True)
-            pays: List[Tuple[Any, Any, Any]] = []
-            for i in range(0, len(ids), 200):
-                part = ids[i : i + 200]
-                marks = ",".join("?" for _ in part)
-                cur.execute(
-                    f"SELECT NUMEROMOVIMENTO, NUMEROFORMAPAGAMENTO, IMPORTO "
-                    f"FROM PAGAMENTI WHERE NUMEROMOVIMENTO IN ({marks})",
-                    part,
-                )
-                pays.extend(cur.fetchall())
-                if i == 0 or (i + 200) >= len(ids):
-                    print(f"LETTURA: pagamenti {min(i + 200, len(ids))}/{len(ids)}", flush=True)
-
             def _is_cash(fid: int, nome: str) -> bool:
                 return fid == 1 or "CONTANT" in nome
 
             def _is_card(fid: int, nome: str) -> bool:
                 return fid in (2, 3) or "BANCOM" in nome or "CARTA" in nome or "CREDITO" in nome
 
+            def _empty_slot() -> Dict[str, Decimal]:
+                return {
+                    "contanti": Decimal("0.00"),
+                    "bancomat": Decimal("0.00"),
+                    "pos": Decimal("0.00"),
+                    "fatture": Decimal("0.00"),
+                    "sconto": Decimal("0.00"),
+                }
+
             by_day: Dict[date, Dict[str, Decimal]] = {}
-            for mid, form_id, imp in pays:
-                key = str(mid).strip()
-                day = day_of.get(key)
-                if day is None:
-                    continue
-                fid = int(form_id or 0)
-                nome = form_names.get(fid, "")
-                amt = _cassetto_money(imp)
-                slot = by_day.setdefault(
-                    day,
-                    {
-                        "contanti": Decimal("0.00"),
-                        "bancomat": Decimal("0.00"),
-                        "pos": Decimal("0.00"),
-                        "fatture": Decimal("0.00"),
-                        "sconto": Decimal("0.00"),
-                        "docs": Decimal("0.00"),
-                    },
-                )
-                kind = kind_of.get(key, "other")
-                if _is_cash(fid, nome):
-                    slot["contanti"] += amt
-                elif _is_card(fid, nome):
-                    slot["bancomat"] += amt
-                    if kind == "scontrino":
-                        slot["pos"] += amt
-                elif "SCONTO" in nome:
-                    slot["sconto"] += amt
-                if kind == "fattura":
-                    slot["fatture"] += amt
+            docs_by_day: Dict[date, set] = {}
+            pay_rows = 0
+            mov_ids: Set[str] = set()
 
-            docs_by_day: Dict[date, int] = {}
-            for key, day in day_of.items():
-                docs_by_day[day] = docs_by_day.get(day, 0) + 1
-
-            out: List[Dict[str, Any]] = []
-            for day in sorted(by_day.keys()):
-                slot = by_day[day]
-                out.append(
-                    {
-                        "day": day.isoformat(),
-                        "contanti": float(slot["contanti"]),
-                        "bancomat": float(slot["bancomat"]),
-                        "pos": float(slot["pos"]),
-                        "fatture": float(slot["fatture"]),
-                        "sconto": float(slot["sconto"]),
-                        "incasso": float(slot["contanti"] + slot["bancomat"] + slot["sconto"]),
-                        "docs": int(docs_by_day.get(day, 0)),
-                    }
-                )
-            holder["result"] = (
-                out,
-                {
+            def _pack() -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                rows_out: List[Dict[str, Any]] = []
+                for d in sorted(by_day.keys()):
+                    slot = by_day[d]
+                    if (
+                        slot["contanti"] == 0
+                        and slot["bancomat"] == 0
+                        and slot["fatture"] == 0
+                        and slot["sconto"] == 0
+                    ):
+                        continue
+                    rows_out.append(
+                        {
+                            "day": d.isoformat(),
+                            "contanti": float(slot["contanti"]),
+                            "bancomat": float(slot["bancomat"]),
+                            "pos": float(slot["pos"]),
+                            "fatture": float(slot["fatture"]),
+                            "sconto": float(slot["sconto"]),
+                            "incasso": float(
+                                slot["contanti"] + slot["bancomat"] + slot["sconto"]
+                            ),
+                            "docs": len(docs_by_day.get(d) or ()),
+                        }
+                    )
+                return rows_out, {
                     "ok": True,
-                    "fetched_days": len(out),
+                    "fetched_days": len(rows_out),
                     "numeropos": pos_want,
-                    "movimenti": len(kind_of),
-                    "pagamenti": len(pays),
-                },
-            )
+                    "movimenti": len(mov_ids),
+                    "pagamenti": pay_rows,
+                }
+
+            # Un giorno alla volta + JOIN (su Abba i batch IN su PAGAMENTI si bloccavano).
+            day = date_from
+            while day <= date_to:
+                d0 = datetime.combine(day, time.min)
+                d1 = datetime.combine(day + timedelta(days=1), time.min)
+                print(f"LETTURA: giorno {day.isoformat()} JOIN PAGAMENTI…", flush=True)
+                rows = None
+                if pos_want is not None:
+                    for sql, params in (
+                        (
+                            "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
+                            "m.DATAMOVIMENTO, p.NUMEROFORMAPAGAMENTO, p.IMPORTO "
+                            "FROM MOVIMENTIT m "
+                            "INNER JOIN PAGAMENTI p ON p.NUMEROMOVIMENTO = m.NUMEROMOVIMENTO "
+                            "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ? "
+                            "AND CAST(m.NUMEROPOS AS VARCHAR(20)) = ?",
+                            [d0, d1, pos_want],
+                        ),
+                        (
+                            "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
+                            "m.DATAMOVIMENTO, p.NUMEROFORMAPAGAMENTO, p.IMPORTO "
+                            "FROM MOVIMENTIT m "
+                            "INNER JOIN PAGAMENTI p ON p.NUMEROMOVIMENTO = m.NUMEROMOVIMENTO "
+                            "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ? "
+                            "AND m.NUMEROPOS = ?",
+                            [d0, d1, int(pos_want) if pos_want.isdigit() else pos_want],
+                        ),
+                    ):
+                        try:
+                            cur.execute(sql, params)
+                            rows = cur.fetchall()
+                            break
+                        except Exception as exc:
+                            print(f"LETTURA: join retry ({exc})", flush=True)
+                if rows is None:
+                    cur.execute(
+                        "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
+                        "m.DATAMOVIMENTO, m.NUMEROPOS, p.NUMEROFORMAPAGAMENTO, p.IMPORTO "
+                        "FROM MOVIMENTIT m "
+                        "INNER JOIN PAGAMENTI p ON p.NUMEROMOVIMENTO = m.NUMEROMOVIMENTO "
+                        "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ?",
+                        [d0, d1],
+                    )
+                    raw = cur.fetchall()
+                    rows = []
+                    for mid, tipo, ndoc, when, npos, form_id, imp in raw:
+                        pos_s = "" if npos is None else str(npos).strip()
+                        if pos_want is not None and pos_s != pos_want:
+                            continue
+                        rows.append((mid, tipo, ndoc, when, form_id, imp))
+
+                slot = by_day.setdefault(day, _empty_slot())
+                docs = docs_by_day.setdefault(day, set())
+                for mid, tipo, ndoc, when, form_id, imp in rows:
+                    key = str(mid).strip()
+                    mov_ids.add(key)
+                    docs.add(key)
+                    kind = classify_easyretail_ven_kind(tipo, ndoc)
+                    fid = int(form_id or 0)
+                    nome = form_names.get(fid, "")
+                    amt = _cassetto_money(imp)
+                    pay_rows += 1
+                    if _is_cash(fid, nome):
+                        slot["contanti"] += amt
+                    elif _is_card(fid, nome):
+                        slot["bancomat"] += amt
+                        if kind == "scontrino":
+                            slot["pos"] += amt
+                    elif "SCONTO" in nome:
+                        slot["sconto"] += amt
+                    if kind == "fattura":
+                        slot["fatture"] += amt
+                print(
+                    f"LETTURA: {day.isoformat()} pay_rows={len(rows)} "
+                    f"contanti={slot['contanti']} pos={slot['pos']} fatture={slot['fatture']}",
+                    flush=True,
+                )
+                holder["result"] = _pack()
+                day += timedelta(days=1)
+
+            holder["result"] = _pack()
         except Exception as exc:  # pylint: disable=broad-except
             holder["error"] = exc
         finally:
@@ -1978,6 +1974,13 @@ def fetch_lettura_operatore_daily(
     t.start()
     t.join(timeout=query_timeout if query_timeout > 0 else None)
     if t.is_alive():
+        # Se ha già prodotto giorni parziali, usa quelli.
+        if "result" in holder:
+            print(
+                f"LETTURA: timeout {int(query_timeout)}s — invio giorni già letti.",
+                flush=True,
+            )
+            return holder["result"]
         print(
             f"LETTURA: timeout {int(query_timeout)}s (GDB occupato da EasyRetail?). Skip.",
             flush=True,
