@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Ricostruisce CONTANTI / BANCOMAT / CARTA della lettura sommando PAGAMENTI.
-
-Confronta con la carta (es. Zanardelli 7/10: contanti 1449,15 · bancomat 1750,32).
+"""Ricostruisce CONTANTI / BANCOMAT della lettura sommando PAGAMENTI.
 
   cd C:\\AtlasSync
   set DIAG_DAY=2026-10-07
-  py -u diagnose_lettura_pagamenti.py
-
-Opzionale (attesi carta):
   set DIAG_EXPECT_CONTANTI=1449.15
   set DIAG_EXPECT_BANCOMAT=1750.32
-  set DIAG_EXPECT_CARTA=0
   set DIAG_EXPECT_FATTURE=80
+  set DIAG_POS=2
+  set DIAG_FROM_HHMM=0837
+  set DIAG_TO_HHMM=2124
+  py -u diagnose_lettura_pagamenti.py
 """
 
 from __future__ import annotations
@@ -20,9 +18,10 @@ from __future__ import annotations
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 _HERE = Path(__file__).resolve().parent
 if (_HERE / "app").is_dir():
@@ -63,6 +62,26 @@ def _safe_close(cur) -> None:
         pass
 
 
+def _hhmm(raw: str, default: time) -> time:
+    s = (raw or "").strip()
+    if len(s) == 4 and s.isdigit():
+        return time(int(s[:2]), int(s[2:]))
+    return default
+
+
+def _bucket(nome: str, fid: int) -> str:
+    u = (nome or "").upper()
+    if "CONTANT" in u or fid == 1:
+        return "contanti"
+    if "BANCOM" in u or fid == 2:
+        return "bancomat"
+    if "CARTA" in u or "CREDITO" in u or fid == 3:
+        return "carta"
+    if "SCONTO" in u:
+        return "sconto"
+    return "altro"
+
+
 def main() -> int:
     _load_dotenv()
     from app.services.easyretail_gdb_service import (
@@ -74,11 +93,16 @@ def main() -> int:
     dsn = (os.getenv("EASYRETAIL_GDB_PATH") or os.getenv("EASYRETAIL_GDB_DSN") or "").strip()
     day_raw = (os.getenv("DIAG_DAY") or "").strip()[:10]
     if not dsn or not day_raw:
-        print("ERRORE: serve EASYRETAIL_GDB_PATH e DIAG_DAY=YYYY-MM-DD", file=sys.stderr)
+        print("ERRORE: serve EASYRETAIL_GDB_PATH e DIAG_DAY", file=sys.stderr)
         return 2
 
     day = datetime.strptime(day_raw, "%Y-%m-%d")
     nxt = day + timedelta(days=1)
+    pos_filter = (os.getenv("DIAG_POS") or "").strip()
+    t0 = _hhmm(os.getenv("DIAG_FROM_HHMM", ""), time(0, 0))
+    t1 = _hhmm(os.getenv("DIAG_TO_HHMM", ""), time(23, 59, 59))
+    start = datetime.combine(day.date(), t0)
+    end = datetime.combine(day.date(), t1) + timedelta(seconds=1)
 
     con = connect_gdb(
         dsn,
@@ -89,10 +113,9 @@ def main() -> int:
     )
     try:
         print(f"gdb={dsn}")
-        print(f"giorno={day_raw}")
+        print(f"giorno={day_raw} pos_filter={pos_filter or '(tutti)'} ore={t0.strftime('%H:%M')}-{t1.strftime('%H:%M')}")
 
-        # Forme pagamento
-        forms = {}
+        forms: Dict[int, Dict[str, Any]] = {}
         cur = con.cursor()
         try:
             cur.execute(
@@ -109,19 +132,11 @@ def main() -> int:
         finally:
             _safe_close(cur)
 
-        print("\n=== FORMEPAGAMENTI ===")
-        for fid in sorted(forms):
-            f = forms[fid]
-            print(
-                f"  {fid}: {f['nome']!r} codice={f['codice']!r} "
-                f"POS={f['pos_flag']} TOTALECASSETTO={f['totale_cassetto']}"
-            )
-
-        # Movimenti del giorno
         cur = con.cursor()
         try:
             cur.execute(
-                "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, TOTALEDOCUMENTO, NUMEROPOS "
+                "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, TOTALEDOCUMENTO, "
+                "NUMEROPOS, DATAMOVIMENTO "
                 "FROM MOVIMENTIT "
                 "WHERE DATAMOVIMENTO >= ? AND DATAMOVIMENTO < ?",
                 [day, nxt],
@@ -130,118 +145,147 @@ def main() -> int:
         finally:
             _safe_close(cur)
 
+        # filtra pos + fascia oraria
+        filtered = []
+        pos_counts: Dict[str, int] = defaultdict(int)
+        for mid, tipo, ndoc, tot, npos, when in movs:
+            pos_s = "" if npos is None else str(npos).strip()
+            pos_counts[pos_s or "(vuoto)"] += 1
+            if pos_filter and pos_s != pos_filter:
+                continue
+            if when is not None and hasattr(when, "hour"):
+                if when < start or when >= end:
+                    continue
+            filtered.append((mid, tipo, ndoc, tot, npos, when))
+
+        print("\n=== NUMEROPOS nel giorno (prima del filtro) ===")
+        for k, n in sorted(pos_counts.items(), key=lambda x: (-x[1], x[0])):
+            print(f"  POS {k}: {n} movimenti")
+        print(f"dopo filtro: {len(filtered)} movimenti")
+
         by_kind = defaultdict(lambda: {"n": 0, "tot": Decimal("0.00")})
-        ids_by_kind = defaultdict(list)
-        for mid, tipo, ndoc, tot, npos in movs:
+        kind_of: Dict[str, str] = {}
+        doc_tot: Dict[str, Decimal] = {}
+        for mid, tipo, ndoc, tot, npos, when in filtered:
+            key = str(mid).strip()
             kind = classify_easyretail_ven_kind(tipo, ndoc)
+            kind_of[key] = kind
+            doc_tot[key] = _money(tot)
             by_kind[kind]["n"] += 1
             by_kind[kind]["tot"] += _money(tot)
-            ids_by_kind[kind].append(str(mid).strip())
 
-        print("\n=== MOVIMENTIT per tipo documento ===")
+        print("\n=== MOVIMENTIT filtrati per tipo ===")
         for kind, slot in sorted(by_kind.items()):
             print(f"  {kind}: n={slot['n']} tot={slot['tot']}")
 
-        # Pagamenti collegati
-        cur = con.cursor()
-        try:
-            cur.execute(
-                "SELECT P.NUMEROMOVIMENTO, P.NUMEROFORMAPAGAMENTO, P.IMPORTO "
-                "FROM PAGAMENTI P "
-                "JOIN MOVIMENTIT M ON M.NUMEROMOVIMENTO = P.NUMEROMOVIMENTO "
-                "WHERE M.DATAMOVIMENTO >= ? AND M.DATAMOVIMENTO < ?",
-                [day, nxt],
-            )
-            pays = cur.fetchall()
-        finally:
-            _safe_close(cur)
+        ids = list(doc_tot.keys())
+        pays = []
+        if ids:
+            # batch IN clause
+            cur = con.cursor()
+            try:
+                chunk = 400
+                for i in range(0, len(ids), chunk):
+                    part = ids[i : i + chunk]
+                    marks = ",".join("?" for _ in part)
+                    cur.execute(
+                        f"SELECT NUMEROMOVIMENTO, NUMEROFORMAPAGAMENTO, IMPORTO "
+                        f"FROM PAGAMENTI WHERE NUMEROMOVIMENTO IN ({marks})",
+                        part,
+                    )
+                    pays.extend(cur.fetchall())
+            finally:
+                _safe_close(cur)
 
-        # classifica ogni movimento
-        kind_of = {}
-        for mid, tipo, ndoc, tot, npos in movs:
-            kind_of[str(mid).strip()] = classify_easyretail_ven_kind(tipo, ndoc)
-
-        by_form = defaultdict(lambda: Decimal("0.00"))
+        pay_sum_by_mov: Dict[str, Decimal] = defaultdict(lambda: Decimal("0.00"))
         by_form_fiscal = defaultdict(lambda: Decimal("0.00"))
         by_form_invoice = defaultdict(lambda: Decimal("0.00"))
-        unmatched = Decimal("0.00")
+        by_form_all = defaultdict(lambda: Decimal("0.00"))
         for mid, form_id, imp in pays:
             key = str(mid).strip()
             amt = _money(imp)
             fid = int(form_id or 0)
-            by_form[fid] += amt
+            by_form_all[fid] += amt
+            pay_sum_by_mov[key] += amt
             kind = kind_of.get(key, "other")
             if kind == "fattura":
                 by_form_invoice[fid] += amt
             elif kind == "scontrino":
                 by_form_fiscal[fid] += amt
-            else:
-                unmatched += amt  # preventivo/vea/other still counted in by_form
 
-        print("\n=== PAGAMENTI per forma (tutti i doc del giorno) ===")
-        tot_all = Decimal("0.00")
-        for fid in sorted(by_form):
+        # integrita: pagamenti vs totale documento (solo scontrini)
+        over = under = ok = 0
+        over_amt = Decimal("0.00")
+        for key, kind in kind_of.items():
+            if kind != "scontrino":
+                continue
+            d = doc_tot.get(key, Decimal("0.00"))
+            p = pay_sum_by_mov.get(key, Decimal("0.00"))
+            if p == d:
+                ok += 1
+            elif p > d:
+                over += 1
+                over_amt += p - d
+            else:
+                under += 1
+        print("\n=== Integrita PAGAMENTI vs TOTALEDOCUMENTO (scontrini) ===")
+        print(f"  ok={ok} over={over} (extra={over_amt}) under={under}")
+
+        print("\n=== PAGAMENTI per forma (filtrati) ===")
+        for fid in sorted(by_form_all):
             nome = forms.get(fid, {}).get("nome") or f"#{fid}"
-            print(f"  {fid} {nome}: {by_form[fid]}")
-            tot_all += by_form[fid]
-        print(f"  TOT pagamenti: {tot_all}")
+            print(f"  {fid} {nome}: {by_form_all[fid]}")
 
-        print("\n=== Solo scontrini fiscali (esclude fatture/preventivi) ===")
-        cash = card = other = Decimal("0.00")
+        buckets = defaultdict(lambda: Decimal("0.00"))
+        print("\n=== Solo scontrini fiscali ===")
         for fid, amt in sorted(by_form_fiscal.items()):
-            nome = (forms.get(fid, {}).get("nome") or "").upper()
-            print(f"  {fid} {forms.get(fid, {}).get('nome')}: {amt}")
-            if "CONTANT" in nome or fid == 1:
-                cash += amt
-            elif "BANCOM" in nome or "CARTA" in nome or "CREDITO" in nome or "PREPAG" in nome:
-                card += amt
-            else:
-                other += amt
-        print(f"  → CONTANTI~ {cash}")
-        print(f"  → ELETTRONICO~ {card}")
-        print(f"  → ALTRO fiscale~ {other}")
+            nome = forms.get(fid, {}).get("nome") or ""
+            b = _bucket(nome, fid)
+            buckets[b] += amt
+            print(f"  {fid} {nome}: {amt} → {b}")
 
-        print("\n=== Fatture (pagamenti su doc fattura) ===")
-        inv = Decimal("0.00")
+        cash = buckets["contanti"]
+        bancom = buckets["bancomat"]
+        carta = buckets["carta"]
+        elettronico = bancom + carta
+        print(f"  → CONTANTI {cash}")
+        print(f"  → BANCOMAT {bancom}")
+        print(f"  → CARTA {carta}")
+        print(f"  → ELETTRONICO {elettronico}")
+        print(f"  → SCONTO {buckets['sconto']}")
+        print(f"  → ALTRO {buckets['altro']}")
+
+        inv_pay = sum(by_form_invoice.values(), Decimal("0.00"))
+        inv_doc = by_kind.get("fattura", {}).get("tot", Decimal("0.00"))
+        print("\n=== Fatture ===")
         for fid, amt in sorted(by_form_invoice.items()):
             print(f"  {fid} {forms.get(fid, {}).get('nome')}: {amt}")
-            inv += amt
-        print(f"  → FATTURE pagamenti~ {inv}")
-        print(f"  → doc fattura tot MOVIMENTIT~ {by_kind.get('fattura', {}).get('tot', 0)}")
+        print(f"  pagamenti fatture={inv_pay}  tot documenti fattura={inv_doc}")
 
-        # proposta chiusura Atlas
-        pos_net = card  # già senza fatture se escluse sopra
-        print("\n=== Proposta chiusura Atlas (da GDB) ===")
-        print(f"  CONTANTI (IN CASSA): {cash}")
-        print(f"  POS (elettronico senza fatture): {pos_net}")
-        print(f"  FATTURE EMESSE: {by_kind.get('fattura', {}).get('tot', Decimal('0.00'))}")
-        print(f"  INCASSO contanti+pos: {(cash + pos_net)}")
+        print("\n=== Proposta Atlas (filtro applicato) ===")
+        print(f"  CONTANTI: {cash}")
+        print(f"  POS (=bancomat+carta, senza fatture): {elettronico}")
+        print(f"  FATTURE (pagamenti): {inv_pay}")
+        print(f"  INCASSO: {cash + elettronico}")
 
-        exp_c = os.getenv("DIAG_EXPECT_CONTANTI")
-        exp_b = os.getenv("DIAG_EXPECT_BANCOMAT")
-        exp_k = os.getenv("DIAG_EXPECT_CARTA")
-        exp_f = os.getenv("DIAG_EXPECT_FATTURE")
-        if any([exp_c, exp_b, exp_k, exp_f]):
-            print("\n=== Confronto carta ===")
-            if exp_c:
-                e = _money(exp_c)
-                print(f"  CONTANTI carta {e} vs GDB {cash} delta={cash - e}")
-            if exp_b:
-                e = _money(exp_b)
-                # carta bancomat spesso = bancomat+carta credito+fatture
-                bancom_only = by_form_fiscal.get(2, Decimal("0.00"))
-                print(f"  BANCOMAT carta {e} vs forma2 fiscale {bancom_only} delta={bancom_only - e}")
-                print(f"  BANCOMAT carta {e} vs elettronico fiscale {card} delta={card - e}")
-            if exp_k:
-                e = _money(exp_k)
-                carta_only = by_form_fiscal.get(3, Decimal("0.00"))
-                print(f"  CARTA carta {e} vs forma3 fiscale {carta_only} delta={carta_only - e}")
-            if exp_f:
-                e = _money(exp_f)
-                ft = by_kind.get("fattura", {}).get("tot", Decimal("0.00"))
-                print(f"  FATTURE carta {e} vs GDB doc {ft} delta={ft - e}")
+        def _exp(name: str) -> Optional[Decimal]:
+            raw = os.getenv(name)
+            return _money(raw) if raw not in (None, "") else None
 
-        print("\nFine. Incolla questo output.")
+        print("\n=== Confronto carta ===")
+        for label, got, env in (
+            ("CONTANTI", cash, "DIAG_EXPECT_CONTANTI"),
+            ("BANCOMAT", bancom, "DIAG_EXPECT_BANCOMAT"),
+            ("CARTA", carta, "DIAG_EXPECT_CARTA"),
+            ("ELETTRONICO", elettronico, "DIAG_EXPECT_ELETTRONICO"),
+            ("FATTURE", inv_pay, "DIAG_EXPECT_FATTURE"),
+        ):
+            e = _exp(env)
+            if e is None:
+                continue
+            print(f"  {label} carta {e} vs GDB {got} delta={got - e}")
+
+        print("\nFine.")
         return 0
     finally:
         try:
