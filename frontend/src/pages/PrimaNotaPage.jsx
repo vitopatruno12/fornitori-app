@@ -268,6 +268,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [excelBusy, setExcelBusy] = useState(false)
+  const [letturaDay, setLetturaDay] = useState(() => selectedDate)
   const [letturaContanti, setLetturaContanti] = useState('')
   const [letturaPos, setLetturaPos] = useState('')
   const [letturaFatture, setLetturaFatture] = useState('')
@@ -933,28 +934,36 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs, summaryScope, movementPeriodFrom, movementPeriodTo])
 
   useEffect(() => {
+    setLetturaDay(selectedDate)
+  }, [selectedDate, activeActivity])
+
+  useEffect(() => {
     let cancelled = false
     async function loadLettura() {
-      if (!canQueryCashData() || !activeActivity || !selectedDate) {
+      const day = isIsoDate(letturaDay) ? letturaDay : selectedDate
+      if (!canQueryCashData() || !activeActivity || !day) {
         setLetturaContanti('')
         setLetturaPos('')
+        setLetturaFatture('')
         return
       }
       try {
         const data = await fetchPaperClosings({
           activity: activeActivity,
-          dateFrom: selectedDate,
-          dateTo: selectedDate,
+          dateFrom: day,
+          dateTo: day,
           accessCode: resolveActiveAccessCode(),
         })
         if (cancelled) return
-        const row = Array.isArray(data?.rows) ? data.rows.find((r) => r.day === selectedDate) : null
+        const row = Array.isArray(data?.rows) ? data.rows.find((r) => r.day === day) : null
         setLetturaContanti(row?.contanti != null ? String(row.contanti) : '')
         setLetturaPos(row?.pos != null ? String(row.pos) : '')
+        setLetturaFatture(row?.fatture != null ? String(row.fatture) : '')
       } catch {
         if (!cancelled) {
           setLetturaContanti('')
           setLetturaPos('')
+          setLetturaFatture('')
         }
       }
     }
@@ -962,7 +971,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     return () => {
       cancelled = true
     }
-  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
+  }, [letturaDay, selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
 
   useEffect(() => {
     let cancelled = false
@@ -1158,6 +1167,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   async function handleSaveLetturaOperatore() {
+    const day = isIsoDate(letturaDay) ? letturaDay : selectedDate
+    if (!isIsoDate(day)) {
+      setError('Scegli il giorno della lettura operatore.')
+      return
+    }
     const cash = String(letturaContanti || '').trim().replace(',', '.')
     const cardRaw = String(letturaPos || '').trim().replace(',', '.')
     const fattureRaw = String(letturaFatture || '').trim().replace(',', '.')
@@ -1178,20 +1192,24 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setLetturaBusy(true)
       await upsertPaperClosing({
         activity: activeActivity,
-        day: selectedDate,
+        day,
         contanti: cash || null,
         pos: pos == null || Number.isNaN(pos) ? null : pos,
         fatture: fattureRaw || null,
         accessCode: resolveActiveAccessCode(),
       })
-      await loadEntries()
-      await loadSummary()
+      if (day !== selectedDate) {
+        setSelectedDate(day)
+      } else {
+        await loadEntries()
+        await loadSummary()
+      }
       const posNote =
         fatture > 0 && bancomatTotale != null
           ? ` · POS ${formatAmount(pos)} (bancomat ${formatAmount(bancomatTotale)} − fatture ${formatAmount(fatture)})`
           : ''
       setSuccess(
-        `Lettura operatore salvata · ${formatDate(selectedDate)} · chiusura allineata (contanti/POS senza fatture)${posNote}.`,
+        `Lettura operatore salvata · ${formatDate(day)} · chiusura allineata (contanti/POS senza fatture)${posNote}.`,
       )
     } catch (err) {
       setError(err?.message || 'Salvataggio lettura operatore non riuscito')
@@ -2785,12 +2803,29 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         {summaryScope === 'day' ? (
           <div className="pn-lettura-box" style={{ margin: '1rem 0', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: 10, background: '#f8fafc' }}>
             <h3 className="page-subheader" style={{ marginTop: 0, marginBottom: '0.35rem', fontSize: '1rem' }}>
-              Lettura operatore · {formatDate(selectedDate)}
+              Lettura operatore
+              {isIsoDate(letturaDay) ? ` · ${formatDate(letturaDay)}` : ''}
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
-              Copia CONTANTI e BANCOMAT dalla «Lettura operatore». Se il bancomat include le fatture, mettile nel campo Fatture: le togliamo dal POS (come nella chiusura elettronico).
+              Copia CONTANTI e BANCOMAT dalla «Lettura operatore». Puoi cambiare il giorno qui sotto se stai correggendo una giornata già chiusa. Se il bancomat include le fatture, mettile in Fatture: le togliamo dal POS.
             </p>
             <div className="form-row" style={{ alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="pn-lettura-day">Giorno lettura</label>
+                <input
+                  id="pn-lettura-day"
+                  type="date"
+                  className="form-control"
+                  value={isIsoDate(letturaDay) ? letturaDay : selectedDate}
+                  max={todayIso}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    if (isIsoDate(next)) setLetturaDay(next)
+                  }}
+                  style={{ maxWidth: 170 }}
+                  title="Giorno della carta lettura da salvare/correggere"
+                />
+              </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Contanti lettura (€)</label>
                 <input
@@ -2840,6 +2875,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 {letturaBusy ? 'Salvataggio…' : 'Salva lettura e allinea'}
               </button>
             </div>
+            {isIsoDate(letturaDay) && letturaDay !== selectedDate ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', margin: '0.55rem 0 0' }}>
+                Correzione per <strong>{formatDate(letturaDay)}</strong> (calendario in alto: {formatDate(selectedDate)}). Al salvataggio apriamo quel giorno.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
