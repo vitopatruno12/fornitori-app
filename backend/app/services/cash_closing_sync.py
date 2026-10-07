@@ -108,20 +108,35 @@ def closing_entry_datetime(day: date) -> datetime:
     return local.astimezone(timezone.utc)
 
 
-def _eligible_days(date_from: Optional[date], date_to: Optional[date]) -> List[date]:
+def _eligible_days(
+    date_from: Optional[date],
+    date_to: Optional[date],
+    *,
+    force_days: Optional[List[date]] = None,
+) -> List[date]:
     today = rome_now().date()
     end = min(date_to or today, today)
     start = date_from or (end - timedelta(days=MAX_BACKFILL_DAYS - 1))
     if start > end:
-        return []
-    if (end - start).days + 1 > MAX_BACKFILL_DAYS:
-        start = end - timedelta(days=MAX_BACKFILL_DAYS - 1)
-    days: List[date] = []
-    cur = start
-    while cur <= end:
-        if day_is_closed(cur):
-            days.append(cur)
-        cur += timedelta(days=1)
+        days: List[date] = []
+    else:
+        if (end - start).days + 1 > MAX_BACKFILL_DAYS:
+            start = end - timedelta(days=MAX_BACKFILL_DAYS - 1)
+        days = []
+        cur = start
+        while cur <= end:
+            if day_is_closed(cur):
+                days.append(cur)
+            cur += timedelta(days=1)
+    # Lettura operatore: allinea subito anche se il giorno non è ancora "chiuso" (prima delle 21:30).
+    forced: List[date] = []
+    for d in force_days or []:
+        if d is None or d > today:
+            continue
+        if d not in days:
+            forced.append(d)
+    if forced:
+        days = sorted(set(days) | set(forced))
     return days
 
 
@@ -318,9 +333,10 @@ def sync_daily_closings_to_prima_nota(
     activity: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    force_days: Optional[List[date]] = None,
 ) -> Dict[str, Any]:
-    """Crea/aggiorna movimenti automatici da scontrini (contanti, POS, preventivi NC)."""
-    days = _eligible_days(date_from, date_to)
+    """Crea/aggiorna movimenti automatici (contanti, POS, fatture emesse, preventivi NC)."""
+    days = _eligible_days(date_from, date_to, force_days=force_days)
     act_filter = normalize_activity(activity) if activity else None
     if not days:
         deduped = remove_manual_closing_duplicates(
@@ -369,9 +385,11 @@ def sync_daily_closings_to_prima_nota(
             card = _dec(hit.get("card_eur"))
             quote = _dec(hit.get("quote_eur"))
             cash, card, quote = _paper_amounts(act, day, cash, card, quote)
-            # Stesso passaggio della chiusura: totale fatture degli scontrini.
-            # Se la lettura operatore ha un importo, quello prevale.
-            if hit:
+            # Lettura operatore (campo fatture) prevale sul totale GDB invoice_eur.
+            paper = get_paper_override(act, day)
+            if "fatture" in paper:
+                fatture = _dec(paper["fatture"])
+            elif hit:
                 fatture = _dec(hit.get("invoice_eur"))
             else:
                 fatture = _paper_fatture(act, day)

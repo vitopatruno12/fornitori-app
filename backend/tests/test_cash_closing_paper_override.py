@@ -1,13 +1,18 @@
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
-from app.services.cash_closing_sync import _paper_amounts
+from app.services.cash_closing_sync import _eligible_days, _paper_amounts
 from app.services.paper_closing_overrides import (
     apply_paper_closing_daily,
     apply_paper_closing_hit,
+    get_paper_override,
     has_paper_override,
     paper_fatture,
 )
+
+ROME = ZoneInfo("Europe/Rome")
 
 
 def test_zanardelli_5_oct_uses_lettura_operatore_cash_and_pos():
@@ -149,3 +154,14 @@ def test_fatture_emesse_restano_fuori_dal_bancomat():
     assert paper_fatture("via_lattea", date(2026, 10, 6)) == Decimal("12.30")
     assert paper_fatture("via_abba", date(2026, 10, 6)) == Decimal("128.73")
     assert paper_fatture("via_zanardelli", date(2026, 10, 4)) == Decimal("0.00")
+    # Lettura operatore: chiave fatture presente → usata in chiusura FATTURE_EMESSE
+    assert "fatture" in get_paper_override("via_zanardelli", date(2026, 10, 6))
+
+
+def test_force_days_allinea_lettura_anche_prima_delle_2130():
+    """Salva lettura: force_days include oggi anche se non ancora chiuso."""
+    today = date(2026, 10, 7)
+    before_close = datetime.combine(today, time(18, 0), tzinfo=ROME)
+    with patch("app.services.cash_closing_sync.rome_now", return_value=before_close):
+        assert _eligible_days(today, today) == []
+        assert _eligible_days(today, today, force_days=[today]) == [today]

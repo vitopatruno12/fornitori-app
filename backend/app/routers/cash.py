@@ -394,5 +394,6 @@ def upsert_paper_closing(
         activity=act,
         date_from=day,
         date_to=day,
+        force_days=[day],
     )
     return {"ok": True, "paper": saved, "sync": sync}
