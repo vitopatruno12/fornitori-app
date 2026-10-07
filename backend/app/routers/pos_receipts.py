@@ -152,6 +152,7 @@ class LetturaDayBody(BaseModel):
     bancomat: float = 0
     pos: float = 0
     fatture: float = 0
+    nc: float = 0
     sconto: float = 0
     incasso: float = 0
     docs: int = 0
@@ -289,15 +290,14 @@ def ingest_lettura_daily(
             day = date_cls.fromisoformat(str(d.get("day") or "")[:10])
         except ValueError:
             continue
-        # Carta: CONTANTI / BANCOMAT; POS = elettronico senza fatture.
-        # NC=0: i preventivi sono gia nei totali pagamento della lettura.
+        # CONTANTI/POS = solo scontrini; NC = preventivi/VEA; FATTURE a parte.
         paper_closing_overrides.upsert_paper_closing(
             act,
             day,
             contanti=d.get("contanti"),
             pos=d.get("pos"),
             fatture=d.get("fatture"),
-            nc=0,
+            nc=d.get("nc"),
         )
         force_days.append(day)
         saved += 1
