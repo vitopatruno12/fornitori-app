@@ -262,11 +262,25 @@ def main() -> int:
             print(f"  {fid} {forms.get(fid, {}).get('nome')}: {amt}")
         print(f"  pagamenti fatture={inv_pay}  tot documenti fattura={inv_doc}")
 
+        # Come fetch_lettura_operatore_daily: CONTANTI/BANCOMAT = tutti i PAGAMENTI
+        # della cassa; POS Prima Nota = elettronico solo su scontrini; FATTURE a parte.
+        cash_all = Decimal("0.00")
+        bancom_all = Decimal("0.00")
+        for fid, amt in by_form_all.items():
+            nome = forms.get(fid, {}).get("nome") or ""
+            b = _bucket(nome, fid)
+            if b == "contanti":
+                cash_all += amt
+            elif b in ("bancomat", "carta"):
+                bancom_all += amt
+
         print("\n=== Proposta Atlas (filtro applicato) ===")
-        print(f"  CONTANTI: {cash}")
-        print(f"  POS (=bancomat+carta, senza fatture): {elettronico}")
+        print(f"  CONTANTI (tutti i pagamenti forma 1): {cash_all}")
+        print(f"  BANCOMAT carta (tutti forma 2/3): {bancom_all}")
+        print(f"  POS Prima Nota (=bancomat+carta su scontrini): {elettronico}")
         print(f"  FATTURE (pagamenti): {inv_pay}")
-        print(f"  INCASSO: {cash + elettronico}")
+        print(f"  INCASSO carta≈: {cash_all + bancom_all}")
+        print(f"  (solo fiscali: CONTANTI {cash} BANCOMAT {bancom})")
 
         def _exp(name: str) -> Optional[Decimal]:
             raw = os.getenv(name)
@@ -274,10 +288,9 @@ def main() -> int:
 
         print("\n=== Confronto carta ===")
         for label, got, env in (
-            ("CONTANTI", cash, "DIAG_EXPECT_CONTANTI"),
-            ("BANCOMAT", bancom, "DIAG_EXPECT_BANCOMAT"),
-            ("CARTA", carta, "DIAG_EXPECT_CARTA"),
-            ("ELETTRONICO", elettronico, "DIAG_EXPECT_ELETTRONICO"),
+            ("CONTANTI", cash_all, "DIAG_EXPECT_CONTANTI"),
+            ("BANCOMAT", bancom_all, "DIAG_EXPECT_BANCOMAT"),
+            ("POS_SCONTRINI", elettronico, "DIAG_EXPECT_ELETTRONICO"),
             ("FATTURE", inv_pay, "DIAG_EXPECT_FATTURE"),
         ):
             e = _exp(env)

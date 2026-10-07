@@ -1768,3 +1768,147 @@ def fetch_cassetto_daily(
         except Exception:
             pass
 
+
+def fetch_lettura_operatore_daily(
+    dsn: str,
+    *,
+    user: str = "SYSDBA",
+    password: str = "masterkey",
+    fbclient: Optional[str] = None,
+    charset: str = "WIN1252",
+    date_from: date,
+    date_to: date,
+    numeropos: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Totali LETTURA OPERATORE = somma PAGAMENTI per forma (come la carta).
+
+    Contanti/Bancomat carta = tutti i pagamenti forma 1/2(+3) del giorno sulla cassa.
+    POS Prima Nota = bancomat/carta su scontrini (senza quota fatture).
+    Fatture = somma pagamenti sui documenti fattura.
+
+    Verificato Zanardelli 2026-10-07 NUMEROPOS=2:
+      CONTANTI 1449.15 · BANCOMAT 1750.32 · FATTURE pagamenti 80.00
+    """
+    if date_to < date_from:
+        return [], {"ok": False, "error": "date_to < date_from"}
+
+    pos_want = None if numeropos is None or str(numeropos).strip() == "" else str(numeropos).strip()
+    con = connect_gdb(dsn, user=user, password=password, fbclient=fbclient, charset=charset)
+    try:
+        cur = con.cursor()
+        # Forme: 1 CONTANTI, 2 BANCOMAT, 3 CARTA…
+        form_names: Dict[int, str] = {}
+        try:
+            cur.execute("SELECT NUMEROFORMAPAGAMENTO, FORMAPAGAMENTO FROM FORMEPAGAMENTI")
+            for fid, nome in cur.fetchall():
+                form_names[int(fid)] = str(nome or "").strip().upper()
+        except Exception:
+            form_names = {1: "CONTANTI", 2: "BANCOMAT", 3: "CARTA DI CREDITO"}
+
+        start = datetime.combine(date_from, time.min)
+        end = datetime.combine(date_to + timedelta(days=1), time.min)
+        cur.execute(
+            "SELECT NUMEROMOVIMENTO, TIPODOCUMENTO, NUMERODOCUMENTO, NUMEROPOS, DATAMOVIMENTO "
+            "FROM MOVIMENTIT WHERE DATAMOVIMENTO >= ? AND DATAMOVIMENTO < ?",
+            [start, end],
+        )
+        movs = cur.fetchall()
+
+        kind_of: Dict[str, str] = {}
+        day_of: Dict[str, date] = {}
+        for mid, tipo, ndoc, npos, when in movs:
+            if when is None or not hasattr(when, "date"):
+                continue
+            pos_s = "" if npos is None else str(npos).strip()
+            if pos_want is not None and pos_s != pos_want:
+                continue
+            key = str(mid).strip()
+            kind_of[key] = classify_easyretail_ven_kind(tipo, ndoc)
+            day_of[key] = when.date()
+
+        if not kind_of:
+            return [], {"ok": True, "fetched_days": 0, "numeropos": pos_want, "rows": 0}
+
+        ids = list(kind_of.keys())
+        pays: List[Tuple[Any, Any, Any]] = []
+        for i in range(0, len(ids), 400):
+            part = ids[i : i + 400]
+            marks = ",".join("?" for _ in part)
+            cur.execute(
+                f"SELECT NUMEROMOVIMENTO, NUMEROFORMAPAGAMENTO, IMPORTO "
+                f"FROM PAGAMENTI WHERE NUMEROMOVIMENTO IN ({marks})",
+                part,
+            )
+            pays.extend(cur.fetchall())
+
+        def _is_cash(fid: int, nome: str) -> bool:
+            return fid == 1 or "CONTANT" in nome
+
+        def _is_card(fid: int, nome: str) -> bool:
+            return fid in (2, 3) or "BANCOM" in nome or "CARTA" in nome or "CREDITO" in nome
+
+        by_day: Dict[date, Dict[str, Decimal]] = {}
+        for mid, form_id, imp in pays:
+            key = str(mid).strip()
+            day = day_of.get(key)
+            if day is None:
+                continue
+            fid = int(form_id or 0)
+            nome = form_names.get(fid, "")
+            amt = _cassetto_money(imp)
+            slot = by_day.setdefault(
+                day,
+                {
+                    "contanti": Decimal("0.00"),
+                    "bancomat": Decimal("0.00"),
+                    "pos": Decimal("0.00"),
+                    "fatture": Decimal("0.00"),
+                    "sconto": Decimal("0.00"),
+                    "docs": Decimal("0.00"),
+                },
+            )
+            kind = kind_of.get(key, "other")
+            if _is_cash(fid, nome):
+                slot["contanti"] += amt
+            elif _is_card(fid, nome):
+                slot["bancomat"] += amt
+                if kind == "scontrino":
+                    slot["pos"] += amt
+            elif "SCONTO" in nome:
+                slot["sconto"] += amt
+            if kind == "fattura":
+                slot["fatture"] += amt
+
+        # docs count approx
+        docs_by_day: Dict[date, int] = {}
+        for key, day in day_of.items():
+            docs_by_day[day] = docs_by_day.get(day, 0) + 1
+
+        out: List[Dict[str, Any]] = []
+        for day in sorted(by_day.keys()):
+            slot = by_day[day]
+            out.append(
+                {
+                    "day": day.isoformat(),
+                    "contanti": float(slot["contanti"]),
+                    "bancomat": float(slot["bancomat"]),
+                    "pos": float(slot["pos"]),
+                    "fatture": float(slot["fatture"]),
+                    "sconto": float(slot["sconto"]),
+                    "incasso": float(slot["contanti"] + slot["bancomat"] + slot["sconto"]),
+                    "docs": int(docs_by_day.get(day, 0)),
+                }
+            )
+        return out, {
+            "ok": True,
+            "fetched_days": len(out),
+            "numeropos": pos_want,
+            "movimenti": len(kind_of),
+            "pagamenti": len(pays),
+        }
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+

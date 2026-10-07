@@ -146,6 +146,23 @@ class CassettoIngestBody(BaseModel):
     days: List[CassettoDayBody] = Field(default_factory=list)
 
 
+class LetturaDayBody(BaseModel):
+    day: str
+    contanti: float = 0
+    bancomat: float = 0
+    pos: float = 0
+    fatture: float = 0
+    sconto: float = 0
+    incasso: float = 0
+    docs: int = 0
+
+
+class LetturaIngestBody(BaseModel):
+    model_id: Optional[str] = None
+    activity: Optional[str] = None
+    days: List[LetturaDayBody] = Field(default_factory=list)
+
+
 class SyncGdbBody(BaseModel):
     dsn: Optional[str] = None
     model_id: Optional[str] = None
@@ -242,6 +259,67 @@ def ingest_cassetto_daily(
         meta={"saved": saved.get("saved"), "model_id": body.model_id},
     )
     return {"ok": True, **saved, "sync": sync}
+
+
+@router.post("/lettura-daily")
+def ingest_lettura_daily(
+    body: LetturaIngestBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_sync_token),
+):
+    """Riceve totali lettura operatore (PAGAMENTI per forma) → paper_closing + Prima Nota."""
+    from datetime import date as date_cls
+
+    from ..services import agent_cassa_status as agent_status
+    from ..services import cash_closing_sync, paper_closing_overrides
+    from ..services.paper_closing_overrides import activity_for_model_id
+
+    if not body.days:
+        return {"ok": True, "saved": 0, "sync": None}
+
+    act = (body.activity or "").strip() or activity_for_model_id(body.model_id)
+    if not act:
+        raise HTTPException(status_code=400, detail="model_id / activity obbligatorio")
+
+    saved = 0
+    force_days: List[date] = []
+    for raw in body.days:
+        d = raw.model_dump() if hasattr(raw, "model_dump") else raw.dict()
+        try:
+            day = date_cls.fromisoformat(str(d.get("day") or "")[:10])
+        except ValueError:
+            continue
+        # Carta: CONTANTI / BANCOMAT; POS = elettronico senza fatture.
+        # NC=0: i preventivi sono gia nei totali pagamento della lettura.
+        paper_closing_overrides.upsert_paper_closing(
+            act,
+            day,
+            contanti=d.get("contanti"),
+            pos=d.get("pos"),
+            fatture=d.get("fatture"),
+            nc=0,
+        )
+        force_days.append(day)
+        saved += 1
+
+    sync = None
+    if force_days:
+        try:
+            sync = cash_closing_sync.sync_daily_closings_to_prima_nota(
+                db,
+                activity=act,
+                date_from=min(force_days),
+                date_to=max(force_days),
+                force_days=force_days,
+            )
+        except Exception as exc:
+            sync = {"ok": False, "error": str(exc)}
+
+    agent_status.touch_agent_heartbeat(
+        source="lettura-daily",
+        meta={"saved": saved, "model_id": body.model_id},
+    )
+    return {"ok": True, "activity": act, "saved": saved, "sync": sync}
 
 
 @router.post("/sync-gdb")

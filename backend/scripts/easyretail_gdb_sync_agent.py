@@ -256,6 +256,86 @@ def _post_cassetto_daily(api: str, token: str, model_id: str | None, days: list[
         return resp.read().decode("utf-8", errors="replace")
 
 
+def _resolve_numeropos(model_id: str | None, store_filter: tuple[str, ...]) -> str | None:
+    """Cassa EasyRetail (NUMEROPOS) per allineare la lettura operatore."""
+    env = (os.getenv("EASYRETAIL_NUMEROPOS") or "").strip()
+    if env:
+        return env
+    for p in store_filter:
+        if p.isdigit():
+            return p
+    defaults = {
+        "model-4": "2",  # Zanardelli (verificato 2026-10-07)
+        "model-2": "0",  # Abba / Mediazione (stesso GDB, POS 0)
+        "model-3": "4",  # Via Lattea (sample storici)
+    }
+    return defaults.get((model_id or "").strip())
+
+
+def _post_lettura_daily(api: str, token: str, model_id: str | None, days: list[dict]) -> str:
+    payload = {"model_id": model_id, "days": days}
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{api}/pos-receipts/lettura-daily",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Atlas-Sync-Token": token,
+            "User-Agent": "atlas-easyretail-gdb-agent/1.5",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _sync_lettura(
+    api: str,
+    token: str,
+    model_id: str | None,
+    dsn: str,
+    lookback_hours: int,
+    store_filter: tuple[str, ...],
+) -> None:
+    """Somma PAGAMENTI = totali lettura operatore → Prima Nota."""
+    from datetime import date, timedelta
+
+    from app.services.easyretail_gdb_service import fetch_lettura_operatore_daily
+
+    days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
+    today = date.today()
+    date_from = today - timedelta(days=days_back)
+    numeropos = _resolve_numeropos(model_id, store_filter)
+    print(
+        f"LETTURA: {date_from}…{today} model={model_id} NUMEROPOS={numeropos}",
+        flush=True,
+    )
+    rows, meta = fetch_lettura_operatore_daily(
+        dsn,
+        user=os.getenv("EASYRETAIL_GDB_USER", "SYSDBA") or "SYSDBA",
+        password=os.getenv("EASYRETAIL_GDB_PASSWORD", "masterkey") or "masterkey",
+        fbclient=(os.getenv("EASYRETAIL_FBCLIENT") or None),
+        charset=os.getenv("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
+        date_from=date_from,
+        date_to=today,
+        numeropos=numeropos,
+    )
+    if not meta.get("ok"):
+        print(f"LETTURA: skip ({meta.get('error')})", flush=True)
+        return
+    if not rows:
+        print(f"LETTURA: nessun pagamento in {days_back}g (ok)", flush=True)
+        return
+    body = _post_lettura_daily(api, token, model_id, rows)
+    print(
+        f"LETTURA: days={len(rows)} "
+        f"contanti={sum(float(r.get('contanti') or 0) for r in rows):.2f} "
+        f"pos={sum(float(r.get('pos') or 0) for r in rows):.2f} "
+        f"fatture={sum(float(r.get('fatture') or 0) for r in rows):.2f} → {body}",
+        flush=True,
+    )
+
+
 def _sync_cassetto(api: str, token: str, model_id: str | None, dsn: str, lookback_hours: int) -> None:
     """Legge MOVIMENTICASSETTIT e invia i totali giornalieri ad ATLAS."""
     from datetime import date, timedelta
@@ -366,7 +446,14 @@ def main() -> int:
                 f"table={meta.get('table')} batches={total_batches}",
                 flush=True,
             )
-        # Sempre: movimenti cassetto → Prima Nota (MOVIMENTO_CASSETTO)
+        # Lettura operatore (CONTANTI/POS/FATTURE come la carta) + cassetto
+        try:
+            _sync_lettura(api, token, model_id, dsn, lookback, store_filter)
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            print(f"LETTURA HTTP {e.code}: {err}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"LETTURA ERRORE: {e}", file=sys.stderr, flush=True)
         try:
             _sync_cassetto(api, token, model_id, dsn, lookback)
         except urllib.error.HTTPError as e:
