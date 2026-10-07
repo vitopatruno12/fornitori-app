@@ -280,6 +280,8 @@ def _consent_valid_until(days: int) -> str:
 
 # Giorni prima della scadenza in cui Atlas chiede di ricollegare il conto.
 CONSENT_WARN_DAYS = max(1, int(os.getenv("ENABLE_BANKING_CONSENT_WARN_DAYS", "5") or "5"))
+# Se la banca non ha mandato la data, il contatore parte da 180 giorni e non si ricalcola.
+DEFAULT_CONSENT_DAYS = 180
 
 
 def parse_consent_valid_until(raw: Any) -> Optional[datetime]:
@@ -311,13 +313,34 @@ def extract_session_consent_valid_until(session: Optional[Dict[str, Any]]) -> Op
   )
 
 
+def _account_is_connected(row: BankAccount) -> bool:
+  return bool(getattr(row, "eb_account_uid", None)) or (getattr(row, "connection_status", None) or "") == "connected"
+
+
+def fill_missing_consent_deadline(row: BankAccount, *, days: int = DEFAULT_CONSENT_DAYS) -> bool:
+  """Scrive la scadenza a 180 giorni solo se il conto è collegato e la data manca."""
+  if not _account_is_connected(row):
+    return False
+  if getattr(row, "eb_consent_valid_until", None) is not None:
+    return False
+  span = max(1, min(DEFAULT_CONSENT_DAYS, int(days or DEFAULT_CONSENT_DAYS)))
+  row.eb_consent_valid_until = datetime.now(timezone.utc) + timedelta(days=span)
+  return True
+
+
 def apply_session_consent(row: BankAccount, session: Optional[Dict[str, Any]], *, fallback_days: Optional[int] = None) -> None:
-  """Aggiorna eb_consent_valid_until dalla sessione o, in mancanza, da fallback_days."""
+  """Aggiorna eb_consent_valid_until dalla sessione.
+
+  Se la banca non manda la data e il collegamento è nuovo (fallback_days), parte da 180 giorni.
+  Uno scarico successivo senza data non ricalcola una scadenza già salvata.
+  """
   vu = extract_session_consent_valid_until(session)
   if vu is None and fallback_days:
-    vu = datetime.now(timezone.utc) + timedelta(days=max(1, int(fallback_days)))
+    vu = datetime.now(timezone.utc) + timedelta(days=max(1, min(DEFAULT_CONSENT_DAYS, int(fallback_days))))
   if vu is not None:
     row.eb_consent_valid_until = vu
+  else:
+    fill_missing_consent_deadline(row)
 
 
 def consent_monitor_for_account(row: BankAccount) -> Dict[str, Any]:
@@ -346,7 +369,7 @@ def consent_monitor_for_account(row: BankAccount) -> Dict[str, Any]:
   if isinstance(vu, datetime) and vu.tzinfo is None:
     vu = vu.replace(tzinfo=timezone.utc)
   now = datetime.now(timezone.utc)
-  days_left = int((vu - now).total_seconds() // 86400)
+  days_left = (vu.astimezone(timezone.utc).date() - now.date()).days
   base["valid_until"] = vu.astimezone(timezone.utc).isoformat()
   base["days_left"] = days_left
   if days_left < 0:
