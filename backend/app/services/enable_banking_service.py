@@ -278,6 +278,113 @@ def _consent_valid_until(days: int) -> str:
   return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Giorni prima della scadenza in cui Atlas chiede di ricollegare il conto.
+CONSENT_WARN_DAYS = max(1, int(os.getenv("ENABLE_BANKING_CONSENT_WARN_DAYS", "5") or "5"))
+
+
+def parse_consent_valid_until(raw: Any) -> Optional[datetime]:
+  """Parse access.valid_until da sessione/auth Enable Banking → datetime UTC aware."""
+  if raw is None:
+    return None
+  if isinstance(raw, datetime):
+    return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+  text = str(raw).strip()
+  if not text:
+    return None
+  if text.endswith("Z"):
+    text = text[:-1] + "+00:00"
+  try:
+    moment = datetime.fromisoformat(text)
+  except ValueError:
+    return None
+  if moment.tzinfo is None:
+    moment = moment.replace(tzinfo=timezone.utc)
+  return moment.astimezone(timezone.utc)
+
+
+def extract_session_consent_valid_until(session: Optional[Dict[str, Any]]) -> Optional[datetime]:
+  if not isinstance(session, dict):
+    return None
+  access = session.get("access") if isinstance(session.get("access"), dict) else {}
+  return parse_consent_valid_until(
+    (access or {}).get("valid_until") or session.get("valid_until")
+  )
+
+
+def apply_session_consent(row: BankAccount, session: Optional[Dict[str, Any]], *, fallback_days: Optional[int] = None) -> None:
+  """Aggiorna eb_consent_valid_until dalla sessione o, in mancanza, da fallback_days."""
+  vu = extract_session_consent_valid_until(session)
+  if vu is None and fallback_days:
+    vu = datetime.now(timezone.utc) + timedelta(days=max(1, int(fallback_days)))
+  if vu is not None:
+    row.eb_consent_valid_until = vu
+
+
+def consent_monitor_for_account(row: BankAccount) -> Dict[str, Any]:
+  """Stato consenso per UI: days_left, status (ok|warn|expired|unknown|disconnected)."""
+  connected = bool(getattr(row, "eb_account_uid", None)) or (row.connection_status or "") == "connected"
+  label = f"{(row.bank_name or '').strip()} · {(row.account_name or 'Conto').strip()}".strip(" ·")
+  company = (getattr(row, "company", None) or "").strip() or None
+  base = {
+    "account_id": row.id,
+    "label": label,
+    "company": company,
+    "connected": connected,
+    "valid_until": None,
+    "days_left": None,
+    "warn_days": CONSENT_WARN_DAYS,
+    "status": "disconnected",
+    "message": "Non collegato",
+  }
+  if not connected:
+    return base
+  vu = getattr(row, "eb_consent_valid_until", None)
+  if vu is None:
+    base["status"] = "unknown"
+    base["message"] = "Scadenza sconosciuta — ricollega per attivare il contatore"
+    return base
+  if isinstance(vu, datetime) and vu.tzinfo is None:
+    vu = vu.replace(tzinfo=timezone.utc)
+  now = datetime.now(timezone.utc)
+  days_left = int((vu - now).total_seconds() // 86400)
+  base["valid_until"] = vu.astimezone(timezone.utc).isoformat()
+  base["days_left"] = days_left
+  if days_left < 0:
+    base["status"] = "expired"
+    base["message"] = f"Consenso scaduto da {abs(days_left)} g — ricollega ora"
+  elif days_left <= CONSENT_WARN_DAYS:
+    base["status"] = "warn"
+    base["message"] = f"Ricollega entro {days_left} g"
+  else:
+    base["status"] = "ok"
+    base["message"] = f"Ricollega tra {days_left} g"
+  return base
+
+
+def consent_monitor_summary(rows: List[BankAccount]) -> Dict[str, Any]:
+  items = [consent_monitor_for_account(r) for r in rows if r.is_active]
+  connected = [x for x in items if x.get("connected")]
+  expired = [x for x in connected if x.get("status") == "expired"]
+  warn = [x for x in connected if x.get("status") == "warn"]
+  unknown = [x for x in connected if x.get("status") == "unknown"]
+  ok = [x for x in connected if x.get("status") == "ok"]
+  next_item = None
+  dated = [x for x in connected if x.get("days_left") is not None]
+  if dated:
+    next_item = min(dated, key=lambda x: int(x.get("days_left") or 0))
+  return {
+    "warn_days": CONSENT_WARN_DAYS,
+    "connected": len(connected),
+    "ok": len(ok),
+    "warn": len(warn),
+    "expired": len(expired),
+    "unknown": len(unknown),
+    "needs_action": len(expired) + len(warn),
+    "next": next_item,
+    "items": items,
+  }
+
+
 def start_authorization(
   *,
   account_id: int,
@@ -788,6 +895,11 @@ def complete_enable_banking_callback(
     iban = _extract_iban(acc)
     row.eb_session_id = session_id[:64]
     row.eb_account_uid = account_uid[:64]
+    cfg = get_enable_banking_config()
+    bank_l = (row.eb_aspsp_name or row.bank_name or "").lower()
+    is_beta = any(k in bank_l for k in ("bcc", "otranto", "intesa", "sanpaolo"))
+    fallback_days = min(89, int(cfg["consent_days"])) if is_beta else int(cfg["consent_days"])
+    apply_session_consent(row, session, fallback_days=fallback_days)
     if iban and not row.iban:
       row.iban = iban[:34]
     bank_label = (row.eb_aspsp_name or row.bank_name or "Banca").strip()
@@ -845,6 +957,7 @@ def sync_enable_banking_account(
     if row.eb_session_id:
       try:
         session = get_session(str(row.eb_session_id))
+        apply_session_consent(row, session)
         for extra in session.get("accounts") or []:
           extra_uid = str(extra or "").strip()
           if extra_uid and extra_uid not in candidate_uids:

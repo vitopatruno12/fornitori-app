@@ -39,6 +39,7 @@ import {
 } from '../services/bancaService'
 import { SeriesBars } from '../components/FattureShared.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import EbConsentMonitor from '../components/EbConsentMonitor.jsx'
 import { parseBanFile } from '../utils/banFileParser'
 import { companyLabel, FATTURE_COMPANY_ORDER, FATTURE_COMPANY_LABELS } from '../utils/fattureCompany.js'
 import { printVneTable } from '../utils/vneTableExport.js'
@@ -877,47 +878,59 @@ export function BancaDashboardPage() {
   }, [])
 
   const societa = Array.isArray(data?.societa) ? data.societa : []
-  const banner = societa.length ? (
-    <div className="banca-hero-companies" aria-label="Saldi per società">
-      {societa.map((row) => (
-        <article key={row.company} className="banca-hero-company">
-          <header className="banca-hero-company-head">
-            <h2>{row.label}</h2>
-            <strong>{eur(row.saldo)}</strong>
-          </header>
-          <p className="banca-hero-company-today">
-            Oggi {eur(row.entrate_oggi)} entrate · {eur(row.uscite_oggi)} uscite
-          </p>
-          <ul className="banca-hero-company-accounts">
-            {(row.conti || []).map((conto) => (
-              <li key={conto.id}>
-                <span>{conto.bank_name || conto.label}</span>
-                <span>{eur(conto.saldo_disponibile)}</span>
-              </li>
-            ))}
-          </ul>
-          <ul className="banca-hero-company-moves">
-            {(row.ultimi_movimenti || []).length === 0 ? (
-              <li>Nessun movimento recente</li>
-            ) : (
-              row.ultimi_movimenti.map((mov) => (
-                <li key={mov.id}>
-                  <Link to={bancaMovimentoDetailHref(mov, bancaBase)} className="banca-hero-move-link" title="Apri dettaglio bonifico">
-                    <span>{formatDate(mov.movement_date)}</span>
-                    <span>{mov.description || '—'}</span>
-                    <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
-                      {mov.movement_type === 'uscita' ? '−' : '+'}
-                      {eur(mov.amount)}
+  const banner = (
+    <>
+      <EbConsentMonitor consent={data?.eb_consent} />
+      {societa.length ? (
+        <div className="banca-hero-companies" aria-label="Saldi per società">
+          {societa.map((row) => (
+            <article key={row.company} className="banca-hero-company">
+              <header className="banca-hero-company-head">
+                <h2>{row.label}</h2>
+                <strong>{eur(row.saldo)}</strong>
+              </header>
+              <p className="banca-hero-company-today">
+                Oggi {eur(row.entrate_oggi)} entrate · {eur(row.uscite_oggi)} uscite
+              </p>
+              <ul className="banca-hero-company-accounts">
+                {(row.conti || []).map((conto) => (
+                  <li key={conto.id}>
+                    <span>
+                      {conto.bank_name || conto.label}
+                      {conto.eb_consent_message ? (
+                        <em style={{ display: 'block', fontStyle: 'normal', opacity: 0.85 }}>
+                          {conto.eb_consent_message}
+                        </em>
+                      ) : null}
                     </span>
-                  </Link>
-                </li>
-              ))
-            )}
-          </ul>
-        </article>
-      ))}
-    </div>
-  ) : null
+                    <span>{eur(conto.saldo_disponibile)}</span>
+                  </li>
+                ))}
+              </ul>
+              <ul className="banca-hero-company-moves">
+                {(row.ultimi_movimenti || []).length === 0 ? (
+                  <li>Nessun movimento recente</li>
+                ) : (
+                  row.ultimi_movimenti.map((mov) => (
+                    <li key={mov.id}>
+                      <Link to={bancaMovimentoDetailHref(mov, bancaBase)} className="banca-hero-move-link" title="Apri dettaglio bonifico">
+                        <span>{formatDate(mov.movement_date)}</span>
+                        <span>{mov.description || '—'}</span>
+                        <span className={mov.movement_type === 'entrata' ? 'is-in' : 'is-out'}>
+                          {mov.movement_type === 'uscita' ? '−' : '+'}
+                          {eur(mov.amount)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </>
+  )
 
   return (
     <BancaPageShell
@@ -1110,6 +1123,7 @@ function BankSyncCard({
 
 export function BancaContiPage() {
   const [items, setItems] = useState([])
+  const [ebConsent, setEbConsent] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -1137,6 +1151,7 @@ export function BancaContiPage() {
     try {
       const [res, profile] = await Promise.all([fetchBancaAccounts(), fetchBancaConnectProfile().catch(() => null)])
       setItems(visibleBankAccounts(Array.isArray(res?.items) ? res.items : []))
+      setEbConsent(res?.eb_consent || null)
       if (profile) setConnectProfile(profile)
     } catch (e) {
       setError(e?.message || 'Errore caricamento conti')
@@ -1816,7 +1831,11 @@ export function BancaContiPage() {
   }
 
   return (
-    <BancaPageShell title="Conti correnti" lead="Conti collegati, saldi e sincronizzazione.">
+    <BancaPageShell
+      title="Conti correnti"
+      lead="Conti collegati, saldi e sincronizzazione. Il contatore Enable Banking avvisa 5 giorni prima della scadenza."
+      banner={<EbConsentMonitor consent={ebConsent} />}
+    >
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
       {connectProfile && (

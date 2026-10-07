@@ -25,6 +25,8 @@ class BankAccount(Base):
   eb_account_uid = Column(String(64), nullable=True)
   eb_aspsp_name = Column(String(120), nullable=True)
   eb_aspsp_country = Column(String(2), nullable=True)
+  # Fine validità consenso AIS (Enable Banking access.valid_until)
+  eb_consent_valid_until = Column(DateTime(timezone=True), nullable=True)
   is_active = Column(Boolean, nullable=False, default=True)
   notes = Column(Text, nullable=True)
   created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

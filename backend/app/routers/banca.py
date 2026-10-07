@@ -258,7 +258,7 @@ def banca_accounts(
 ) -> Dict[str, Any]:
   if company:
     return {"items": banca_service.accounts_for_company(db, company)}
-  return {"items": banca_service.list_accounts(db)}
+  return banca_service.list_accounts_payload(db)
 
 
 @router.post("/accounts")

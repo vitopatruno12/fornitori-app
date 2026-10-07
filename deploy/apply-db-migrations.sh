@@ -50,6 +50,7 @@ SAFE_MIGRATIONS=(
   20260812_sdi_electronic_invoice_link.sql
   20260816_pos_receipts.sql
   20260926_invoices_bolla_verified.sql
+  20261007_bank_accounts_eb_consent.sql
 )
 
 # ADD COLUMN prende un lock esclusivo anche se la colonna c'è già.

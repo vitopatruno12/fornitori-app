@@ -225,8 +225,11 @@ def _account_display_label(account: Optional[BankAccount]) -> Optional[str]:
 
 
 def _account_out(row: BankAccount) -> Dict[str, Any]:
+  from .enable_banking_service import consent_monitor_for_account
+
   company = (getattr(row, "company", None) or "").strip() or None
   ledger_code = (getattr(row, "ledger_code", None) or "1100").strip() or "1100"
+  consent = consent_monitor_for_account(row)
   return {
     "id": row.id,
     "bank_name": row.bank_name,
@@ -245,6 +248,10 @@ def _account_out(row: BankAccount) -> Dict[str, Any]:
     "eb_account_uid": getattr(row, "eb_account_uid", None),
     "eb_aspsp_name": getattr(row, "eb_aspsp_name", None),
     "eb_aspsp_country": getattr(row, "eb_aspsp_country", None),
+    "eb_consent_valid_until": consent.get("valid_until"),
+    "eb_consent_days_left": consent.get("days_left"),
+    "eb_consent_status": consent.get("status"),
+    "eb_consent_message": consent.get("message"),
     "enable_banking_connected": bool(getattr(row, "eb_account_uid", None)),
   }
 
@@ -324,6 +331,52 @@ def list_accounts(db: Session) -> List[Dict[str, Any]]:
   deactivate_unlinked_duplicate_accounts(db)
   rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
   return [_account_out(r) for r in rows]
+
+
+def ensure_bank_accounts_eb_consent_column() -> bool:
+  """Aggiunge bank_accounts.eb_consent_valid_until se manca (deploy senza migrazione)."""
+  from sqlalchemy import text
+  from sqlalchemy.exc import SQLAlchemyError
+
+  from ..database import engine
+
+  try:
+    with engine.begin() as conn:
+      exists = conn.execute(
+        text(
+          "SELECT 1 FROM information_schema.columns "
+          "WHERE table_schema = 'public' AND table_name = 'bank_accounts' "
+          "AND column_name = 'eb_consent_valid_until' LIMIT 1"
+        )
+      ).first()
+      if exists:
+        return True
+      conn.execute(
+        text(
+          "ALTER TABLE bank_accounts "
+          "ADD COLUMN IF NOT EXISTS eb_consent_valid_until TIMESTAMPTZ"
+        )
+      )
+    return True
+  except SQLAlchemyError:
+    logger.warning("Colonna bank_accounts.eb_consent_valid_until non assicurabile", exc_info=True)
+    return False
+
+
+def list_accounts_payload(db: Session) -> Dict[str, Any]:
+  """Elenco conti + riepilogo scadenze consenso Enable Banking."""
+  from .enable_banking_service import consent_monitor_summary
+
+  ensure_bank_accounts_eb_consent_column()
+  ensure_default_account(db)
+  ensure_canonical_bank_accounts(db)
+  ensure_known_account_companies(db)
+  deactivate_unlinked_duplicate_accounts(db)
+  rows = db.query(BankAccount).filter(BankAccount.is_active.is_(True)).order_by(BankAccount.id.asc()).all()
+  return {
+    "items": [_account_out(r) for r in rows],
+    "eb_consent": consent_monitor_summary(rows),
+  }
 
 
 def create_account(db: Session, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -640,6 +693,7 @@ def set_connection(db: Session, account_id: int, connect: bool) -> Dict[str, Any
     row.last_sync_at = None
     row.eb_session_id = None
     row.eb_account_uid = None
+    row.eb_consent_valid_until = None
   db.commit()
   db.refresh(row)
   return _account_out(row)
@@ -659,6 +713,7 @@ def unsync_account(db: Session, account_id: int) -> Dict[str, Any]:
   row.last_sync_at = None
   row.eb_session_id = None
   row.eb_account_uid = None
+  row.eb_consent_valid_until = None
   row.saldo_disponibile = 0
   row.saldo_contabile = 0
   db.commit()
@@ -941,7 +996,11 @@ def list_movements(
 
 
 def get_dashboard(db: Session) -> Dict[str, Any]:
-  accounts = list_accounts(db)
+  from .enable_banking_service import consent_monitor_summary
+
+  accounts_payload = list_accounts_payload(db)
+  accounts = accounts_payload.get("items") or []
+  eb_consent = accounts_payload.get("eb_consent") or consent_monitor_summary([])
   today = date.today()
   month_start = today.replace(day=1)
 
@@ -1096,6 +1155,12 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
   disconnected = [a for a in accounts if a["connection_status"] != "connected"]
   if disconnected:
     avvisi.append(f"{len(disconnected)} conto/i non collegati")
+  needs_relink = int(eb_consent.get("needs_action") or 0)
+  if needs_relink:
+    avvisi.append(
+      f"{needs_relink} conto/i Enable Banking da ricollegare "
+      f"(entro {eb_consent.get('warn_days') or 5} giorni o scaduti)"
+    )
   if unmatched:
     avvisi.append(f"{unmatched} movimenti da riconciliare")
   if differences:
@@ -1167,6 +1232,9 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
             "iban": a.get("iban"),
             "saldo_disponibile": a.get("saldo_disponibile"),
             "connection_status": a.get("connection_status"),
+            "eb_consent_days_left": a.get("eb_consent_days_left"),
+            "eb_consent_status": a.get("eb_consent_status"),
+            "eb_consent_message": a.get("eb_consent_message"),
           }
           for a in rows
         ],
@@ -1186,6 +1254,7 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
     "accounts_count": len(accounts),
     "month_start": month_start.isoformat(),
     "societa": societa,
+    "eb_consent": eb_consent,
   }
 
 
