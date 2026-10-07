@@ -266,7 +266,7 @@ def _resolve_numeropos(model_id: str | None, store_filter: tuple[str, ...]) -> s
             return p
     defaults = {
         "model-4": "2",  # Zanardelli (verificato 2026-10-07)
-        "model-2": "0",  # Abba / Mediazione (stesso GDB, POS 0)
+        "model-2": "1",  # Abba / Mediazione (stesso GDB; STORE_FILTER=1)
         "model-3": "4",  # Via Lattea (sample storici)
     }
     return defaults.get((model_id or "").strip())
