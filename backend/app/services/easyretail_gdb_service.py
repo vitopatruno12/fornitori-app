@@ -1595,3 +1595,176 @@ def probe_gdb(dsn: str, **kwargs) -> Dict[str, Any]:
             con.close()
         except Exception:
             pass
+
+
+def _cassetto_colmap(cols: Sequence[str]) -> Dict[str, str]:
+    return {c.upper(): c for c in cols}
+
+
+def _cassetto_pick(col_u: Dict[str, str], *names: str) -> Optional[str]:
+    for name in names:
+        if name in col_u:
+            return col_u[name]
+    best: Optional[Tuple[int, str]] = None
+    for upper, real in col_u.items():
+        for name in names:
+            if name and name in upper:
+                score = len(name)
+                if best is None or score > best[0]:
+                    best = (score, real)
+    return best[1] if best else None
+
+
+def _cassetto_money(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal("0.00")
+
+
+def fetch_cassetto_daily(
+    dsn: str,
+    *,
+    user: str = "SYSDBA",
+    password: str = "masterkey",
+    fbclient: Optional[str] = None,
+    charset: str = "WIN1252",
+    date_from: date,
+    date_to: date,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Totali giornalieri movimento cassetto da MOVIMENTICASSETTIT (+ somma R).
+
+    Ritorna lista di dict:
+      day, amount_uscita, amount_net, count, causali
+    amount_uscita = somma uscite (U) → da scrivere in Prima Nota come MOVIMENTO_CASSETTO.
+    """
+    if date_to < date_from:
+        return [], {"ok": False, "error": "date_to < date_from"}
+
+    con = connect_gdb(dsn, user=user, password=password, fbclient=fbclient, charset=charset)
+    try:
+        cur = con.cursor()
+        t_cols = _table_columns(cur, "MOVIMENTICASSETTIT")
+        if not t_cols:
+            return [], {"ok": False, "error": "MOVIMENTICASSETTIT assente"}
+        t_u = _cassetto_colmap(t_cols)
+        id_col = _cassetto_pick(
+            t_u,
+            "NUMEROMOVIMENTOCASSETTO",
+            "NUMEROMOVIMENTO",
+            "IDMOVIMENTOCASSETTO",
+        )
+        ts_col = _cassetto_pick(t_u, "DATAMOVIMENTO", "DATAORA", "DATAORAMOVIMENTO", "DATA")
+        segno_col = _cassetto_pick(t_u, "INGRESSOUSCITA", "SEGNO", "TIPOSEGNO")
+        desc_col = _cassetto_pick(t_u, "CAUSALE", "DESCRIZIONE", "NOTE")
+        amt_t = _cassetto_pick(
+            t_u,
+            "IMPORTOMOVIMENTO",
+            "IMPORTOEURO",
+            "IMPORTO",
+            "TOTALE",
+            "VALORE",
+        )
+        if not id_col or not ts_col:
+            return [], {"ok": False, "error": "colonne testata incomplete", "columns": t_cols}
+
+        r_sums: Dict[Any, Decimal] = {}
+        r_cols = _table_columns(cur, "MOVIMENTICASSETTIR")
+        if r_cols:
+            r_u = _cassetto_colmap(r_cols)
+            r_parent = _cassetto_pick(
+                r_u,
+                "NUMEROMOVIMENTOCASSETTO",
+                "NUMEROMOVIMENTO",
+                "IDMOVIMENTOCASSETTO",
+            )
+            r_amt = _cassetto_pick(r_u, "TOTALE", "IMPORTO", "VALORE", "IMPORTOEURO")
+            if r_parent and r_amt:
+                cur.execute(f"SELECT {r_parent}, SUM({r_amt}) FROM MOVIMENTICASSETTIR GROUP BY {r_parent}")
+                for pid, total in cur.fetchall():
+                    r_sums[pid] = _cassetto_money(total)
+
+        start = datetime.combine(date_from, time.min)
+        end = datetime.combine(date_to + timedelta(days=1), time.min)
+        select = [c for c in (id_col, ts_col, segno_col, amt_t, desc_col) if c]
+        sql = (
+            f"SELECT FIRST 5000 {', '.join(select)} FROM MOVIMENTICASSETTIT "
+            f"WHERE {ts_col} >= ? AND {ts_col} < ? ORDER BY {ts_col}"
+        )
+        try:
+            cur.execute(sql, [start, end])
+            rows = cur.fetchall()
+        except Exception:
+            cur.execute(sql, [date_from, date_to + timedelta(days=1)])
+            rows = cur.fetchall()
+
+        by_day: Dict[date, Dict[str, Any]] = {}
+        for row in rows:
+            data = {select[i]: row[i] for i in range(len(select))}
+            when = data.get(ts_col)
+            if when is None:
+                continue
+            day = when.date() if hasattr(when, "date") else None
+            if day is None:
+                try:
+                    day = date.fromisoformat(str(when)[:10])
+                except ValueError:
+                    continue
+            if day < date_from or day > date_to:
+                continue
+            pid = data.get(id_col)
+            amt = _cassetto_money(data.get(amt_t) if amt_t else 0)
+            if amt == 0 and pid in r_sums:
+                amt = r_sums[pid]
+            segno = str(data.get(segno_col) or "").strip().upper() if segno_col else ""
+            is_out = segno in {"U", "USC", "USCITA", "OUT", "P", "-1", "-"}
+            is_in = segno in {"I", "E", "ENT", "ENTRATA", "IN", "V", "1", "+"}
+            signed = -amt if is_out else (amt if is_in or not segno else amt)
+            # Senza segno: tratta come uscita (spesa/lavanderia tipiche)
+            if not segno:
+                signed = -abs(amt)
+                is_out = True
+            slot = by_day.setdefault(
+                day,
+                {
+                    "amount_uscita": Decimal("0.00"),
+                    "amount_net": Decimal("0.00"),
+                    "count": 0,
+                    "causali": [],
+                },
+            )
+            slot["amount_net"] = (slot["amount_net"] + signed).quantize(Decimal("0.01"))
+            slot["count"] += 1
+            if is_out or (not segno and amt > 0):
+                slot["amount_uscita"] = (slot["amount_uscita"] + abs(amt)).quantize(Decimal("0.01"))
+            causale = str(data.get(desc_col) or "").strip() if desc_col else ""
+            if causale and causale not in slot["causali"] and len(slot["causali"]) < 12:
+                slot["causali"].append(causale[:40])
+
+        out = []
+        for day in sorted(by_day.keys()):
+            slot = by_day[day]
+            out.append(
+                {
+                    "day": day.isoformat(),
+                    "amount_uscita": float(slot["amount_uscita"]),
+                    "amount_net": float(slot["amount_net"]),
+                    "count": slot["count"],
+                    "causali": slot["causali"],
+                }
+            )
+        return out, {
+            "ok": True,
+            "fetched_days": len(out),
+            "rows": len(rows),
+            "has_r_sums": bool(r_sums),
+            "id_col": id_col,
+            "ts_col": ts_col,
+            "segno_col": segno_col,
+        }
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+

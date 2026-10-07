@@ -24,6 +24,8 @@ from .cash_service import (
     VERSAMENTO_BANCA_CONTO,
     normalize_activity,
 )
+from .cassetto_daily_store import cassetto_amount as _cassetto_amount
+from .cassetto_daily_store import cassetto_meta as _cassetto_meta
 from .paper_closing_overrides import (
     get_paper_override,
     has_paper_override,
@@ -80,6 +82,12 @@ _KIND_META = {
         "conto": NON_FISCALE_CONTO,
         "description": "Preventivi / non fiscali (A)",
         "description_gdb": "Preventivi / non fiscali (A)",
+    },
+    "cassetto": {
+        "conto": MOVIMENTO_CASSETTO_CONTO,
+        "description": "Movimenti cassetto EasyRetail (A)",
+        "description_gdb": "Movimenti cassetto EasyRetail (A)",
+        "entry_type": "uscita",
     },
 }
 
@@ -178,11 +186,16 @@ def _upsert_auto_entry(
 ) -> str:
     meta = _KIND_META[kind]
     conto = meta["conto"]
+    entry_type = meta.get("entry_type") or "entrata"
     if kind == "fatture":
         from_paper = "fatture" in get_paper_override(activity, day)
     else:
         from_paper = has_paper_override(activity, day) and kind in ("contanti", "pos")
     description = meta["description"] if from_paper or kind == "nc" else meta.get("description_gdb") or meta["description"]
+    if kind == "cassetto":
+        causali = [str(x) for x in (_cassetto_meta(activity, day).get("causali") or []) if str(x).strip()]
+        if causali:
+            description = f"Movimenti cassetto · {', '.join(causali[:4])} (A)"
     if amount <= 0:
         existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
         if existing is not None:
@@ -194,10 +207,11 @@ def _upsert_auto_entry(
     if existing is not None:
         same_amount = _dec(existing.amount) == amount
         same_desc = str(existing.description or "") == description
-        if same_amount and same_desc:
+        same_type = str(existing.type or "") == entry_type
+        if same_amount and same_desc and same_type:
             return "unchanged"
         existing.amount = amount
-        existing.type = "entrata"
+        existing.type = entry_type
         existing.description = description
         existing.note = note
         existing.entry_date = closing_entry_datetime(day)
@@ -205,7 +219,7 @@ def _upsert_auto_entry(
     db.add(
         CashEntry(
             entry_date=closing_entry_datetime(day),
-            type="entrata",
+            type=entry_type,
             amount=amount,
             description=description,
             note=note,
@@ -215,6 +229,44 @@ def _upsert_auto_entry(
     )
     db.flush()
     return "created"
+
+
+def upsert_cassetto_auto_entries(
+    db: Session,
+    *,
+    activity: str,
+    days: Optional[List[date]] = None,
+) -> Dict[str, Any]:
+    """Scrive solo MOVIMENTO_CASSETTO dagli importi agent (senza toccare contanti/POS)."""
+    act = normalize_activity(activity)
+    if days is None:
+        days = _eligible_days(None, None)
+    else:
+        today = rome_now().date()
+        days = [d for d in days if d is not None and d <= today and (day_is_closed(d) or d < today)]
+        # Oggi solo dopo 21:30; i giorni passati sempre
+        if not days:
+            return {"ok": True, "created": 0, "updated": 0, "removed": 0, "days": 0}
+    created = updated = removed = 0
+    for day in days:
+        amount = _cassetto_amount(act, day)
+        action = _upsert_auto_entry(db, activity=act, day=day, kind="cassetto", amount=amount)
+        if action == "created":
+            created += 1
+        elif action == "updated":
+            updated += 1
+        elif action == "removed":
+            removed += 1
+    if created or updated or removed:
+        db.commit()
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "removed": removed,
+        "days": len(days),
+        "activity": act,
+    }
 
 
 def _is_auto_entry(entry: CashEntry) -> bool:
@@ -393,7 +445,14 @@ def sync_daily_closings_to_prima_nota(
                 fatture = _dec(hit.get("invoice_eur"))
             else:
                 fatture = _paper_fatture(act, day)
-            for kind, amount in (("contanti", cash), ("pos", card), ("nc", quote), ("fatture", fatture)):
+            cassetto = _cassetto_amount(act, day)
+            for kind, amount in (
+                ("contanti", cash),
+                ("pos", card),
+                ("nc", quote),
+                ("fatture", fatture),
+                ("cassetto", cassetto),
+            ):
                 action = _upsert_auto_entry(db, activity=act, day=day, kind=kind, amount=amount)
                 if action == "created":
                     created += 1

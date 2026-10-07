@@ -217,7 +217,7 @@ def _post_ingest(api: str, token: str, model_id: str | None, receipts: list[dict
         headers={
             "Content-Type": "application/json",
             "X-Atlas-Sync-Token": token,
-            "User-Agent": "atlas-easyretail-gdb-agent/1.3",
+            "User-Agent": "atlas-easyretail-gdb-agent/1.4",
         },
     )
     with urllib.request.urlopen(req, timeout=180) as resp:
@@ -232,11 +232,61 @@ def _post_agent_ping(api: str, token: str) -> str:
         headers={
             "Content-Type": "application/json",
             "X-Atlas-Sync-Token": token,
-            "User-Agent": "atlas-easyretail-gdb-agent/1.3",
+            "User-Agent": "atlas-easyretail-gdb-agent/1.4",
         },
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8", errors="replace")
+
+
+def _post_cassetto_daily(api: str, token: str, model_id: str | None, days: list[dict]) -> str:
+    payload = {"model_id": model_id, "days": days}
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{api}/pos-receipts/cassetto-daily",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Atlas-Sync-Token": token,
+            "User-Agent": "atlas-easyretail-gdb-agent/1.4",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _sync_cassetto(api: str, token: str, model_id: str | None, dsn: str, lookback_hours: int) -> None:
+    """Legge MOVIMENTICASSETTIT e invia i totali giornalieri ad ATLAS."""
+    from datetime import date, timedelta
+
+    from app.services.easyretail_gdb_service import fetch_cassetto_daily
+
+    days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
+    today = date.today()
+    date_from = today - timedelta(days=days_back)
+    print(f"CASSETTO: lettura {date_from}…{today} model={model_id}", flush=True)
+    rows, meta = fetch_cassetto_daily(
+        dsn,
+        user=os.getenv("EASYRETAIL_GDB_USER", "SYSDBA") or "SYSDBA",
+        password=os.getenv("EASYRETAIL_GDB_PASSWORD", "masterkey") or "masterkey",
+        fbclient=(os.getenv("EASYRETAIL_FBCLIENT") or None),
+        charset=os.getenv("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
+        date_from=date_from,
+        date_to=today,
+    )
+    if not meta.get("ok"):
+        print(f"CASSETTO: skip ({meta.get('error')})", flush=True)
+        return
+    if not rows:
+        print(f"CASSETTO: nessun movimento in {days_back}g (ok)", flush=True)
+        return
+    body = _post_cassetto_daily(api, token, model_id, rows)
+    tot = sum(float(r.get("amount_uscita") or 0) for r in rows)
+    print(
+        f"CASSETTO: days={len(rows)} uscita_tot={tot:.2f} → {body}",
+        flush=True,
+    )
 
 
 def main() -> int:
@@ -289,8 +339,8 @@ def main() -> int:
             print(f"skipped_store={meta.get('skipped_store')} (filtro attivo)", flush=True)
 
     serialized = [_serialize_receipt(r) for r in rows]
-    if not serialized:
-        try:
+    try:
+        if not serialized:
             ping_body = _post_agent_ping(api, token)
             print(
                 f"OK fetched=0 with_payment=0 "
@@ -298,33 +348,32 @@ def main() -> int:
                 f"table={meta.get('table')} (nessuno scontrino) ping={ping_body}",
                 flush=True,
             )
-            return 0
+        else:
+            total_batches = (len(serialized) + batch_size - 1) // batch_size
+            for i in range(0, len(serialized), batch_size):
+                chunk = serialized[i : i + batch_size]
+                batch_no = i // batch_size + 1
+                body = _post_ingest(api, token, model_id, chunk)
+                print(f"batch {batch_no}/{total_batches} sent={len(chunk)} → {body}", flush=True)
+            print(
+                f"OK fetched={meta.get('fetched')} "
+                f"with_payment={meta.get('with_payment_type', 0)} "
+                f"preventivi={meta.get('preventivo_non_fiscal', 0)} "
+                f"vea={meta.get('vea_non_fiscal', 0)} "
+                f"fatture={meta.get('fattura_count', 0)} "
+                f"mode={(meta.get('payment_schema') or {}).get('mode')} "
+                f"matched={(meta.get('payment_schema') or {}).get('payment_lines_matched')} "
+                f"table={meta.get('table')} batches={total_batches}",
+                flush=True,
+            )
+        # Sempre: movimenti cassetto → Prima Nota (MOVIMENTO_CASSETTO)
+        try:
+            _sync_cassetto(api, token, model_id, dsn, lookback)
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
-            print(f"HTTP {e.code} (agent-ping): {err}", file=sys.stderr, flush=True)
-            return 1
+            print(f"CASSETTO HTTP {e.code}: {err}", file=sys.stderr, flush=True)
         except Exception as e:
-            print(f"ERRORE agent-ping: {e}", file=sys.stderr, flush=True)
-            return 1
-
-    total_batches = (len(serialized) + batch_size - 1) // batch_size
-    try:
-        for i in range(0, len(serialized), batch_size):
-            chunk = serialized[i : i + batch_size]
-            batch_no = i // batch_size + 1
-            body = _post_ingest(api, token, model_id, chunk)
-            print(f"batch {batch_no}/{total_batches} sent={len(chunk)} → {body}", flush=True)
-        print(
-            f"OK fetched={meta.get('fetched')} "
-            f"with_payment={meta.get('with_payment_type', 0)} "
-            f"preventivi={meta.get('preventivo_non_fiscal', 0)} "
-            f"vea={meta.get('vea_non_fiscal', 0)} "
-            f"fatture={meta.get('fattura_count', 0)} "
-            f"mode={(meta.get('payment_schema') or {}).get('mode')} "
-            f"matched={(meta.get('payment_schema') or {}).get('payment_lines_matched')} "
-            f"table={meta.get('table')} batches={total_batches}",
-            flush=True,
-        )
+            print(f"CASSETTO ERRORE: {e}", file=sys.stderr, flush=True)
         return 0
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")

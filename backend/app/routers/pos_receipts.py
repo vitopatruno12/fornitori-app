@@ -132,6 +132,20 @@ class IngestBody(BaseModel):
     model_id: Optional[str] = None
 
 
+class CassettoDayBody(BaseModel):
+    day: str
+    amount_uscita: float = 0
+    amount_net: float = 0
+    count: int = 0
+    causali: List[str] = Field(default_factory=list)
+
+
+class CassettoIngestBody(BaseModel):
+    model_id: Optional[str] = None
+    activity: Optional[str] = None
+    days: List[CassettoDayBody] = Field(default_factory=list)
+
+
 class SyncGdbBody(BaseModel):
     dsn: Optional[str] = None
     model_id: Optional[str] = None
@@ -180,6 +194,54 @@ def pos_receipts_agent_ping(
 
     payload = agent_status.touch_agent_heartbeat(source="agent-ping")
     return {"ok": True, **payload}
+
+
+@router.post("/cassetto-daily")
+def ingest_cassetto_daily(
+    body: CassettoIngestBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_sync_token),
+):
+    """Riceve totali giornalieri movimento cassetto dall'agent (→ Prima Nota)."""
+    from datetime import date as date_cls
+
+    from ..services import agent_cassa_status as agent_status
+    from ..services import cash_closing_sync, cassetto_daily_store
+    from ..services.paper_closing_overrides import activity_for_model_id
+
+    if not body.days:
+        return {"ok": True, "saved": 0, "sync": None}
+    try:
+        saved = cassetto_daily_store.upsert_cassetto_days(
+            model_id=body.model_id,
+            activity=body.activity,
+            days=[d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in body.days],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    days: List[date] = []
+    for d in body.days:
+        try:
+            days.append(date_cls.fromisoformat(str(d.day)[:10]))
+        except ValueError:
+            continue
+    act = (body.activity or "").strip() or activity_for_model_id(body.model_id)
+    sync = None
+    if days and act:
+        try:
+            sync = cash_closing_sync.upsert_cassetto_auto_entries(
+                db,
+                activity=act,
+                days=days,
+            )
+        except Exception as exc:
+            sync = {"ok": False, "error": str(exc)}
+    agent_status.touch_agent_heartbeat(
+        source="cassetto-daily",
+        meta={"saved": saved.get("saved"), "model_id": body.model_id},
+    )
+    return {"ok": True, **saved, "sync": sync}
 
 
 @router.post("/sync-gdb")
