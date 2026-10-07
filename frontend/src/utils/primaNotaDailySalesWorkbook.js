@@ -14,7 +14,7 @@ function amountCell(value) {
 }
 
 /**
- * @param {{ fiscale: number, nonFiscale: number, pos: number, refill: number, totale: number }} totals
+ * @param {{ fiscale: number, nonFiscale: number, pos: number, fattureEmesse: number, refill: number, totale: number }} totals
  */
 export function buildPrimaNotaDailySalesRows(totals) {
   return [
@@ -26,6 +26,7 @@ export function buildPrimaNotaDailySalesRows(totals) {
       rowClass: 'prima-nota-row-nf',
     },
     { id: 'pos', label: 'Totale POS', amount: amountCell(totals.pos) },
+    { id: 'fatture_emesse', label: 'Fatture emesse', amount: amountCell(totals.fattureEmesse) },
     { id: 'refill', label: 'Totale Refill', amount: amountCell(totals.refill) },
     {
       id: 'totale',

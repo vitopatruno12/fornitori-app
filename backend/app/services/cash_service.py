@@ -19,10 +19,11 @@ from ..schemas.cash import CashEntryCreate
 NON_FISCALE_CONTO = "NON_FISCALE"
 POS_CONTO = "POS"
 CONTANTI_CONTO = "CONTANTI"
+FATTURE_EMESSE_CONTO = "FATTURE_EMESSE"
 REFILL_CONTO = "REFILL"
 STACKER_SVUOTAMENTO_CONTO = "SVUOTAMENTO_STACKER"
 VERSAMENTO_BANCA_CONTO = "VERSAMENTO_BANCA"
-EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO)
+EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO, FATTURE_EMESSE_CONTO)
 CASSA_USCITA_FORCED_CONTI = (STACKER_SVUOTAMENTO_CONTO, VERSAMENTO_BANCA_CONTO)
 
 
@@ -61,6 +62,7 @@ def _is_fiscale_filter():
             [
                 NON_FISCALE_CONTO,
                 POS_CONTO,
+                FATTURE_EMESSE_CONTO,
                 REFILL_CONTO,
                 STACKER_SVUOTAMENTO_CONTO,
                 VERSAMENTO_BANCA_CONTO,
@@ -195,7 +197,7 @@ def _conto_amount_for_day(
 def _normalize_cash_entry_payload(payload: dict) -> dict:
     """POS solo entrata; svuotamento stacker e versamento banca solo uscita di cassa."""
     conto = payload.get("conto")
-    if conto == POS_CONTO:
+    if conto in (POS_CONTO, FATTURE_EMESSE_CONTO):
         payload = {**payload, "type": "entrata"}
     elif conto in CASSA_USCITA_FORCED_CONTI:
         payload = {**payload, "type": "uscita"}
@@ -398,6 +400,7 @@ def _get_period_summary_metrics(
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
     totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
     totale_contanti = _entrata_amount_for_day(db, start, end, activity, conto=CONTANTI_CONTO)
+    totale_fatture_emesse = _entrata_amount_for_day(db, start, end, activity, conto=FATTURE_EMESSE_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
     totale_stacker_svuotamento = _conto_amount_for_day(
         db, start, end, activity, conto=STACKER_SVUOTAMENTO_CONTO
@@ -457,6 +460,7 @@ def _get_period_summary_metrics(
         "totale_non_fiscale": totale_non_fiscale,
         "totale_pos": totale_pos,
         "totale_contanti": totale_contanti,
+        "totale_fatture_emesse": totale_fatture_emesse,
         "totale_refill": totale_refill,
         "totale_stacker_svuotamento": totale_stacker_svuotamento,
         "totale_vendita": totale_vendita,

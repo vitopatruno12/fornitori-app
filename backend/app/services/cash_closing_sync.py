@@ -15,6 +15,7 @@ from ..constants.prima_nota import PRIMA_NOTA_ACTIVITIES
 from ..models.cash_entry import CashEntry
 from .cash_service import (
     CONTANTI_CONTO,
+    FATTURE_EMESSE_CONTO,
     NON_FISCALE_CONTO,
     POS_CONTO,
     REFILL_CONTO,
@@ -22,7 +23,12 @@ from .cash_service import (
     VERSAMENTO_BANCA_CONTO,
     normalize_activity,
 )
-from .paper_closing_overrides import has_paper_override, paper_amounts as _paper_amounts
+from .paper_closing_overrides import (
+    get_paper_override,
+    has_paper_override,
+    paper_amounts as _paper_amounts,
+    paper_fatture as _paper_fatture,
+)
 from .pos_receipts_service import load_pos_daily_incasso
 
 logger = logging.getLogger(__name__)
@@ -45,6 +51,7 @@ _ACTIVITY_POS_SOURCE = {
 _PROTECTED_CONTI = (
     CONTANTI_CONTO,
     POS_CONTO,
+    FATTURE_EMESSE_CONTO,
     NON_FISCALE_CONTO,
     REFILL_CONTO,
     STACKER_SVUOTAMENTO_CONTO,
@@ -61,6 +68,11 @@ _KIND_META = {
         "conto": POS_CONTO,
         "description": "Chiusura lettura · pagamenti POS (A)",
         "description_gdb": "Chiusura scontrini · pagamenti POS (A)",
+    },
+    "fatture": {
+        "conto": FATTURE_EMESSE_CONTO,
+        "description": "Chiusura lettura · fatture emesse (A)",
+        "description_gdb": "Chiusura scontrini · fatture emesse (A)",
     },
     "nc": {
         "conto": NON_FISCALE_CONTO,
@@ -149,7 +161,10 @@ def _upsert_auto_entry(
 ) -> str:
     meta = _KIND_META[kind]
     conto = meta["conto"]
-    from_paper = has_paper_override(activity, day) and kind in ("contanti", "pos")
+    if kind == "fatture":
+        from_paper = "fatture" in get_paper_override(activity, day)
+    else:
+        from_paper = has_paper_override(activity, day) and kind in ("contanti", "pos")
     description = meta["description"] if from_paper or kind == "nc" else meta.get("description_gdb") or meta["description"]
     if amount <= 0:
         existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
@@ -352,7 +367,13 @@ def sync_daily_closings_to_prima_nota(
             card = _dec(hit.get("card_eur"))
             quote = _dec(hit.get("quote_eur"))
             cash, card, quote = _paper_amounts(act, day, cash, card, quote)
-            for kind, amount in (("contanti", cash), ("pos", card), ("nc", quote)):
+            # Stesso passaggio della chiusura: totale fatture degli scontrini.
+            # Se la lettura operatore ha un importo, quello prevale.
+            if hit:
+                fatture = _dec(hit.get("invoice_eur"))
+            else:
+                fatture = _paper_fatture(act, day)
+            for kind, amount in (("contanti", cash), ("pos", card), ("nc", quote), ("fatture", fatture)):
                 action = _upsert_auto_entry(db, activity=act, day=day, kind=kind, amount=amount)
                 if action == "created":
                     created += 1

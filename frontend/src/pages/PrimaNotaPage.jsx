@@ -58,6 +58,7 @@ import { getLockedOperatorStationId } from '../utils/operatorMode.ts'
 
 const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
+const CONTO_FATTURE_EMESSE = 'FATTURE_EMESSE'
 const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
@@ -75,6 +76,7 @@ const MOVEMENT_KIND_OPTIONS = [
   'nf_ent',
   'nf_usc',
   'pos',
+  'fatture_emesse',
   'contanti',
   'refill',
   'stacker_svuotamento',
@@ -134,7 +136,7 @@ function resolveInitialPrimaNotaDate({ todayIso, operatorMode, operatorStationId
 }
 
 function isExtraCassaConto(conto) {
-  return conto === CONTO_POS || conto === CONTO_REFILL
+  return conto === CONTO_POS || conto === CONTO_REFILL || conto === CONTO_FATTURE_EMESSE
 }
 
 function isCassaUscitaForcedConto(conto) {
@@ -144,6 +146,7 @@ function isCassaUscitaForcedConto(conto) {
 function flowTagFromConto(conto) {
   if (conto === CONTO_NON_FISCALE) return 'non_fiscale'
   if (conto === CONTO_POS) return 'pos'
+  if (conto === CONTO_FATTURE_EMESSE) return 'fatture_emesse'
   if (conto === CONTO_CONTANTI) return 'fiscale'
   if (conto === CONTO_REFILL) return 'refill'
   if (conto === CONTO_STACKER_SVUOTAMENTO) return 'stacker_svuotamento'
@@ -230,8 +233,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [formDescription, setFormDescription] = useState('')
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
-  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | contanti | refill | stacker_svuotamento | versamento_banca
-  const extraCassaEntrataOnly = formFlowTag === 'pos'
+  const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | fatture_emesse | contanti | refill | stacker_svuotamento | versamento_banca
+  const extraCassaEntrataOnly = formFlowTag === 'pos' || formFlowTag === 'fatture_emesse'
   const cassaUscitaOnly = formFlowTag === 'versamento_banca' || formFlowTag === 'stacker_svuotamento'
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
@@ -1303,6 +1306,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             ? CONTO_NON_FISCALE
             : formFlowTag === 'pos'
               ? CONTO_POS
+              : formFlowTag === 'fatture_emesse'
+                ? CONTO_FATTURE_EMESSE
               : formFlowTag === 'contanti'
                 ? CONTO_CONTANTI
               : formFlowTag === 'refill'
@@ -1376,7 +1381,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setFormNote(entry.note || '')
     setFormConto(entry.conto || '')
     setFormFlowTag(flowTagFromConto(entry.conto))
-    if (entry.conto === CONTO_POS || entry.conto === CONTO_CONTANTI) setFormType('entrata')
+    if (entry.conto === CONTO_POS || entry.conto === CONTO_FATTURE_EMESSE || entry.conto === CONTO_CONTANTI) setFormType('entrata')
     if (isCassaUscitaForcedConto(entry.conto)) setFormType('uscita')
     setFormRifDocumento(entry.riferimento_documento || '')
     setFormSupplierId(entry.supplier_id ? String(entry.supplier_id) : '')
@@ -1694,6 +1699,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     return entry?.conto === CONTO_POS
   }
 
+  function isFattureEmesse(entry) {
+    return entry?.conto === CONTO_FATTURE_EMESSE
+  }
+
   function isContanti(entry) {
     return entry?.conto === CONTO_CONTANTI
   }
@@ -1725,11 +1734,12 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const amount = Number(entry.amount || 0)
     const nonFiscaleTag = entry.conto === CONTO_NON_FISCALE
     const posTag = entry.conto === CONTO_POS
+    const fattureTag = entry.conto === CONTO_FATTURE_EMESSE
     const contantiTag = entry.conto === CONTO_CONTANTI
     const refillTag = entry.conto === CONTO_REFILL
     const stackerTag = entry.conto === CONTO_STACKER_SVUOTAMENTO
     const versamentoTag = entry.conto === CONTO_VERSAMENTO_BANCA
-    const extraCassaTag = posTag || refillTag
+    const extraCassaTag = posTag || refillTag || fattureTag
     const uscitaForced = stackerTag || versamentoTag
     const isEntrata = !uscitaForced && entry.type === 'entrata'
     const isUscita = uscitaForced || entry.type === 'uscita'
@@ -1739,6 +1749,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const nonFiscaleUscita = nonFiscaleTag && !isEntrata ? amount : 0
     const nonFiscale = nonFiscaleEntrata - nonFiscaleUscita
     const pos = posTag && isEntrata ? amount : 0
+    const fattureEmesse = fattureTag && isEntrata ? amount : 0
     const contanti = contantiTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
     const stackerSvuotamento = stackerTag ? Math.abs(amount) : 0
@@ -1756,6 +1767,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       nonFiscaleEntrata,
       nonFiscaleUscita,
       pos,
+      fattureEmesse,
       contanti,
       refill,
       stackerSvuotamento,
@@ -1841,6 +1853,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'nf_ent' && (!isNonFiscale(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'nf_usc' && (!isNonFiscale(entry) || entry.type !== 'uscita')) return false
       if (movementKind === 'pos' && (!isPos(entry) || entry.type !== 'entrata')) return false
+      if (movementKind === 'fatture_emesse' && (!isFattureEmesse(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'contanti' && (!isContanti(entry) || entry.type !== 'entrata')) return false
       if (movementKind === 'refill' && !isRefill(entry)) return false
       if (movementKind === 'stacker_svuotamento' && !isStackerSvuotamento(entry)) return false
@@ -1861,6 +1874,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         nonFiscaleEntrata: acc.nonFiscaleEntrata + Number(entry.nonFiscaleEntrata || 0),
         nonFiscaleUscita: acc.nonFiscaleUscita + Number(entry.nonFiscaleUscita || 0),
         pos: acc.pos + Number(entry.pos || 0),
+        fattureEmesse: acc.fattureEmesse + Number(entry.fattureEmesse || 0),
         contanti: acc.contanti + Number(entry.contanti || 0),
         refill: acc.refill + Number(entry.refill || 0),
         stackerSvuotamento: acc.stackerSvuotamento + Number(entry.stackerSvuotamento || 0),
@@ -1878,6 +1892,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         nonFiscaleEntrata: 0,
         nonFiscaleUscita: 0,
         pos: 0,
+        fattureEmesse: 0,
         contanti: 0,
         refill: 0,
         stackerSvuotamento: 0,
@@ -1986,6 +2001,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }, 0)
   }, [entriesForSummary])
 
+  const fattureEmesseGiornoComputed = React.useMemo(() => {
+    return entriesForSummary.reduce((acc, e) => {
+      if (e.conto !== CONTO_FATTURE_EMESSE || e.type !== 'entrata') return acc
+      return acc + Number(e.amount || 0)
+    }, 0)
+  }, [entriesForSummary])
+
   const contantiGiornoComputed = React.useMemo(() => {
     return entriesForSummary.reduce((acc, e) => {
       if (e.conto !== CONTO_CONTANTI || e.type !== 'entrata') return acc
@@ -2011,6 +2033,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   const nonFiscaleGiorno = summary?.totale_non_fiscale != null ? Number(summary.totale_non_fiscale) : nonFiscaleGiornoComputed
   const posGiorno = summary?.totale_pos != null ? Number(summary.totale_pos) : posGiornoComputed
+  const fattureEmesseGiorno = summary?.totale_fatture_emesse != null
+    ? Number(summary.totale_fatture_emesse)
+    : fattureEmesseGiornoComputed
   const contantiGiorno = summary?.totale_contanti != null ? Number(summary.totale_contanti) : contantiGiornoComputed
   const refillGiorno = summary?.totale_refill != null ? Number(summary.totale_refill) : refillGiornoComputed
   const fiscaleGiorno = summary?.totale_fiscale != null ? Number(summary.totale_fiscale) : fiscaleGiornoComputed
@@ -2035,10 +2060,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         fiscale: fiscaleGiorno,
         nonFiscale: nonFiscaleGiorno,
         pos: posGiorno,
+        fattureEmesse: fattureEmesseGiorno,
         refill: refillGiorno,
         totale: totaleVenditaGiorno,
       }),
-    [fiscaleGiorno, nonFiscaleGiorno, posGiorno, refillGiorno, totaleVenditaGiorno],
+    [fiscaleGiorno, nonFiscaleGiorno, posGiorno, fattureEmesseGiorno, refillGiorno, totaleVenditaGiorno],
   )
 
   const dailyCashRows = useMemo(
@@ -2185,6 +2211,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <option value="nf_ent">NC ent</option>
             <option value="nf_usc">NC usc</option>
             <option value="pos">POS</option>
+            <option value="fatture_emesse">Fatture emesse</option>
             <option value="refill">Refill</option>
             <option value="stacker_svuotamento">Svuotamento stacker</option>
             <option value="versamento_banca">Versamento banca</option>
@@ -2238,14 +2265,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   className={(formType === 'uscita' || cassaUscitaOnly) && !extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
                   onClick={() => setFormType('uscita')}
                   disabled={extraCassaEntrataOnly}
-                  title={extraCassaEntrataOnly ? 'POS registra solo entrate (pagamenti ricevuti).' : undefined}
+                  title={extraCassaEntrataOnly ? 'POS e fatture emesse registrano solo entrate.' : undefined}
                 >
                   Cassa uscita
                 </button>
               </div>
               {extraCassaEntrataOnly ? (
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  POS: solo pagamenti ricevuti (cassa entrata).
+                  {formFlowTag === 'fatture_emesse'
+                    ? 'Fatture emesse: restano fuori dal bancomat e dalla cassa fisica.'
+                    : 'POS: solo pagamenti ricevuti (cassa entrata).'}
                 </p>
               ) : cassaUscitaOnly ? (
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
@@ -2312,6 +2341,18 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   title="Flusso POS/Bancomat: solo pagamenti in entrata, escluso dalla cassa fisica."
                 >
                   POS
+                </button>
+                <button
+                  type="button"
+                  className={formFlowTag === 'fatture_emesse' ? 'btn btn-vino' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setFormFlowTag('fatture_emesse')
+                    setFormType('entrata')
+                    setFormDescription((prev) => (String(prev || '').trim() ? prev : 'Fatture emesse'))
+                  }}
+                  title="Fatture emesse della lettura: non entrano nel bancomat/POS."
+                >
+                  Fatture emesse
                 </button>
                 <button
                   type="button"
@@ -2595,6 +2636,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
             </span>
             <span className="pn-movement-totals-item">
+              Fatture emesse: <strong>€ {formatAmount(movementPeriodTotals.fattureEmesse)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
               Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
             </span>
             <span className="pn-movement-totals-item">
@@ -2793,8 +2837,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           title={summaryScope === 'interval' ? `Vendite del periodo — ${activeActivityLabel}` : `Vendite del giorno — ${activeActivityLabel}`}
           hint={
             <>
-              Fiscale, NC, POS e Refill per <strong>{summaryPeriodLabel}</strong>.
-              I pagamenti in contanti della chiusura sono in Fiscale ent e Cassa entrata (dalla lettura operatore).
+              Fiscale, NC, POS, fatture emesse e Refill per <strong>{summaryPeriodLabel}</strong>.
+              I pagamenti in contanti della chiusura sono in Fiscale ent e Cassa entrata. Le fatture emesse non entrano nel bancomat.
             </>
           }
           rows={dailySalesRows}
@@ -2807,7 +2851,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               {isIsoDate(letturaDay) ? ` · ${formatDate(letturaDay)}` : ''}
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
-              Copia CONTANTI e BANCOMAT dalla «Lettura operatore». Puoi cambiare il giorno qui sotto se stai correggendo una giornata già chiusa. Se il bancomat include le fatture, mettile in Fatture: le togliamo dal POS.
+              Copia CONTANTI, BANCOMAT e il totale FATTURE EMESSE dalla lettura operatore. Il bancomat si salva senza le fatture: quelle restano nella colonna Fatture emesse.
             </p>
             <div className="form-row" style={{ alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -2853,7 +2897,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Fatture (€)</label>
+                <label>Fatture emesse (€)</label>
                 <input
                   type="number"
                   step="0.01"

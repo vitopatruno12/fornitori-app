@@ -6,6 +6,7 @@ from app.services.paper_closing_overrides import (
     apply_paper_closing_daily,
     apply_paper_closing_hit,
     has_paper_override,
+    paper_fatture,
 )
 
 
@@ -141,3 +142,10 @@ def test_via_lattea_6_oct_uses_in_cassa_not_contanti_lordi():
     assert hit["card_eur"] == Decimal("703.90")
     assert hit["invoice_eur"] == Decimal("12.30")
     assert hit["incasso"] == Decimal("1636.20")
+
+
+def test_fatture_emesse_restano_fuori_dal_bancomat():
+    assert paper_fatture("via_zanardelli", date(2026, 10, 6)) == Decimal("143.99")
+    assert paper_fatture("via_lattea", date(2026, 10, 6)) == Decimal("12.30")
+    assert paper_fatture("via_abba", date(2026, 10, 6)) == Decimal("128.73")
+    assert paper_fatture("via_zanardelli", date(2026, 10, 4)) == Decimal("0.00")

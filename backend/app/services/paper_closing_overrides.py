@@ -251,6 +251,14 @@ def paper_amounts(
     )
 
 
+def paper_fatture(activity: str, day: date) -> Decimal:
+    """Importo FATTURE EMESSE della lettura. Resta fuori dal bancomat/POS."""
+    extra = get_paper_override(activity, day)
+    if "fatture" not in extra:
+        return Decimal("0.00")
+    return _dec(extra["fatture"])
+
+
 def apply_paper_closing_hit(activity: str, day: date, hit: Dict[str, Any]) -> Dict[str, Any]:
     extra = get_paper_override(activity, day)
     if not extra:

@@ -1,5 +1,6 @@
 const CONTO_NON_FISCALE = 'NON_FISCALE'
 const CONTO_POS = 'POS'
+const CONTO_FATTURE_EMESSE = 'FATTURE_EMESSE'
 const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
@@ -19,6 +20,7 @@ export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'non_fiscale_ent', label: 'NC ent', numeric: true, width: 90 },
   { id: 'non_fiscale_usc', label: 'NC usc', numeric: true, width: 90 },
   { id: 'pos', label: 'POS', numeric: true, width: 90 },
+  { id: 'fatture_emesse', label: 'Fatture emesse', numeric: true, width: 120 },
   { id: 'refill', label: 'Refill', numeric: true, width: 90 },
   { id: 'stacker_svuotamento', label: 'Stacker', numeric: true, width: 90 },
   { id: 'incasso', label: 'Totale', numeric: true, width: 110, tone: (row) => movementIncassoTone(row) },
@@ -74,6 +76,10 @@ function isPosEntry(entry) {
   return entry?.conto === CONTO_POS
 }
 
+function isFattureEmesseEntry(entry) {
+  return entry?.conto === CONTO_FATTURE_EMESSE
+}
+
 function isContantiEntry(entry) {
   return entry?.conto === CONTO_CONTANTI
 }
@@ -91,7 +97,7 @@ function isVersamentoBancaEntry(entry) {
 }
 
 export function isExtraCassaMovement(entry) {
-  return isPosEntry(entry) || isRefillEntry(entry)
+  return isPosEntry(entry) || isRefillEntry(entry) || isFattureEmesseEntry(entry)
 }
 
 function movementDescription(entry) {
@@ -101,6 +107,7 @@ function movementDescription(entry) {
   }
   if (isNonFiscaleEntry(entry)) text = text ? `${text} [NC]` : '[NC]'
   else if (isPosEntry(entry)) text = text ? `${text} [POS]` : '[POS]'
+  else if (isFattureEmesseEntry(entry)) text = text ? `${text} [Fatture emesse]` : '[Fatture emesse]'
   else if (isContantiEntry(entry)) text = text ? `${text} [Contanti]` : '[Contanti]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
@@ -128,6 +135,7 @@ function entrySearchAmounts(entry) {
     entry?.nonFiscaleEntrata,
     entry?.nonFiscaleUscita,
     entry?.pos,
+    entry?.fattureEmesse,
     entry?.contanti,
     entry?.refill,
     entry?.stackerSvuotamento,
@@ -211,6 +219,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatFlowAmount(entry.nonFiscaleUscita, entry)
     case 'pos':
       return formatFlowAmount(entry.pos, entry)
+    case 'fatture_emesse':
+      return formatFlowAmount(entry.fattureEmesse, entry)
     case 'refill':
       return formatFlowAmount(entry.refill, entry)
     case 'stacker_svuotamento':
@@ -238,6 +248,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'non_fiscale_ent') return formatAmount(totals.nonFiscaleEntrata)
   if (columnId === 'non_fiscale_usc') return formatAmount(totals.nonFiscaleUscita)
   if (columnId === 'pos') return formatAmount(totals.pos)
+  if (columnId === 'fatture_emesse') return formatAmount(totals.fattureEmesse)
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
   if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)
