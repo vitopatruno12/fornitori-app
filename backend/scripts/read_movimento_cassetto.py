@@ -263,7 +263,14 @@ def _read_testate(
     )
     ts_col = _pick(col_u, "DATAORA", "DATAMOVIMENTO", "DATAORAMOVIMENTO", "TIMESTAMP", "DATA")
     amt_col = _pick_amount(col_u)
-    segno_col = _pick(col_u, "SEGNO", "TIPOSEGNO", "ENTRAUSCITA", "DIREZIONE")
+    segno_col = _pick(
+        col_u,
+        "INGRESSOUSCITA",
+        "SEGNO",
+        "TIPOSEGNO",
+        "ENTRAUSCITA",
+        "DIREZIONE",
+    )
     code_col = _pick(col_u, "CODICEMOVIMENTO", "NUMEROCODICEMOVIMENTO", "CODICECAUSALE")
     desc_col = _pick(col_u, "DESCRIZIONE", "CAUSALE", "NOTE", "INTEST", "NOMEMOVIMENTO")
     store_col = _pick(col_u, "NUMEROPOSTAZIONE", "NUMEROPOS", "NUMEROCASSA", "CASSA")
