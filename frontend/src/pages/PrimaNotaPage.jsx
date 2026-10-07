@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchSuppliers } from '../services/suppliersService'
-import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaAccessCode, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack } from '../services/cashService'
+import { fetchEntries, createEntry, updateEntry, deleteEntry, deleteEntriesForDay, deleteEntriesForRange, fetchDailySummary, fetchRangeSummary, getExportUrl, fetchPrimaNotaLinkOptions, fetchPrimaNotaAccessCode, fetchPrimaNotaLocalePacks, fetchPrimaNotaLocalePack, upsertPrimaNotaLocalePack, deletePrimaNotaLocalePack, fetchPaperClosings, upsertPaperClosing } from '../services/cashService'
 import { collectCachedCashEntries, invalidateCachePrefix } from '../offline/offlineCache.js'
 import { isOnline } from '../offline/offlineStatus.js'
 import { fetchStaffLocaleAccessCode, fetchStaffLocalePack, fetchStaffLocalePacks } from '../services/staffService'
@@ -268,6 +268,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [excelBusy, setExcelBusy] = useState(false)
+  const [letturaContanti, setLetturaContanti] = useState('')
+  const [letturaPos, setLetturaPos] = useState('')
+  const [letturaFatture, setLetturaFatture] = useState('')
+  const [letturaBusy, setLetturaBusy] = useState(false)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
   const [staffLocaleSummaries, setStaffLocaleSummaries] = useState([])
   const [protectedLocaleSummaries, setProtectedLocaleSummaries] = useState([])
@@ -930,6 +934,38 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   useEffect(() => {
     let cancelled = false
+    async function loadLettura() {
+      if (!canQueryCashData() || !activeActivity || !selectedDate) {
+        setLetturaContanti('')
+        setLetturaPos('')
+        return
+      }
+      try {
+        const data = await fetchPaperClosings({
+          activity: activeActivity,
+          dateFrom: selectedDate,
+          dateTo: selectedDate,
+          accessCode: resolveActiveAccessCode(),
+        })
+        if (cancelled) return
+        const row = Array.isArray(data?.rows) ? data.rows.find((r) => r.day === selectedDate) : null
+        setLetturaContanti(row?.contanti != null ? String(row.contanti) : '')
+        setLetturaPos(row?.pos != null ? String(row.pos) : '')
+      } catch {
+        if (!cancelled) {
+          setLetturaContanti('')
+          setLetturaPos('')
+        }
+      }
+    }
+    loadLettura()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDate, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
+
+  useEffect(() => {
+    let cancelled = false
     async function ensureSelectedDayEntries() {
       if (!canQueryCashData()) return
       const from = movementPeriodFrom
@@ -1118,6 +1154,49 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setError('Errore nell\'aggiornamento del riepilogo')
     } finally {
       setRefreshingRiepilogo(false)
+    }
+  }
+
+  async function handleSaveLetturaOperatore() {
+    const cash = String(letturaContanti || '').trim().replace(',', '.')
+    const cardRaw = String(letturaPos || '').trim().replace(',', '.')
+    const fattureRaw = String(letturaFatture || '').trim().replace(',', '.')
+    if (!cash && !cardRaw && !fattureRaw) {
+      setError('Inserisci contanti e/o bancomat dalla lettura operatore.')
+      return
+    }
+    const bancomatTotale = cardRaw ? Number(cardRaw) : null
+    const fatture = fattureRaw ? Number(fattureRaw) : 0
+    // Se sulla lettura BANCOMAT include le fatture, le togliamo dal POS.
+    let pos = bancomatTotale
+    if (pos != null && Number.isFinite(fatture) && fatture > 0 && pos >= fatture) {
+      pos = Math.round((pos - fatture) * 100) / 100
+    }
+    setError('')
+    setSuccess('')
+    try {
+      setLetturaBusy(true)
+      await upsertPaperClosing({
+        activity: activeActivity,
+        day: selectedDate,
+        contanti: cash || null,
+        pos: pos == null || Number.isNaN(pos) ? null : pos,
+        fatture: fattureRaw || null,
+        accessCode: resolveActiveAccessCode(),
+      })
+      await loadEntries()
+      await loadSummary()
+      const posNote =
+        fatture > 0 && bancomatTotale != null
+          ? ` · POS ${formatAmount(pos)} (bancomat ${formatAmount(bancomatTotale)} − fatture ${formatAmount(fatture)})`
+          : ''
+      setSuccess(
+        `Lettura operatore salvata · ${formatDate(selectedDate)} · chiusura allineata (contanti/POS senza fatture)${posNote}.`,
+      )
+    } catch (err) {
+      setError(err?.message || 'Salvataggio lettura operatore non riuscito')
+    } finally {
+      setLetturaBusy(false)
     }
   }
 
@@ -2697,11 +2776,72 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           hint={
             <>
               Fiscale, NC, POS e Refill per <strong>{summaryPeriodLabel}</strong>.
-              I pagamenti in contanti della chiusura fiscale sono in Fiscale ent e Cassa entrata.
+              I pagamenti in contanti della chiusura sono in Fiscale ent e Cassa entrata (dalla lettura operatore).
             </>
           }
           rows={dailySalesRows}
         />
+
+        {summaryScope === 'day' ? (
+          <div className="pn-lettura-box" style={{ margin: '1rem 0', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: 10, background: '#f8fafc' }}>
+            <h3 className="page-subheader" style={{ marginTop: 0, marginBottom: '0.35rem', fontSize: '1rem' }}>
+              Lettura operatore · {formatDate(selectedDate)}
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.75rem' }}>
+              Copia CONTANTI e BANCOMAT dalla «Lettura operatore». Se il bancomat include le fatture, mettile nel campo Fatture: le togliamo dal POS (come nella chiusura elettronico).
+            </p>
+            <div className="form-row" style={{ alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Contanti lettura (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="form-control"
+                  value={letturaContanti}
+                  onChange={(e) => setLetturaContanti(e.target.value)}
+                  placeholder="es. 1403.15"
+                  style={{ maxWidth: 160 }}
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Bancomat lettura (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="form-control"
+                  value={letturaPos}
+                  onChange={(e) => setLetturaPos(e.target.value)}
+                  placeholder="es. 2016.77"
+                  style={{ maxWidth: 160 }}
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Fatture (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="form-control"
+                  value={letturaFatture}
+                  onChange={(e) => setLetturaFatture(e.target.value)}
+                  placeholder="es. 143.99"
+                  style={{ maxWidth: 140 }}
+                  title="Importo FATTURE della lettura: non entra nel bancomat/POS di chiusura"
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={letturaBusy || loading || saving || needsLocaleUnlock}
+                onClick={handleSaveLetturaOperatore}
+              >
+                {letturaBusy ? 'Salvataggio…' : 'Salva lettura e allinea'}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <PrimaNotaExcelSummaryTable
           title={summaryScope === 'interval' ? 'Cassa del periodo' : 'Cassa del giorno'}

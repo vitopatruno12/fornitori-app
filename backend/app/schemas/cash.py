@@ -112,3 +112,14 @@ class PrimaNotaLocalePackUpsert(BaseModel):
     label: Optional[str] = Field(None, max_length=255)
     access_code: Optional[str] = Field(None, min_length=6, max_length=6, pattern=r"^\d{6}$")
     regenerate_access_code: bool = False
+
+
+class PaperClosingUpsert(BaseModel):
+    """Lettura operatore (CONTANTI / BANCOMAT senza fatture / FATTURE)."""
+
+    activity: str = Field(..., min_length=1, max_length=32)
+    day: str = Field(..., min_length=10, max_length=10, description="YYYY-MM-DD")
+    contanti: Optional[Decimal] = None
+    pos: Optional[Decimal] = None
+    nc: Optional[Decimal] = None
+    fatture: Optional[Decimal] = None

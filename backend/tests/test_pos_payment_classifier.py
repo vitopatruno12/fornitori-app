@@ -39,3 +39,18 @@ def test_merge_payment_fields():
     )
     assert merged["payment_type"] == "cash"
     assert merged["cash_amount_eur"] == Decimal("20.00")
+
+
+def test_merge_fattura_stays_out_of_card():
+    merged = merge_payment_fields(
+        {
+            "amount_eur": Decimal("143.99"),
+            "payment_type": "invoice",
+            "payment_raw": "FATTURA:1253/A/2026",
+            "card_amount_eur": Decimal("143.99"),
+        }
+    )
+    assert merged["payment_type"] == "invoice"
+    assert merged["cash_amount_eur"] is None
+    assert merged["card_amount_eur"] is None
+    assert merged["payment_label"] == "Fattura"

@@ -215,3 +215,32 @@ export function getExportUrl(dateFrom, dateTo, activity, accessCode) {
   const q = params.toString()
   return apiUrl(`/cash/export/csv${q ? '?' + q : ''}`)
 }
+
+/** Letture operatore salvate (CONTANTI / BANCOMAT carta chiusura). */
+export async function fetchPaperClosings({ activity, dateFrom, dateTo, accessCode } = {}) {
+  const params = new URLSearchParams()
+  appendActivityAndCode(params, activity, accessCode)
+  if (dateFrom) params.append('date_from', dateFrom)
+  if (dateTo) params.append('date_to', dateTo)
+  const q = params.toString()
+  return apiFetch(`/cash/paper-closings${q ? `?${q}` : ''}`)
+}
+
+/** Salva lettura operatore e riscrive chiusura automatica contanti/POS (senza fatture). */
+export async function upsertPaperClosing({ activity, day, contanti, pos, nc, fatture, accessCode } = {}) {
+  const params = new URLSearchParams()
+  appendAccessCode(params, accessCode)
+  const q = params.toString()
+  return apiFetch(`/cash/paper-closings${q ? `?${q}` : ''}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      activity,
+      day,
+      contanti: contanti === '' || contanti == null ? null : Number(contanti),
+      pos: pos === '' || pos == null ? null : Number(pos),
+      nc: nc === '' || nc == null ? null : Number(nc),
+      fatture: fatture === '' || fatture == null ? null : Number(fatture),
+    }),
+  })
+}

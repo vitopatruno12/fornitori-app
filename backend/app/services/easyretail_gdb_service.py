@@ -1315,7 +1315,17 @@ def fetch_receipts_from_gdb(
                     "payment_raw": "PREVENTIVO",
                 }
             elif doc_kind == "fattura":
+                # Fatture: non entrano in contanti/POS della chiusura (come chiusura fiscale elettronico).
                 fattura_count += 1
+                doc_num = get(row, "doc_number")
+                raw_num = str(doc_num).strip() if doc_num is not None else ""
+                pay = {
+                    "payment_type": "invoice",
+                    "cash_amount_eur": None,
+                    "card_amount_eur": None,
+                    "payment_label": "Fattura",
+                    "payment_raw": f"FATTURA:{raw_num}" if raw_num else "FATTURA",
+                }
             rows.append({**base, **pay})
         meta = {
             "table": table,

@@ -1,20 +1,47 @@
-"""Letture chiusura (carta / operatore): prevalgono sul GDB per contanti e POS.
+"""Lettura operatore (carta chiusura): fonte ufficiale per contanti e POS.
 
-I preventivi non fiscali restano nei scontrini e in Prima Nota dopo le 21:30;
-lo Storico Analisi usa solo contanti + POS.
+Priorità:
+1. Letture salvate (file data/paper_closings.json) — inserite da Prima Nota / API
+2. Seed noti (giorni già verificati a mano)
+3. Fallback scontrini EasyRetail (GDB)
+
+I preventivi / NC restano dagli scontrini e in Prima Nota dopo le 21:30.
+Le fatture restano fuori da contanti/POS (campo fatture / invoice_eur).
+Lo Storico Analisi usa solo contanti + POS (senza arancio).
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# Zanardelli 5 ott 2026: Bancomat ATLAS già 2312,35; contanti carta 1366,10 (GDB 803,90).
-PAPER_CLOSING_OVERRIDES: Dict[Tuple[str, date], Dict[str, Decimal]] = {
+logger = logging.getLogger(__name__)
+
+# Seed verificati su carta (lettura operatore). Il file JSON può sovrascriverli.
+_SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
+    # Zanardelli 5 ott 2026: contanti carta 1366,10 (GDB 803,90); POS ok.
     ("via_zanardelli", date(2026, 10, 5)): {
         "contanti": Decimal("1366.10"),
         "pos": Decimal("2312.35"),
+    },
+    # Zanardelli 6 ott 2026: lettura CONTANTI 1403,15 · BANCOMAT 2016,77
+    # di cui FATTURE 143,99 → POS chiusura elettronico 1872,78 (senza fatture).
+    ("via_zanardelli", date(2026, 10, 6)): {
+        "contanti": Decimal("1403.15"),
+        "pos": Decimal("1872.78"),
+        "fatture": Decimal("143.99"),
+    },
+    # Abba 6 ott 2026: lettura CONTANTI 2216,99 · CARTA 2816,81 · FATTURE 128,73.
+    # Bancomat GDB già ok; contanti allineati alla carta (GDB sotto).
+    ("via_abba", date(2026, 10, 6)): {
+        "contanti": Decimal("2216.99"),
+        "pos": Decimal("2816.81"),
+        "fatture": Decimal("128.73"),
     },
 }
 
@@ -41,6 +68,167 @@ def _activity_key(activity: str) -> str:
     return MODEL_ID_TO_ACTIVITY.get(raw, raw)
 
 
+def _data_dir() -> Path:
+    raw = (os.getenv("PAPER_CLOSINGS_PATH") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve().parent
+    return Path(__file__).resolve().parents[2] / "data"
+
+
+def paper_closings_path() -> Path:
+    raw = (os.getenv("PAPER_CLOSINGS_PATH") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return _data_dir() / "paper_closings.json"
+
+
+def _parse_day(value: Any) -> Optional[date]:
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()[:10]
+    if len(text) != 10:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _load_file_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
+    path = paper_closings_path()
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("File letture operatore illeggibile: %s", path, exc_info=True)
+        return {}
+    rows = raw.get("rows") if isinstance(raw, dict) else raw
+    if not isinstance(rows, list):
+        return {}
+    out: Dict[Tuple[str, date], Dict[str, Decimal]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        act = _activity_key(str(row.get("activity") or ""))
+        day = _parse_day(row.get("day") or row.get("date"))
+        if not act or day is None:
+            continue
+        slot: Dict[str, Decimal] = {}
+        if row.get("contanti") is not None:
+            slot["contanti"] = _dec(row.get("contanti"))
+        if row.get("pos") is not None:
+            slot["pos"] = _dec(row.get("pos"))
+        if row.get("nc") is not None:
+            slot["nc"] = _dec(row.get("nc"))
+        if row.get("fatture") is not None:
+            slot["fatture"] = _dec(row.get("fatture"))
+        if slot:
+            out[(act, day)] = slot
+    return out
+
+
+def all_paper_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
+    merged = dict(_SEED_PAPER_CLOSINGS)
+    merged.update(_load_file_overrides())
+    return merged
+
+
+def get_paper_override(activity: str, day: date) -> Dict[str, Decimal]:
+    return dict(all_paper_overrides().get((_activity_key(activity), day)) or {})
+
+
+def has_paper_override(activity: str, day: date) -> bool:
+    return bool(get_paper_override(activity, day))
+
+
+def list_paper_closings(
+    *,
+    activity: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    act_filter = _activity_key(activity) if activity else ""
+    file_map = _load_file_overrides()
+    rows: List[Dict[str, Any]] = []
+    for (act, day), amounts in sorted(all_paper_overrides().items(), key=lambda x: (x[0][1], x[0][0])):
+        if act_filter and act != act_filter:
+            continue
+        if date_from and day < date_from:
+            continue
+        if date_to and day > date_to:
+            continue
+        rows.append(
+            {
+                "activity": act,
+                "day": day.isoformat(),
+                "contanti": amounts.get("contanti"),
+                "pos": amounts.get("pos"),
+                "nc": amounts.get("nc"),
+                "fatture": amounts.get("fatture"),
+                "source": "seed" if (act, day) in _SEED_PAPER_CLOSINGS and (act, day) not in file_map else "file",
+            }
+        )
+    return rows
+
+
+def upsert_paper_closing(
+    activity: str,
+    day: date,
+    *,
+    contanti: Optional[Any] = None,
+    pos: Optional[Any] = None,
+    nc: Optional[Any] = None,
+    fatture: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Salva la lettura operatore (CONTANTI / BANCOMAT senza fatture / FATTURE)."""
+    act = _activity_key(activity)
+    if not act:
+        raise ValueError("Attività non valida")
+    path = paper_closings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    file_map = _load_file_overrides()
+    slot = dict(file_map.get((act, day)) or {})
+    if contanti is not None:
+        slot["contanti"] = _dec(contanti)
+    if pos is not None:
+        slot["pos"] = _dec(pos)
+    if nc is not None:
+        slot["nc"] = _dec(nc)
+    if fatture is not None:
+        slot["fatture"] = _dec(fatture)
+    if not slot:
+        raise ValueError("Indica almeno contanti o POS della lettura")
+    file_map[(act, day)] = slot
+    payload = {
+        "version": 1,
+        "note": (
+            "Letture operatore Prima Nota / Analisi. Prevalgono sul GDB per contanti e POS. "
+            "Il POS è senza fatture; le fatture vanno nel campo fatture."
+        ),
+        "rows": [
+            {
+                "activity": a,
+                "day": d.isoformat(),
+                **{k: str(v) for k, v in am.items()},
+            }
+            for (a, d), am in sorted(file_map.items(), key=lambda x: (x[0][1], x[0][0]))
+        ],
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return {
+        "ok": True,
+        "activity": act,
+        "day": day.isoformat(),
+        "contanti": slot.get("contanti"),
+        "pos": slot.get("pos"),
+        "nc": slot.get("nc"),
+        "fatture": slot.get("fatture"),
+    }
+
+
 def paper_amounts(
     activity: str,
     day: date,
@@ -48,7 +236,7 @@ def paper_amounts(
     card: Decimal,
     quote: Decimal,
 ) -> Tuple[Decimal, Decimal, Decimal]:
-    extra = PAPER_CLOSING_OVERRIDES.get((_activity_key(activity), day)) or {}
+    extra = get_paper_override(activity, day)
     return (
         _dec(extra["contanti"]) if "contanti" in extra else cash,
         _dec(extra["pos"]) if "pos" in extra else card,
@@ -57,7 +245,7 @@ def paper_amounts(
 
 
 def apply_paper_closing_hit(activity: str, day: date, hit: Dict[str, Any]) -> Dict[str, Any]:
-    extra = PAPER_CLOSING_OVERRIDES.get((_activity_key(activity), day))
+    extra = get_paper_override(activity, day)
     if not extra:
         return hit
     cash, card, quote = paper_amounts(
@@ -71,7 +259,10 @@ def apply_paper_closing_hit(activity: str, day: date, hit: Dict[str, Any]) -> Di
     out["cash_eur"] = cash
     out["card_eur"] = card
     out["quote_eur"] = quote
+    if "fatture" in extra:
+        out["invoice_eur"] = _dec(extra["fatture"])
     out["incasso"] = (cash + card).quantize(Decimal("0.01"))
+    out["paper_closing"] = True
     return out
 
 

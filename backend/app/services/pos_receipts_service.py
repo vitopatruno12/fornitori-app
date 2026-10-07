@@ -25,6 +25,7 @@ from .pos_store_catalog import (  # noqa: F401 — re-export
 # - TIPODOCUMENTO=VEA
 # - VEN con NUMERODOCUMENTO che inizia con '5' (Preventivi nel Rapporto Complessivo)
 NON_FISCAL_PAYMENT_TYPES = frozenset({"quote", "non_fiscal", "vea", "preventivo"})
+INVOICE_PAYMENT_TYPES = frozenset({"invoice", "fattura"})
 
 
 def _is_non_fiscal_receipt(payment_type: Optional[str], *, payment_raw: Optional[str] = None) -> bool:
@@ -39,6 +40,13 @@ def _is_non_fiscal_receipt(payment_type: Optional[str], *, payment_raw: Optional
         return len(raw) >= 10 and raw.isdigit()
     return False
 
+
+def _is_invoice_receipt(payment_type: Optional[str], *, payment_raw: Optional[str] = None) -> bool:
+    pt = (payment_type or "").strip().lower()
+    if pt in INVOICE_PAYMENT_TYPES:
+        return True
+    raw = (payment_raw or "").strip().upper()
+    return raw == "FATTURA" or raw.startswith("FATTURA:")
 _DATE_HEADERS = (
     "dataora",
     "data_ora",
@@ -608,6 +616,8 @@ def load_pos_visit_buckets(
             continue
         if _is_non_fiscal_receipt(r.payment_type, payment_raw=r.payment_raw):
             continue
+        if _is_invoice_receipt(r.payment_type, payment_raw=r.payment_raw):
+            continue
         ext = (r.external_id or "").strip()
         mid_r = r.model_id or "unknown"
         dedupe_key = (mid_r, ext) if ext else (mid_r, r.id)
@@ -745,6 +755,8 @@ def load_pos_daily_incasso(
             "card_eur": Decimal("0.00"),
             "quote_eur": Decimal("0.00"),
             "quote_receipts": 0,
+            "invoice_eur": Decimal("0.00"),
+            "invoice_receipts": 0,
         }
     )
     seen_external: set = set()
@@ -778,6 +790,13 @@ def load_pos_daily_incasso(
             by_day[day]["quote_receipts"] += 1
             if r.amount_eur is not None:
                 by_day[day]["quote_eur"] = (by_day[day]["quote_eur"] + amount).quantize(Decimal("0.01"))
+            continue
+        if _is_invoice_receipt(r.payment_type, payment_raw=r.payment_raw):
+            by_day[day]["invoice_receipts"] += 1
+            if r.amount_eur is not None:
+                by_day[day]["invoice_eur"] = (by_day[day]["invoice_eur"] + amount).quantize(
+                    Decimal("0.01")
+                )
             continue
         by_day[day]["movimenti"] += 1
         if r.amount_eur is not None:
@@ -924,6 +943,8 @@ def payment_summary(
         "other_eur": 0.0,
         "quote_receipts": 0,
         "quote_eur": 0.0,
+        "invoice_receipts": 0,
+        "invoice_eur": 0.0,
     }
     by_type: Dict[str, int] = defaultdict(int)
     by_store: Dict[str, Dict[str, float]] = defaultdict(
@@ -936,6 +957,8 @@ def payment_summary(
             "card_eur": 0.0,
             "quote_eur": 0.0,
             "quote_receipts": 0.0,
+            "invoice_eur": 0.0,
+            "invoice_receipts": 0.0,
             "amount_eur": 0.0,
         }
     )
@@ -945,6 +968,7 @@ def payment_summary(
             "cash_eur": 0.0,
             "card_eur": 0.0,
             "quote_eur": 0.0,
+            "invoice_eur": 0.0,
             "amount_eur": 0.0,
             "movimenti": 0.0,
         }
@@ -962,6 +986,15 @@ def payment_summary(
             by_day[day_key]["quote_receipts"] += 1
             if r.receipt_at:
                 by_hour[int(r.receipt_at.hour)]["quote_eur"] += amount
+            continue
+        if _is_invoice_receipt(r.payment_type, payment_raw=r.payment_raw):
+            totals["invoice_receipts"] += 1
+            totals["invoice_eur"] += amount
+            day_key = r.receipt_at.date().isoformat() if r.receipt_at else "unknown"
+            by_day[day_key]["invoice_eur"] += amount
+            by_day[day_key]["invoice_receipts"] += 1
+            if r.receipt_at:
+                by_hour[int(r.receipt_at.hour)]["invoice_eur"] += amount
             continue
 
         totals["receipts"] += 1
@@ -1019,6 +1052,7 @@ def payment_summary(
                 "cash_eur": round(float(hit.get("cash_eur") or 0), 2),
                 "card_eur": round(float(hit.get("card_eur") or 0), 2),
                 "quote_eur": round(float(hit.get("quote_eur") or 0), 2),
+                "invoice_eur": round(float(hit.get("invoice_eur") or 0), 2),
             }
         )
 

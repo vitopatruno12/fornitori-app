@@ -53,7 +53,18 @@ QUOTE_KEYWORDS = (
 )
 
 # Tipi già risolti che non vanno riclassificati su unknown.
-PRESERVE_PAYMENT_TYPES = frozenset({"cash", "card", "mixed", "other", "quote", "non_fiscal", "vea", "preventivo"})
+PRESERVE_PAYMENT_TYPES = frozenset({
+    "cash",
+    "card",
+    "mixed",
+    "other",
+    "quote",
+    "non_fiscal",
+    "vea",
+    "preventivo",
+    "invoice",
+    "fattura",
+})
 
 
 
@@ -140,6 +151,17 @@ def merge_payment_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             )
         if not out.get("payment_raw"):
             out["payment_raw"] = "VEA"
+        return out
+    # Fatture emesse: fuori da contanti/POS chiusura
+    if existing_type in ("invoice", "fattura") or str(row.get("payment_raw") or "").strip().upper().startswith("FATTURA"):
+        out = dict(row)
+        out["payment_type"] = "invoice"
+        out["cash_amount_eur"] = None
+        out["card_amount_eur"] = None
+        if not out.get("payment_label"):
+            out["payment_label"] = "Fattura"
+        if not out.get("payment_raw"):
+            out["payment_raw"] = "FATTURA"
         return out
 
     cash_raw = row.get("cash_amount_eur")

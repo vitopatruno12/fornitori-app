@@ -15,6 +15,7 @@ from ..schemas.cash import (
     CashEntryWithBalance,
     DailySummary,
     PeriodSummary,
+    PaperClosingUpsert,
     PrimaNotaLinkOptions,
     PrimaNotaLocalePackRead,
     PrimaNotaLocalePackSummary,
@@ -25,7 +26,7 @@ from ..constants.prima_nota_staff_locale import (
     match_staff_locale_name,
     staff_locale_link_for_activity,
 )
-from ..services import cash_closing_sync, cash_service, prima_nota_locale_service, staff_service
+from ..services import cash_closing_sync, cash_service, paper_closing_overrides, prima_nota_locale_service, staff_service
 
 router = APIRouter(prefix="/cash", tags=["cash"])
 logger = logging.getLogger(__name__)
@@ -337,3 +338,61 @@ def export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/paper-closings")
+def list_paper_closings(
+    activity: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
+    """Letture operatore salvate (CONTANTI / BANCOMAT della carta)."""
+    act = _validate_activity(activity)
+    _verify_activity_access(db, act, code)
+    d_from = date.fromisoformat(date_from) if date_from else None
+    d_to = date.fromisoformat(date_to) if date_to else None
+    rows = paper_closing_overrides.list_paper_closings(
+        activity=act,
+        date_from=d_from,
+        date_to=d_to,
+    )
+    return {"ok": True, "rows": rows}
+
+
+@router.put("/paper-closings")
+def upsert_paper_closing(
+    body: PaperClosingUpsert,
+    code: Optional[str] = Query(None, min_length=6, max_length=6),
+    db: Session = Depends(get_db),
+):
+    """Salva lettura operatore e riscrive la chiusura automatica in Prima Nota."""
+    act = _validate_activity(body.activity)
+    if not act:
+        raise HTTPException(status_code=400, detail="Attività obbligatoria")
+    _verify_activity_access(db, act, code)
+    try:
+        day = date.fromisoformat(body.day[:10])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Data non valida") from exc
+    if body.contanti is None and body.pos is None and body.nc is None and body.fatture is None:
+        raise HTTPException(status_code=400, detail="Indica contanti e/o POS della lettura")
+    try:
+        saved = paper_closing_overrides.upsert_paper_closing(
+            act,
+            day,
+            contanti=body.contanti,
+            pos=body.pos,
+            nc=body.nc,
+            fatture=body.fatture,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    sync = cash_closing_sync.sync_daily_closings_to_prima_nota(
+        db,
+        activity=act,
+        date_from=day,
+        date_to=day,
+    )
+    return {"ok": True, "paper": saved, "sync": sync}
