@@ -59,7 +59,7 @@ def _base_enable_banking_config() -> Dict[str, Any]:
     or os.getenv("PUBLIC_APP_URL")
     or "https://www.atlass.it"
   ).strip().rstrip("/")
-  consent_days = max(1, min(180, int(os.getenv("ENABLE_BANKING_CONSENT_DAYS", "90") or "90")))
+  consent_days = max(1, min(180, int(os.getenv("ENABLE_BANKING_CONSENT_DAYS", "180") or "180")))
   configured = bool(app_id and key_path.is_file() and redirect)
   return {
     "configured": configured,
@@ -406,8 +406,9 @@ def start_authorization(
     or "intesa" in bank_l
     or "sanpaolo" in bank_l
   )
+  # Max tipico PSD2 / Enable Banking: 180 giorni (anche BCC/Intesa se lo supportano).
   raw_days = max(1, int(cfg["consent_days"]))
-  consent_days = min(89, raw_days) if is_beta_aspsp else raw_days
+  consent_days = min(180, raw_days)
   valid_until = _consent_valid_until(consent_days)
   psu = psu_type if psu_type in {"personal", "business"} else "personal"
   # Intesa/BCC in beta rispondono spesso ASPSP_ERROR se il consenso è troppo ricco
@@ -896,9 +897,7 @@ def complete_enable_banking_callback(
     row.eb_session_id = session_id[:64]
     row.eb_account_uid = account_uid[:64]
     cfg = get_enable_banking_config()
-    bank_l = (row.eb_aspsp_name or row.bank_name or "").lower()
-    is_beta = any(k in bank_l for k in ("bcc", "otranto", "intesa", "sanpaolo"))
-    fallback_days = min(89, int(cfg["consent_days"])) if is_beta else int(cfg["consent_days"])
+    fallback_days = min(180, int(cfg["consent_days"]))
     apply_session_consent(row, session, fallback_days=fallback_days)
     if iban and not row.iban:
       row.iban = iban[:34]
