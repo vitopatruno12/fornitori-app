@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 """Cerca nel GDB EasyRetail i totali della LETTURA OPERATORE (carta).
 
-Obiettivo: trovare tabelle/colonne = CONTANTI / CARTA / INCASSO / IN CASSA
-cosi Atlas puo allinearsi da solo senza digitare la lettura ogni sera.
-
 Sul PC cassa (C:\\AtlasSync):
 
   py -u diagnose_lettura_giornate.py
@@ -31,19 +28,29 @@ else:
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-_HINTS = (
-    "GIORNAT",
-    "CHIUSUR",
-    "TOTAL",
-    "RAPPORTO",
-    "LETTURA",
-    "XREPORT",
-    "ZREPORT",
+_FOCUS = (
+    "GIORNATEPOS",
+    "GIORNATE",
+    "FORMEPAGAMENTI",
+    "STAMPEGIORNATAT",
+    "STAMPEGIORNATAR",
+)
+
+_MONEY = (
+    "CONTANT",
+    "BANCOM",
+    "CARTA",
     "INCASS",
     "CASSA",
-    "BANCOM",
-    "CONTANT",
-    "FORMEPAG",
+    "TOTALE",
+    "IMPORTO",
+    "ELETTRON",
+    "FATTUR",
+    "POS",
+    "PAGAMENT",
+    "VALORE",
+    "NETTO",
+    "LORDO",
 )
 
 
@@ -61,7 +68,7 @@ def _load_dotenv() -> None:
                 os.environ[k] = v
 
 
-def _cell(value, limit: int = 40) -> str:
+def _cell(value, limit: int = 36) -> str:
     if value is None:
         return ""
     text = str(value).replace("\n", " ").strip()
@@ -70,14 +77,154 @@ def _cell(value, limit: int = 40) -> str:
     return text
 
 
+def _safe_close(cur) -> None:
+    try:
+        cur.close()
+    except Exception:
+        pass
+
+
+def _columns(con, table: str):
+    cur = con.cursor()
+    try:
+        cur.execute(
+            "SELECT TRIM(RF.RDB$FIELD_NAME) FROM RDB$RELATION_FIELDS RF "
+            "WHERE TRIM(RF.RDB$RELATION_NAME) = ? "
+            "ORDER BY RF.RDB$FIELD_POSITION",
+            (table.upper(),),
+        )
+        return [str(r[0]).strip().upper() for r in cur.fetchall() if r and r[0]]
+    finally:
+        _safe_close(cur)
+
+
+def _list_tables(con):
+    cur = con.cursor()
+    try:
+        cur.execute(
+            "SELECT TRIM(RDB$RELATION_NAME) FROM RDB$RELATIONS "
+            "WHERE RDB$SYSTEM_FLAG = 0 AND RDB$VIEW_BLR IS NULL "
+            "ORDER BY 1"
+        )
+        return [str(r[0]).strip() for r in cur.fetchall() if r and r[0]]
+    finally:
+        _safe_close(cur)
+
+
+def _dump_table(con, name: str, day_raw: str) -> None:
+    try:
+        cols = _columns(con, name)
+    except Exception as exc:
+        print(f"\n=== {name}: errore colonne {exc} ===")
+        return
+    if not cols:
+        print(f"\n=== {name}: assente ===")
+        return
+
+    interesting = [c for c in cols if any(n in c for n in _MONEY)]
+    print(f"\n=== {name} ({len(cols)} col) ===")
+    print("  colonne:", ", ".join(cols))
+    if interesting:
+        print("  € candidate:", ", ".join(interesting))
+
+    show = (interesting or cols)[:14]
+    order = next((c for c in cols if "DATA" in c or c.endswith("ORA") or "GIORN" in c), show[0])
+
+    cur = con.cursor()
+    try:
+        sql = f"SELECT FIRST 8 {', '.join(show)} FROM {name} ORDER BY {order} DESC"
+        cur.execute(sql)
+        rows = cur.fetchall()
+        print(f"  ultimi (ORDER BY {order}):")
+        for row in rows:
+            print("  ", " | ".join(_cell(v) for v in row))
+    except Exception as exc:
+        print(f"  sample fallito: {exc}")
+        _safe_close(cur)
+        cur = con.cursor()
+        try:
+            cur.execute(f"SELECT FIRST 5 {', '.join(show)} FROM {name}")
+            for row in cur.fetchall():
+                print("  ", " | ".join(_cell(v) for v in row))
+        except Exception as exc2:
+            print(f"  sample2 fallito: {exc2}")
+    finally:
+        _safe_close(cur)
+
+    if not day_raw:
+        return
+
+    # prova filtri data comuni
+    day = datetime.strptime(day_raw, "%Y-%m-%d")
+    nxt = day + timedelta(days=1)
+    date_cols = [c for c in cols if "DATA" in c or c.endswith("ORA")]
+    for dc in date_cols[:3]:
+        cur = con.cursor()
+        try:
+            cur.execute(
+                f"SELECT FIRST 15 {', '.join(show)} FROM {name} "
+                f"WHERE {dc} >= ? AND {dc} < ? ORDER BY {dc}",
+                [day, nxt],
+            )
+            rows = cur.fetchall()
+            print(f"  filtro {dc}={day_raw}: {len(rows)} righe")
+            for row in rows[:10]:
+                print("   *", " | ".join(_cell(v) for v in row))
+        except Exception as exc:
+            print(f"  filtro {dc}: {exc}")
+        finally:
+            _safe_close(cur)
+
+    # GIORNATEPOS a volte ha solo NUMEROGIORNATA / chiavi senza timestamp
+    for key in ("NUMEROGIORNATA", "NUMEROGIORNOPOS", "ANNO", "MESE"):
+        if key not in cols:
+            continue
+        cur = con.cursor()
+        try:
+            if key == "ANNO" and "MESE" in cols:
+                cur.execute(
+                    f"SELECT FIRST 20 {', '.join(show)} FROM {name} "
+                    f"WHERE ANNO = ? AND MESE = ?",
+                    [day.year, day.month],
+                )
+            elif key.startswith("NUMERO"):
+                # ultimi record: non filtriamo per giorno numerico
+                continue
+            else:
+                continue
+            rows = cur.fetchall()
+            print(f"  filtro {key} mese: {len(rows)} righe")
+            for row in rows[:10]:
+                print("   *", " | ".join(_cell(v) for v in row))
+        except Exception as exc:
+            print(f"  filtro {key}: {exc}")
+        finally:
+            _safe_close(cur)
+
+
+def _scan_money_columns(con, tables) -> None:
+    print("\n=== scan colonne CONTANTI/BANCOMAT/INCASSO in tutto il GDB ===")
+    hits = []
+    for t in tables:
+        try:
+            cols = _columns(con, t)
+        except Exception:
+            continue
+        money = [
+            c
+            for c in cols
+            if any(x in c for x in ("CONTANT", "BANCOM", "INCASS", "INCASSA", "IN_CASSA", "TOTCASSA"))
+        ]
+        if money:
+            hits.append((t, money))
+            print(f"  {t}: {', '.join(money)}")
+    if not hits:
+        print("  nessuna colonna CONTANTI/BANCOMAT/INCASSO trovata nei nomi campo")
+
+
 def main() -> int:
     _load_dotenv()
-    from app.services.easyretail_gdb_service import (
-        _list_user_tables,
-        _table_columns,
-        connect_gdb,
-        resolve_fbclient,
-    )
+    from app.services.easyretail_gdb_service import connect_gdb, resolve_fbclient
 
     dsn = (os.getenv("EASYRETAIL_GDB_PATH") or os.getenv("EASYRETAIL_GDB_DSN") or "").strip()
     if not dsn:
@@ -93,89 +240,37 @@ def main() -> int:
         charset=os.getenv("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
     )
     try:
-        cur = con.cursor()
-        tables = _list_user_tables(cur)
+        tables = _list_tables(con)
         print(f"gdb={dsn}")
         print(f"tabelle={len(tables)} day_filter={day_raw or '(nessuno)'}")
-        print("\n=== tabelle candidate lettura/chiusura/totali ===")
-        candidates = []
+
+        focus = [t for t in tables if t.upper() in {x.upper() for x in _FOCUS}]
+        # aggiungi altre GIORN*/CHIUSUR*
         for t in tables:
             u = t.upper()
-            if any(h in u for h in _HINTS):
-                candidates.append(t)
-                print(" ", t)
-        if not candidates:
-            print("  (nessuna — elenco completo sample)")
-            candidates = [t for t in tables if "GIORN" in t.upper() or "POS" in t.upper()][:20]
+            if u in {x.upper() for x in focus}:
+                continue
+            if any(h in u for h in ("GIORNAT", "CHIUSUR", "TOTALI", "RAPPORTO", "LETTURA")):
+                focus.append(t)
 
-        money_needles = (
-            "CONTANT",
-            "BANCOM",
-            "CARTA",
-            "INCASS",
-            "CASSA",
-            "TOTALE",
-            "IMPORTO",
-            "ELETTRON",
-            "POS",
-            "FATTUR",
-        )
-        for name in candidates[:40]:
-            try:
-                cols = _table_columns(cur, name)
-            except Exception as exc:
-                print(f"\n{name}: errore colonne {exc}")
-                continue
-            interesting = [c for c in cols if any(n in c.upper() for n in money_needles)]
-            print(f"\n=== {name} ({len(cols)} col) ===")
-            print("  colonne:", ", ".join(cols[:40]), ("…" if len(cols) > 40 else ""))
-            if interesting:
-                print("  € candidate:", ", ".join(interesting))
-            show = interesting[:10] if interesting else cols[:12]
-            if not show:
-                continue
-            # prefer date-ish columns for ORDER BY
-            order = None
-            for c in cols:
-                cu = c.upper()
-                if "DATA" in cu or cu.endswith("ORA") or "GIORN" in cu:
-                    order = c
-                    break
-            sql = f"SELECT FIRST 5 {', '.join(show)} FROM {name}"
-            if order:
-                sql += f" ORDER BY {order} DESC"
-            try:
-                cur.execute(sql)
-                rows = cur.fetchall()
-            except Exception as exc:
-                print(f"  sample: {exc}")
-                continue
-            for row in rows:
-                print("  ", " | ".join(_cell(v) for v in row))
+        print("\n=== focus ===")
+        for t in focus:
+            print(" ", t)
 
-            if day_raw and order:
-                try:
-                    day = datetime.strptime(day_raw, "%Y-%m-%d")
-                    nxt = day + timedelta(days=1)
-                    cur.execute(
-                        f"SELECT FIRST 20 {', '.join(show)} FROM {name} "
-                        f"WHERE {order} >= ? AND {order} < ?",
-                        [day, nxt],
-                    )
-                    day_rows = cur.fetchall()
-                    print(f"  filtro {day_raw}: {len(day_rows)} righe")
-                    for row in day_rows[:8]:
-                        print("   *", " | ".join(_cell(v) for v in row))
-                except Exception as exc:
-                    print(f"  filtro giorno: {exc}")
+        for name in focus:
+            _dump_table(con, name, day_raw)
+
+        _scan_money_columns(con, tables)
 
         print(
-            "\nFine. Incolla questo output in chat: "
-            "cosi colleghiamo CONTANTI/CARTA della carta alla tabella giusta."
+            "\nFine. Incolla l'output (soprattutto GIORNATEPOS + scan CONTANTI/BANCOMAT)."
         )
         return 0
     finally:
-        con.close()
+        try:
+            con.close()
+        except Exception as exc:
+            print(f"(close warning: {exc})")
 
 
 if __name__ == "__main__":
