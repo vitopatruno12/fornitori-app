@@ -22,7 +22,7 @@ from .cash_service import (
     VERSAMENTO_BANCA_CONTO,
     normalize_activity,
 )
-from .paper_closing_overrides import paper_amounts as _paper_amounts
+from .paper_closing_overrides import has_paper_override, paper_amounts as _paper_amounts
 from .pos_receipts_service import load_pos_daily_incasso
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,18 @@ _PROTECTED_CONTI = (
 _KIND_META = {
     "contanti": {
         "conto": CONTANTI_CONTO,
-        "description": "Chiusura fiscale · pagamenti contanti (A)",
+        "description": "Chiusura lettura · pagamenti contanti (A)",
+        "description_gdb": "Chiusura scontrini · pagamenti contanti (A)",
     },
     "pos": {
         "conto": POS_CONTO,
-        "description": "Chiusura fiscale · pagamenti POS (A)",
+        "description": "Chiusura lettura · pagamenti POS (A)",
+        "description_gdb": "Chiusura scontrini · pagamenti POS (A)",
     },
     "nc": {
         "conto": NON_FISCALE_CONTO,
         "description": "Preventivi / non fiscali (A)",
+        "description_gdb": "Preventivi / non fiscali (A)",
     },
 }
 
@@ -146,6 +149,8 @@ def _upsert_auto_entry(
 ) -> str:
     meta = _KIND_META[kind]
     conto = meta["conto"]
+    from_paper = has_paper_override(activity, day) and kind in ("contanti", "pos")
+    description = meta["description"] if from_paper or kind == "nc" else meta.get("description_gdb") or meta["description"]
     if amount <= 0:
         existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
         if existing is not None:
@@ -155,11 +160,13 @@ def _upsert_auto_entry(
     existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
     note = f"{AUTO_NOTE} {kind} {day.isoformat()}"
     if existing is not None:
-        if _dec(existing.amount) == amount:
+        same_amount = _dec(existing.amount) == amount
+        same_desc = str(existing.description or "") == description
+        if same_amount and same_desc:
             return "unchanged"
         existing.amount = amount
         existing.type = "entrata"
-        existing.description = meta["description"]
+        existing.description = description
         existing.note = note
         existing.entry_date = closing_entry_datetime(day)
         return "updated"
@@ -168,7 +175,7 @@ def _upsert_auto_entry(
             entry_date=closing_entry_datetime(day),
             type="entrata",
             amount=amount,
-            description=meta["description"],
+            description=description,
             note=note,
             conto=conto,
             activity=activity,
@@ -198,7 +205,11 @@ def remove_manual_closing_duplicates(
     date_to: Optional[date] = None,
     activity: Optional[str] = None,
 ) -> int:
-    """Se esiste la riga sync, elimina le copie inserite a mano (stesso giorno/registro/conto)."""
+    """Se esiste la riga sync, elimina le copie inserite a mano (stesso giorno/registro).
+
+    Con auto presente si cancellano tutte le manuali sullo stesso conto (anche importo diverso),
+    così non restano doppie «incasso contanti» vs chiusura lettura.
+    """
     today = rome_now().date()
     end = min(date_to or today, today)
     start = date_from or (end - timedelta(days=MAX_BACKFILL_DAYS - 1))
@@ -229,7 +240,7 @@ def remove_manual_closing_duplicates(
         groups.setdefault((act, day, entry.conto), []).append(entry)
 
     deleted = 0
-    auto_amounts: Dict[Tuple[str, date, Optional[str]], Decimal] = {}
+    days_with_cash_auto: set = set()
     for (_act, _day, _conto), items in groups.items():
         autos = [e for e in items if _is_auto_entry(e)]
         manuals = [e for e in items if not _is_auto_entry(e)]
@@ -246,7 +257,10 @@ def remove_manual_closing_duplicates(
             db.delete(manual)
             deleted += 1
         keep = autos[0]
-        auto_amounts[(normalize_activity(keep.activity), _rome_day(keep), keep.conto)] = _dec(keep.amount)
+        if keep.conto == CONTANTI_CONTO:
+            day = _rome_day(keep)
+            if day is not None:
+                days_with_cash_auto.add((normalize_activity(keep.activity), day))
 
     fiscale_q = db.query(CashEntry).filter(
         CashEntry.entry_date >= day_start,
@@ -267,8 +281,15 @@ def remove_manual_closing_duplicates(
         if day is None:
             continue
         act = normalize_activity(entry.activity)
-        cash_auto = auto_amounts.get((act, day, CONTANTI_CONTO))
-        if cash_auto is not None and _dec(entry.amount) == cash_auto:
+        if (act, day) not in days_with_cash_auto:
+            continue
+        desc = str(entry.description or "").strip().lower()
+        if (
+            "incasso contanti" in desc
+            or "incasso cassa" in desc
+            or desc.startswith("chiusura")
+            or "pagamenti contanti" in desc
+        ):
             db.delete(entry)
             deleted += 1
     return deleted
