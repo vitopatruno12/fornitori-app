@@ -8,9 +8,9 @@ Sul PC cassa (C:\\AtlasSync):
   py -u read_movimento_cassetto.py --day 2026-10-06 --schema
 
 Tabelle EasyRetail:
-  MOVIMENTICASSETTIT = testate (data, causale, importo) ← quelle che servono
-  MOVIMENTICASSETTIR = righe dettaglio / tagli di banconote (non il totale giorno)
-  CODICIMOVIMENTI    = anagrafica causali (es. VERSAMENTO IVA)
+  MOVIMENTICASSETTIT = testate (data, causale) ← lavanderia, spesa, …
+  MOVIMENTICASSETTIR = righe importo/tagli (sommate per testata se T non ha IMPORTO)
+  CODICIMOVIMENTI    = anagrafica causali
 
 Non stampa la password del database.
 """
@@ -76,15 +76,43 @@ def _colmap(cols: Sequence[str]) -> Dict[str, str]:
     return {c.upper(): c for c in cols}
 
 
-def _pick(col_u: Dict[str, str], *names: str) -> Optional[str]:
+def _pick_exact(col_u: Dict[str, str], *names: str) -> Optional[str]:
     for name in names:
         if name in col_u:
             return col_u[name]
+    return None
+
+
+def _pick(col_u: Dict[str, str], *names: str) -> Optional[str]:
+    hit = _pick_exact(col_u, *names)
+    if hit:
+        return hit
+    # Prefer longest name match to avoid ID matching inside NUMEROPOSTAZIONE etc.
+    best: Optional[Tuple[int, str]] = None
     for upper, real in col_u.items():
         for name in names:
-            if name in upper:
-                return real
-    return None
+            if name and name in upper:
+                score = len(name)
+                if best is None or score > best[0]:
+                    best = (score, real)
+    return best[1] if best else None
+
+
+def _pick_amount(col_u: Dict[str, str]) -> Optional[str]:
+    return _pick(
+        col_u,
+        "IMPORTOMOVIMENTO",
+        "IMPORTOEURO",
+        "TOTALEMOVIMENTO",
+        "IMPORTOCASSA",
+        "IMPORTOCASSETTO",
+        "VALOREEURO",
+        "IMPORTO",
+        "VALORE",
+        "TOTALE",
+        "AMOUNTEUR",
+        "AMOUNT",
+    )
 
 
 def _dump_schema(cur, tables: Sequence[str]) -> None:
@@ -99,45 +127,146 @@ def _dump_schema(cur, tables: Sequence[str]) -> None:
             continue
         print(f"\n{name} ({len(cols)} colonne)")
         print("  ", ", ".join(cols))
-        show = cols[:12]
-        if not show:
+        if not cols:
             continue
+        # Mostra tutte le colonne sui sample (max 16 per riga leggibile)
+        show = list(cols[:16])
         try:
-            cur.execute(f"SELECT FIRST 5 {', '.join(show)} FROM {name}")
+            cur.execute(f"SELECT FIRST 8 {', '.join(show)} FROM {name} ORDER BY 1 DESC")
             rows = cur.fetchall()
-        except Exception as exc:
-            print(f"  sample saltato: {exc}")
-            continue
+        except Exception:
+            try:
+                cur.execute(f"SELECT FIRST 8 {', '.join(show)} FROM {name}")
+                rows = cur.fetchall()
+            except Exception as exc:
+                print(f"  sample saltato: {exc}")
+                continue
         for row in rows:
-            print("  ", " | ".join(_cell(v, 36) for v in row))
+            print("  ", " | ".join(_cell(v, 28) for v in row))
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM {name}")
+            print(f"  COUNT(*) = {cur.fetchone()[0]}")
+        except Exception:
+            pass
 
 
-def _read_testate(cur, day: datetime) -> Tuple[List[Dict[str, Any]], Decimal]:
-    """Legge MOVIMENTICASSETTIT per il giorno (testate = movimenti reali)."""
+def _sum_righe_by_parent(cur) -> Dict[Any, Decimal]:
+    """Somma IMPORTO delle righe MOVIMENTICASSETTIR per ogni testata."""
+    from app.services.easyretail_gdb_service import _table_columns
+
+    name = "MOVIMENTICASSETTIR"
+    try:
+        cols = _table_columns(cur, name)
+    except Exception:
+        return {}
+    if not cols:
+        return {}
+    col_u = _colmap(cols)
+    parent = _pick(
+        col_u,
+        "NUMEROMOVIMENTOCASSETTO",
+        "NUMEROMOVIMENTO",
+        "IDMOVIMENTOCASSETTO",
+        "IDMOVIMENTO",
+        "IDTESTATA",
+    )
+    amt = _pick_amount(col_u)
+    if not parent or not amt:
+        print(f"[righe] {name}: parent={parent} importo={amt} (skip somma)")
+        return {}
+    print(f"[righe] {name}: somma {amt} per {parent}")
+    try:
+        cur.execute(f"SELECT {parent}, SUM({amt}) FROM {name} GROUP BY {parent}")
+        out: Dict[Any, Decimal] = {}
+        for pid, total in cur.fetchall():
+            out[pid] = _money(total)
+        return out
+    except Exception as exc:
+        print(f"[righe] somma fallita: {exc}")
+        return {}
+
+
+def _fetch_testate_rows(
+    cur,
+    *,
+    ordered: List[str],
+    ts_col: str,
+    day: Optional[datetime],
+    limit: int = 2000,
+) -> Tuple[List[Any], str]:
+    if day is not None:
+        nxt = day + timedelta(days=1)
+        attempts = [
+            (f"{ts_col} >= ? AND {ts_col} < ?", [day, nxt]),
+            (f"{ts_col} >= ? AND {ts_col} < ?", [day.date(), nxt.date()]),
+            (f"CAST({ts_col} AS DATE) = ?", [day.date()]),
+        ]
+        for where, params in attempts:
+            sql = (
+                f"SELECT FIRST {limit} {', '.join(ordered)} FROM MOVIMENTICASSETTIT "
+                f"WHERE {where} ORDER BY {ts_col}"
+            )
+            try:
+                cur.execute(sql, params)
+                return cur.fetchall(), where
+            except Exception:
+                continue
+        # fallback python filter
+        sql = (
+            f"SELECT FIRST {limit} {', '.join(ordered)} FROM MOVIMENTICASSETTIT "
+            f"ORDER BY {ts_col} DESC"
+        )
+        cur.execute(sql)
+        raw = cur.fetchall()
+        rows = []
+        for row in raw:
+            data = {ordered[i]: row[i] for i in range(len(ordered))}
+            when = data.get(ts_col)
+            if when is None:
+                continue
+            d = when.date() if hasattr(when, "date") else None
+            if d == day.date() or str(when)[:10] == day.date().isoformat():
+                rows.append(row)
+        return rows, "python-filter"
+
+    sql = (
+        f"SELECT FIRST {limit} {', '.join(ordered)} FROM MOVIMENTICASSETTIT "
+        f"ORDER BY {ts_col} DESC"
+    )
+    cur.execute(sql)
+    return cur.fetchall(), "recent"
+
+
+def _read_testate(
+    cur,
+    day: Optional[datetime],
+    *,
+    recent_if_empty: bool = True,
+) -> Tuple[List[Dict[str, Any]], Decimal, bool]:
+    """Legge MOVIMENTICASSETTIT; se manca IMPORTO somma le righe R."""
     from app.services.easyretail_gdb_service import _table_columns
 
     name = "MOVIMENTICASSETTIT"
     cols = _table_columns(cur, name)
     if not cols:
         print("ERRORE: tabella MOVIMENTICASSETTIT assente", file=sys.stderr)
-        return [], Decimal("0.00")
+        return [], Decimal("0.00"), False
     col_u = _colmap(cols)
 
-    id_col = _pick(col_u, "NUMEROMOVIMENTO", "IDMOVIMENTO", "PROGRESSIVO", "ID")
-    ts_col = _pick(col_u, "DATAORA", "DATAMOVIMENTO", "DATAORAMOVIMENTO", "TIMESTAMP", "DATA")
-    amt_col = _pick(
+    id_col = _pick(
         col_u,
-        "IMPORTO",
-        "IMPORTOMOVIMENTO",
-        "VALORE",
-        "TOTALE",
-        "TOTALEMOVIMENTO",
-        "IMPORTOEURO",
+        "NUMEROMOVIMENTOCASSETTO",
+        "NUMEROMOVIMENTO",
+        "IDMOVIMENTOCASSETTO",
+        "IDMOVIMENTO",
+        "PROGRESSIVO",
     )
+    ts_col = _pick(col_u, "DATAORA", "DATAMOVIMENTO", "DATAORAMOVIMENTO", "TIMESTAMP", "DATA")
+    amt_col = _pick_amount(col_u)
     segno_col = _pick(col_u, "SEGNO", "TIPOSEGNO", "ENTRAUSCITA", "DIREZIONE")
-    code_col = _pick(col_u, "CODICEMOVIMENTO", "NUMEROCODICEMOVIMENTO", "CODICE")
+    code_col = _pick(col_u, "CODICEMOVIMENTO", "NUMEROCODICEMOVIMENTO", "CODICECAUSALE")
     desc_col = _pick(col_u, "DESCRIZIONE", "CAUSALE", "NOTE", "INTEST", "NOMEMOVIMENTO")
-    store_col = _pick(col_u, "NUMEROPOS", "NUMEROCASSA", "CASSA", "NEGOZIO", "PUNTOVENDITA")
+    store_col = _pick(col_u, "NUMEROPOSTAZIONE", "NUMEROPOS", "NUMEROCASSA", "CASSA")
     tipo_col = _pick(col_u, "TIPOMOVIMENTO", "TIPO", "TIPODOCUMENTO")
 
     print(f"[testate] {name}")
@@ -147,11 +276,9 @@ def _read_testate(cur, day: datetime) -> Tuple[List[Dict[str, Any]], Decimal]:
     )
     if not ts_col:
         print("ERRORE: nessuna colonna data su MOVIMENTICASSETTIT", file=sys.stderr)
-        return [], Decimal("0.00")
+        return [], Decimal("0.00"), False
 
-    nxt = day + timedelta(days=1)
     select = [c for c in (id_col, ts_col, store_col, tipo_col, code_col, segno_col, amt_col, desc_col) if c]
-    # unique keep order
     ordered: List[str] = []
     seen = set()
     for c in select:
@@ -159,58 +286,40 @@ def _read_testate(cur, day: datetime) -> Tuple[List[Dict[str, Any]], Decimal]:
             seen.add(c)
             ordered.append(c)
 
-    # Prova filtro timestamp e filtro solo-data
-    attempts = [
-        (f"{ts_col} >= ? AND {ts_col} < ?", [day, nxt]),
-        (f"{ts_col} >= ? AND {ts_col} < ?", [day.date(), nxt.date()]),
-        (f"CAST({ts_col} AS DATE) = ?", [day.date()]),
-    ]
-    rows = []
-    used = ""
-    for where, params in attempts:
-        sql = f"SELECT FIRST 2000 {', '.join(ordered)} FROM {name} WHERE {where} ORDER BY {ts_col}"
-        try:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-            used = where
-            break
-        except Exception:
-            continue
-    if not used:
-        # ultimo tentativo: ultimi 2000 e filtro in Python
-        sql = f"SELECT FIRST 2000 {', '.join(ordered)} FROM {name} ORDER BY {ts_col} DESC"
-        cur.execute(sql)
-        raw = cur.fetchall()
-        for row in raw:
-            data = {ordered[i]: row[i] for i in range(len(ordered))}
-            when = data.get(ts_col)
-            if when is None:
-                continue
-            d = when.date() if hasattr(when, "date") else None
-            if d == day.date() or str(when)[:10] == day.date().isoformat():
-                rows.append(row)
-        used = "python-filter"
+    r_sums = _sum_righe_by_parent(cur) if not amt_col else {}
+    if amt_col:
+        # anche con importo su T, se è sempre 0 usiamo R come fallback per riga
+        r_sums = _sum_righe_by_parent(cur)
+
+    rows, used = _fetch_testate_rows(cur, ordered=ordered, ts_col=ts_col, day=day)
     print(f"  filtro={used} righe={len(rows)}")
+    used_recent = False
+    if not rows and day is not None and recent_if_empty:
+        rows, used = _fetch_testate_rows(cur, ordered=ordered, ts_col=ts_col, day=None, limit=30)
+        used_recent = True
+        print(f"  giorno vuoto → ultimi movimenti ({used}) righe={len(rows)}")
 
     hits: List[Dict[str, Any]] = []
     total = Decimal("0.00")
     for row in rows:
         data = {ordered[i]: row[i] for i in range(len(ordered))}
+        pid = data.get(id_col) if id_col else None
         amt = _money(data.get(amt_col) if amt_col else 0)
+        if amt == 0 and pid in r_sums:
+            amt = r_sums[pid]
+            src = "R"
+        else:
+            src = "T" if amt_col else ("R" if pid in r_sums else "?")
         segno_raw = str(data.get(segno_col) or "").strip().upper() if segno_col else ""
-        # Segno: -1 / U / USCITA → negativo (soldi che escono dal cassetto)
         if segno_raw in {"-1", "-", "U", "USC", "USCITA", "OUT", "P"} or (
             segno_col and _money(data.get(segno_col)) < 0 and amt > 0
         ):
             if amt > 0:
                 amt = -amt
-        elif segno_raw in {"1", "+", "E", "ENT", "ENTRATA", "IN", "V"}:
-            pass
         desc = _cell(data.get(desc_col) if desc_col else "", 60)
-        # Se importo colonna assente, prova a leggere dalla descrizione numeri (raro)
         hits.append(
             {
-                "id": data.get(id_col),
+                "id": pid,
                 "when": data.get(ts_col),
                 "store": _cell(data.get(store_col) if store_col else "", 8),
                 "tipo": _cell(data.get(tipo_col) if tipo_col else "", 16),
@@ -218,10 +327,11 @@ def _read_testate(cur, day: datetime) -> Tuple[List[Dict[str, Any]], Decimal]:
                 "segno": segno_raw,
                 "amount": amt,
                 "desc": desc,
+                "src": src,
             }
         )
         total += amt
-    return hits, total
+    return hits, total, used_recent
 
 
 def _read_codici(cur) -> None:
@@ -251,7 +361,7 @@ def _read_codici(cur) -> None:
     for row in rows:
         line = " | ".join(_cell(v, 40) for v in row)
         up = line.upper()
-        if any(k in up for k in ("CASSET", "PRELIEV", "VERSAMENT", "FONDO", "IVA", "BANCA")):
+        if any(k in up for k in ("CASSET", "PRELIEV", "VERSAMENT", "FONDO", "IVA", "BANCA", "LAVAND", "SPESA")):
             print(" ", line)
 
 
@@ -288,31 +398,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 ("MOVIMENTICASSETTIT", "MOVIMENTICASSETTIR", "CODICIMOVIMENTI"),
             )
 
-        hits, total = _read_testate(cur, day)
+        hits, total, used_recent = _read_testate(cur, day)
         _read_codici(cur)
 
-        print(f"\n=== movimenti cassetto del {day.date().isoformat()} ({len(hits)}) ===")
+        label = day.date().isoformat()
+        if used_recent:
+            print(f"\n=== nessun movimento il {label}: ultimi in GDB ({len(hits)}) ===")
+            print("(Su Via Lattea quel giorno puo essere vuoto: controlla data lettura / altra cassa.)")
+        else:
+            print(f"\n=== movimenti cassetto del {label} ({len(hits)}) ===")
+
         if not hits:
-            print("Nessuna testata in MOVIMENTICASSETTIT per questo giorno.")
-            print("Rilancia con --schema e incolla l'output (colonne + 5 sample).")
+            print("Nessuna testata in MOVIMENTICASSETTIT.")
+            print("Rilancia con --schema e incolla l'output.")
             return 0
 
-        print(f"{'quando':19} {'pos':5} {'importo':>10}  {'tipo/codice':18} descrizione")
+        print(f"{'quando':19} {'pos':5} {'importo':>10}  {'src':3}  descrizione")
         for hit in hits:
             when = hit["when"]
             when_s = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else _cell(when, 19)
-            tipo_code = " / ".join(x for x in (hit["tipo"], hit["code"]) if x)
             print(
                 f"{when_s:19} {hit['store']:5} {hit['amount']:>10}  "
-                f"{_cell(tipo_code, 18):18} {hit['desc']}"
+                f"{hit['src']:3}  {hit['desc'] or hit['code'] or hit['tipo']}"
             )
 
-        print(f"\nTOTALE MOVIMENTICASSETTIT ({day.date().isoformat()}): {total}")
-        print(
-            "Nota: sulla lettura finanziaria «CONTANTI CASSETTO» è spesso "
-            "il netto prelievo/versamento del giorno (es. -230,60), non i tagli banconote."
-        )
-        print("Non usare MOVIMENTICASSETTIR (righe taglio) come totale Prima Nota.")
+        print(f"\nTOTALE: {total}")
+        print("src=T importo in testata; src=R somma righe MOVIMENTICASSETTIR.")
+        print("Usa questo totale per CONTANTI CASSETTO / MOVIMENTO_CASSETTO in Prima Nota.")
         return 0
     finally:
         con.close()
