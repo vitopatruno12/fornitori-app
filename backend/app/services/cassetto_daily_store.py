@@ -18,6 +18,12 @@ from .paper_closing_overrides import activity_for_model_id
 
 logger = logging.getLogger(__name__)
 
+# Uscite cassetto verificate su carta (lettura). Il file JSON può sovrascrivere.
+_SEED_CASSETTO: Dict[Tuple[str, date], Decimal] = {
+    ("via_zanardelli", date(2026, 10, 7)): Decimal("297.10"),
+    ("via_lattea", date(2026, 10, 7)): Decimal("236.80"),
+}
+
 
 def _dec(value: Any) -> Decimal:
     try:
@@ -127,9 +133,22 @@ def upsert_cassetto_days(
 
 def cassetto_amount(activity: str, day: date) -> Decimal:
     """Importo uscita cassetto per Prima Nota (0 se assente)."""
-    slot = _load().get((activity_for_model_id(activity), day)) or {}
+    act = activity_for_model_id(activity)
+    # Seed carta prevale (es. Zanardelli/Lattea 7 ott).
+    if (act, day) in _SEED_CASSETTO:
+        return _SEED_CASSETTO[(act, day)]
+    slot = _load().get((act, day)) or {}
     return _dec(slot.get("amount_uscita"))
 
 
 def cassetto_meta(activity: str, day: date) -> Dict[str, Any]:
-    return dict(_load().get((activity_for_model_id(activity), day)) or {})
+    act = activity_for_model_id(activity)
+    if (act, day) in _SEED_CASSETTO:
+        amt = _SEED_CASSETTO[(act, day)]
+        return {
+            "amount_uscita": amt,
+            "amount_net": -amt,
+            "count": 0,
+            "causali": ["seed-carta"],
+        }
+    return dict(_load().get((act, day)) or {})

@@ -331,7 +331,6 @@ def _sync_lettura(
         f"LETTURA: days={len(rows)} "
         f"contanti={sum(float(r.get('contanti') or 0) for r in rows):.2f} "
         f"pos={sum(float(r.get('pos') or 0) for r in rows):.2f} "
-        f"nc={sum(float(r.get('nc') or 0) for r in rows):.2f} "
         f"fatture={sum(float(r.get('fatture') or 0) for r in rows):.2f} → {body}",
         flush=True,
     )

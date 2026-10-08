@@ -3,44 +3,35 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from app.routers.pos_receipts import LetturaIngestBody, LetturaDayBody, ingest_lettura_daily
+from app.services.cassetto_daily_store import cassetto_amount
 from app.services.paper_closing_overrides import (
     get_paper_override,
+    is_seed_paper_day,
     paper_amounts,
-    upsert_paper_closing,
 )
 
 
-def test_upsert_lettura_split_nc_from_contanti(tmp_path, monkeypatch):
-    """CONTANTI/POS solo scontrini; NC preventivi; FATTURE a parte (Zanardelli 7 ott)."""
-    path = tmp_path / "paper_closings.json"
-    monkeypatch.setenv("PAPER_CLOSINGS_PATH", str(path))
+def test_seed_7_ottobre_zanardelli_abba_lattea():
     day = date(2026, 10, 7)
-    upsert_paper_closing(
-        "via_zanardelli",
-        day,
-        contanti=776.85,
-        pos=1702.62,
-        fatture=80.00,
-        nc=640.15,
-    )
-    ov = get_paper_override("via_zanardelli", day)
-    assert ov["contanti"] == Decimal("776.85")
-    assert ov["pos"] == Decimal("1702.62")
-    assert ov["fatture"] == Decimal("80.00")
-    assert ov["nc"] == Decimal("640.15")
-    cash, card, quote = paper_amounts(
-        "via_zanardelli",
-        day,
-        Decimal("100.00"),
-        Decimal("200.00"),
-        Decimal("30.00"),
-    )
-    assert cash == Decimal("776.85")
-    assert card == Decimal("1702.62")
-    assert quote == Decimal("640.15")
+    assert is_seed_paper_day("via_zanardelli", day)
+    z = get_paper_override("via_zanardelli", day)
+    assert z["contanti"] == Decimal("1449.15")
+    assert z["pos"] == Decimal("1670.32")
+    assert z["fatture"] == Decimal("80.00")
+    assert z["nc"] == Decimal("0.00")
+    assert cassetto_amount("via_zanardelli", day) == Decimal("297.10")
+
+    a = get_paper_override("via_abba", day)
+    assert a["contanti"] == Decimal("1989.70")
+    assert a["pos"] == Decimal("2674.61")
+
+    l = get_paper_override("via_lattea", day)
+    assert l["contanti"] == Decimal("693.30")
+    assert l["pos"] == Decimal("603.00")
+    assert cassetto_amount("via_lattea", day) == Decimal("236.80")
 
 
-def test_ingest_lettura_daily_saves_nc(tmp_path, monkeypatch):
+def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
     path = tmp_path / "paper_closings.json"
     monkeypatch.setenv("PAPER_CLOSINGS_PATH", str(path))
     body = LetturaIngestBody(
@@ -48,28 +39,31 @@ def test_ingest_lettura_daily_saves_nc(tmp_path, monkeypatch):
         days=[
             LetturaDayBody(
                 day="2026-10-07",
-                contanti=776.85,
-                bancomat=1750.32,
-                pos=1702.62,
-                fatture=80.0,
-                nc=640.15,
+                contanti=1.0,
+                pos=2.0,
+                fatture=3.0,
+                nc=4.0,
             )
         ],
     )
     db = MagicMock()
     with patch(
         "app.services.cash_closing_sync.sync_daily_closings_to_prima_nota",
-        return_value={"ok": True, "created": 4},
-    ) as sync, patch(
+        return_value={"ok": True},
+    ), patch(
         "app.services.agent_cassa_status.touch_agent_heartbeat",
         return_value={"ok": True},
     ):
         out = ingest_lettura_daily(body, db=db, _=None)
     assert out["ok"] is True
-    assert out["saved"] == 1
-    sync.assert_called_once()
-    ov = get_paper_override("via_zanardelli", date(2026, 10, 7))
-    assert ov["contanti"] == Decimal("776.85")
-    assert ov["pos"] == Decimal("1702.62")
-    assert ov["fatture"] == Decimal("80.00")
-    assert ov["nc"] == Decimal("640.15")
+    # Seed carta resta (agent non sovrascrive)
+    cash, card, quote = paper_amounts(
+        "via_zanardelli",
+        date(2026, 10, 7),
+        Decimal("0"),
+        Decimal("0"),
+        Decimal("0"),
+    )
+    assert cash == Decimal("1449.15")
+    assert card == Decimal("1670.32")
+    assert quote == Decimal("0.00")

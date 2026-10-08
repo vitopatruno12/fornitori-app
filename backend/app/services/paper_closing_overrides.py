@@ -50,6 +50,29 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("703.90"),
         "fatture": Decimal("12.30"),
     },
+    # Zanardelli 7 ott 2026 — LETTURA OPERATORE: CONTANTI 1449,15 · BANCOMAT 1750,32
+    # · FATTURE 80,00 → POS = bancomat − fatture = 1670,32. NC dentro contanti/POS.
+    ("via_zanardelli", date(2026, 10, 7)): {
+        "contanti": Decimal("1449.15"),
+        "pos": Decimal("1670.32"),
+        "fatture": Decimal("80.00"),
+        "nc": Decimal("0.00"),
+    },
+    # Abba 7 ott 2026 — LETTURA OPERATORE: CONTANTI 1989,70 · CARTA 2674,61 · INCASSO 4664,32.
+    ("via_abba", date(2026, 10, 7)): {
+        "contanti": Decimal("1989.70"),
+        "pos": Decimal("2674.61"),
+        "fatture": Decimal("0.00"),
+        "nc": Decimal("0.00"),
+    },
+    # Via Lattea 7 ott 2026 — LETTURA FINANZIARIA: BANCOMAT 603,00;
+    # CONTANTI 930,20 − CASSETTO 236,80 = IN CASSA 693,30.
+    ("via_lattea", date(2026, 10, 7)): {
+        "contanti": Decimal("693.30"),
+        "pos": Decimal("603.00"),
+        "fatture": Decimal("0.00"),
+        "nc": Decimal("0.00"),
+    },
 }
 
 MODEL_ID_TO_ACTIVITY = {
@@ -136,9 +159,14 @@ def _load_file_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
 
 
 def all_paper_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
-    merged = dict(_SEED_PAPER_CLOSINGS)
-    merged.update(_load_file_overrides())
+    # Seed carta verificati prevalgono sul file (agent GDB non deve ribaltare il 7 ott…).
+    merged = dict(_load_file_overrides())
+    merged.update(_SEED_PAPER_CLOSINGS)
     return merged
+
+
+def is_seed_paper_day(activity: str, day: date) -> bool:
+    return (_activity_key(activity), day) in _SEED_PAPER_CLOSINGS
 
 
 def get_paper_override(activity: str, day: date) -> Dict[str, Decimal]:
@@ -173,7 +201,7 @@ def list_paper_closings(
                 "pos": amounts.get("pos"),
                 "nc": amounts.get("nc"),
                 "fatture": amounts.get("fatture"),
-                "source": "seed" if (act, day) in _SEED_PAPER_CLOSINGS and (act, day) not in file_map else "file",
+                "source": "seed" if (act, day) in _SEED_PAPER_CLOSINGS else "file",
             }
         )
     return rows

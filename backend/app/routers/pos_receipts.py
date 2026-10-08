@@ -290,14 +290,19 @@ def ingest_lettura_daily(
             day = date_cls.fromisoformat(str(d.get("day") or "")[:10])
         except ValueError:
             continue
-        # CONTANTI/POS = solo scontrini; NC = preventivi/VEA; FATTURE a parte.
+        # Giorni seedati da carta: sync con seed (non sovrascrivere con GDB).
+        if paper_closing_overrides.is_seed_paper_day(act, day):
+            force_days.append(day)
+            saved += 1
+            continue
+        # Lettura ≈ carta: CONTANTI tutti i contanti; POS = elettronico senza fatture; NC=0.
         paper_closing_overrides.upsert_paper_closing(
             act,
             day,
             contanti=d.get("contanti"),
             pos=d.get("pos"),
             fatture=d.get("fatture"),
-            nc=d.get("nc"),
+            nc=0,
         )
         force_days.append(day)
         saved += 1
