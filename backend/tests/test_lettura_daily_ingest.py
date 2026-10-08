@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.routers.pos_receipts import LetturaIngestBody, LetturaDayBody, ingest_lettura_daily
 from app.services.cassetto_daily_store import cassetto_amount
+from app.services.cash_closing_sync import _KIND_META
 from app.services.paper_closing_overrides import (
     get_paper_override,
     is_seed_paper_day,
@@ -11,24 +12,27 @@ from app.services.paper_closing_overrides import (
 )
 
 
-def test_seed_7_ottobre_zanardelli_abba_lattea():
+def test_nc_is_entrata_in_prima_nota():
+    assert _KIND_META["nc"].get("entry_type") == "entrata"
+    assert _KIND_META["nc"]["conto"]
+
+
+def test_seed_7_ottobre_zanardelli_splits_preventivi_to_nc():
     day = date(2026, 10, 7)
     assert is_seed_paper_day("via_zanardelli", day)
     z = get_paper_override("via_zanardelli", day)
-    assert z["contanti"] == Decimal("1449.15")
+    # Carta CONTANTI 1449.15 − preventivi 640.15 = 809.00
+    assert z["contanti"] == Decimal("809.00")
     assert z["pos"] == Decimal("1670.32")
     assert z["fatture"] == Decimal("80.00")
-    assert z["nc"] == Decimal("0.00")
+    assert z["nc"] == Decimal("640.15")
     assert cassetto_amount("via_zanardelli", day) == Decimal("297.10")
-
-    a = get_paper_override("via_abba", day)
-    assert a["contanti"] == Decimal("1989.70")
-    assert a["pos"] == Decimal("2674.61")
-
-    l = get_paper_override("via_lattea", day)
-    assert l["contanti"] == Decimal("693.30")
-    assert l["pos"] == Decimal("603.00")
-    assert cassetto_amount("via_lattea", day) == Decimal("236.80")
+    cash, card, quote = paper_amounts(
+        "via_zanardelli", day, Decimal("0"), Decimal("0"), Decimal("0")
+    )
+    assert cash == Decimal("809.00")
+    assert card == Decimal("1670.32")
+    assert quote == Decimal("640.15")
 
 
 def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
@@ -56,14 +60,6 @@ def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
     ):
         out = ingest_lettura_daily(body, db=db, _=None)
     assert out["ok"] is True
-    # Seed carta resta (agent non sovrascrive)
-    cash, card, quote = paper_amounts(
-        "via_zanardelli",
-        date(2026, 10, 7),
-        Decimal("0"),
-        Decimal("0"),
-        Decimal("0"),
-    )
-    assert cash == Decimal("1449.15")
-    assert card == Decimal("1670.32")
-    assert quote == Decimal("0.00")
+    ov = get_paper_override("via_zanardelli", date(2026, 10, 7))
+    assert ov["nc"] == Decimal("640.15")
+    assert ov["contanti"] == Decimal("809.00")

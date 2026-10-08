@@ -50,23 +50,24 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("703.90"),
         "fatture": Decimal("12.30"),
     },
-    # Zanardelli 7 ott 2026 — LETTURA OPERATORE: CONTANTI 1449,15 · BANCOMAT 1750,32
-    # · FATTURE 80,00 → POS = bancomat − fatture = 1670,32. NC dentro contanti/POS.
+    # Zanardelli 7 ott 2026 — carta CONTANTI 1449,15 · BANCOMAT 1750,32 · FATTURE 80;
+    # preventivi GDB 640,15 → NC entrata; CONTANTI = 1449,15 − 640,15 = 809,00;
+    # POS = 1750,32 − 80 = 1670,32.
     ("via_zanardelli", date(2026, 10, 7)): {
-        "contanti": Decimal("1449.15"),
+        "contanti": Decimal("809.00"),
         "pos": Decimal("1670.32"),
         "fatture": Decimal("80.00"),
-        "nc": Decimal("0.00"),
+        "nc": Decimal("640.15"),
     },
-    # Abba 7 ott 2026 — LETTURA OPERATORE: CONTANTI 1989,70 · CARTA 2674,61 · INCASSO 4664,32.
+    # Abba 7 ott 2026 — carta CONTANTI 1989,70 · CARTA 2674,61.
+    # NC da ricalcolare al prossimo sync agent (seed senza NC finché non noto).
     ("via_abba", date(2026, 10, 7)): {
         "contanti": Decimal("1989.70"),
         "pos": Decimal("2674.61"),
         "fatture": Decimal("0.00"),
         "nc": Decimal("0.00"),
     },
-    # Via Lattea 7 ott 2026 — LETTURA FINANZIARIA: BANCOMAT 603,00;
-    # CONTANTI 930,20 − CASSETTO 236,80 = IN CASSA 693,30.
+    # Via Lattea 7 ott 2026 — IN CASSA 693,30 · BANCOMAT 603,00.
     ("via_lattea", date(2026, 10, 7)): {
         "contanti": Decimal("693.30"),
         "pos": Decimal("603.00"),

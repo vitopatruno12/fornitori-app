@@ -295,14 +295,14 @@ def ingest_lettura_daily(
             force_days.append(day)
             saved += 1
             continue
-        # Lettura ≈ carta: CONTANTI tutti i contanti; POS = elettronico senza fatture; NC=0.
+        # CONTANTI/POS senza preventivi; NC = preventivi/VEA (entrata); FATTURE a parte.
         paper_closing_overrides.upsert_paper_closing(
             act,
             day,
             contanti=d.get("contanti"),
             pos=d.get("pos"),
             fatture=d.get("fatture"),
-            nc=0,
+            nc=d.get("nc"),
         )
         force_days.append(day)
         saved += 1

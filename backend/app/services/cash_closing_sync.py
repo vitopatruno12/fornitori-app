@@ -82,6 +82,7 @@ _KIND_META = {
         "conto": NON_FISCALE_CONTO,
         "description": "Preventivi / non fiscali (A)",
         "description_gdb": "Preventivi / non fiscali (A)",
+        "entry_type": "entrata",
     },
     "cassetto": {
         "conto": MOVIMENTO_CASSETTO_CONTO,
