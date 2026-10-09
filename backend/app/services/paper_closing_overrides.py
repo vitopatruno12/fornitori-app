@@ -71,6 +71,14 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("603.00"),
         "fatture": Decimal("0.00"),
     },
+    # Zanardelli 8 ott 2026 — lettura IN CASSA 1223,95 (non i contanti lordi 1957,61).
+    # PAGATO ELETTRONICO 1840,27 · TOT FATTURE 89,34.
+    ("via_zanardelli", date(2026, 10, 8)): {
+        "contanti": Decimal("1223.95"),
+        "pos": Decimal("1840.27"),
+        "nc": Decimal("640.72"),
+        "fatture": Decimal("89.34"),
+    },
 }
 
 MODEL_ID_TO_ACTIVITY = {
