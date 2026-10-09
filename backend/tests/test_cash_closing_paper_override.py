@@ -96,7 +96,8 @@ def test_abba_6_oct_uses_lettura_operatore_contanti():
         Decimal("100.00"),
     )
     assert cash == Decimal("2216.99")
-    assert card == Decimal("2816.81")
+    # POS = CARTA 2816,81 − FATTURE 128,73
+    assert card == Decimal("2688.08")
     assert quote == Decimal("100.00")
 
 
@@ -113,9 +114,10 @@ def test_storico_abba_6_oct_incasso_is_lettura_cash_plus_pos():
         },
     )
     assert hit["cash_eur"] == Decimal("2216.99")
-    assert hit["card_eur"] == Decimal("2816.81")
+    assert hit["card_eur"] == Decimal("2688.08")
     assert hit["invoice_eur"] == Decimal("128.73")
-    assert hit["incasso"] == Decimal("5033.80")
+    # contanti + pos (senza rifare le fatture nel bancomat)
+    assert hit["incasso"] == Decimal("4905.07")
     assert hit.get("paper_closing") is True
 
 

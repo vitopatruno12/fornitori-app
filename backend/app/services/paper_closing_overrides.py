@@ -36,11 +36,11 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("1872.78"),
         "fatture": Decimal("143.99"),
     },
-    # Abba 6 ott 2026: lettura CONTANTI 2216,99 · CARTA 2816,81 · FATTURE 128,73.
-    # Bancomat GDB già ok; contanti allineati alla carta (GDB sotto).
+    # Abba 6 ott 2026: CONTANTI 2216,99 · CARTA 2816,81 · FATTURE 128,73
+    # → POS = carta − fatture (niente doppio conteggio).
     ("via_abba", date(2026, 10, 6)): {
         "contanti": Decimal("2216.99"),
-        "pos": Decimal("2816.81"),
+        "pos": Decimal("2688.08"),
         "fatture": Decimal("128.73"),
     },
     # Via Lattea 6 ott 2026 (lettura finanziaria): BANCOMAT 703,90 ok;
@@ -50,29 +50,26 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("703.90"),
         "fatture": Decimal("12.30"),
     },
-    # Zanardelli 7 ott 2026 — carta CONTANTI 1449,15 · BANCOMAT 1750,32 · FATTURE 80;
-    # preventivi GDB 640,15 → NC entrata; CONTANTI = 1449,15 − 640,15 = 809,00;
-    # POS = 1750,32 − 80 = 1670,32.
+    # Zanardelli 7 ott 2026 — chiusura fiscale CONTANTI 776,85 · ELETTRONICO 1702,62;
+    # lettura FATTURE 80; preventivi GDB 640,15 → NC entrata.
+    # (carta CONTANTI 1449,15 = 776,85 + 640,15 + quota fatture contanti)
     ("via_zanardelli", date(2026, 10, 7)): {
-        "contanti": Decimal("809.00"),
-        "pos": Decimal("1670.32"),
+        "contanti": Decimal("776.85"),
+        "pos": Decimal("1702.62"),
         "fatture": Decimal("80.00"),
         "nc": Decimal("640.15"),
     },
-    # Abba 7 ott 2026 — carta CONTANTI 1989,70 · CARTA 2674,61.
-    # NC da ricalcolare al prossimo sync agent (seed senza NC finché non noto).
+    # Abba 7 ott 2026 — LETTURA OPERATORE CONTANTI 1989,70 · CARTA 2674,61.
     ("via_abba", date(2026, 10, 7)): {
         "contanti": Decimal("1989.70"),
         "pos": Decimal("2674.61"),
         "fatture": Decimal("0.00"),
-        "nc": Decimal("0.00"),
     },
     # Via Lattea 7 ott 2026 — IN CASSA 693,30 · BANCOMAT 603,00.
     ("via_lattea", date(2026, 10, 7)): {
         "contanti": Decimal("693.30"),
         "pos": Decimal("603.00"),
         "fatture": Decimal("0.00"),
-        "nc": Decimal("0.00"),
     },
 }
 

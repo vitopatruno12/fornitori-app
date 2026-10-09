@@ -1782,14 +1782,12 @@ def fetch_lettura_operatore_daily(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Totali chiusura da PAGAMENTI (per cassa NUMEROPOS).
 
-    CONTANTI = contanti esclusi preventivi/VEA (e restano i contanti fattura nella riga contanti
-      oppure si compensano con FATTURE a parte — FATTURE = tutti i pagamenti fattura).
-    NC = pagamenti su preventivi + VEA → Prima Nota entrata non fiscale.
-    POS = bancomat/carta esclusi preventivi/VEA, poi − FATTURE (come seed carta).
-    FATTURE = pagamenti documenti fattura.
+    CONTANTI = contanti su scontrini (no preventivi, no fatture).
+    POS = bancomat/carta su scontrini (no preventivi, no fatture).
+    NC = pagamenti preventivi+VEA → entrata non fiscale.
+    FATTURE = pagamenti documenti fattura (riga a parte).
 
-    Zanardelli 2026-10-07 NUMEROPOS=2:
-      carta CONTANTI 1449.15 − NC≈640.15 → CONTANTI≈809; BANCOMAT 1750.32 − FATTURE 80 → POS 1670.32
+    Zanardelli 2026-10-07: CONTANTI 776.85 · POS 1702.62 · NC≈640.15 · FATTURE 80.
     """
     if date_to < date_from:
         return [], {"ok": False, "error": "date_to < date_from"}
@@ -1862,15 +1860,12 @@ def fetch_lettura_operatore_daily(
                         and slot["sconto"] == 0
                     ):
                         continue
-                    pos_amt = slot["bancomat"] - slot["fatture"]
-                    if pos_amt < 0:
-                        pos_amt = Decimal("0.00")
                     rows_out.append(
                         {
                             "day": d.isoformat(),
                             "contanti": float(slot["contanti"]),
                             "bancomat": float(slot["bancomat"]),
-                            "pos": float(pos_amt),
+                            "pos": float(slot["bancomat"]),
                             "fatture": float(slot["fatture"]),
                             "nc": float(slot["nc"]),
                             "sconto": float(slot["sconto"]),
@@ -1878,6 +1873,7 @@ def fetch_lettura_operatore_daily(
                                 slot["contanti"]
                                 + slot["bancomat"]
                                 + slot["nc"]
+                                + slot["fatture"]
                                 + slot["sconto"]
                             ),
                             "docs": len(docs_by_day.get(d) or ()),
@@ -1944,37 +1940,41 @@ def fetch_lettura_operatore_daily(
 
                 slot = by_day.setdefault(day, _empty_slot())
                 docs = docs_by_day.setdefault(day, set())
+                # Abba: a volte PAGAMENTI ripete la stessa riga → totali ×2 rispetto alla carta.
+                seen_pay: Set[Tuple[str, int, str]] = set()
+                dup_pay = 0
                 for mid, tipo, ndoc, when, form_id, imp in rows:
                     key = str(mid).strip()
+                    fid = int(form_id or 0)
+                    amt = _cassetto_money(imp)
+                    pay_key = (key, fid, f"{amt:.2f}")
+                    if pay_key in seen_pay:
+                        dup_pay += 1
+                        continue
+                    seen_pay.add(pay_key)
                     mov_ids.add(key)
                     docs.add(key)
                     kind = classify_easyretail_ven_kind(tipo, ndoc)
-                    fid = int(form_id or 0)
                     nome = form_names.get(fid, "")
-                    amt = _cassetto_money(imp)
                     pay_rows += 1
                     if kind in ("preventivo", "vea"):
                         slot["nc"] += amt
                     elif kind == "fattura":
+                        # Solo in FATTURE (non anche in CONTANTI/POS → evita doppio conteggio).
                         slot["fatture"] += amt
-                        if _is_cash(fid, nome):
-                            slot["contanti"] += amt
-                        elif _is_card(fid, nome):
-                            slot["bancomat"] += amt
                     else:
-                        # scontrini (+ altri): restano in CONTANTI/POS
+                        # scontrini (+ altri non preventivo): CONTANTI / bancomat
                         if _is_cash(fid, nome):
                             slot["contanti"] += amt
                         elif _is_card(fid, nome):
                             slot["bancomat"] += amt
                         elif "SCONTO" in nome:
                             slot["sconto"] += amt
-                pos_day = slot["bancomat"] - slot["fatture"]
-                if pos_day < 0:
-                    pos_day = Decimal("0.00")
+                # POS Prima Nota = bancomat scontrini (fatture già fuori).
+                pos_day = slot["bancomat"]
                 print(
-                    f"LETTURA: {day.isoformat()} pay_rows={len(rows)} "
-                    f"contanti={slot['contanti']} pos={pos_day} "
+                    f"LETTURA: {day.isoformat()} pay_rows={len(rows)} unique={len(seen_pay)} "
+                    f"dup={dup_pay} contanti={slot['contanti']} pos={pos_day} "
                     f"nc={slot['nc']} fatture={slot['fatture']}",
                     flush=True,
                 )
