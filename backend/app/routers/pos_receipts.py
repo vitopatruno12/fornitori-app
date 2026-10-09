@@ -296,11 +296,42 @@ def ingest_lettura_daily(
             saved += 1
             continue
         # CONTANTI/POS senza preventivi; NC = preventivi/VEA (entrata); FATTURE a parte.
+        contanti = d.get("contanti")
+        pos = d.get("pos")
+        try:
+            from ..services.pos_receipts_service import load_pos_daily_incasso
+
+            model_id = (body.model_id or "").strip()
+            if not model_id:
+                model_id = next(
+                    (
+                        mid
+                        for mid, slug in paper_closing_overrides.MODEL_ID_TO_ACTIVITY.items()
+                        if slug == act
+                    ),
+                    "",
+                )
+            raw_split = load_pos_daily_incasso(
+                db,
+                date_from=day,
+                date_to=day,
+                model_id=model_id or None,
+                apply_paper=False,
+            )
+            hit = raw_split.get(day) or {}
+            contanti, pos = paper_closing_overrides.clamp_inflated_lettura(
+                contanti,
+                pos,
+                cash=hit.get("cash_eur"),
+                card=hit.get("card_eur"),
+            )
+        except Exception:
+            pass
         paper_closing_overrides.upsert_paper_closing(
             act,
             day,
-            contanti=d.get("contanti"),
-            pos=d.get("pos"),
+            contanti=contanti,
+            pos=pos,
             fatture=d.get("fatture"),
             nc=d.get("nc"),
         )

@@ -66,6 +66,45 @@ def classify_easyretail_ven_kind(doc_type: Any, doc_number: Any) -> str:
     return "other"
 
 
+def lettura_includes_document(doc_type: Any) -> bool:
+    """Chiusura operatore: solo VEN e VEA.
+
+    BIL è il gemello gestionale dello stesso scontrino. Se entra nei PAGAMENTI,
+    contanti e POS della lettura raddoppiano su ogni registro.
+    """
+    dt = str(doc_type or "").strip().upper()
+    return dt in ("", "VEN", "VEA")
+
+
+def strip_total_mirror(
+    lines: Sequence[Tuple[bool, Decimal, Any]],
+    doc_total: Decimal,
+) -> List[Tuple[bool, Decimal, Any]]:
+    """Toglie la riga che ripete il totale documento.
+
+    Succede quando PAGAMENTI ha una riga CONTANTI pari all'intero scontrino
+    e, accanto, i pagamenti veri. I contanti della chiusura diventano allora
+    l'incasso intero. Non tocca i pagamenti misti che già sommano al documento.
+    Se sia la riga contanti sia la carta ripetono il totale, si toglie la contanti.
+    """
+    kept = list(lines)
+    if doc_total <= 0 or len(kept) < 2:
+        return kept
+    total = sum((amt for _, amt, _ in kept), Decimal("0.00"))
+    if total <= doc_total + Decimal("0.05"):
+        return kept
+    cash_first = sorted(range(len(kept)), key=lambda i: 0 if kept[i][0] else 1)
+    for idx in cash_first:
+        amt = kept[idx][1]
+        if abs(amt - doc_total) > Decimal("0.02"):
+            continue
+        rest = [ln for j, ln in enumerate(kept) if j != idx]
+        rest_sum = sum((a for _, a, _ in rest), Decimal("0.00"))
+        if abs(rest_sum - doc_total) <= Decimal("0.05"):
+            return rest
+    return kept
+
+
 # Tabelle candidate (EasyRetail POS)
 _TABLE_CANDIDATES = (
     "SCONTRINI",
@@ -1894,8 +1933,19 @@ def fetch_lettura_operatore_daily(
                 d1 = datetime.combine(day + timedelta(days=1), time.min)
                 print(f"LETTURA: giorno {day.isoformat()} JOIN PAGAMENTI…", flush=True)
                 rows = None
+                rows_have_doc = False
                 if pos_want is not None:
-                    for sql, params in (
+                    for sql, params, has_doc in (
+                        (
+                            "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
+                            "m.DATAMOVIMENTO, p.NUMEROFORMAPAGAMENTO, p.IMPORTO, m.TOTALEDOCUMENTO "
+                            "FROM MOVIMENTIT m "
+                            "INNER JOIN PAGAMENTI p ON p.NUMEROMOVIMENTO = m.NUMEROMOVIMENTO "
+                            "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ? "
+                            "AND CAST(m.NUMEROPOS AS VARCHAR(20)) = ?",
+                            [d0, d1, pos_want],
+                            True,
+                        ),
                         (
                             "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
                             "m.DATAMOVIMENTO, p.NUMEROFORMAPAGAMENTO, p.IMPORTO "
@@ -1904,6 +1954,7 @@ def fetch_lettura_operatore_daily(
                             "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ? "
                             "AND CAST(m.NUMEROPOS AS VARCHAR(20)) = ?",
                             [d0, d1, pos_want],
+                            False,
                         ),
                         (
                             "SELECT m.NUMEROMOVIMENTO, m.TIPODOCUMENTO, m.NUMERODOCUMENTO, "
@@ -1913,11 +1964,13 @@ def fetch_lettura_operatore_daily(
                             "WHERE m.DATAMOVIMENTO >= ? AND m.DATAMOVIMENTO < ? "
                             "AND m.NUMEROPOS = ?",
                             [d0, d1, int(pos_want) if pos_want.isdigit() else pos_want],
+                            False,
                         ),
                     ):
                         try:
                             cur.execute(sql, params)
                             rows = cur.fetchall()
+                            rows_have_doc = has_doc
                             break
                         except Exception as exc:
                             print(f"LETTURA: join retry ({exc})", flush=True)
@@ -1943,7 +1996,13 @@ def fetch_lettura_operatore_daily(
                 # Abba: a volte PAGAMENTI ripete la stessa riga → totali ×2 rispetto alla carta.
                 seen_pay: Set[Tuple[str, int, str]] = set()
                 dup_pay = 0
-                for mid, tipo, ndoc, when, form_id, imp in rows:
+                grouped: Dict[str, Dict[str, Any]] = {}
+                for raw_row in rows:
+                    if rows_have_doc:
+                        mid, tipo, ndoc, when, form_id, imp, doc_raw = raw_row
+                    else:
+                        mid, tipo, ndoc, when, form_id, imp = raw_row
+                        doc_raw = None
                     key = str(mid).strip()
                     fid = int(form_id or 0)
                     amt = _cassetto_money(imp)
@@ -1954,22 +2013,36 @@ def fetch_lettura_operatore_daily(
                     seen_pay.add(pay_key)
                     mov_ids.add(key)
                     docs.add(key)
+                    if not lettura_includes_document(tipo):
+                        continue
                     kind = classify_easyretail_ven_kind(tipo, ndoc)
                     nome = form_names.get(fid, "")
-                    pay_rows += 1
-                    if kind in ("preventivo", "vea"):
-                        slot["nc"] += amt
-                    elif kind == "fattura":
-                        # Solo in FATTURE (non anche in CONTANTI/POS → evita doppio conteggio).
-                        slot["fatture"] += amt
-                    else:
-                        # scontrini (+ altri non preventivo): CONTANTI / bancomat
-                        if _is_cash(fid, nome):
-                            slot["contanti"] += amt
-                        elif _is_card(fid, nome):
-                            slot["bancomat"] += amt
-                        elif "SCONTO" in nome:
-                            slot["sconto"] += amt
+                    doc_amt = _cassetto_money(doc_raw)
+                    bucket = grouped.setdefault(key, {"doc": doc_amt, "lines": []})
+                    if doc_amt > 0:
+                        bucket["doc"] = doc_amt
+                    bucket["lines"].append((fid, amt, nome, kind))
+                for bucket in grouped.values():
+                    prepared = []
+                    for fid, amt, nome, kind in bucket["lines"]:
+                        is_cash = kind not in ("preventivo", "vea", "fattura") and _is_cash(fid, nome)
+                        prepared.append((is_cash, amt, (fid, amt, nome, kind)))
+                    for _is_cash_line, _amt, payload in strip_total_mirror(prepared, bucket["doc"]):
+                        fid, amt, nome, kind = payload
+                        pay_rows += 1
+                        if kind in ("preventivo", "vea"):
+                            slot["nc"] += amt
+                        elif kind == "fattura":
+                            # Solo in FATTURE (non anche in CONTANTI/POS → evita doppio conteggio).
+                            slot["fatture"] += amt
+                        else:
+                            # scontrini (+ altri non preventivo): CONTANTI / bancomat
+                            if _is_cash(fid, nome):
+                                slot["contanti"] += amt
+                            elif _is_card(fid, nome):
+                                slot["bancomat"] += amt
+                            elif "SCONTO" in nome:
+                                slot["sconto"] += amt
                 # POS Prima Nota = bancomat scontrini (fatture già fuori).
                 pos_day = slot["bancomat"]
                 print(

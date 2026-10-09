@@ -262,6 +262,43 @@ def upsert_paper_closing(
     }
 
 
+def clamp_inflated_lettura(
+    contanti: Optional[Any],
+    pos: Optional[Any],
+    *,
+    cash: Any,
+    card: Any,
+) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+    """Abbassa una lettura automatica gonfiata, lasciando stare la carta operatore.
+
+    Il POS è gonfiato quando vale circa il doppio degli scontrini in carta.
+    I contanti sono gonfiati quando valgono l'incasso intero (contanti + carta)
+    invece della sola quota contanti. Le letture già uguali agli scontrini restano.
+    """
+    cash_d = _dec(cash)
+    card_d = _dec(card)
+    out_c = None if contanti is None else _dec(contanti)
+    out_p = None if pos is None else _dec(pos)
+    if out_p is not None and card_d > 0:
+        twice = (card_d * 2).quantize(Decimal("0.01"))
+        if out_p >= (card_d * Decimal("1.85")).quantize(Decimal("0.01")):
+            slack = max(Decimal("1.00"), (twice * Decimal("0.08")).quantize(Decimal("0.01")))
+            if abs(out_p - twice) <= slack or (
+                out_p > twice and (out_p - twice) <= slack
+            ):
+                out_p = card_d
+    full = (cash_d + card_d).quantize(Decimal("0.01"))
+    if (
+        out_c is not None
+        and full > 0
+        and out_c > (cash_d * Decimal("1.5") if cash_d > 0 else full)
+    ):
+        slack_full = (full * Decimal("0.05")).quantize(Decimal("0.01"))
+        if abs(out_c - full) <= slack_full:
+            out_c = cash_d
+    return out_c, out_p
+
+
 def paper_amounts(
     activity: str,
     day: date,
