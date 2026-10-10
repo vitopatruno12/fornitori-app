@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _SEED_CASSETTO: Dict[Tuple[str, date], Decimal] = {
     ("via_zanardelli", date(2026, 10, 7)): Decimal("297.10"),
     ("via_lattea", date(2026, 10, 7)): Decimal("236.80"),
+    ("via_zanardelli", date(2026, 10, 10)): Decimal("156.60"),
 }
 
 

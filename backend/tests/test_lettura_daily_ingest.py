@@ -101,6 +101,15 @@ def test_seed_abba_6_ottobre_pos_senza_fatture():
     assert a["fatture"] == Decimal("128.73")
 
 
+def test_seed_10_ottobre_zanardelli_from_carta():
+    day = date(2026, 10, 10)
+    z = get_paper_override("via_zanardelli", day)
+    assert z["contanti"] == Decimal("1291.80")
+    assert z["pos"] == Decimal("1125.56")
+    assert z["fatture"] == Decimal("58.46")
+    assert cassetto_amount("via_zanardelli", day) == Decimal("156.60")
+
+
 def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
     path = tmp_path / "paper_closings.json"
     monkeypatch.setenv("PAPER_CLOSINGS_PATH", str(path))

@@ -79,6 +79,13 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "nc": Decimal("640.72"),
         "fatture": Decimal("89.34"),
     },
+    # Zanardelli 10 ott 2026 — lettura: CONTANTI 1291,80 · BANCOMAT 1184,02
+    # · FATTURE 58,46 → POS = 1184,02 − 58,46 = 1125,56. Cassetto 156,60.
+    ("via_zanardelli", date(2026, 10, 10)): {
+        "contanti": Decimal("1291.80"),
+        "pos": Decimal("1125.56"),
+        "fatture": Decimal("58.46"),
+    },
 }
 
 MODEL_ID_TO_ACTIVITY = {
