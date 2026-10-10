@@ -110,6 +110,29 @@ def test_seed_10_ottobre_zanardelli_from_carta():
     assert cassetto_amount("via_zanardelli", day) == Decimal("156.60")
 
 
+def test_seed_lattea_7_ottobre_contanti_lordi_non_in_cassa():
+    # CONTANTI lordi; il cassetto è uscita a parte (non già sottratto).
+    l = get_paper_override("via_lattea", date(2026, 10, 7))
+    assert l["contanti"] == Decimal("930.20")
+    assert l["pos"] == Decimal("603.00")
+    assert cassetto_amount("via_lattea", date(2026, 10, 7)) == Decimal("236.80")
+
+
+def test_resolve_numeropos_lattea_senza_filtro():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "easyretail_gdb_sync_agent.py"
+    spec = importlib.util.spec_from_file_location("atlas_agent", path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    assert mod._resolve_numeropos("model-3", ()) is None
+    assert mod._resolve_numeropos("model-4", ()) == "2"
+    assert mod._resolve_numeropos("model-2", ()) == "1"
+    assert mod._resolve_numeropos("model-2", ("1",)) == "1"
+
+
 def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
     path = tmp_path / "paper_closings.json"
     monkeypatch.setenv("PAPER_CLOSINGS_PATH", str(path))

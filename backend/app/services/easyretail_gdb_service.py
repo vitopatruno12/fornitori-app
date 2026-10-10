@@ -1819,14 +1819,17 @@ def fetch_lettura_operatore_daily(
     date_to: date,
     numeropos: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Totali chiusura da PAGAMENTI (per cassa NUMEROPOS).
+    """Totali chiusura automatica da PAGAMENTI (per cassa NUMEROPOS).
+
+    Esclude BIL (gemello gestionale) e toglie la riga-specchio del totale documento,
+    altrimenti CONTANTI/POS raddoppiano rispetto alla lettura operatore.
 
     CONTANTI = contanti su scontrini (no preventivi, no fatture).
     POS = bancomat/carta su scontrini (no preventivi, no fatture).
     NC = pagamenti preventivi+VEA → entrata non fiscale.
     FATTURE = pagamenti documenti fattura (riga a parte).
 
-    Zanardelli 2026-10-07: CONTANTI 776.85 · POS 1702.62 · NC≈640.15 · FATTURE 80.
+    Somma CONTANTI+POS+NC+FATTURE ≈ INCASSO carta / (CONTANTI+BANCOMAT lettura).
     """
     if date_to < date_from:
         return [], {"ok": False, "error": "date_to < date_from"}

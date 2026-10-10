@@ -290,12 +290,14 @@ def ingest_lettura_daily(
             day = date_cls.fromisoformat(str(d.get("day") or "")[:10])
         except ValueError:
             continue
-        # Giorni seedati da carta: sync con seed (non sovrascrivere con GDB).
+        # Seed carta storici: non sovrascrivere (giorni già verificati a mano).
+        # I giorni nuovi arrivano solo dall'agent → chiusura automatica.
         if paper_closing_overrides.is_seed_paper_day(act, day):
             force_days.append(day)
             saved += 1
             continue
-        # CONTANTI/POS senza preventivi; NC = preventivi/VEA (entrata); FATTURE a parte.
+        # CONTANTI/POS = scontrini; NC = preventivi; FATTURE a parte.
+        # clamp: se GDB ha ancora doppi (BIL/specchio), abbassa al livello scontrini.
         contanti = d.get("contanti")
         pos = d.get("pos")
         try:
@@ -319,12 +321,19 @@ def ingest_lettura_daily(
                 apply_paper=False,
             )
             hit = raw_split.get(day) or {}
+            before_c, before_p = contanti, pos
             contanti, pos = paper_closing_overrides.clamp_inflated_lettura(
                 contanti,
                 pos,
                 cash=hit.get("cash_eur"),
                 card=hit.get("card_eur"),
             )
+            if str(contanti) != str(before_c) or str(pos) != str(before_p):
+                print(
+                    f"LETTURA-DAILY: clamp {act} {day} "
+                    f"{before_c}/{before_p} → {contanti}/{pos}",
+                    flush=True,
+                )
         except Exception:
             pass
         paper_closing_overrides.upsert_paper_closing(

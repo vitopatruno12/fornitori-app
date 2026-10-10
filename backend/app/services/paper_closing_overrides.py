@@ -65,9 +65,10 @@ _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
         "pos": Decimal("2674.61"),
         "fatture": Decimal("0.00"),
     },
-    # Via Lattea 7 ott 2026 — IN CASSA 693,30 · BANCOMAT 603,00.
+    # Via Lattea 7 ott 2026 — CONTANTI lordi 930,20 · BANCOMAT 603,00
+    # (IN CASSA 693,30 = 930,20 − cassetto 236,80; cassetto è riga a parte).
     ("via_lattea", date(2026, 10, 7)): {
-        "contanti": Decimal("693.30"),
+        "contanti": Decimal("930.20"),
         "pos": Decimal("603.00"),
         "fatture": Decimal("0.00"),
     },

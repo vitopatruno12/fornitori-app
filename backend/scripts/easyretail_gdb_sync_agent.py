@@ -257,19 +257,28 @@ def _post_cassetto_daily(api: str, token: str, model_id: str | None, days: list[
 
 
 def _resolve_numeropos(model_id: str | None, store_filter: tuple[str, ...]) -> str | None:
-    """Cassa EasyRetail (NUMEROPOS) per allineare la lettura operatore."""
+    """Cassa EasyRetail (NUMEROPOS) per allineare la lettura operatore.
+
+    - Zanardelli/Abba: obbligatorio (stesso GDB condiviso).
+    - Via Lattea: nessuna filtro (GDB a cassa unica; NUMEROPOS storico inaffidabile).
+    - EASYRETAIL_NUMEROPOS=all|none|* → nessun filtro.
+    """
     env = (os.getenv("EASYRETAIL_NUMEROPOS") or "").strip()
+    if env.lower() in ("all", "none", "*", "-"):
+        return None
     if env:
         return env
     for p in store_filter:
         if p.isdigit():
             return p
+    mid = (model_id or "").strip()
+    if mid == "model-3":
+        return None  # Via Lattea: non filtrare
     defaults = {
-        "model-4": "2",  # Zanardelli (verificato 2026-10-07)
-        "model-2": "1",  # Abba / Mediazione (stesso GDB; STORE_FILTER=1)
-        "model-3": "4",  # Via Lattea (sample storici)
+        "model-4": "2",  # Zanardelli
+        "model-2": "1",  # Abba
     }
-    return defaults.get((model_id or "").strip())
+    return defaults.get(mid)
 
 
 def _post_lettura_daily(api: str, token: str, model_id: str | None, days: list[dict]) -> str:
@@ -302,12 +311,14 @@ def _sync_lettura(
 
     from app.services.easyretail_gdb_service import fetch_lettura_operatore_daily
 
-    days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
+    # Finestra corta: chiusura automatica degli ultimi giorni (veloce, ogni 3 min).
+    days_back = max(1, min(5, (int(lookback_hours) + 23) // 24))
     today = date.today()
     date_from = today - timedelta(days=days_back)
     numeropos = _resolve_numeropos(model_id, store_filter)
     print(
-        f"LETTURA: {date_from}…{today} model={model_id} NUMEROPOS={numeropos}",
+        f"LETTURA: {date_from}…{today} model={model_id} "
+        f"NUMEROPOS={numeropos if numeropos is not None else 'ALL'}",
         flush=True,
     )
     rows, meta = fetch_lettura_operatore_daily(
@@ -328,7 +339,7 @@ def _sync_lettura(
         return
     body = _post_lettura_daily(api, token, model_id, rows)
     print(
-        f"LETTURA: days={len(rows)} "
+        f"LETTURA AUTO: days={len(rows)} "
         f"contanti={sum(float(r.get('contanti') or 0) for r in rows):.2f} "
         f"pos={sum(float(r.get('pos') or 0) for r in rows):.2f} "
         f"nc={sum(float(r.get('nc') or 0) for r in rows):.2f} "
