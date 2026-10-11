@@ -580,6 +580,114 @@ def test_bank_versamento_detection_for_prima_nota():
   assert _activity_for_bank_company("mediazione_z") == "via_zanardelli"
 
 
+def test_alias_collega_nome_banca_diverso_dalla_fattura(tmp_path, monkeypatch):
+  from app.services import banca_service
+
+  path = tmp_path / "aliases.json"
+  path.write_text('{"aliases": []}\n', encoding="utf-8")
+  monkeypatch.setenv("SUPPLIER_BANK_ALIASES_PATH", str(path))
+  assert banca_service._party_names_align("MUCCHE VOLANTI", "MV SPA") is False
+  banca_service.remember_supplier_bank_alias("MV SPA", "MUCCHE VOLANTI")
+  assert banca_service._party_names_align("Mucche Volanti Srl", "MV S.P.A.") is True
+  banca_service.remember_supplier_bank_alias("MV SPA", "MUCCHE VOLANTI")
+  saved = banca_service.load_supplier_bank_aliases()
+  assert len(saved) == 1
+
+
+def test_bonifico_si_collega_a_fattura_gia_pagata_dal_file():
+  from app.services.banca_service import assign_already_paid_wires
+
+  supplier = "ACME FORNITURE SRL"
+  inv = _inv(
+    id=7,
+    invoice_number="77",
+    invoice_date=date(2026, 9, 1),
+    due_date=date(2026, 9, 30),
+    total=Decimal("400.00"),
+    amount_paid=Decimal("400.00"),
+    supplier_name=supplier,
+    payment_status="paid",
+  )
+  mov = _mov(
+    id=70,
+    amount=Decimal("400.00"),
+    movement_date=date(2026, 10, 1),
+    counterparty=supplier,
+    reconciliation_status="unmatched",
+    matched_invoice_id=None,
+  )
+  meta = {"mov": mov, "blob": supplier, "beneficiary": supplier, "blob_digits": "", "out": {}}
+  linked = assign_already_paid_wires([inv], [meta])
+  assert set(linked) == {7}
+  assert linked[7]["reason"] == "collegato_gia_pagata"
+  assert linked[7]["mov"].id == 70
+
+
+def test_bonifico_oltre_un_anno_non_collega_la_gia_pagata():
+  from app.services.banca_service import assign_already_paid_wires
+
+  supplier = "ACME FORNITURE SRL"
+  inv = _inv(
+    id=8,
+    invoice_date=date(2025, 1, 1),
+    due_date=date(2025, 1, 31),
+    total=Decimal("400.00"),
+    amount_paid=Decimal("400.00"),
+    supplier_name=supplier,
+    payment_status="paid",
+  )
+  mov = _mov(
+    id=80,
+    amount=Decimal("400.00"),
+    movement_date=date(2026, 8, 1),
+    counterparty=supplier,
+    reconciliation_status="unmatched",
+    matched_invoice_id=None,
+  )
+  meta = {"mov": mov, "blob": supplier, "beneficiary": supplier, "blob_digits": "", "out": {}}
+  assert assign_already_paid_wires([inv], [meta]) == {}
+
+
+def test_somma_di_fatture_gia_pagate_dello_stesso_fornitore():
+  from app.services.banca_service import assign_already_paid_wires
+
+  supplier = "ACME FORNITURE SRL"
+  invoices = [
+    _inv(
+      id=1,
+      invoice_number="1",
+      invoice_date=date(2026, 9, 1),
+      due_date=date(2026, 9, 30),
+      total=Decimal("100.00"),
+      amount_paid=Decimal("100.00"),
+      supplier_name=supplier,
+      payment_status="paid",
+    ),
+    _inv(
+      id=2,
+      invoice_number="2",
+      invoice_date=date(2026, 9, 2),
+      due_date=date(2026, 9, 30),
+      total=Decimal("150.00"),
+      amount_paid=Decimal("150.00"),
+      supplier_name=supplier,
+      payment_status="paid",
+    ),
+  ]
+  mov = _mov(
+    id=90,
+    amount=Decimal("250.00"),
+    movement_date=date(2026, 10, 5),
+    counterparty=supplier,
+    reconciliation_status="unmatched",
+    matched_invoice_id=None,
+  )
+  meta = {"mov": mov, "blob": supplier, "beneficiary": supplier, "blob_digits": "", "out": {}}
+  linked = assign_already_paid_wires(invoices, [meta])
+  assert set(linked) == {1, 2}
+  assert linked[1]["reason"] == "bundle_fornitore"
+
+
 def test_pagamenti_file_window_before_august_2026():
   from app.services.banca_service import _uses_pagamenti_file_recon
 

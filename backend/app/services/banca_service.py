@@ -3,8 +3,11 @@ from decimal import Decimal
 from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import bisect
+import json
 import logging
+import os
 import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -1461,7 +1464,8 @@ def _party_name_tokens(name: Optional[str]) -> List[str]:
   ]
 
 
-def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
+def _party_names_align_raw(supplier_name: Optional[str], beneficiary: str) -> bool:
+  """Stesso nome, senza la tabella alias."""
   left = _party_name_tokens(supplier_name)
   right = _party_name_tokens(beneficiary)
   if not left or not right:
@@ -1479,6 +1483,89 @@ def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
   joined_l = "".join(left)
   joined_r = "".join(right)
   return len(joined_l) >= 5 and (joined_l in joined_r or joined_r in joined_l)
+
+
+def supplier_bank_aliases_path() -> Path:
+  raw = (os.getenv("SUPPLIER_BANK_ALIASES_PATH") or "").strip()
+  if raw:
+    return Path(raw)
+  return Path(__file__).resolve().parents[2] / "data" / "supplier_bank_aliases.json"
+
+
+def _alias_side_match(left: Optional[str], right: Optional[str]) -> bool:
+  if _party_names_align_raw(left, right or ""):
+    return True
+  a = _party_compact(left)
+  b = _party_compact(right)
+  if not a or not b:
+    return False
+  if len(a) < 4 or len(b) < 4:
+    return a == b and len(a) >= 2
+  return a == b or a in b or b in a
+
+
+def load_supplier_bank_aliases() -> List[tuple]:
+  """Coppie (nome in banca, nome in fattura)."""
+  path = supplier_bank_aliases_path()
+  if not path.is_file():
+    return []
+  try:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+  except Exception:
+    logger.warning("Alias fornitori illeggibile: %s", path, exc_info=True)
+    return []
+  rows = raw.get("aliases") if isinstance(raw, dict) else raw
+  if not isinstance(rows, list):
+    return []
+  out: List[tuple] = []
+  for row in rows:
+    if not isinstance(row, dict):
+      continue
+    bank = str(row.get("bank_name") or "").strip()
+    supplier = str(row.get("supplier_name") or "").strip()
+    if bank and supplier:
+      out.append((bank, supplier))
+  return out
+
+
+def remember_supplier_bank_alias(bank_name: str, supplier_name: str) -> None:
+  """Memorizza un nome banca diverso da quello in fattura, per i bonifici successivi."""
+  bank = str(bank_name or "").strip()
+  supplier = str(supplier_name or "").strip()
+  if not bank or not supplier:
+    return
+  if _party_names_align_raw(supplier, bank):
+    return
+  current = load_supplier_bank_aliases()
+  for known_bank, known_supplier in current:
+    if _alias_side_match(bank, known_bank) and _alias_side_match(supplier, known_supplier):
+      return
+  path = supplier_bank_aliases_path()
+  try:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+      "aliases": [
+        {"bank_name": b, "supplier_name": s} for b, s in current
+      ] + [{"bank_name": bank, "supplier_name": supplier}]
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+  except Exception:
+    logger.warning("Alias fornitore non salvato", exc_info=True)
+
+
+def _alias_links(supplier_name: Optional[str], beneficiary: str) -> bool:
+  if not supplier_name or not beneficiary:
+    return False
+  for bank_name, alias_supplier in load_supplier_bank_aliases():
+    if _alias_side_match(beneficiary, bank_name) and _alias_side_match(supplier_name, alias_supplier):
+      return True
+  return False
+
+
+def _party_names_align(supplier_name: Optional[str], beneficiary: str) -> bool:
+  if _party_names_align_raw(supplier_name, beneficiary):
+    return True
+  return _alias_links(supplier_name, beneficiary)
 
 
 _DOC_REF_RE = re.compile(
@@ -2546,6 +2633,114 @@ def allocate_supplier_bundles(
         "bundle_size": len(chosen),
         "supplier": getattr(inv, "supplier_name", None),
       }
+  return out
+
+
+def assign_already_paid_wires(
+  invoices: List[Any],
+  mov_meta: List[Dict[str, Any]],
+  *,
+  skip_invoice_ids: Optional[set] = None,
+  skip_movement_ids: Optional[set] = None,
+) -> Dict[int, Dict[str, Any]]:
+  """Collega un bonifico ancora aperto a fatture già segnate pagate.
+
+  Stesso fornitore (o alias), stesso importo, data entro un anno.
+  Se l'importo è la somma di più fatture dello stesso fornitore, le collega tutte.
+  Non cambia lo stato pagata: aggiorna solo il movimento.
+  """
+  skip_inv = set(skip_invoice_ids or ())
+  skip_mov = set(skip_movement_ids or ())
+  pool = [inv for inv in invoices if int(getattr(inv, "id")) not in skip_inv]
+  if not pool:
+    return {}
+
+  def _rank(inv_dto: Any, mov: Any, blob: str, sc: Dict[str, Any]) -> tuple:
+    inv_d = _as_date(getattr(inv_dto, "invoice_date", None))
+    mov_d = _as_date(getattr(mov, "movement_date", None))
+    gap = abs((mov_d - inv_d).days) if inv_d and mov_d else 9999
+    return (int(sc.get("score") or 0), -gap, -int(getattr(inv_dto, "id") or 0))
+
+  candidates: List[Dict[str, Any]] = []
+  mov_index = _index_uscita_by_amount(mov_meta)
+  for inv_dto in pool:
+    inv_id = int(getattr(inv_dto, "id"))
+    for meta in _uscita_near_targets(mov_index, _invoice_amount_targets(inv_dto)):
+      mov = meta["mov"]
+      if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+        continue
+      mid = int(getattr(mov, "id") or 0)
+      if mid and mid in skip_mov:
+        continue
+      status = str(getattr(mov, "reconciliation_status", "") or "")
+      if status not in ("", "unmatched"):
+        continue
+      if getattr(mov, "matched_invoice_id", None):
+        continue
+      blob = meta.get("blob") or ""
+      if not _pair_can_score(
+        inv_dto,
+        blob,
+        meta.get("beneficiary") or "",
+        meta.get("blob_digits") or "",
+      ):
+        continue
+      sc = score_movement_invoice(inv_dto, mov, blob)
+      if sc.get("band") != "auto":
+        continue
+      if not _dates_compatible(inv_dto, mov, max_days=365):
+        continue
+      candidates.append(
+        {
+          "inv": inv_dto,
+          "mov": mov,
+          "meta": meta,
+          "sc": sc,
+          "rank": _rank(inv_dto, mov, blob, sc),
+        }
+      )
+
+  candidates.sort(key=lambda row: row["rank"], reverse=True)
+  out: Dict[int, Dict[str, Any]] = {}
+  used_inv: set[int] = set()
+  used_mov: set[int] = set()
+  for cand in candidates:
+    inv_id = int(getattr(cand["inv"], "id"))
+    mov_id = int(cand["mov"].id)
+    if inv_id in used_inv or mov_id in used_mov:
+      continue
+    used_inv.add(inv_id)
+    used_mov.add(mov_id)
+    out[inv_id] = {
+      "meta": cand["meta"],
+      "mov": cand["mov"],
+      "reason": "collegato_gia_pagata",
+      "sc": cand["sc"],
+    }
+
+  for iid, hit in allocate_saldo_fatture(
+    pool,
+    mov_meta,
+    skip_invoice_ids=used_inv | skip_inv,
+    skip_movement_ids=used_mov | skip_mov,
+  ).items():
+    out[iid] = {"meta": hit["meta"], "mov": hit["meta"]["mov"], "reason": "saldo_fatture"}
+    used_inv.add(iid)
+    used_mov.add(int(hit["meta"]["mov"].id))
+
+  for iid, hit in allocate_supplier_bundles(
+    pool,
+    mov_meta,
+    include_paid=True,
+    skip_invoice_ids=used_inv | skip_inv,
+    skip_movement_ids=used_mov | skip_mov,
+  ).items():
+    out[iid] = {
+      "meta": hit["meta"],
+      "mov": hit["meta"]["mov"],
+      "reason": "bundle_fornitore",
+      "bundle": True,
+    }
   return out
 
 
@@ -3828,6 +4023,8 @@ def sync_payment_status_from_bank(
     banca di quel periodo non sono più recuperabili.
   - dal 1/08/2026: bonifici sui conti (score auto: importo + fornitore e/o n. documento)
     e, senza bonifico, CONTANTI/CARTA/assegno nel file Pagamenti.
+  - fatture già chiuse dal file: il bonifico si collega lo stesso (stesso fornitore
+    o alias, stesso importo oppure somma di più fatture, data entro un anno).
 
   Un movimento con importo di una sola fattura paga quella fattura.
   Un bonifico «saldo fatture <mese>» che quadra con più fatture dello stesso fornitore
@@ -4045,6 +4242,31 @@ def sync_payment_status_from_bank(
     # Stesso canale «multi-fattura» di saldo/cited in UI
     saldo_by_invoice[iid] = hit
 
+  already_linked_ids = (
+    set(bank_assignments.keys()) | set(saldo_by_invoice.keys()) | set(cited_by_invoice.keys())
+  )
+  file_closed = []
+  for inv_dto in paid_listed:
+    inv_id = int(getattr(inv_dto, "id"))
+    if inv_id in already_linked_ids:
+      continue
+    if _uses_pagamenti_file_recon(inv_dto):
+      continue
+    if str(getattr(inv_dto, "payment_method", None) or "").strip().lower() == "contanti":
+      continue
+    already = mov_index["by_invoice"].get(inv_id)
+    if already and str(getattr(already["mov"], "reconciliation_status", "") or "") in {
+      "matched",
+      "difference",
+    }:
+      continue
+    file_closed.append(inv_dto)
+  paid_wire_by_invoice = assign_already_paid_wires(
+    file_closed,
+    mov_meta,
+    skip_movement_ids=assigned_mov | acconto_mov_ids,
+  )
+
   marked: List[Dict[str, Any]] = []
   reopened: List[Dict[str, Any]] = []
   marked_from_file = 0
@@ -4219,6 +4441,39 @@ def sync_payment_status_from_bank(
       }
     )
 
+  # Fatture già chiuse dal file: collega il bonifico, senza riaprirle e senza
+  # segnarle di nuovo pagate.
+  for inv_id, hit in paid_wire_by_invoice.items():
+    if inv_id in {int(item["invoice_id"]) for item in marked if item.get("invoice_id") is not None}:
+      continue
+    mov = hit["mov"]
+    meta = hit["meta"]
+    blob = meta.get("blob") or ""
+    num = ""
+    inv_dto = next((inv for inv in file_closed if int(getattr(inv, "id")) == inv_id), None)
+    if inv_dto is not None:
+      num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+      beneficiary = _movement_beneficiary(mov, blob)
+      supplier = getattr(inv_dto, "supplier_name", None)
+      if beneficiary and supplier and not _party_names_align_raw(supplier, beneficiary):
+        remember_supplier_bank_alias(beneficiary, str(supplier))
+    if str(getattr(mov, "reconciliation_status", "") or "") in ("", "unmatched"):
+      mov.reconciliation_status = "matched"
+      mov.difference_amount = None
+      if hit.get("reason") == "collegato_gia_pagata":
+        mov.matched_invoice_id = inv_id
+    changed = True
+    marked.append(
+      {
+        "invoice_id": inv_id,
+        "invoice_number": num,
+        "reason": hit.get("reason") or "collegato_gia_pagata",
+        "movement_id": int(mov.id),
+        "match_band": "auto",
+        "already_paid": True,
+      }
+    )
+
   # Riapri «pagate» senza prova banca né contanti/POS da file.
   # Proteggi anche saldi multi-fattura (nota [fatture collegate] / numeri in causale).
   marked_ids = {int(item["invoice_id"]) for item in marked if item.get("invoice_id") is not None}
@@ -4227,7 +4482,13 @@ def sync_payment_status_from_bank(
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
     if str(getattr(inv_dto, "payment_method", None) or "").strip().lower() == "contanti":
       continue
-    if inv_id in marked_ids or inv_id in bank_assignments or inv_id in saldo_by_invoice or inv_id in cited_by_invoice:
+    if (
+      inv_id in marked_ids
+      or inv_id in bank_assignments
+      or inv_id in saldo_by_invoice
+      or inv_id in cited_by_invoice
+      or inv_id in paid_wire_by_invoice
+    ):
       continue
     if _invoice_protected_by_bank_evidence(inv_dto, mov_meta):
       continue
@@ -4346,7 +4607,9 @@ def sync_payment_status_from_bank(
   if changed:
     db.commit()
 
-  fully_marked = [item for item in marked if item.get("reason") != "acconto"]
+  fully_marked = [
+    item for item in marked if item.get("reason") != "acconto" and not item.get("already_paid")
+  ]
   da_pagare_count = max(0, len(unpaid) - len(fully_marked) + len(reopened))
   return {
     "ok": True,

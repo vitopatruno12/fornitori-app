@@ -321,7 +321,7 @@ def _reconcile_all_companies(db: Session) -> Dict[str, Any]:
     bank_sync = res.get("bank_sync") or {}
     for item in bank_sync.get("items") or []:
       iid = int(item.get("invoice_id") or 0)
-      if not iid or iid in seen_mark:
+      if not iid or iid in seen_mark or item.get("already_paid"):
         continue
       seen_mark.add(iid)
       marked_items.append(item)
@@ -341,7 +341,15 @@ def _reconcile_all_companies(db: Session) -> Dict[str, Any]:
   from_bank = sum(
     1
     for item in marked_items
-    if item.get("reason") in ("numero_in_movimento", "importo_in_movimento", "matched")
+    if item.get("reason") in (
+      "numero_in_movimento",
+      "importo_in_movimento",
+      "matched",
+      "score_auto",
+      "collegato_gia_pagata",
+      "bundle_fornitore",
+      "saldo_fatture",
+    )
   )
   return {
     "linked_movements": len(linked),

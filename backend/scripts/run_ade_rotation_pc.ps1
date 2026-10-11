@@ -12,7 +12,10 @@
 param(
   [switch]$CatchUp,
   [ValidateSet('request', 'download')]
-  [string]$Phase = ''
+  [string]$Phase = '',
+  [string]$ForceProfiles = '',
+  [string]$PlanDate = '',
+  [int]$LookbackDays = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +47,11 @@ $env:ADE_PROFILE_TIMEOUT_SEC = "900"
 # Il .env punta ancora alle cartelle di un altro utente Windows: da qui non si possono creare.
 $env:ADE_XML_DROP_DIR = Join-Path $Backend "uploads\ade"
 $env:ADE_DEBUG_DIR = Join-Path $Backend "uploads\ade_debug"
-$env:ADE_ROTATION_LOOKBACK_DAYS = "21"
+if ($LookbackDays -gt 0) {
+  $env:ADE_ROTATION_LOOKBACK_DAYS = [string]$LookbackDays
+} else {
+  $env:ADE_ROTATION_LOOKBACK_DAYS = "21"
+}
 # Ricevute (emesse verso le società, anche se il fornitore non è in anagrafica) ed emesse nostre.
 $env:ADE_MASS_KINDS = "ricevute,emesse"
 $env:ADE_HEADLESS = "1"
@@ -81,14 +88,17 @@ if ($CatchUp) {
   exit 0
 }
 
-if ($Phase -eq 'request') {
-  Invoke-Rotation @("--phase", "request")
-  exit 0
-}
-
-if ($Phase -eq 'download') {
-  $yesterday = (Get-Date).Date.AddDays(-1).ToString('yyyy-MM-dd')
-  Invoke-Rotation @("--phase", "download", "--date", $yesterday)
+if ($Phase -eq 'request' -or $Phase -eq 'download') {
+  $extra = @("--phase", $Phase)
+  if ($ForceProfiles.Trim()) {
+    $extra += @("--force", $ForceProfiles.Trim())
+  }
+  if ($PlanDate.Trim()) {
+    $extra += @("--date", $PlanDate.Trim())
+  } elseif ($Phase -eq 'download') {
+    $extra += @("--date", (Get-Date).Date.AddDays(-1).ToString('yyyy-MM-dd'))
+  }
+  Invoke-Rotation $extra
   exit 0
 }
 
