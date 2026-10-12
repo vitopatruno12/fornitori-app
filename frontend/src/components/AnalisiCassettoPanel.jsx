@@ -205,7 +205,19 @@ export function AnalisiCassettoPanel({ modelId, dateFrom, dateTo, periodLabel })
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>{formatDay(row.entry_date)}</td>
-                  <td>{row.description || 'Movimento cassetto'}</td>
+                  <td>
+                    {row.description || 'Movimento cassetto'}
+                    {Array.isArray(row.cassetto_operazioni) && row.cassetto_operazioni.length > 0 && (
+                      <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.1rem' }}>
+                        {row.cassetto_operazioni.map((op, index) => (
+                          <li key={`${op.ora || ''}-${op.testo || ''}-${index}`}>
+                            {[op.ora, op.testo].filter(Boolean).join(' · ')}
+                            {op.importo != null ? ` · € ${formatAmount(op.importo)}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
                   <td>€ {formatAmount(row.amount)}</td>
                   <td>
                     <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(row)}>

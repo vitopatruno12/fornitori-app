@@ -106,7 +106,47 @@ export function isExtraCassaMovement(entry) {
   return isPosEntry(entry) || isRefillEntry(entry) || isFattureEmesseEntry(entry)
 }
 
+export function cassettoOperazioni(entry) {
+  const raw = entry?.cassetto_operazioni
+  if (Array.isArray(raw) && raw.length) {
+    return raw
+      .map((op) => ({
+        ora: String(op?.ora || '').trim(),
+        verso: String(op?.verso || '').trim(),
+        importo: op?.importo == null || op?.importo === '' ? null : Number(op.importo),
+        testo: String(op?.testo || '').trim(),
+      }))
+      .filter((op) => op.testo)
+  }
+  const lines = String(entry?.note || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.includes('[auto-chiusura]'))
+  return lines.map((line) => {
+    const bits = line.split(' · ').map((bit) => bit.trim()).filter(Boolean)
+    const ora = /^\d{2}:\d{2}$/.test(bits[0] || '') ? bits.shift() : ''
+    const verso = bits[0] === 'uscita' || bits[0] === 'entrata' ? bits.shift() : ''
+    let importo = null
+    if (bits[0] && /^€/.test(bits[0])) {
+      const n = Number(bits.shift().replace('€', '').trim().replace(/\./g, '').replace(',', '.'))
+      importo = Number.isFinite(n) ? n : null
+    }
+    return { ora, verso, importo, testo: bits.join(' · ') || line }
+  }).filter((op) => op.testo)
+}
+
 function movementDescription(entry) {
+  if (isMovimentoCassettoEntry(entry)) {
+    const ops = cassettoOperazioni(entry)
+    if (ops.length) {
+      const preview = ops.slice(0, 3).map((op) => {
+        const text = String(op.testo || '').trim()
+        return text.length > 70 ? `${text.slice(0, 67)}…` : text
+      }).join(' · ')
+      const more = ops.length > 3 ? ` · +${ops.length - 3}` : ''
+      return `${preview}${more} [Cassetto]`
+    }
+  }
   let text = String(entry.description || '').trim()
   if (entry.riferimento_documento) {
     text = text ? `${text} · ${entry.riferimento_documento}` : String(entry.riferimento_documento)
@@ -149,10 +189,12 @@ function entrySearchAmounts(entry) {
     entry?.versamentoBanca,
     entry?.movimentoCassetto,
     entry?.incasso,
+    ...cassettoOperazioni(entry).map((op) => op.importo),
   ].map((value) => Number(value || 0)).filter((n) => Number.isFinite(n) && Math.abs(n) >= 0.005)
 }
 
 function entrySearchText(entry) {
+  const ops = cassettoOperazioni(entry).map((op) => [op.testo, op.ora, op.verso].filter(Boolean).join(' '))
   return [
     entry?.description,
     entry?.riferimento_documento,
@@ -161,6 +203,7 @@ function entrySearchText(entry) {
     entry?.activity,
     entry?.conto,
     entry?.type,
+    ...ops,
   ]
     .filter(Boolean)
     .join(' ')

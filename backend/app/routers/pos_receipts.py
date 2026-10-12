@@ -132,12 +132,20 @@ class IngestBody(BaseModel):
     model_id: Optional[str] = None
 
 
+class CassettoOperazioneBody(BaseModel):
+    ora: str = ""
+    verso: str = ""
+    importo: float = 0
+    testo: str = ""
+
+
 class CassettoDayBody(BaseModel):
     day: str
     amount_uscita: float = 0
     amount_net: float = 0
     count: int = 0
     causali: List[str] = Field(default_factory=list)
+    operazioni: List[CassettoOperazioneBody] = Field(default_factory=list)
 
 
 class CassettoIngestBody(BaseModel):

@@ -5,6 +5,13 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class CassettoOperazioneRead(BaseModel):
+    ora: str = ""
+    verso: str = ""
+    importo: Optional[float] = None
+    testo: str = ""
+
+
 class CashEntryBase(BaseModel):
     entry_date: datetime
     type: str  # entrata | uscita
@@ -32,6 +39,7 @@ class CashEntryCreate(CashEntryBase):
 class CashEntryRead(CashEntryBase):
     id: int
     created_at: datetime
+    cassetto_operazioni: Optional[List[CassettoOperazioneRead]] = None
 
     class Config:
         from_attributes = True

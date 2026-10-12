@@ -9,16 +9,21 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from .paper_closing_overrides import activity_for_model_id
 
 logger = logging.getLogger(__name__)
 
 # Uscite cassetto verificate su carta (lettura). Il file JSON può sovrascrivere.
+_MAX_OPS = 80
+_MAX_TEXT = 180
+_SKIP_LABELS = {"seed-carta", "seed"}
+_ROME = ZoneInfo("Europe/Rome")
 _SEED_CASSETTO: Dict[Tuple[str, date], Decimal] = {
     ("via_zanardelli", date(2026, 10, 7)): Decimal("297.10"),
     ("via_lattea", date(2026, 10, 7)): Decimal("236.80"),
@@ -72,7 +77,8 @@ def _load() -> Dict[Tuple[str, date], Dict[str, Any]]:
             "amount_uscita": _dec(row.get("amount_uscita")),
             "amount_net": _dec(row.get("amount_net")),
             "count": int(row.get("count") or 0),
-            "causali": list(row.get("causali") or [])[:12],
+            "causali": list(row.get("causali") or [])[:20],
+            "operazioni": _clean_ops(row.get("operazioni")),
         }
     return out
 
@@ -89,7 +95,8 @@ def _save(data: Dict[Tuple[str, date], Dict[str, Any]]) -> None:
                 "amount_uscita": str(slot.get("amount_uscita") or "0.00"),
                 "amount_net": str(slot.get("amount_net") or "0.00"),
                 "count": int(slot.get("count") or 0),
-                "causali": list(slot.get("causali") or [])[:12],
+                "causali": list(slot.get("causali") or [])[:20],
+                "operazioni": _clean_ops(slot.get("operazioni")),
             }
         )
     payload = {
@@ -121,11 +128,16 @@ def upsert_cassetto_days(
             day = date.fromisoformat(day_raw)
         except ValueError:
             continue
+        prev = store.get((act, day)) or {}
+        incoming_ops = _clean_ops(raw.get("operazioni"))
+        if not incoming_ops:
+            incoming_ops = _clean_ops(prev.get("operazioni"))
         store[(act, day)] = {
             "amount_uscita": _dec(raw.get("amount_uscita")),
             "amount_net": _dec(raw.get("amount_net")),
             "count": int(raw.get("count") or 0),
-            "causali": [str(x)[:40] for x in (raw.get("causali") or []) if str(x).strip()][:12],
+            "causali": [str(x)[:80] for x in (raw.get("causali") or []) if str(x).strip()][:20],
+            "operazioni": incoming_ops,
         }
         saved += 1
     _save(store)
@@ -152,4 +164,121 @@ def cassetto_meta(activity: str, day: date) -> Dict[str, Any]:
             "count": 0,
             "causali": ["seed-carta"],
         }
-    return dict(_load().get((act, day)) or {})
+    slot = dict(_load().get((act, day)) or {})
+    slot.setdefault("operazioni", [])
+    return slot
+
+
+def _clean_text(value: Any) -> str:
+    text = " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())
+    return text[:_MAX_TEXT]
+
+
+def join_operation_parts(*parts: Any) -> str:
+    """Unisce causale, nota e operatore tenendo il testo più lungo."""
+    kept: List[str] = []
+    for part in parts:
+        text = _clean_text(part)
+        if not text or text.casefold() in _SKIP_LABELS:
+            continue
+        low = text.casefold()
+        absorbed = False
+        for index, existing in enumerate(kept):
+            other = existing.casefold()
+            if low == other or low in other:
+                absorbed = True
+                break
+            if other in low:
+                kept[index] = text
+                absorbed = True
+                break
+        if not absorbed:
+            kept.append(text)
+    return " · ".join(kept)[:_MAX_TEXT]
+
+
+def _clean_op(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    testo = join_operation_parts(raw.get("testo"))
+    if not testo:
+        return None
+    ora = str(raw.get("ora") or "").strip()[:5]
+    verso = str(raw.get("verso") or "").strip().lower()
+    if verso not in {"entrata", "uscita"}:
+        verso = ""
+    importo = None
+    if raw.get("importo") not in (None, ""):
+        importo = float(_dec(raw.get("importo")))
+    return {"ora": ora, "verso": verso, "importo": importo, "testo": testo}
+
+
+def _clean_ops(raw: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in raw or []:
+        op = _clean_op(item)
+        if not op:
+            continue
+        out.append(op)
+        if len(out) >= _MAX_OPS:
+            break
+    return out
+
+
+def display_operazioni(meta: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Righe da mostrare in Prima Nota. Se mancano i dettagli, usa le causali già salvate."""
+    data = meta or {}
+    ops = _clean_ops(data.get("operazioni"))
+    if ops:
+        return ops
+    out: List[Dict[str, Any]] = []
+    for label in data.get("causali") or []:
+        testo = join_operation_parts(label)
+        if not testo:
+            continue
+        out.append({"ora": "", "verso": "", "importo": None, "testo": testo})
+        if len(out) >= 20:
+            break
+    return out
+
+
+def cassetto_row_description(meta: Optional[Dict[str, Any]]) -> str:
+    ops = display_operazioni(meta)
+    if not ops:
+        return "Movimenti cassetto (A)"
+    return f"Movimenti cassetto · {len(ops)} operazioni (A)"[:255]
+
+
+def cassetto_detail_lines(meta: Optional[Dict[str, Any]]) -> List[str]:
+    lines: List[str] = []
+    for op in display_operazioni(meta):
+        bits: List[str] = []
+        if op.get("ora"):
+            bits.append(str(op["ora"]))
+        if op.get("verso"):
+            bits.append(str(op["verso"]))
+        if op.get("importo") is not None:
+            bits.append("€ " + f"{float(op['importo']):.2f}".replace(".", ","))
+        bits.append(str(op["testo"]))
+        lines.append(" · ".join(bits))
+    return lines
+
+
+def operazioni_for(activity: str, day: date) -> List[Dict[str, Any]]:
+    return display_operazioni(cassetto_meta(activity, day))
+
+
+def operazioni_for_entry(activity: Optional[str], when: Any) -> List[Dict[str, Any]]:
+    if not activity or when is None:
+        return []
+    if isinstance(when, datetime):
+        stamp = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+        day = stamp.astimezone(_ROME).date()
+    elif isinstance(when, date):
+        day = when
+    else:
+        try:
+            day = date.fromisoformat(str(when)[:10])
+        except ValueError:
+            return []
+    return operazioni_for(activity, day)

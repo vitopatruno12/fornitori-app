@@ -25,7 +25,9 @@ from .cash_service import (
     normalize_activity,
 )
 from .cassetto_daily_store import cassetto_amount as _cassetto_amount
+from .cassetto_daily_store import cassetto_detail_lines as _cassetto_detail_lines
 from .cassetto_daily_store import cassetto_meta as _cassetto_meta
+from .cassetto_daily_store import cassetto_row_description as _cassetto_row_description
 from .paper_closing_overrides import (
     get_paper_override,
     has_paper_override,
@@ -193,10 +195,13 @@ def _upsert_auto_entry(
     else:
         from_paper = has_paper_override(activity, day) and kind in ("contanti", "pos")
     description = meta["description"] if from_paper or kind == "nc" else meta.get("description_gdb") or meta["description"]
+    note = f"{AUTO_NOTE} {kind} {day.isoformat()}"
     if kind == "cassetto":
-        causali = [str(x) for x in (_cassetto_meta(activity, day).get("causali") or []) if str(x).strip()]
-        if causali:
-            description = f"Movimenti cassetto · {', '.join(causali[:4])} (A)"
+        cassetto = _cassetto_meta(activity, day)
+        description = _cassetto_row_description(cassetto)
+        detail = _cassetto_detail_lines(cassetto)
+        if detail:
+            note = note + "\n" + "\n".join(detail)
     if amount <= 0:
         existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
         if existing is not None:
@@ -204,12 +209,12 @@ def _upsert_auto_entry(
             return "removed"
         return "skip"
     existing = _find_auto_entry(db, activity=activity, day=day, conto=conto)
-    note = f"{AUTO_NOTE} {kind} {day.isoformat()}"
     if existing is not None:
         same_amount = _dec(existing.amount) == amount
         same_desc = str(existing.description or "") == description
         same_type = str(existing.type or "") == entry_type
-        if same_amount and same_desc and same_type:
+        same_note = str(existing.note or "") == note
+        if same_amount and same_desc and same_type and same_note:
             return "unchanged"
         existing.amount = amount
         existing.type = entry_type

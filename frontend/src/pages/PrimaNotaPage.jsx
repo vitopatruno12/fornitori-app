@@ -23,6 +23,7 @@ import {
 import {
   PRIMA_NOTA_MOVEMENTS_COLUMNS,
   PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE,
+  cassettoOperazioni,
   primaNotaMovementCellValue,
   primaNotaMovementMatchesSearch,
   primaNotaMovementTotalsLabel,
@@ -3021,7 +3022,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       {drawerEntry && (
         <>
           <div className="ui-drawer-backdrop" onClick={() => setDrawerEntry(null)} aria-hidden />
-          <aside className="ui-drawer" role="dialog" aria-label="Dettaglio movimento" style={{ width: 'min(440px, 100vw)' }}>
+          <aside className="ui-drawer" role="dialog" aria-label="Dettaglio movimento" style={{ width: isMovimentoCassetto(drawerEntry) ? 'min(560px, 100vw)' : 'min(440px, 100vw)' }}>
             <div className="ui-drawer-header">
               <div>
                 <h2 className="ui-drawer-title">Movimento cassa</h2>
@@ -3054,6 +3055,28 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               <p className="pn-amount-cell" style={{ fontSize: '1.35rem', margin: '0.5rem 0 1rem', color: isExtraCassa(drawerEntry) ? 'var(--text-muted)' : isCassaUscitaForcedConto(drawerEntry.conto) || drawerEntry.type === 'uscita' ? 'var(--danger)' : 'var(--success)' }}>
                 € {formatAmount(drawerEntry.amount)}{String(drawerEntry.note || drawerEntry.description || '').includes('[auto-chiusura]') || /\(\s*A\s*\)/.test(String(drawerEntry.description || '')) ? ' (A)' : ''}
               </p>
+              {isMovimentoCassetto(drawerEntry) && cassettoOperazioni(drawerEntry).length > 0 && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ margin: '0 0 0.4rem', fontWeight: 650 }}>Operazioni del cassetto</p>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {cassettoOperazioni(drawerEntry).map((op, index) => (
+                      <li key={`${op.ora}-${op.testo}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.35rem 0.75rem', padding: '0.45rem 0', borderTop: '1px solid var(--border, rgba(0,0,0,0.08))' }}>
+                        <span>
+                          <span style={{ display: 'block' }}>{op.testo}</span>
+                          {(op.ora || op.verso) && (
+                            <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              {[op.ora, op.verso].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </span>
+                        <strong style={{ whiteSpace: 'nowrap' }}>
+                          {op.importo != null && Number.isFinite(op.importo) ? `€ ${formatAmount(op.importo)}` : ''}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 0.75rem', fontSize: '0.9rem' }}>
                 <dt style={{ color: 'var(--text-muted)' }}>Descrizione</dt>
                 <dd style={{ margin: 0 }}>{drawerEntry.description || '–'}</dd>

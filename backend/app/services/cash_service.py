@@ -261,6 +261,8 @@ def list_entries_with_balance(
             Decimal(str(entrate_before or 0)) - Decimal(str(uscite_before or 0))
         ).quantize(Decimal("0.01"))
 
+    from .cassetto_daily_store import operazioni_for_entry
+
     result = []
     saldo = opening
     for e in entries:
@@ -291,6 +293,9 @@ def list_entries_with_balance(
             "activity": getattr(e, "activity", None) or DEFAULT_PRIMA_NOTA_ACTIVITY,
             "created_at": e.created_at,
             "saldo_progressivo": saldo,
+            "cassetto_operazioni": (
+                operazioni_for_entry(getattr(e, "activity", None), e.entry_date) or None
+            ) if e.conto == MOVIMENTO_CASSETTO_CONTO else None,
         })
     return result
 

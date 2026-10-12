@@ -1640,6 +1640,13 @@ def _cassetto_colmap(cols: Sequence[str]) -> Dict[str, str]:
     return {c.upper(): c for c in cols}
 
 
+def _cassetto_exact(col_u: Dict[str, str], *names: str) -> Optional[str]:
+    for name in names:
+        if name in col_u:
+            return col_u[name]
+    return None
+
+
 def _cassetto_pick(col_u: Dict[str, str], *names: str) -> Optional[str]:
     for name in names:
         if name in col_u:
@@ -1659,6 +1666,55 @@ def _cassetto_money(value: Any) -> Decimal:
         return Decimal(str(value or 0)).quantize(Decimal("0.01"))
     except Exception:
         return Decimal("0.00")
+
+
+def _join_cassetto_text(*parts: Any) -> str:
+    kept: List[str] = []
+    for part in parts:
+        text = " ".join(str(part or "").replace("\r", " ").replace("\n", " ").split())[:180]
+        if not text:
+            continue
+        low = text.casefold()
+        absorbed = False
+        for index, existing in enumerate(kept):
+            other = existing.casefold()
+            if low == other or low in other:
+                absorbed = True
+                break
+            if other in low:
+                kept[index] = text
+                absorbed = True
+                break
+        if not absorbed:
+            kept.append(text)
+    return " · ".join(kept)[:180]
+
+
+def _cassetto_code_labels(cur) -> Dict[str, str]:
+    """Anagrafica CODICIMOVIMENTI: codice → descrizione estesa."""
+    try:
+        cols = _table_columns(cur, "CODICIMOVIMENTI")
+    except Exception:
+        return {}
+    if not cols:
+        return {}
+    col_u = _cassetto_colmap(cols)
+    code_col = _cassetto_exact(col_u, "CODICEMOVIMENTO", "CODICE", "NUMEROCODICEMOVIMENTO")
+    desc_col = _cassetto_exact(col_u, "DESCRIZIONE", "INLABEL", "NOME", "CAUSALE")
+    if not code_col or not desc_col:
+        return {}
+    try:
+        cur.execute(f"SELECT {code_col}, {desc_col} FROM CODICIMOVIMENTI")
+        rows = cur.fetchall()
+    except Exception:
+        return {}
+    labels: Dict[str, str] = {}
+    for code, desc in rows:
+        key = str(code or "").strip()
+        text = " ".join(str(desc or "").split())
+        if key and text:
+            labels[key.upper()] = text[:180]
+    return labels
 
 
 def fetch_cassetto_daily(
@@ -1695,7 +1751,15 @@ def fetch_cassetto_daily(
         )
         ts_col = _cassetto_pick(t_u, "DATAMOVIMENTO", "DATAORA", "DATAORAMOVIMENTO", "DATA")
         segno_col = _cassetto_pick(t_u, "INGRESSOUSCITA", "SEGNO", "TIPOSEGNO")
-        desc_col = _cassetto_pick(t_u, "CAUSALE", "DESCRIZIONE", "NOTE")
+        code_col = _cassetto_exact(
+            t_u, "CODICEMOVIMENTO", "NUMEROCODICEMOVIMENTO", "CODICECAUSALE"
+        )
+        causale_col = _cassetto_exact(t_u, "CAUSALE", "CAUSALEMOVIMENTO")
+        descr_col = _cassetto_exact(
+            t_u, "DESCRIZIONE", "DESCRIZIONEMOVIMENTO", "INTESTAZIONE", "INTEST"
+        )
+        note_col = _cassetto_exact(t_u, "NOTE", "NOTA", "ANNOTAZIONI", "ANNOTAZIONE")
+        oper_col = _cassetto_exact(t_u, "OPERATORE", "NOMEOPERATORE", "CASSIERE", "UTENTE")
         amt_t = _cassetto_pick(
             t_u,
             "IMPORTOMOVIMENTO",
@@ -1708,6 +1772,7 @@ def fetch_cassetto_daily(
             return [], {"ok": False, "error": "colonne testata incomplete", "columns": t_cols}
 
         r_sums: Dict[Any, Decimal] = {}
+        r_texts: Dict[Any, List[str]] = {}
         r_cols = _table_columns(cur, "MOVIMENTICASSETTIR")
         if r_cols:
             r_u = _cassetto_colmap(r_cols)
@@ -1718,14 +1783,52 @@ def fetch_cassetto_daily(
                 "IDMOVIMENTOCASSETTO",
             )
             r_amt = _cassetto_pick(r_u, "TOTALE", "IMPORTO", "VALORE", "IMPORTOEURO")
+            r_text = _cassetto_exact(
+                r_u, "DESCRIZIONE", "NOTE", "CAUSALE", "DESCRIZIONEARTICOLO", "ARTICOLO"
+            )
             if r_parent and r_amt:
                 cur.execute(f"SELECT {r_parent}, SUM({r_amt}) FROM MOVIMENTICASSETTIR GROUP BY {r_parent}")
                 for pid, total in cur.fetchall():
                     r_sums[pid] = _cassetto_money(total)
+            if r_parent and r_text:
+                try:
+                    cur.execute(f"SELECT {r_parent}, {r_text} FROM MOVIMENTICASSETTIR")
+                    for pid, raw_text in cur.fetchall():
+                        piece = " ".join(str(raw_text or "").split())
+                        if not piece:
+                            continue
+                        bucket = r_texts.setdefault(pid, [])
+                        if piece not in bucket and len(bucket) < 8:
+                            bucket.append(piece[:180])
+                except Exception:
+                    r_texts = {}
+
+        code_labels = _cassetto_code_labels(cur)
 
         start = datetime.combine(date_from, time.min)
         end = datetime.combine(date_to + timedelta(days=1), time.min)
-        select = [c for c in (id_col, ts_col, segno_col, amt_t, desc_col) if c]
+        select = [
+            c
+            for c in (
+                id_col,
+                ts_col,
+                segno_col,
+                amt_t,
+                code_col,
+                causale_col,
+                descr_col,
+                note_col,
+                oper_col,
+            )
+            if c
+        ]
+        seen_select: set = set()
+        ordered_select: List[str] = []
+        for col in select:
+            if col not in seen_select:
+                seen_select.add(col)
+                ordered_select.append(col)
+        select = ordered_select
         sql = (
             f"SELECT FIRST 5000 {', '.join(select)} FROM MOVIMENTICASSETTIT "
             f"WHERE {ts_col} >= ? AND {ts_col} < ? ORDER BY {ts_col}"
@@ -1770,15 +1873,38 @@ def fetch_cassetto_daily(
                     "amount_net": Decimal("0.00"),
                     "count": 0,
                     "causali": [],
+                    "operazioni": [],
                 },
             )
             slot["amount_net"] = (slot["amount_net"] + signed).quantize(Decimal("0.01"))
             slot["count"] += 1
             if is_out or (not segno and amt > 0):
                 slot["amount_uscita"] = (slot["amount_uscita"] + abs(amt)).quantize(Decimal("0.01"))
-            causale = str(data.get(desc_col) or "").strip() if desc_col else ""
-            if causale and causale not in slot["causali"] and len(slot["causali"]) < 12:
-                slot["causali"].append(causale[:40])
+            code_raw = str(data.get(code_col) or "").strip() if code_col else ""
+            code_label = code_labels.get(code_raw.upper()) or code_labels.get(code_raw) or ""
+            operatore = str(data.get(oper_col) or "").strip() if oper_col else ""
+            testo = _join_cassetto_text(
+                code_label,
+                data.get(causale_col) if causale_col else "",
+                data.get(descr_col) if descr_col else "",
+                data.get(note_col) if note_col else "",
+                *(r_texts.get(pid) or []),
+                f"operatore {operatore}" if operatore else "",
+            )
+            if not testo:
+                testo = "Operazione senza descrizione"
+            if testo not in slot["causali"] and len(slot["causali"]) < 20:
+                slot["causali"].append(testo[:80])
+            if len(slot["operazioni"]) < 80:
+                ora = when.strftime("%H:%M") if hasattr(when, "strftime") else ""
+                slot["operazioni"].append(
+                    {
+                        "ora": ora,
+                        "verso": "uscita" if is_out else "entrata",
+                        "importo": float(abs(amt)),
+                        "testo": testo,
+                    }
+                )
 
         out = []
         for day in sorted(by_day.keys()):
@@ -1790,6 +1916,7 @@ def fetch_cassetto_daily(
                     "amount_net": float(slot["amount_net"]),
                     "count": slot["count"],
                     "causali": slot["causali"],
+                    "operazioni": slot["operazioni"],
                 }
             )
         return out, {
@@ -1800,6 +1927,8 @@ def fetch_cassetto_daily(
             "id_col": id_col,
             "ts_col": ts_col,
             "segno_col": segno_col,
+            "descr_col": descr_col,
+            "note_col": note_col,
         }
     finally:
         try:
