@@ -1717,6 +1717,18 @@ def _cassetto_code_labels(cur) -> Dict[str, str]:
     return labels
 
 
+def cassetto_pos_matches(value: Any, numeropos: Optional[str]) -> bool:
+    """True se il movimento appartiene a questa cassa.
+
+    Senza numero cassa richiesto (Via Lattea) tiene tutto.
+    Con numero richiesto, una riga senza cassa non va su nessun locale.
+    """
+    wanted = _norm_doc_number(numeropos)
+    if not wanted:
+        return True
+    return _norm_doc_number(value) == wanted
+
+
 def fetch_cassetto_daily(
     dsn: str,
     *,
@@ -1726,6 +1738,7 @@ def fetch_cassetto_daily(
     charset: str = "WIN1252",
     date_from: date,
     date_to: date,
+    numeropos: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Totali giornalieri movimento cassetto da MOVIMENTICASSETTIT (+ somma R).
 
@@ -1760,6 +1773,13 @@ def fetch_cassetto_daily(
         )
         note_col = _cassetto_exact(t_u, "NOTE", "NOTA", "ANNOTAZIONI", "ANNOTAZIONE")
         oper_col = _cassetto_exact(t_u, "OPERATORE", "NOMEOPERATORE", "CASSIERE", "UTENTE")
+        store_col = _cassetto_exact(t_u, "NUMEROPOS", "NUMEROPOSTAZIONE", "NUMEROCASSA")
+        pos_want = _norm_doc_number(numeropos) or None
+        if pos_want and not store_col:
+            print(
+                "CASSETTO: NUMEROPOS richiesto ma colonna cassa assente, tengo tutti i movimenti.",
+                flush=True,
+            )
         amt_t = _cassetto_pick(
             t_u,
             "IMPORTOMOVIMENTO",
@@ -1819,6 +1839,7 @@ def fetch_cassetto_daily(
                 descr_col,
                 note_col,
                 oper_col,
+                store_col,
             )
             if c
         ]
@@ -1841,6 +1862,8 @@ def fetch_cassetto_daily(
             rows = cur.fetchall()
 
         by_day: Dict[date, Dict[str, Any]] = {}
+        skipped_other_pos = 0
+        days_other_pos: Set[date] = set()
         for row in rows:
             data = {select[i]: row[i] for i in range(len(select))}
             when = data.get(ts_col)
@@ -1853,6 +1876,10 @@ def fetch_cassetto_daily(
                 except ValueError:
                     continue
             if day < date_from or day > date_to:
+                continue
+            if pos_want and store_col and not cassetto_pos_matches(data.get(store_col), pos_want):
+                skipped_other_pos += 1
+                days_other_pos.add(day)
                 continue
             pid = data.get(id_col)
             amt = _cassetto_money(data.get(amt_t) if amt_t else 0)
@@ -1906,6 +1933,19 @@ def fetch_cassetto_daily(
                     }
                 )
 
+        if pos_want and store_col:
+            for day in days_other_pos:
+                by_day.setdefault(
+                    day,
+                    {
+                        "amount_uscita": Decimal("0.00"),
+                        "amount_net": Decimal("0.00"),
+                        "count": 0,
+                        "causali": [],
+                        "operazioni": [],
+                    },
+                )
+
         out = []
         for day in sorted(by_day.keys()):
             slot = by_day[day]
@@ -1929,6 +1969,9 @@ def fetch_cassetto_daily(
             "segno_col": segno_col,
             "descr_col": descr_col,
             "note_col": note_col,
+            "store_col": store_col,
+            "numeropos": pos_want,
+            "skipped_other_pos": skipped_other_pos,
         }
     finally:
         try:

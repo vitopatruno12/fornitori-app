@@ -348,16 +348,34 @@ def _sync_lettura(
     )
 
 
-def _sync_cassetto(api: str, token: str, model_id: str | None, dsn: str, lookback_hours: int) -> None:
-    """Legge MOVIMENTICASSETTIT e invia i totali giornalieri ad ATLAS."""
+def _sync_cassetto(
+    api: str,
+    token: str,
+    model_id: str | None,
+    dsn: str,
+    lookback_hours: int,
+    store_filter: tuple[str, ...] = (),
+) -> None:
+    """Legge MOVIMENTICASSETTIT e invia i totali giornalieri ad ATLAS.
+
+    Abba e Zanardelli condividono il GDB: si tiene solo NUMEROPOS del locale
+    (1 Abba, 2 Zanardelli). Via Lattea non filtra.
+    """
     from datetime import date, timedelta
 
     from app.services.easyretail_gdb_service import fetch_cassetto_daily
 
+    numeropos = _resolve_numeropos(model_id, store_filter)
     days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
+    if numeropos:
+        days_back = 14
     today = date.today()
     date_from = today - timedelta(days=days_back)
-    print(f"CASSETTO: lettura {date_from}…{today} model={model_id}", flush=True)
+    print(
+        f"CASSETTO: lettura {date_from}…{today} model={model_id} "
+        f"NUMEROPOS={numeropos or 'ALL'}",
+        flush=True,
+    )
     rows, meta = fetch_cassetto_daily(
         dsn,
         user=os.getenv("EASYRETAIL_GDB_USER", "SYSDBA") or "SYSDBA",
@@ -366,6 +384,7 @@ def _sync_cassetto(api: str, token: str, model_id: str | None, dsn: str, lookbac
         charset=os.getenv("EASYRETAIL_GDB_CHARSET", "WIN1252") or "WIN1252",
         date_from=date_from,
         date_to=today,
+        numeropos=numeropos,
     )
     if not meta.get("ok"):
         print(f"CASSETTO: skip ({meta.get('error')})", flush=True)
@@ -376,7 +395,8 @@ def _sync_cassetto(api: str, token: str, model_id: str | None, dsn: str, lookbac
     body = _post_cassetto_daily(api, token, model_id, rows)
     tot = sum(float(r.get("amount_uscita") or 0) for r in rows)
     print(
-        f"CASSETTO: days={len(rows)} uscita_tot={tot:.2f} → {body}",
+        f"CASSETTO: days={len(rows)} uscita_tot={tot:.2f} "
+        f"col={meta.get('store_col')} skipped_other={meta.get('skipped_other_pos')} → {body}",
         flush=True,
     )
 
@@ -467,7 +487,7 @@ def main() -> int:
         except Exception as e:
             print(f"LETTURA ERRORE: {e}", file=sys.stderr, flush=True)
         try:
-            _sync_cassetto(api, token, model_id, dsn, lookback)
+            _sync_cassetto(api, token, model_id, dsn, lookback, store_filter)
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
             print(f"CASSETTO HTTP {e.code}: {err}", file=sys.stderr, flush=True)

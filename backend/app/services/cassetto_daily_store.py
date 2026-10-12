@@ -129,8 +129,9 @@ def upsert_cassetto_days(
         except ValueError:
             continue
         prev = store.get((act, day)) or {}
-        incoming_ops = _clean_ops(raw.get("operazioni"))
-        if not incoming_ops:
+        if "operazioni" in raw:
+            incoming_ops = _clean_ops(raw.get("operazioni"))
+        else:
             incoming_ops = _clean_ops(prev.get("operazioni"))
         store[(act, day)] = {
             "amount_uscita": _dec(raw.get("amount_uscita")),

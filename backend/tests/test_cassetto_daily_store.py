@@ -10,6 +10,7 @@ from app.services.cassetto_daily_store import (
     upsert_cassetto_days,
 )
 from app.services.cash_closing_sync import _KIND_META
+from app.services.easyretail_gdb_service import cassetto_pos_matches
 
 
 def test_cassetto_daily_store_roundtrip(tmp_path, monkeypatch):
@@ -97,3 +98,26 @@ def test_operazioni_complete_restano_nel_dettaglio(tmp_path, monkeypatch):
     )
     kept = cassetto_detail_lines(cassetto_meta("via_lattea", date(2026, 10, 11)))
     assert kept[0].endswith("Comprato straccio pagato Carlo")
+    upsert_cassetto_days(
+        model_id="model-3",
+        days=[
+            {
+                "day": "2026-10-11",
+                "amount_uscita": "0",
+                "amount_net": "0",
+                "count": 0,
+                "causali": [],
+                "operazioni": [],
+            }
+        ],
+    )
+    assert cassetto_detail_lines(cassetto_meta("via_lattea", date(2026, 10, 11))) == []
+
+
+def test_cassetto_resta_sulla_propria_cassa():
+    assert cassetto_pos_matches(1, "1")
+    assert cassetto_pos_matches("2", "2")
+    assert not cassetto_pos_matches(2, "1")
+    assert not cassetto_pos_matches(None, "1")
+    assert cassetto_pos_matches(2, None)
+    assert cassetto_pos_matches("coltelli", None)
