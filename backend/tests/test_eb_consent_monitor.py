@@ -5,7 +5,9 @@ from app.services.enable_banking_service import (
   CONSENT_WARN_DAYS,
   DEFAULT_CONSENT_DAYS,
   apply_session_consent,
+  bank_link_is_down,
   consent_monitor_for_account,
+  consent_monitor_summary,
   extract_session_consent_valid_until,
   fill_missing_consent_deadline,
 )
@@ -71,6 +73,48 @@ def test_missing_deadline_starts_at_180_days_once():
   kept = row.eb_consent_valid_until
   apply_session_consent(row, {"access": {}})
   assert row.eb_consent_valid_until == kept
+
+
+def test_conto_in_errore_e_staccato():
+  row = SimpleNamespace(
+    id=11,
+    bank_name="BCC",
+    account_name="Via Lattea",
+    company="via_lattea",
+    connection_status="error",
+    eb_account_uid="uid-11",
+    is_active=True,
+    eb_consent_valid_until=datetime.now(timezone.utc) + timedelta(days=70),
+  )
+  hit = consent_monitor_for_account(row)
+  assert hit["status"] == "detached"
+  assert hit["message"] == "Conto staccato — ricollega"
+
+
+def test_sessione_rifiutata_accende_il_conto_staccato(monkeypatch):
+  assert bank_link_is_down("Enable Banking HTTP 401: Session expired")
+  assert not bank_link_is_down("")
+  row = SimpleNamespace(
+    id=8,
+    bank_name="BCC Terra d'Otranto",
+    account_name="Via Lattea",
+    company="via_lattea",
+    connection_status="connected",
+    eb_account_uid="uid-8",
+    is_active=True,
+    eb_consent_valid_until=datetime.now(timezone.utc) + timedelta(days=70),
+  )
+  hit = consent_monitor_for_account(row)
+  assert hit["status"] == "ok"
+  monkeypatch.setattr(
+    "app.services.enable_banking_service._detached_account_ids",
+    lambda: {8},
+  )
+  summary = consent_monitor_summary([row])
+  marked = summary["items"][0]
+  assert marked["status"] == "detached"
+  assert summary["detached"] == 1
+  assert summary["needs_action"] == 0
 
 
 def test_real_session_date_replaces_missing_deadline():

@@ -6400,6 +6400,51 @@ select.form-control {
   border-top: 1px solid rgba(255, 255, 255, 0.16);
 }
 
+.banca-eb-lights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.55rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.banca-eb-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.22);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.banca-eb-light-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.banca-eb-light.is-on .banca-eb-light-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35), 0 0 8px #38bdf8;
+}
+
+.banca-eb-light.is-off .banca-eb-light-dot {
+  background: #f87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.35), 0 0 8px #f87171;
+}
+
+.banca-eb-light-state {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.66rem;
+  opacity: 0.9;
+}
+
 .banca-eb-consent-actions {
   margin-top: 0.55rem;
 }

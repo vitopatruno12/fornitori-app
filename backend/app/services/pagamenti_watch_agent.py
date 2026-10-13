@@ -282,6 +282,18 @@ def _sync_enable_banking_accounts(db: Session) -> Tuple[int, List[Dict[str, Any]
     except Exception as exc:  # noqa: BLE001 — un conto non deve fermare gli altri
       item["error"] = str(exc)[:240]
       logger.warning("Agente riconciliazione: sync conto %s fallito", row.id, exc_info=True)
+      from .enable_banking_service import bank_link_is_down
+
+      if bank_link_is_down(exc):
+        try:
+          db.rollback()
+          fresh = db.query(BankAccount).filter(BankAccount.id == row.id).first()
+          if fresh is not None:
+            fresh.connection_status = "error"
+            db.commit()
+        except Exception:
+          db.rollback()
+          logger.warning("Stato conto staccato non salvato per %s", row.id, exc_info=True)
     accounts.append(item)
   return imported_total, accounts
 

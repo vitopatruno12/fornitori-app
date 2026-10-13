@@ -2,6 +2,35 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { useBancaBase } from './BancaShared.jsx'
 
+const COMPANY_SHORT = {
+  mediazione_a: 'Abba',
+  mediazione_z: 'Zanardelli',
+  via_lattea: 'Via Lattea',
+  risacca: 'Risacca',
+  pg: 'PG',
+}
+
+function bankShort(label) {
+  const raw = String(label || '').split('·')[0].trim()
+  const up = raw.toUpperCase()
+  if (up.includes('INTESA')) return 'Intesa'
+  if (up.includes('BCC') || up.includes('OTRANTO')) return 'BCC'
+  if (up.includes('BPPB') || up.includes('POPOLARE')) return 'BPPB'
+  return raw.replace(/\d{4,}/g, '').trim() || 'Conto'
+}
+
+function lightLabel(row) {
+  const bank = bankShort(row?.label)
+  const company = COMPANY_SHORT[row?.company] || ''
+  return [bank, company].filter(Boolean).join(' · ')
+}
+
+function lightIsOn(row) {
+  const status = String(row?.status || '')
+  if (!row?.connected) return false
+  return !['disconnected', 'expired', 'detached', 'error'].includes(status)
+}
+
 function formatConsentDate(iso) {
   if (!iso) return ''
   try {
@@ -49,6 +78,7 @@ export default function EbConsentMonitor({ consent, compact = false }) {
   const actionItems = (consent.items || []).filter(
     (row) => row.connected && (row.status === 'warn' || row.status === 'expired' || row.status === 'unknown'),
   )
+  const lights = Array.isArray(consent.items) ? consent.items : []
 
   return (
     <div className={`banca-eb-consent ${tone}`} aria-label="Monitoraggio consenso Enable Banking">
@@ -69,6 +99,21 @@ export default function EbConsentMonitor({ consent, compact = false }) {
           <span className="banca-eb-consent-counter-unit">giorni</span>
         </div>
       </div>
+      {lights.length ? (
+        <ul className="banca-eb-lights" aria-label="Stato collegamento di ogni conto">
+          {lights.map((row) => {
+            const on = lightIsOn(row)
+            const name = lightLabel(row)
+            return (
+              <li key={row.account_id} className={`banca-eb-light ${on ? 'is-on' : 'is-off'}`}>
+                <span className="banca-eb-light-dot" aria-hidden />
+                <span>{name}</span>
+                <span className="banca-eb-light-state">{on ? 'attivo' : 'staccato'}</span>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
       {!compact && actionItems.length ? (
         <ul className="banca-eb-consent-list">
           {actionItems.slice(0, 6).map((row) => (

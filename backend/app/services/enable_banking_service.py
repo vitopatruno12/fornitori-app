@@ -343,8 +343,45 @@ def apply_session_consent(row: BankAccount, session: Optional[Dict[str, Any]], *
     fill_missing_consent_deadline(row)
 
 
+def bank_link_is_down(detail: Any) -> bool:
+  """True se la banca ha rifiutato la sessione e il conto va ricollegato."""
+  text = str(detail or "").lower()
+  if not text:
+    return False
+  return any(
+    token in text
+    for token in (
+      "session expired",
+      "http 401",
+      "unauthorized",
+      "invalid session",
+      "consent expired",
+      "access expired",
+    )
+  )
+
+
+def _detached_account_ids() -> set:
+  """Conti la cui ultima sincronizzazione è stata rifiutata dalla banca."""
+  try:
+    from .pagamenti_watch_agent import read_status
+  except Exception:
+    return set()
+  found = set()
+  for item in read_status().get("accounts") or []:
+    if not isinstance(item, dict) or not bank_link_is_down(item.get("error")):
+      continue
+    if item.get("id") is None:
+      continue
+    try:
+      found.add(int(item["id"]))
+    except (TypeError, ValueError):
+      continue
+  return found
+
+
 def consent_monitor_for_account(row: BankAccount) -> Dict[str, Any]:
-  """Stato consenso per UI: days_left, status (ok|warn|expired|unknown|disconnected)."""
+  """Stato consenso per UI: days_left, status (ok|warn|expired|unknown|disconnected|detached)."""
   connected = bool(getattr(row, "eb_account_uid", None)) or (row.connection_status or "") == "connected"
   label = f"{(row.bank_name or '').strip()} · {(row.account_name or 'Conto').strip()}".strip(" ·")
   company = (getattr(row, "company", None) or "").strip() or None
@@ -381,20 +418,31 @@ def consent_monitor_for_account(row: BankAccount) -> Dict[str, Any]:
   else:
     base["status"] = "ok"
     base["message"] = f"Ricollega tra {days_left} g"
+  if (row.connection_status or "") == "error":
+    base["status"] = "detached"
+    base["message"] = "Conto staccato — ricollega"
   return base
 
 
 def consent_monitor_summary(rows: List[BankAccount]) -> Dict[str, Any]:
   items = [consent_monitor_for_account(r) for r in rows if r.is_active]
   connected = [x for x in items if x.get("connected")]
+  down_ids = _detached_account_ids()
+  for item in items:
+    if item.get("account_id") in down_ids and item.get("status") not in ("disconnected", "expired"):
+      item["status"] = "detached"
+      item["message"] = "Conto staccato — ricollega"
   expired = [x for x in connected if x.get("status") == "expired"]
   warn = [x for x in connected if x.get("status") == "warn"]
   unknown = [x for x in connected if x.get("status") == "unknown"]
   ok = [x for x in connected if x.get("status") == "ok"]
   next_item = None
-  dated = [x for x in connected if x.get("days_left") is not None]
+  dated = [x for x in connected if x.get("days_left") is not None and x.get("status") != "detached"]
+  if not dated:
+    dated = [x for x in connected if x.get("days_left") is not None]
   if dated:
     next_item = min(dated, key=lambda x: int(x.get("days_left") or 0))
+  detached = [x for x in items if x.get("status") == "detached"]
   return {
     "warn_days": CONSENT_WARN_DAYS,
     "connected": len(connected),
@@ -402,6 +450,7 @@ def consent_monitor_summary(rows: List[BankAccount]) -> Dict[str, Any]:
     "warn": len(warn),
     "expired": len(expired),
     "unknown": len(unknown),
+    "detached": len(detached),
     "needs_action": len(expired) + len(warn),
     "next": next_item,
     "items": items,
