@@ -143,6 +143,19 @@ try:
             "Sede Via C. Battisti 27, 73041 Carmiano (LE)"
         ),
     )
+    ensure(
+        db,
+        bank_name="BPPB - Banca Popolare di Puglia e Basilicata",
+        account_name="PG · Gazza Ladra · CC1410004516",
+        iban="IT92F0538516000CC1410004516",
+        company="pg",
+        ledger_code="1100",
+        notes=(
+            "PG S.R.L. · BPPB ABI 05385 CAB 16000 · "
+            "CC1410004516 · SWIFT BPDMIT3B · "
+            "Enable Banking app 82c21178-2e47-44e6-a73d-396be16ccf96"
+        ),
+    )
     print("accounts:")
     for a in banca_service.list_accounts(db):
         print("-", a["id"], a.get("company") or "-", a["bank_name"], a.get("iban"))

@@ -66,5 +66,19 @@
     "enable_banking_app_id": "",
     "enable_banking_key_path": "",
     "enabled": true
+  },
+  {
+    "id": "bppb_pg",
+    "label": "BPPB — PG S.R.L. (Gazza Ladra)",
+    "company": "pg",
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "iban": "IT92F0538516000CC1410004516",
+    "account_number": "CC1410004516",
+    "username": "",
+    "password": "",
+    "portal_url": "",
+    "enable_banking_app_id": "82c21178-2e47-44e6-a73d-396be16ccf96",
+    "enable_banking_key_path": "./keys/82c21178-2e47-44e6-a73d-396be16ccf96.pem",
+    "enabled": true
   }
 ]

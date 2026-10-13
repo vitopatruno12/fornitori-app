@@ -877,7 +877,12 @@ def begin_enable_banking_connect(
       "bppb" in bank_l
       or "puglia" in bank_l
       or "basilicata" in bank_l
-      or iban_n in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+      or iban_n in {
+        "IT25D0538516000CC1410004514",
+        "IT55B0538516000CC1410004512",
+        "IT25D0538516000CC410004514",
+        "IT92F0538516000CC1410004516",
+      }
     )
   )
   is_intesa = (
@@ -900,14 +905,18 @@ def begin_enable_banking_connect(
         "Controlla /opt/fornitori-app/backend/keys/bank_profiles.json "
         "(devono esserci bcc_via_lattea e bcc_mediazione con quell'app_id)."
       )
-    if is_bppb and app_id and app_id != "b88c128a-68e1-4b2e-b999-e87cc80c13b8":
-      # Via Lattea BPPB non deve finire sull'app BCC 4625919e…
+    _bppb_apps = {
+      "b88c128a-68e1-4b2e-b999-e87cc80c13b8",  # Via Lattea / Mediazione BPPB
+      "82c21178-2e47-44e6-a73d-396be16ccf96",  # PG S.R.L. BPPB
+    }
+    if is_bppb and app_id and app_id not in _bppb_apps:
+      # Conti BPPB non devono finire sull'app BCC 4625919e…
       if app_id == "4625919e-22a1-4d40-8267-7587ff2360c0":
         raise RuntimeError(
-          "Profilo Enable Banking sbagliato per BPPB Via Lattea: Atlas userebbe l'app BCC "
+          "Profilo Enable Banking sbagliato per BPPB: Atlas userebbe l'app BCC "
           f"({app_id}, profilo {cfg.get('profile_id')}). "
-          "Serve l'app b88c128a-68e1-4b2e-b999-e87cc80c13b8 in bank_profiles.json "
-          "(id bppb_via_lattea) e IBAN IT25D0538516000CC1410004514."
+          "Serve l'app BPPB corretta in bank_profiles.json "
+          "(bppb_via_lattea o bppb_pg) e l'IBAN del conto."
         )
     # Non lasciare che il frontend/profilo usi per errore l'ASPSP sbagliato.
     auth_aspsp = aspsp_name or None
@@ -1259,7 +1268,12 @@ def _bank_kind_from_account(row: Optional[BankAccount]) -> str:
     "bppb" in text
     or "puglia" in text
     or "basilicata" in text
-    or iban in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+    or iban in {
+      "IT25D0538516000CC1410004514",
+      "IT55B0538516000CC1410004512",
+      "IT25D0538516000CC410004514",
+      "IT92F0538516000CC1410004516",
+    }
   ):
     return "bppb"
   if "intesa" in text or "sanpaolo" in text or iban == "IT88N0306979822100000008926":

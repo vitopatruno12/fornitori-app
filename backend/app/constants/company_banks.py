@@ -18,6 +18,7 @@ IBAN_VIA_LATTEA_BPPB = "IT25D0538516000CC1410004514"
 IBAN_VIA_LATTEA_BPPB_LEGACY = "IT25D0538516000CC410004514"
 IBAN_VIA_LATTEA_BCC = "IT37M0844516000000000967252"
 IBAN_RISACCA_INTESA = "IT88N0306979822100000008926"
+IBAN_PG_BPPB = "IT92F0538516000CC1410004516"
 
 MEDIAZIONE_COMPANIES: frozenset[str] = frozenset({"mediazione_a", "mediazione_z", "mediazione"})
 
@@ -54,7 +55,7 @@ COMPANY_BANK_EXPECTATIONS: Dict[str, Dict[str, Any]] = {
   "pg": {
     "label": "PG · Gazza Ladra",
     "banks": ("BPPB",),
-    "ibans": frozenset(),  # IBAN specifico da impostare su Conti correnti (company=pg)
+    "ibans": frozenset({IBAN_PG_BPPB}),
     "company_tags": frozenset({"pg"}),
     "bank_keywords": ("bppb", "puglia", "basilicata"),
   },
@@ -68,6 +69,7 @@ IBAN_TO_COMPANY: Dict[str, str] = {
   IBAN_VIA_LATTEA_BPPB_LEGACY: "via_lattea",
   IBAN_VIA_LATTEA_BCC: "via_lattea",
   IBAN_RISACCA_INTESA: "risacca",
+  IBAN_PG_BPPB: "pg",
 }
 
 
@@ -116,14 +118,6 @@ def account_matches_company(
   tags = set(spec.get("company_tags") or {cid})
   acc_co = (account_company or "").strip().lower()
   if acc_co and acc_co in tags:
-    # Evita che un BPPB Mediazione (company mediazione_a) finisca sotto PG
-    # se PG non ha IBAN noti: richiedi anche keyword banca + nome account/pg
-    if cid == "pg" and not known_ibans:
-      blob = f"{bank_name or ''} {account_name or ''} {notes or ''}".lower()
-      if "gazza" in blob or " pg" in f" {blob}" or blob.strip().startswith("pg"):
-        return True
-      # company=pg esplicito sul conto → ok
-      return acc_co == "pg"
     return True
 
   # Solo per società con IBAN noti: non usare keyword banca da sole

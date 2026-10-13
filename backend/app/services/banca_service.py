@@ -21,6 +21,7 @@ from ..models.invoice import Invoice
 from ..models.supplier import Supplier
 from ..constants.company_banks import (
   IBAN_MEDIAZIONE_BPPB,
+  IBAN_PG_BPPB,
   IBAN_RISACCA_INTESA,
   IBAN_TO_COMPANY,
   IBAN_VIA_LATTEA_BCC,
@@ -469,6 +470,10 @@ def ensure_known_account_companies(db: Session) -> int:
       if "risacca" not in name_l:
         row.account_name = "Risacca · Bar Momento · Intesa"
         need_rename = True
+    if target == "pg" and iban_n == normalize_iban(IBAN_PG_BPPB):
+      if "pg" not in name_l and "gazza" not in name_l:
+        row.account_name = "PG · Gazza Ladra · CC1410004516"
+        need_rename = True
     if current == target and not need_rename:
       continue
     # Non sovrascrivere pg se qualcuno ha già taggato a mano un IBAN non in mappa
@@ -524,11 +529,19 @@ _CANONICAL_BANK_SEEDS: List[Dict[str, Any]] = [
     "ledger_code": "1100",
     "notes": "RISACCA · Intesa Sanpaolo · IBAN IT88N0306979822100000008926",
   },
+  {
+    "bank_name": "BPPB - Banca Popolare di Puglia e Basilicata",
+    "account_name": "PG · Gazza Ladra · CC1410004516",
+    "iban": IBAN_PG_BPPB,
+    "company": "pg",
+    "ledger_code": "1100",
+    "notes": f"PG S.R.L. · BPPB · IBAN {IBAN_PG_BPPB} · SWIFT BPDMIT3B",
+  },
 ]
 
 
 def ensure_canonical_bank_accounts(db: Session) -> int:
-  """Crea i conti canonici (Via Lattea BPPB/BCC, Mediazione, Risacca) se l'IBAN non esiste."""
+  """Crea i conti canonici (Via Lattea BPPB/BCC, Mediazione, Risacca, PG) se l'IBAN non esiste."""
   # Include anche is_active=False: altrimenti un seed disattivato (duplicato) verrebbe ricreato.
   rows = db.query(BankAccount).all()
   existing = {normalize_iban(r.iban) for r in rows if r.iban}
@@ -565,7 +578,12 @@ def _bank_family_key(row: BankAccount) -> str:
     "bppb" in bank
     or "puglia" in bank
     or "basilicata" in bank
-    or iban in {"IT25D0538516000CC1410004514", "IT55B0538516000CC1410004512", "IT25D0538516000CC410004514"}
+    or iban in {
+      "IT25D0538516000CC1410004514",
+      "IT55B0538516000CC1410004512",
+      "IT25D0538516000CC410004514",
+      IBAN_PG_BPPB,
+    }
   ):
     return "bppb"
   if (
@@ -652,6 +670,7 @@ _PRIMARY_RECON_IBANS: Dict[str, frozenset] = {
   "mediazione": frozenset({normalize_iban(IBAN_MEDIAZIONE_BPPB)}),
   "via_lattea": frozenset({normalize_iban(IBAN_VIA_LATTEA_BCC)}),
   "risacca": frozenset({normalize_iban(IBAN_RISACCA_INTESA)}),
+  "pg": frozenset({normalize_iban(IBAN_PG_BPPB)}),
 }
 
 
