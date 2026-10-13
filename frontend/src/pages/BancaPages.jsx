@@ -321,15 +321,25 @@ const BANK_LAST_MOVEMENTS_COLUMNS = [
   { id: 'description', label: 'Descrizione', width: 42, fluid: true, emphasis: true },
   { id: 'type', label: 'Tipo', width: 12, fluid: true },
   { id: 'amount', label: 'Importo', width: 16, fluid: true, numeric: true },
-  { id: 'status', label: 'Riconciliato', width: 16, fluid: true },
+  { id: 'status', label: 'Stato', width: 16, fluid: true },
 ]
+
+function MovementSenseLight({ movementType }) {
+  const entrata = String(movementType || '').toLowerCase() === 'entrata'
+  const label = entrata ? 'Entrata' : 'Uscita'
+  return (
+    <span className={`banca-recon-light ${entrata ? 'is-on' : 'is-off'}`} title={label} aria-label={label}>
+      <span className="banca-recon-light-dot" aria-hidden="true" />
+    </span>
+  )
+}
 
 function bankLastMovementsCellValue(row, col) {
   if (col.id === 'date') return formatDate(row?.movement_date)
   if (col.id === 'description') return row?.description || '—'
   if (col.id === 'type') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   if (col.id === 'amount') return eur(row?.amount)
-  if (col.id === 'status') return reconciliationStatusLabel(row?.reconciliation_status)
+  if (col.id === 'status') return row?.movement_type === 'entrata' ? 'Entrata' : 'Uscita'
   return ''
 }
 
@@ -350,7 +360,7 @@ function bancaMovimentoDetailHref(row, base = '/banca') {
 }
 
 function bankLastMovementsRenderCell(row, col, base = '/banca') {
-  if (col.id === 'status') return <ReconLight status={row?.reconciliation_status} />
+  if (col.id === 'status') return <MovementSenseLight movementType={row?.movement_type} />
   if (col.id !== 'description') return null
   const text = row?.description || '—'
   if (!row?.id) return null
