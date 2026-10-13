@@ -110,6 +110,20 @@ export function ReconBadge({ status }) {
   return <span style={{ ...base, background: '#fee2e2', color: '#dc2626' }}>{label}</span>
 }
 
+/** Luce al posto della scritta: verde = riconciliato, rossa = da riconciliare. */
+export function ReconLight({ status }) {
+  const key = String(status || '').trim().toLowerCase()
+  const on = key === 'matched'
+  const warn = key === 'difference'
+  const label = on ? 'Riconciliato' : warn ? 'Differenza' : 'Da riconciliare'
+  const tone = on ? 'is-on' : warn ? 'is-warn' : 'is-off'
+  return (
+    <span className={`banca-recon-light ${tone}`} title={label} aria-label={label}>
+      <span className="banca-recon-light-dot" aria-hidden="true" />
+    </span>
+  )
+}
+
 export function AmministrazioneSubnav() {
   const location = useLocation()
   const path = location.pathname || ''

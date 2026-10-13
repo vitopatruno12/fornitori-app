@@ -7,6 +7,7 @@ import {
   eur,
   formatDate,
   reconciliationStatusLabel,
+  ReconLight,
   resolveBancaPath,
   useBancaBase,
 } from '../components/BancaShared.jsx'
@@ -320,7 +321,7 @@ const BANK_LAST_MOVEMENTS_COLUMNS = [
   { id: 'description', label: 'Descrizione', width: 42, fluid: true, emphasis: true },
   { id: 'type', label: 'Tipo', width: 12, fluid: true },
   { id: 'amount', label: 'Importo', width: 16, fluid: true, numeric: true },
-  { id: 'status', label: 'Stato', width: 16, fluid: true },
+  { id: 'status', label: 'Riconciliato', width: 16, fluid: true },
 ]
 
 function bankLastMovementsCellValue(row, col) {
@@ -349,6 +350,7 @@ function bancaMovimentoDetailHref(row, base = '/banca') {
 }
 
 function bankLastMovementsRenderCell(row, col, base = '/banca') {
+  if (col.id === 'status') return <ReconLight status={row?.reconciliation_status} />
   if (col.id !== 'description') return null
   const text = row?.description || '—'
   if (!row?.id) return null
@@ -395,7 +397,7 @@ const BANK_MOVEMENTS_COLUMNS = [
   { id: 'type', label: 'Entrata/Uscita', width: 8, fluid: true },
   { id: 'amount', label: 'Importo', width: 10, fluid: true, numeric: true },
   { id: 'account', label: 'Conto', width: 14, fluid: true },
-  { id: 'status', label: 'Riconciliazione', width: 8, fluid: true },
+  { id: 'status', label: 'Riconciliato', width: 11, fluid: true },
 ]
 
 function invoiceNumberDigitsOnly(value) {
@@ -478,6 +480,7 @@ function bankMovementsCellValue(row, col) {
 }
 
 function bankMovementsRenderCell(row, col) {
+  if (col.id === 'status') return <ReconLight status={row?.reconciliation_status} />
   if (col.id !== 'linked_invoice') return null
   const linked = linkedInvoicesForMovement(row)
   if (!linked.length) return null
