@@ -673,15 +673,6 @@ export function FattureDashboardPage() {
               </FattureLink>
             </div>
           </section>
-
-          <section className="card fatture-panel">
-            <h2 className="fatture-panel-title">Prossimamente</h2>
-            <ul className="fatture-suggestions">
-              <li>Suggerimento automatico centro di costo</li>
-              <li>Riconoscimento fatture ricorrenti e anomalie</li>
-              <li>Notifiche scadenze e match con ordini/DDT</li>
-            </ul>
-          </section>
         </>
       )}
     </FatturePageShell>
