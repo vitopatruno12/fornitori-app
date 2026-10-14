@@ -269,6 +269,17 @@ function buildFornitoriMastrini(
     return true
   }
 
+  const paidByBankIds = new Set()
+  for (const row of bankMovements || []) {
+    const add = (value) => {
+      const id = Number(value)
+      if (Number.isFinite(id) && id > 0) paidByBankIds.add(id)
+    }
+    add(row?.matched_invoice?.id)
+    add(row?.matched_invoice_id)
+    for (const linked of row?.linked_invoices || []) add(linked?.id)
+  }
+
   for (const inv of receivedInvoices) {
     const companyId = invoiceCompany(inv)
     if (company && companyId !== company) continue
@@ -324,6 +335,41 @@ function buildFornitoriMastrini(
       avere: 0,
       source: 'fatture_ricevute',
       invoiceKind: 'ricevuta',
+    })
+
+    const paid = String(inv?.payment_status || '').toLowerCase() === 'paid'
+    const invId = Number(inv?.id)
+    if (!paid || (Number.isFinite(invId) && paidByBankIds.has(invId))) continue
+    const cashPaid = String(inv?.payment_method || '').trim().toLowerCase() === 'contanti'
+    party.totalAvere += amount
+    party.pagamentiCount += 1
+    party.finalBalance = party.totalDare - party.totalAvere
+    party.movements.push({
+      date,
+      documentDate: date,
+      registrationNumber: `PG-INV-${inv?.id ?? ''}`,
+      causale: 'PG',
+      causaleLabel: cashPaid ? 'Pagamento contanti' : 'Pagamento file',
+      description: cashPaid
+        ? `Pagamento contanti fattura ${number}`.trim()
+        : `Pagamento file Pagamenti fattura ${number}`.trim(),
+      documentLabel: `Pagamento ${number}`.trim(),
+      documentType: 'pagamento_fornitore',
+      documentId: inv?.id ? String(inv.id) : '',
+      documentPath: '/pagamenti',
+      linkedInvoiceId: inv?.id ? String(inv.id) : '',
+      supplierId: inv?.supplier_id != null ? Number(inv.supplier_id) : null,
+      counterparty: party.name,
+      supplier: party.name,
+      customer: '',
+      company: companyId,
+      companyLabel: companyId === 'non_classificata' ? 'Non classificate' : companyLabel(companyId),
+      locale: String(inv?.activity || inv?.section || '').trim().toLowerCase(),
+      amount,
+      dare: 0,
+      avere: amount,
+      source: 'pagamenti',
+      invoiceKind: 'pagamento',
     })
   }
 

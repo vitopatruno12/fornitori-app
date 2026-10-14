@@ -165,7 +165,7 @@ export function SchedaContabileFornitorePage({
       title="Scheda contabile fornitori"
       lead={
         companyId
-          ? `${companyName}: esercizio ${dateFrom.slice(0, 4)}. Aggiorna allinea i pagamenti (file Pagamenti fino a luglio, banca da agosto) e ricarica le schede. I clienti sono in Mastrini → Scheda clienti.`
+          ? `${companyName}: esercizio ${dateFrom.slice(0, 4)}. Aggiorna allinea i pagamenti (file Pagamenti e, da agosto, anche i bonifici) e ricarica le schede. I clienti sono in Mastrini → Scheda clienti.`
           : 'Scegli la società nel banner, poi Aggiorna per aprire le schede fornitore di quel registro.'
       }
       actions={

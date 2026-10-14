@@ -699,7 +699,7 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'bundle_fornitore') return '✔ Bonifico multi-fattura'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
-    if (row?.match_reason === 'file_pagamenti') return '✔ File Pagamenti (fino a luglio)'
+    if (row?.match_reason === 'file_pagamenti') return '✔ File Pagamenti'
     if (row?.match_reason === 'file_contanti') return '✔ Contanti/carta (file Pagamenti)'
     if (row?.match_reason === 'pagata_contanti') return '✔ Pagata in contanti'
     if (row?.match_reason === 'acconto') {
@@ -2698,7 +2698,7 @@ export function BancaRiconciliazionePage() {
         if (!auto) throw firstErr
         res = await fetchBancaRiconciliazione(nextCompany)
         setError(
-          'Riconciliazione banca lenta: elenco aggiornato da file Pagamenti (fino a luglio) e stato già salvato.',
+          'Riconciliazione banca lenta: elenco aggiornato dal file Pagamenti e dallo stato già salvato.',
         )
       }
       setData({ ...res, suggestions_pending: true })
@@ -2707,7 +2707,7 @@ export function BancaRiconciliazionePage() {
       const fromFile = Number(res?.bank_sync?.marked_from_pagamenti ?? res?.marked_from_pagamenti) || 0
       if (auto && (n > 0 || fromFile > 0)) {
         setSuccess(
-          `Elenco aggiornato: ${n} da banca, ${fromFile} dal file Pagamenti (gennaio–luglio).`.replace(
+          `Elenco aggiornato: ${n} da banca, ${fromFile} dal file Pagamenti.`.replace(
             /\s+/g,
             ' ',
           ).trim(),
@@ -2957,8 +2957,8 @@ export function BancaRiconciliazionePage() {
       title="Riconciliazione automatica"
       lead={
         companyId
-          ? `Fatture ${companyName}: pagate / da pagare aggiornate all’apertura. Fino a luglio dal file Pagamenti, da agosto dai bonifici (importo + fornitore / n. fattura).`
-          : 'Scegli la società: l’elenco pagate e da pagare si aggiorna (file Pagamenti fino a luglio, banca da agosto).'
+          ? `Fatture ${companyName}: pagate / da pagare aggiornate all’apertura. Il file Pagamenti chiude la fattura se PAGATO è compilato; da agosto, se manca nel file, la chiude il bonifico.`
+          : 'Scegli la società: l’elenco pagate e da pagare si aggiorna dal file Pagamenti e, da agosto, anche dai bonifici.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">

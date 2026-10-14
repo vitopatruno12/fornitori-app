@@ -378,12 +378,11 @@ export function buildSchedaContabileFornitori(
       residuo: Math.max(0, amount - paidAmt),
     })
 
-    // Se pagata in Atlas ma senza movimento banca matchato → PG virtuale
-    // (gennaio–luglio: file Pagamenti; poi contanti/banca)
+    // Pagata in Atlas senza movimento banca: file Pagamenti, oppure contanti.
     if (paidAmt > 0.009 && !paidInvoiceIds.has(Number(inv?.id)) && !paidByBank) {
       const payDate = isoDate(inv?.paid_at || inv?.updated_at || date)
       const cashPaid = String(inv?.payment_method || '').trim().toLowerCase() === 'contanti'
-      const fromPagamentiFile = Boolean(date && date < '2026-08-01')
+      const fromPagamentiFile = !cashPaid
       if (inPeriod(payDate) || inPeriod(date)) {
         const useDate = inPeriod(payDate) ? payDate : date
         party.totalDare += paidAmt

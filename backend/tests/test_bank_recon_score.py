@@ -689,6 +689,8 @@ def test_somma_di_fatture_gia_pagate_dello_stesso_fornitore():
 
 
 def test_pagamenti_file_window_before_august_2026():
+  """Fino al 31/07 il file è l'unica prova: la banca non recupera quei mesi.
+  Da agosto la banca resta attiva, e il file chiude lo stesso se PAGATO è compilato."""
   from app.services.banca_service import _uses_pagamenti_file_recon
 
   assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 1, 1)))

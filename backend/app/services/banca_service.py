@@ -3244,7 +3244,7 @@ def apply_pagamenti_file_window_payments(
   db: Session,
   company: Optional[str] = None,
 ) -> int:
-  """Chiude le fatture fino al 31/07 se PAGATO (DARE) > 0 nel file Pagamenti."""
+  """Chiude le fatture se PAGATO (DARE) > 0 nel file Pagamenti, anche dopo il 31/07."""
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
@@ -3252,8 +3252,7 @@ def apply_pagamenti_file_window_payments(
   unpaid = [
     inv
     for inv in listed
-    if _uses_pagamenti_file_recon(inv)
-    and (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+    if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
   ]
   if not unpaid:
     return 0
@@ -3421,7 +3420,7 @@ def reconciliation_snapshot(
   limit: int = 40,
   company: Optional[str] = None,
 ) -> Dict[str, Any]:
-  """Elenco pagate/da pagare: chiude subito gennaio–luglio dal file Pagamenti.
+  """Elenco pagate/da pagare: chiude dal file Pagamenti ogni fattura con PAGATO > 0.
 
   Il confronto completo sui bonifici (da agosto) resta su POST /riconciliazione/auto.
   """
@@ -3702,7 +3701,6 @@ def reconciliation_preview(
     paid_file_rows = []
   cash_file_rows = [row for row in paid_file_rows if row.get("is_cash_payment")]
   paid_file_by_number = _cash_rows_by_number(paid_file_rows)
-  cash_by_number = _cash_rows_by_number(cash_file_rows)
 
   paid_by_bank: List[Dict[str, Any]] = []
   da_pagare: List[Dict[str, Any]] = []
@@ -3808,8 +3806,8 @@ def reconciliation_preview(
     cash_hit = None
     file_window = _uses_pagamenti_file_recon(inv)
     if not found:
-      file_grouped = paid_file_by_number if file_window else cash_by_number
-      file_rows = paid_file_rows if file_window else cash_file_rows
+      file_grouped = paid_file_by_number
+      file_rows = paid_file_rows
       if file_rows:
         cash_subset = file_grouped.get(supplier_payments_service._normalize_doc(num)) or []
         cash_hit = supplier_payments_service.find_paid_row_for_invoice(
@@ -3895,18 +3893,19 @@ def reconciliation_preview(
         )
       )
     elif cash_hit:
+      cash_only = bool(cash_hit.get("is_cash_payment")) and not file_window
       paid_by_bank.append(
         _invoice_row_out(
           inv,
-          reason="file_pagamenti" if file_window else "file_contanti",
+          reason="file_contanti" if cash_only else "file_pagamenti",
           match_movement={
             "movement_date": (cash_hit.get("payment_date") or "")[:10] or None,
             "description": (
-              f"File Pagamenti · {cash_hit.get('sheet') or ''}".strip(" ·")
-              if file_window
-              else f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·")
+              f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·")
+              if cash_only
+              else f"File Pagamenti · {cash_hit.get('sheet') or ''}".strip(" ·")
             ),
-            "causale": "PAGAMENTI" if file_window else "CONTANTI",
+            "causale": "CONTANTI" if cash_only else "PAGAMENTI",
             "amount": cash_hit.get("amount_paid"),
             "id": None,
           },
@@ -4038,10 +4037,10 @@ def sync_payment_status_from_bank(
 ) -> Dict[str, Any]:
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
-  - fino al 31/07/2026: file Pagamenti (colonna PAGATO DARE > 0). I movimenti
-    banca di quel periodo non sono più recuperabili.
-  - dal 1/08/2026: bonifici sui conti (score auto: importo + fornitore e/o n. documento)
-    e, senza bonifico, CONTANTI/CARTA/assegno nel file Pagamenti.
+  - file Pagamenti (colonna PAGATO DARE > 0), in qualsiasi mese.
+  - fino al 31/07/2026 i movimenti banca non sono recuperabili: vale solo il file.
+  - dal 1/08/2026: prima il bonifico (importo + fornitore e/o n. documento);
+    se il bonifico non c'è, chiude comunque il file Pagamenti.
   - fatture già chiuse dal file: il bonifico si collega lo stesso (stesso fornitore
     o alias, stesso importo oppure somma di più fatture, data entro un anno).
 
@@ -4320,7 +4319,7 @@ def sync_payment_status_from_bank(
       cash_hit = _pagamenti_file_hit(inv_dto)
       acconto_hit = None
     else:
-      cash_hit = None if (found or saldo_hit or cited_hit) else _cash_file_hit(inv_dto)
+      cash_hit = None if (found or saldo_hit or cited_hit) else _pagamenti_file_hit(inv_dto)
       acconto_hit = None if (found or saldo_hit or cited_hit or cash_hit) else acconti.get(inv_id)
     if not found and not saldo_hit and not cited_hit and not cash_hit and not acconto_hit:
       continue
@@ -4384,7 +4383,7 @@ def sync_payment_status_from_bank(
         group_mov.difference_amount = None
     else:
       marked_from_file += 1
-      reason = "file_pagamenti" if file_window else "file_contanti"
+      reason = "file_pagamenti"
     changed = True
     item = {
       "invoice_id": inv_id,
@@ -4531,7 +4530,7 @@ def sync_payment_status_from_bank(
       continue
     if _uses_pagamenti_file_recon(inv_dto):
       continue
-    if _cash_file_hit(inv_dto):
+    if _pagamenti_file_hit(inv_dto):
       continue
     row = orm_by_id.get(inv_id)
     if not row:
