@@ -298,9 +298,8 @@ def ingest_lettura_daily(
             day = date_cls.fromisoformat(str(d.get("day") or "")[:10])
         except ValueError:
             continue
-        # Seed carta storici: non sovrascrivere (giorni già verificati a mano).
-        # I giorni nuovi arrivano solo dall'agent → chiusura automatica.
-        if paper_closing_overrides.is_seed_paper_day(act, day):
+        # Seed e correzioni fatte con «Salva lettura» non vanno riscritti dal GDB.
+        if paper_closing_overrides.is_seed_paper_day(act, day) or paper_closing_overrides.is_operator_locked(act, day):
             force_days.append(day)
             saved += 1
             continue

@@ -386,6 +386,7 @@ def upsert_paper_closing(
             pos=body.pos,
             nc=body.nc,
             fatture=body.fatture,
+            operator=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

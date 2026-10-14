@@ -9,8 +9,10 @@ from app.services.cassetto_daily_store import cassetto_amount
 from app.services.cash_closing_sync import _KIND_META
 from app.services.paper_closing_overrides import (
     get_paper_override,
+    is_operator_locked,
     is_seed_paper_day,
     paper_amounts,
+    upsert_paper_closing,
 )
 
 
@@ -161,3 +163,49 @@ def test_seed_day_not_overwritten_by_agent(tmp_path, monkeypatch):
     ov = get_paper_override("via_zanardelli", date(2026, 10, 7))
     assert ov["contanti"] == Decimal("776.85")
     assert ov["nc"] == Decimal("640.15")
+
+
+def test_operator_save_sticks_over_seed_and_agent(tmp_path, monkeypatch):
+    path = tmp_path / "paper_closings.json"
+    monkeypatch.setenv("PAPER_CLOSINGS_PATH", str(path))
+    day = date(2026, 10, 7)
+    upsert_paper_closing(
+        "via_zanardelli",
+        day,
+        contanti=Decimal("810.00"),
+        pos=Decimal("1700.00"),
+        nc=Decimal("12.00"),
+        fatture=Decimal("4.00"),
+        operator=True,
+    )
+    assert is_operator_locked("via_zanardelli", day)
+    saved = get_paper_override("via_zanardelli", day)
+    assert saved["contanti"] == Decimal("810.00")
+    assert saved["nc"] == Decimal("12.00")
+
+    body = LetturaIngestBody(
+        model_id="model-4",
+        days=[
+            LetturaDayBody(
+                day="2026-10-07",
+                contanti=1.0,
+                pos=2.0,
+                fatture=3.0,
+                nc=4.0,
+            )
+        ],
+    )
+    db = MagicMock()
+    with patch(
+        "app.services.cash_closing_sync.sync_daily_closings_to_prima_nota",
+        return_value={"ok": True},
+    ), patch(
+        "app.services.agent_cassa_status.touch_agent_heartbeat",
+        return_value={"ok": True},
+    ):
+        out = ingest_lettura_daily(body, db=db, _=None)
+    assert out["ok"] is True
+    again = get_paper_override("via_zanardelli", day)
+    assert again["contanti"] == Decimal("810.00")
+    assert again["nc"] == Decimal("12.00")
+    assert is_operator_locked("via_zanardelli", day)

@@ -1,9 +1,10 @@
 """Lettura operatore (carta chiusura): fonte ufficiale per contanti e POS.
 
 Priorità:
-1. Letture salvate (file data/paper_closings.json) — inserite da Prima Nota / API
-2. Seed noti (giorni già verificati a mano)
-3. Fallback scontrini EasyRetail (GDB)
+1. Correzione manuale (Salva lettura in Prima Nota): la cassa non la riscrive
+2. Seed noti (giorni già verificati a mano), se nessuno li ha corretti dopo
+3. Lettura automatica della cassa
+4. Fallback scontrini EasyRetail (GDB)
 
 I preventivi / NC restano dagli scontrini e in Prima Nota dopo le 21:30.
 Le fatture restano fuori da contanti/POS (campo fatture / invoice_eur).
@@ -22,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Seed verificati su carta (lettura operatore). Il file JSON può sovrascriverli.
+# Seed verificati su carta. Una correzione con Salva lettura (operator) li sostituisce.
 _SEED_PAPER_CLOSINGS: Dict[Tuple[str, date], Dict[str, Decimal]] = {
     # Zanardelli 5 ott 2026: contanti carta 1366,10 (GDB 803,90); POS ok.
     ("via_zanardelli", date(2026, 10, 5)): {
@@ -138,19 +139,21 @@ def _parse_day(value: Any) -> Optional[date]:
         return None
 
 
-def _load_file_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
+def _load_file_state() -> Tuple[Dict[Tuple[str, date], Dict[str, Decimal]], set]:
+    """Importi del file e giorni corretti a mano in Prima Nota (operator=true)."""
     path = paper_closings_path()
     if not path.is_file():
-        return {}
+        return {}, set()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         logger.warning("File letture operatore illeggibile: %s", path, exc_info=True)
-        return {}
+        return {}, set()
     rows = raw.get("rows") if isinstance(raw, dict) else raw
     if not isinstance(rows, list):
-        return {}
+        return {}, set()
     out: Dict[Tuple[str, date], Dict[str, Decimal]] = {}
+    locked: set = set()
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -167,20 +170,38 @@ def _load_file_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
             slot["nc"] = _dec(row.get("nc"))
         if row.get("fatture") is not None:
             slot["fatture"] = _dec(row.get("fatture"))
-        if slot:
-            out[(act, day)] = slot
-    return out
+        if not slot:
+            continue
+        out[(act, day)] = slot
+        if row.get("operator") is True:
+            locked.add((act, day))
+    return out, locked
+
+
+def _load_file_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
+    amounts, _locked = _load_file_state()
+    return amounts
 
 
 def all_paper_overrides() -> Dict[Tuple[str, date], Dict[str, Decimal]]:
-    # Seed carta verificati prevalgono sul file (agent GDB non deve ribaltare il 7 ott…).
-    merged = dict(_load_file_overrides())
-    merged.update(_SEED_PAPER_CLOSINGS)
+    # Il file automatico non ribalta i seed. Una correzione fatta con
+    # «Salva lettura» (operator) resta, anche sui giorni seed.
+    file_map, locked = _load_file_state()
+    merged = dict(file_map)
+    for key, seed in _SEED_PAPER_CLOSINGS.items():
+        if key not in locked:
+            merged[key] = dict(seed)
     return merged
 
 
 def is_seed_paper_day(activity: str, day: date) -> bool:
     return (_activity_key(activity), day) in _SEED_PAPER_CLOSINGS
+
+
+def is_operator_locked(activity: str, day: date) -> bool:
+    """True se quel giorno è stato salvato a mano da Prima Nota."""
+    _amounts, locked = _load_file_state()
+    return (_activity_key(activity), day) in locked
 
 
 def get_paper_override(activity: str, day: date) -> Dict[str, Decimal]:
@@ -198,7 +219,7 @@ def list_paper_closings(
     date_to: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
     act_filter = _activity_key(activity) if activity else ""
-    file_map = _load_file_overrides()
+    _file_map, locked = _load_file_state()
     rows: List[Dict[str, Any]] = []
     for (act, day), amounts in sorted(all_paper_overrides().items(), key=lambda x: (x[0][1], x[0][0])):
         if act_filter and act != act_filter:
@@ -207,6 +228,9 @@ def list_paper_closings(
             continue
         if date_to and day > date_to:
             continue
+        source = "operator" if (act, day) in locked else (
+            "seed" if (act, day) in _SEED_PAPER_CLOSINGS else "file"
+        )
         rows.append(
             {
                 "activity": act,
@@ -215,7 +239,7 @@ def list_paper_closings(
                 "pos": amounts.get("pos"),
                 "nc": amounts.get("nc"),
                 "fatture": amounts.get("fatture"),
-                "source": "seed" if (act, day) in _SEED_PAPER_CLOSINGS else "file",
+                "source": source,
             }
         )
     return rows
@@ -229,14 +253,15 @@ def upsert_paper_closing(
     pos: Optional[Any] = None,
     nc: Optional[Any] = None,
     fatture: Optional[Any] = None,
+    operator: bool = False,
 ) -> Dict[str, Any]:
-    """Salva la lettura operatore (CONTANTI / BANCOMAT senza fatture / FATTURE)."""
+    """Salva la lettura. operator=True è il tasto Salva in Prima Nota e non va ribaltato."""
     act = _activity_key(activity)
     if not act:
         raise ValueError("Attività non valida")
     path = paper_closings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    file_map = _load_file_overrides()
+    file_map, locked = _load_file_state()
     slot = dict(file_map.get((act, day)) or {})
     if contanti is not None:
         slot["contanti"] = _dec(contanti)
@@ -249,16 +274,22 @@ def upsert_paper_closing(
     if not slot:
         raise ValueError("Indica almeno contanti o POS della lettura")
     file_map[(act, day)] = slot
+    if operator:
+        locked.add((act, day))
+    else:
+        locked.discard((act, day))
     payload = {
         "version": 1,
         "note": (
             "Letture operatore Prima Nota / Analisi. Prevalgono sul GDB per contanti e POS. "
-            "Il POS è senza fatture; le fatture vanno nel campo fatture."
+            "Il POS è senza fatture; le fatture vanno nel campo fatture. "
+            "operator=true: correzione manuale, la cassa non la riscrive."
         ),
         "rows": [
             {
                 "activity": a,
                 "day": d.isoformat(),
+                **({"operator": True} if (a, d) in locked else {}),
                 **{k: str(v) for k, v in am.items()},
             }
             for (a, d), am in sorted(file_map.items(), key=lambda x: (x[0][1], x[0][0]))

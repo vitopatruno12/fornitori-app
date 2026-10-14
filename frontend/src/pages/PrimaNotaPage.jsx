@@ -281,6 +281,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [letturaNc, setLetturaNc] = useState('')
   const [letturaFatture, setLetturaFatture] = useState('')
   const [letturaBusy, setLetturaBusy] = useState(false)
+  const letturaFetchGen = useRef(0)
+  const letturaDirtyRef = useRef(false)
+  const letturaDaySeenRef = useRef(null)
   const [localeAccessCode, setLocaleAccessCode] = useState('')
   const [staffLocaleSummaries, setStaffLocaleSummaries] = useState([])
   const [protectedLocaleSummaries, setProtectedLocaleSummaries] = useState([])
@@ -946,10 +949,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }, [selectedDate, activeActivity])
 
   useEffect(() => {
+    const dayChanged = letturaDaySeenRef.current !== letturaDay
+    letturaDaySeenRef.current = letturaDay
+    if (dayChanged) letturaDirtyRef.current = false
+    const gen = ++letturaFetchGen.current
     let cancelled = false
     async function loadLettura() {
       const day = isIsoDate(letturaDay) ? letturaDay : selectedDate
+      const stillCurrent = () => !cancelled && gen === letturaFetchGen.current && !letturaDirtyRef.current
       if (!canQueryCashData() || !activeActivity || !day) {
+        if (!stillCurrent()) return
         setLetturaContanti('')
         setLetturaPos('')
         setLetturaNc('')
@@ -963,14 +972,14 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           dateTo: day,
           accessCode: resolveActiveAccessCode(),
         })
-        if (cancelled) return
+        if (!stillCurrent()) return
         const row = Array.isArray(data?.rows) ? data.rows.find((r) => r.day === day) : null
         setLetturaContanti(row?.contanti != null ? String(row.contanti) : '')
         setLetturaPos(row?.pos != null ? String(row.pos) : '')
         setLetturaNc(row?.nc != null ? String(row.nc) : '')
         setLetturaFatture(row?.fatture != null ? String(row.fatture) : '')
       } catch {
-        if (!cancelled) {
+        if (stillCurrent()) {
           setLetturaContanti('')
           setLetturaPos('')
           setLetturaNc('')
@@ -1201,6 +1210,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setSuccess('')
     try {
       setLetturaBusy(true)
+      letturaFetchGen.current += 1
+      letturaDirtyRef.current = false
       await upsertPaperClosing({
         activity: activeActivity,
         day,
@@ -1225,6 +1236,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         `Lettura operatore salvata · ${formatDate(day)} · ${parts.join(' · ')}. Contanti, elettronico e preventivi restano come scritti.`,
       )
     } catch (err) {
+      letturaDirtyRef.current = true
       setError(err?.message || 'Salvataggio lettura operatore non riuscito')
     } finally {
       setLetturaBusy(false)
@@ -2918,7 +2930,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   min="0"
                   className="form-control"
                   value={letturaContanti}
-                  onChange={(e) => setLetturaContanti(e.target.value)}
+                  onChange={(e) => { letturaDirtyRef.current = true; setLetturaContanti(e.target.value) }}
                   placeholder="es. 1403.15"
                   style={{ maxWidth: 160 }}
                 />
@@ -2931,7 +2943,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   min="0"
                   className="form-control"
                   value={letturaPos}
-                  onChange={(e) => setLetturaPos(e.target.value)}
+                  onChange={(e) => { letturaDirtyRef.current = true; setLetturaPos(e.target.value) }}
                   placeholder="es. 1872.78"
                   style={{ maxWidth: 160 }}
                   title="Bancomat già senza fatture emesse"
@@ -2945,7 +2957,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   min="0"
                   className="form-control"
                   value={letturaNc}
-                  onChange={(e) => setLetturaNc(e.target.value)}
+                  onChange={(e) => { letturaDirtyRef.current = true; setLetturaNc(e.target.value) }}
                   placeholder="es. 538.72"
                   style={{ maxWidth: 140 }}
                   title="Preventivi / non fiscali: solo colonna NC entrata"
@@ -2959,7 +2971,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   min="0"
                   className="form-control"
                   value={letturaFatture}
-                  onChange={(e) => setLetturaFatture(e.target.value)}
+                  onChange={(e) => { letturaDirtyRef.current = true; setLetturaFatture(e.target.value) }}
                   placeholder="es. 143.99"
                   style={{ maxWidth: 140 }}
                   title="Importo FATTURE della lettura: non entra nel bancomat/POS di chiusura"
