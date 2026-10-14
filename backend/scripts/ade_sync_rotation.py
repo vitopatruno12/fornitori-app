@@ -15,6 +15,8 @@ Uso (PC ufficio):
   python scripts/ade_sync_rotation.py --dry-run
 
 Periodo: ultimi ADE_ROTATION_LOOKBACK_DAYS (default 10) fino al giorno del piano.
+Si controlla solo l'ultimo trimestre chiuso (ADE_GAP_COVER=1): se è pieno
+si procede col periodo breve; se un mese è quasi vuoto, si parte da lì.
 """
 
 from __future__ import annotations
@@ -91,17 +93,25 @@ _LAST_INVOICE_ON = {
 
 
 def _profile_date_from(pid: str, day: date) -> date:
-  """Inizio periodo: lookback, avvicinato all'ultima fattura già scaricata."""
+  """Inizio periodo: lookback, allungato se manca un mese intero."""
   lookback_from = day - timedelta(days=_lookback_days())
-  if day > _CATCHUP_UNTIL:
-    return lookback_from
-  anchor = _LAST_INVOICE_ON.get((pid or "").strip().lower())
-  if anchor is None or anchor > day:
-    return lookback_from
-  if anchor >= lookback_from:
-    return anchor
-  if (lookback_from - anchor).days <= 10:
-    return anchor
+  if day <= _CATCHUP_UNTIL:
+    anchor = _LAST_INVOICE_ON.get((pid or "").strip().lower())
+    if anchor is not None and anchor <= day:
+      if anchor >= lookback_from or (lookback_from - anchor).days <= 10:
+        lookback_from = anchor
+  try:
+    from app.services.ade_gap_cover import cover_from_for_profile
+
+    gap = cover_from_for_profile(pid, day)
+  except Exception:
+    gap = None
+  if gap is not None and gap < lookback_from:
+    print(
+      f"  copertura {pid}: mese vuoto, periodo da {gap.isoformat()}",
+      flush=True,
+    )
+    return gap
   return lookback_from
 
 
