@@ -243,14 +243,18 @@ def upsert_cassetto_auto_entries(
     activity: str,
     days: Optional[List[date]] = None,
 ) -> Dict[str, Any]:
-    """Scrive solo MOVIMENTO_CASSETTO dagli importi agent (senza toccare contanti/POS)."""
+    """Scrive solo MOVIMENTO_CASSETTO dagli importi agent (senza toccare contanti/POS).
+
+    Allinea subito anche oggi (come la lettura): così un MIWA di Zanardelli
+    finito per errore su Abba viene tolto appena l'agent Abba sincronizza con filtro NUMEROPOS.
+    """
     act = normalize_activity(activity)
     if days is None:
         days = _eligible_days(None, None)
     else:
         today = rome_now().date()
-        days = [d for d in days if d is not None and d <= today and (day_is_closed(d) or d < today)]
-        # Oggi solo dopo 21:30; i giorni passati sempre
+        # Giorni passati + oggi (anche prima delle 21:30), mai futuro.
+        days = [d for d in days if d is not None and d <= today]
         if not days:
             return {"ok": True, "created": 0, "updated": 0, "removed": 0, "days": 0}
     created = updated = removed = 0

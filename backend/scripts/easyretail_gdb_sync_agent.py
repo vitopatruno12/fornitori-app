@@ -19,7 +19,8 @@ Variabili (o file .env accanto allo script):
   EASYRETAIL_SYNC_TOKEN=...          # stesso token sul server
   EASYRETAIL_GDB_PATH=C:\\EasyRetail\\DBase\\DBRETAIL.GDB
   EASYRETAIL_FBCLIENT=C:\\EasyRetail\\DBase\\fbclient.dll
-  EASYRETAIL_MODEL_ID=model-2        # opzionale: Mani in Pasta
+  EASYRETAIL_MODEL_ID=model-2        # obbligatorio Mediazione: model-2=Abba, model-4=Zanardelli
+  EASYRETAIL_NUMEROPOS=1             # opzionale; default da MODEL_ID (Abba=1, Zanardelli=2)
   EASYRETAIL_STORE_FILTER=...        # opzionale: solo certe casse/POS (es. codice Abba)
   EASYRETAIL_GDB_LOOKBACK_HOURS=48
   EASYRETAIL_GDB_USER=SYSDBA
@@ -256,29 +257,54 @@ def _post_cassetto_daily(api: str, token: str, model_id: str | None, days: list[
         return resp.read().decode("utf-8", errors="replace")
 
 
+_SHARED_GDB_MODELS = {
+    "model-2": "1",  # Abba · Mediazione (GDB condiviso)
+    "model-4": "2",  # Zanardelli · Mediazione (GDB condiviso)
+}
+
+
 def _resolve_numeropos(model_id: str | None, store_filter: tuple[str, ...]) -> str | None:
     """Cassa EasyRetail (NUMEROPOS) per allineare la lettura operatore.
 
     - Zanardelli/Abba: obbligatorio (stesso GDB condiviso).
     - Via Lattea: nessuna filtro (GDB a cassa unica; NUMEROPOS storico inaffidabile).
-    - EASYRETAIL_NUMEROPOS=all|none|* → nessun filtro.
+    - EASYRETAIL_NUMEROPOS=all|none|* → nessun filtro (vietato su Abba/Zanardelli).
     """
+    mid = (model_id or "").strip()
     env = (os.getenv("EASYRETAIL_NUMEROPOS") or "").strip()
     if env.lower() in ("all", "none", "*", "-"):
+        if mid in _SHARED_GDB_MODELS:
+            # Mai «tutti i cassetti» su GDB Mediazione: MIWA di Z finirebbe anche su Abba.
+            print(
+                f"CASSETTO/LETTURA: EASYRETAIL_NUMEROPOS={env} ignorato per {mid} "
+                f"(uso cassa {_SHARED_GDB_MODELS[mid]})",
+                flush=True,
+            )
+            return _SHARED_GDB_MODELS[mid]
         return None
     if env:
         return env
     for p in store_filter:
         if p.isdigit():
             return p
-    mid = (model_id or "").strip()
     if mid == "model-3":
         return None  # Via Lattea: non filtrare
-    defaults = {
-        "model-4": "2",  # Zanardelli
-        "model-2": "1",  # Abba
-    }
-    return defaults.get(mid)
+    return _SHARED_GDB_MODELS.get(mid)
+
+
+def _require_shared_gdb_numeropos(model_id: str | None, numeropos: str | None, *, what: str) -> bool:
+    """True se si può procedere. Su Abba/Zanardelli senza NUMEROPOS → stop."""
+    mid = (model_id or "").strip()
+    if mid in _SHARED_GDB_MODELS and not numeropos:
+        print(
+            f"{what}: STOP model={mid} senza NUMEROPOS "
+            f"(imposta EASYRETAIL_MODEL_ID={mid} o EASYRETAIL_NUMEROPOS="
+            f"{_SHARED_GDB_MODELS[mid]}). Evito di mischiare i cassetti Mediazione.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    return True
 
 
 def _post_lettura_daily(api: str, token: str, model_id: str | None, days: list[dict]) -> str:
@@ -316,6 +342,8 @@ def _sync_lettura(
     today = date.today()
     date_from = today - timedelta(days=days_back)
     numeropos = _resolve_numeropos(model_id, store_filter)
+    if not _require_shared_gdb_numeropos(model_id, numeropos, what="LETTURA"):
+        return
     print(
         f"LETTURA: {date_from}…{today} model={model_id} "
         f"NUMEROPOS={numeropos if numeropos is not None else 'ALL'}",
@@ -348,6 +376,37 @@ def _sync_lettura(
     )
 
 
+def _pad_cassetto_days(
+    rows: list[dict],
+    *,
+    date_from,
+    date_to,
+) -> list[dict]:
+    """Copre ogni giorno del periodo: i giorni vuoti azzerano dati sbagliati già su Atlas."""
+    from datetime import timedelta
+
+    by_day = {str(r.get("day") or "")[:10]: r for r in rows if r.get("day")}
+    out: list[dict] = []
+    cur = date_from
+    while cur <= date_to:
+        key = cur.isoformat()
+        if key in by_day:
+            out.append(by_day[key])
+        else:
+            out.append(
+                {
+                    "day": key,
+                    "amount_uscita": 0.0,
+                    "amount_net": 0.0,
+                    "count": 0,
+                    "causali": [],
+                    "operazioni": [],
+                }
+            )
+        cur += timedelta(days=1)
+    return out
+
+
 def _sync_cassetto(
     api: str,
     token: str,
@@ -355,6 +414,9 @@ def _sync_cassetto(
     dsn: str,
     lookback_hours: int,
     store_filter: tuple[str, ...] = (),
+    *,
+    date_from_override=None,
+    date_to_override=None,
 ) -> None:
     """Legge MOVIMENTICASSETTIT e invia i totali giornalieri ad ATLAS.
 
@@ -366,11 +428,20 @@ def _sync_cassetto(
     from app.services.easyretail_gdb_service import fetch_cassetto_daily
 
     numeropos = _resolve_numeropos(model_id, store_filter)
-    days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
-    if numeropos:
-        days_back = 14
-    today = date.today()
-    date_from = today - timedelta(days=days_back)
+    if not _require_shared_gdb_numeropos(model_id, numeropos, what="CASSETTO"):
+        return
+    today = date_to_override or date.today()
+    if date_from_override is not None:
+        date_from = date_from_override
+    elif numeropos:
+        # Mediazione (Abba/Zanardelli): riscrivi sempre dal 1 ottobre 2026 in poi
+        oct1 = date(2026, 10, 1)
+        date_from = oct1 if today >= oct1 else today - timedelta(days=20)
+    else:
+        days_back = max(1, min(14, (int(lookback_hours) + 23) // 24))
+        date_from = today - timedelta(days=days_back)
+    if date_from > today:
+        date_from = today
     print(
         f"CASSETTO: lettura {date_from}…{today} model={model_id} "
         f"NUMEROPOS={numeropos or 'ALL'}",
@@ -389,9 +460,8 @@ def _sync_cassetto(
     if not meta.get("ok"):
         print(f"CASSETTO: skip ({meta.get('error')})", flush=True)
         return
-    if not rows:
-        print(f"CASSETTO: nessun movimento in {days_back}g (ok)", flush=True)
-        return
+    # Sempre una riga per giorno: i giorni a zero cancellano MIWA/operazioni dell'altro locale.
+    rows = _pad_cassetto_days(rows or [], date_from=date_from, date_to=today)
     body = _post_cassetto_daily(api, token, model_id, rows)
     tot = sum(float(r.get("amount_uscita") or 0) for r in rows)
     print(
@@ -404,12 +474,62 @@ def _sync_cassetto(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync EasyRetail GDB → ATLAS")
     parser.add_argument("--probe", action="store_true", help="Solo diagnostica flusso pagamenti (no invio API)")
+    parser.add_argument(
+        "--repair-cassetto-from",
+        default="",
+        help="Solo cassetto: riparte da questa data (YYYY-MM-DD), es. 2026-10-01",
+    )
+    parser.add_argument(
+        "--repair-cassetto-to",
+        default="",
+        help="Solo cassetto: fino a questa data (default oggi)",
+    )
     args = parser.parse_args()
 
     print(f"AtlasSync agent start argv={sys.argv}", flush=True)
     _load_dotenv()
     if args.probe:
         return run_probe()
+
+    repair_from = (args.repair_cassetto_from or "").strip()
+    repair_to = (args.repair_cassetto_to or "").strip()
+    if repair_from or repair_to:
+        from datetime import date as date_cls
+
+        api = (os.getenv("ATLAS_API_BASE") or "https://www.atlass.it/api").rstrip("/")
+        token = (os.getenv("EASYRETAIL_SYNC_TOKEN") or os.getenv("POS_RECEIPTS_SYNC_TOKEN") or "").strip()
+        dsn = (os.getenv("EASYRETAIL_GDB_PATH") or os.getenv("EASYRETAIL_GDB_DSN") or "").strip()
+        if not dsn or not token:
+            print("ERRORE: servono EASYRETAIL_GDB_PATH e EASYRETAIL_SYNC_TOKEN", file=sys.stderr)
+            return 2
+        model_id = (os.getenv("EASYRETAIL_MODEL_ID") or "").strip() or None
+        store_filter = tuple(
+            p.strip()
+            for p in (os.getenv("EASYRETAIL_STORE_FILTER") or "").split(",")
+            if p.strip()
+        )
+        try:
+            d_from = date_cls.fromisoformat(repair_from) if repair_from else date_cls(2026, 10, 1)
+            d_to = date_cls.fromisoformat(repair_to) if repair_to else date_cls.today()
+        except ValueError as exc:
+            print(f"ERRORE date: {exc}", file=sys.stderr)
+            return 2
+        print(f"REPAIR CASSETTO {d_from}…{d_to} model={model_id}", flush=True)
+        try:
+            _sync_cassetto(
+                api,
+                token,
+                model_id,
+                dsn,
+                lookback_hours=24,
+                store_filter=store_filter,
+                date_from_override=d_from,
+                date_to_override=d_to,
+            )
+            return 0
+        except Exception as e:
+            print(f"CASSETTO REPAIR ERRORE: {e}", file=sys.stderr, flush=True)
+            return 1
 
     api = (os.getenv("ATLAS_API_BASE") or "https://www.atlass.it/api").rstrip("/")
     token = (os.getenv("EASYRETAIL_SYNC_TOKEN") or os.getenv("POS_RECEIPTS_SYNC_TOKEN") or "").strip()

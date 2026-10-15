@@ -1773,13 +1773,24 @@ def fetch_cassetto_daily(
         )
         note_col = _cassetto_exact(t_u, "NOTE", "NOTA", "ANNOTAZIONI", "ANNOTAZIONE")
         oper_col = _cassetto_exact(t_u, "OPERATORE", "NOMEOPERATORE", "CASSIERE", "UTENTE")
-        store_col = _cassetto_exact(t_u, "NUMEROPOS", "NUMEROPOSTAZIONE", "NUMEROCASSA")
+        # Preferisci NUMEROPOS (1=Abba, 2=Zanardelli). NUMEROPOSTAZIONE è progressivo giorno
+        # e non distingue i locali Mediazione.
+        store_col = _cassetto_exact(t_u, "NUMEROPOS", "NUMEROCASSA", "NUMEROPOSTAZIONE")
         pos_want = _norm_doc_number(numeropos) or None
         if pos_want and not store_col:
+            # Fail-closed: senza colonna cassa non si può separare Abba/Zanardelli
+            # (altrimenti MIWA di un locale finisce anche sull'altro).
             print(
-                "CASSETTO: NUMEROPOS richiesto ma colonna cassa assente, tengo tutti i movimenti.",
+                "CASSETTO: NUMEROPOS richiesto ma colonna cassa assente → nessun movimento "
+                "(evito di copiare l'altro locale).",
                 flush=True,
             )
+            return [], {
+                "ok": False,
+                "error": "colonna_cassa_assente",
+                "numeropos": pos_want,
+                "columns": t_cols,
+            }
         amt_t = _cassetto_pick(
             t_u,
             "IMPORTOMOVIMENTO",
