@@ -189,6 +189,7 @@ class StaffStipendiMonthLine(BaseModel):
     staff_member_id: Optional[int] = None
     name: str = Field(..., max_length=255)
     busta: float = Field(0, ge=0)
+    busta_a: float = Field(0, ge=0)
     acconto_tfr: float = Field(0, ge=0)
     fuori: float = Field(0, ge=0)
     tfr_attuale: float = Field(0, ge=0)
@@ -202,8 +203,13 @@ class StaffStipendiMonthLine(BaseModel):
 
     @property
     def totale(self) -> float:
-        """Totale busta paga: busta + fuori − acconto TFR."""
-        return float(self.busta or 0) + float(self.fuori or 0) - float(self.acconto_tfr or 0)
+        """Totale busta paga: busta + busta A + fuori − acconto TFR."""
+        return (
+            float(self.busta or 0)
+            + float(self.busta_a or 0)
+            + float(self.fuori or 0)
+            - float(self.acconto_tfr or 0)
+        )
 
 
 class StaffStipendiMonthCreate(BaseModel):

@@ -430,14 +430,15 @@ def _stipendi_lines_from_json(raw: str) -> List[staff_schema.StaffStipendiMonthL
 
 def _stipendi_totals(lines: List[staff_schema.StaffStipendiMonthLine]) -> dict:
     busta = round(sum(float(l.busta or 0) for l in lines), 2)
+    busta_a = round(sum(float(getattr(l, "busta_a", 0) or 0) for l in lines), 2)
     tfr = round(sum(float(l.acconto_tfr or 0) for l in lines), 2)
     fuori = round(sum(float(l.fuori or 0) for l in lines), 2)
-    # Totale busta paga: busta + fuori − acconto TFR
+    # Totale busta paga: busta + busta A + fuori − acconto TFR
     return {
         "total_busta": busta,
         "total_tfr": tfr,
         "total_fuori": fuori,
-        "total_amount": round(busta + fuori - tfr, 2),
+        "total_amount": round(busta + busta_a + fuori - tfr, 2),
     }
 
 

@@ -86,6 +86,7 @@ function headerField(label) {
   if (key.includes('tfr') && key.includes('attual')) return 'tfr_attuale'
   if (key === 'tfr') return 'tfr_attuale'
   if (key.includes('fuori')) return 'fuori'
+  if (/busta\s*a\b/.test(key) || key === 'bustaa') return 'busta_a'
   if (key.includes('busta') && !key.includes('totale')) return 'busta'
   return ''
 }
@@ -146,7 +147,7 @@ function toYearMonth(yearValue, monthValue) {
   return `${y}-${String(m).padStart(2, '0')}`
 }
 
-const POSITIONAL_FIELDS = ['name', 'busta', 'fuori', 'tfr_attuale', 'acconto_tfr', 'nuovo_tfr', 'tfr_anticipato']
+const POSITIONAL_FIELDS = ['name', 'busta', 'busta_a', 'fuori', 'tfr_attuale', 'acconto_tfr', 'nuovo_tfr', 'tfr_anticipato']
 
 function rowToLine(cells, fields) {
   const partial = {}
@@ -171,6 +172,7 @@ function mergeImportedLines(list) {
       byKey.set(key, {
         name,
         busta: Number(row.busta) || 0,
+        busta_a: Number(row.busta_a) || 0,
         fuori: Number(row.fuori) || 0,
         tfr_attuale: Number(row.tfr_attuale) || 0,
         acconto_tfr: Number(row.acconto_tfr) || 0,
@@ -179,6 +181,7 @@ function mergeImportedLines(list) {
       continue
     }
     prev.busta += Number(row.busta) || 0
+    prev.busta_a += Number(row.busta_a) || 0
     prev.fuori += Number(row.fuori) || 0
     prev.tfr_attuale += Number(row.tfr_attuale) || 0
     prev.acconto_tfr += Number(row.acconto_tfr) || 0
@@ -187,6 +190,7 @@ function mergeImportedLines(list) {
   return [...byKey.values()].map((row) => ({
     ...row,
     busta: Math.round(row.busta * 100) / 100,
+    busta_a: Math.round(row.busta_a * 100) / 100,
     fuori: Math.round(row.fuori * 100) / 100,
     tfr_attuale: Math.round(row.tfr_attuale * 100) / 100,
     acconto_tfr: Math.round(row.acconto_tfr * 100) / 100,

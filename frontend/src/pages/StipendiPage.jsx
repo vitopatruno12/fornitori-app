@@ -37,6 +37,7 @@ const MONTH_LABELS = [
 const STIPENDI_COLUMNS = [
   { id: 'name', label: 'Nominativo', width: 22, fluid: true },
   { id: 'busta', label: 'Busta', width: 11, fluid: true, numeric: true },
+  { id: 'busta_a', label: 'Busta A', width: 11, fluid: true, numeric: true },
   { id: 'fuori', label: 'Fuori', width: 11, fluid: true, numeric: true },
   { id: 'tfr_attuale', label: 'TFR attuale', width: 12, fluid: true, numeric: true },
   { id: 'acconto_tfr', label: 'Acconto TFR (−)', width: 13, fluid: true, numeric: true },
@@ -127,6 +128,7 @@ function emptyLine(partial = {}) {
     staff_member_id: partial.staff_member_id ?? null,
     name: partial.name || '',
     busta: Number(partial.busta) || 0,
+    busta_a: Number(partial.busta_a) || 0,
     acconto_tfr,
     fuori: Number(partial.fuori) || 0,
     tfr_attuale,
@@ -135,9 +137,14 @@ function emptyLine(partial = {}) {
   }
 }
 
-/** Totale busta paga = Busta + Fuori − Acconto TFR */
+/** Totale busta paga = Busta + Busta A + Fuori − Acconto TFR */
 function lineTotale(row) {
-  return (Number(row.busta) || 0) + (Number(row.fuori) || 0) - (Number(row.acconto_tfr) || 0)
+  return (
+    (Number(row.busta) || 0) +
+    (Number(row.busta_a) || 0) +
+    (Number(row.fuori) || 0) -
+    (Number(row.acconto_tfr) || 0)
+  )
 }
 
 /** Saldo TFR aggiornato = TFR attuale − Acconto */
@@ -163,6 +170,7 @@ function parseMoneyInput(raw) {
 function stipendiCellValue(row, col) {
   if (col.id === 'name') return row?.name || '—'
   if (col.id === 'busta') return eur(row?.busta)
+  if (col.id === 'busta_a') return eur(row?.busta_a)
   if (col.id === 'acconto_tfr') return eur(row?.acconto_tfr)
   if (col.id === 'fuori') return eur(row?.fuori)
   if (col.id === 'tfr_attuale') return eur(row?.tfr_attuale)
@@ -209,6 +217,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
 
   const totals = useMemo(() => {
     const busta = lines.reduce((a, r) => a + (Number(r.busta) || 0), 0)
+    const bustaA = lines.reduce((a, r) => a + (Number(r.busta_a) || 0), 0)
     const tfr = lines.reduce((a, r) => a + (Number(r.acconto_tfr) || 0), 0)
     const fuori = lines.reduce((a, r) => a + (Number(r.fuori) || 0), 0)
     const tfrAttuale = lines.reduce((a, r) => a + (Number(r.tfr_attuale) || 0), 0)
@@ -216,12 +225,13 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     const nuovoTfr = lines.reduce((a, r) => a + lineNuovoTfr(r), 0)
     return {
       busta,
+      bustaA,
       tfr,
       fuori,
       tfrAttuale,
       tfrAnticipato,
       nuovoTfr,
-      amount: busta + fuori - tfr,
+      amount: busta + bustaA + fuori - tfr,
     }
   }, [lines])
 
@@ -727,6 +737,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       const header = [
         'Nominativo',
         'Busta',
+        'Busta A',
         'Fuori',
         'TFR attuale',
         'Acconto TFR (−)',
@@ -737,6 +748,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       const body = lines.map((r) => [
         r.name,
         Number(r.busta) || 0,
+        Number(r.busta_a) || 0,
         Number(r.fuori) || 0,
         Number(r.tfr_attuale) || 0,
         Number(r.acconto_tfr) || 0,
@@ -747,6 +759,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       body.push([
         'TOTALI',
         totals.busta,
+        totals.bustaA,
         totals.fuori,
         totals.tfrAttuale,
         totals.tfr,
@@ -882,6 +895,16 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                     />
                   </label>
                   <label className="stipendi-edit-field">
+                    <span>Busta A</span>
+                    <input
+                      className="form-control"
+                      inputMode="decimal"
+                      value={moneyDisplay(draft.busta_a)}
+                      onChange={(e) => updateDraft('busta_a', e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <label className="stipendi-edit-field">
                     <span>Fuori</span>
                     <input
                       className="form-control"
@@ -925,7 +948,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                       placeholder="0,00"
                     />
                   </label>
-                  <div className="stipendi-edit-total" title="Busta + Fuori − Acconto TFR">
+                  <div className="stipendi-edit-total" title="Busta + Busta A + Fuori − Acconto TFR">
                     {eur(lineTotale(draft))}
                   </div>
                 </div>
@@ -988,6 +1011,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                 }
                 totals={{
                   busta: totals.busta,
+                  busta_a: totals.bustaA,
                   fuori: totals.fuori,
                   tfr_attuale: totals.tfrAttuale,
                   acconto_tfr: totals.tfr,
@@ -998,6 +1022,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                 totalsLabel={(colId, t) => {
                   if (colId === 'name') return 'TOTALI'
                   if (colId === 'busta') return eur(t?.busta)
+                  if (colId === 'busta_a') return eur(t?.busta_a)
                   if (colId === 'fuori') return eur(t?.fuori)
                   if (colId === 'tfr_attuale') return eur(t?.tfr_attuale)
                   if (colId === 'acconto_tfr') return eur(t?.acconto_tfr)
