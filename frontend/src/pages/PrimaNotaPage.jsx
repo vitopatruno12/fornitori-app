@@ -328,7 +328,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     if (!saved) return
     setSelectedDate(saved)
     setFormEntryDate(saved)
-    setMovementPeriodFrom(defaultMovementPeriodFrom(saved))
+    // Postazione: giornata salvata = elenco di quel solo giorno (non intervallo 1 mese)
+    setSummaryScope('day')
+    setMovementPeriodFrom(saved)
     setMovementPeriodTo(saved)
   }, [operatorMode, operatorStationId, activeActivity])
 
@@ -852,10 +854,24 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setSuccess('Filtri dashboard rimossi')
   }
 
+  function resolveListPeriod(periodOverride = null) {
+    if (periodOverride?.from && periodOverride?.to) {
+      return normalizeDateRange(periodOverride.from, periodOverride.to)
+    }
+    // Giorno: elenco = sola «Data giornata». Intervallo: date «Periodo elenco».
+    if (summaryScope === 'day') {
+      const day = isIsoDate(selectedDate) ? selectedDate : formatLocalIsoDate(new Date())
+      return { from: day, to: day }
+    }
+    return normalizeDateRange(movementPeriodFrom, movementPeriodTo)
+  }
+
   function applyMovementPeriodPreset(which) {
     const now = new Date()
     const today = formatLocalIsoDate(now)
+    setSummaryScope('interval')
     if (which === 'today') {
+      setSelectedDate(today)
       setMovementPeriodFrom(today)
       setMovementPeriodTo(today)
     } else if (which === 'month') {
@@ -870,7 +886,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }
 
   function alignMovementPeriodToSelectedDay() {
-    setMovementPeriodFrom(defaultMovementPeriodFrom(selectedDate))
+    // Allinea periodo e elenco alla sola giornata selezionata
+    setSummaryScope('day')
+    setMovementPeriodFrom(selectedDate)
     setMovementPeriodTo(selectedDate)
   }
 
@@ -898,6 +916,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const nextFrom = String(from || '').slice(0, 10)
     const nextTo = String(to || '').slice(0, 10)
     if (!nextFrom || !nextTo) return
+    setSummaryScope('interval')
     if (nextFrom !== movementPeriodFrom) setMovementPeriodFrom(nextFrom)
     if (nextTo !== movementPeriodTo) setMovementPeriodTo(nextTo)
   }
@@ -921,7 +940,14 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
     const found = entries.some(e => Number(e.id) === id)
     if (!found) {
-      setFocusEntryMessage(`Movimento cassa #${id} non è nell’elenco del periodo impostato (dal ${formatDate(movementPeriodFrom)} al ${formatDate(movementPeriodTo)}). Allarga il periodo nella barra in alto o vai al giorno giusto.`)
+      {
+        const { from, to } = resolveListPeriod()
+        setFocusEntryMessage(
+          summaryScope === 'day'
+            ? `Movimento cassa #${id} non è nella giornata ${formatDate(selectedDate)}. Passa a Intervallo o cambia Data giornata.`
+            : `Movimento cassa #${id} non è nell’elenco del periodo (dal ${formatDate(from)} al ${formatDate(to)}). Allarga il periodo o vai al giorno giusto.`,
+        )
+      }
       return
     }
     setFocusEntryMessage('')
@@ -936,9 +962,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   useEffect(() => {
     if (!operatorMode) return
-    setMovementPeriodFrom(defaultMovementPeriodFrom(selectedDate))
+    if (!isIsoDate(selectedDate)) return
+    // Stesso comportamento del gestionale: Data giornata → ambito Giorno, periodo = quel giorno.
+    // L'intervallo si attiva solo se l'operatore tocca Periodo / Oggi / 7gg / Mese.
+    if (summaryScope !== 'day') return
+    setMovementPeriodFrom(selectedDate)
     setMovementPeriodTo(selectedDate)
-  }, [operatorMode, selectedDate])
+  }, [operatorMode, selectedDate, summaryScope])
 
   useEffect(() => {
     loadSummary()
@@ -1029,7 +1059,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   useEffect(() => {
     loadEntries()
-  }, [movementPeriodFrom, movementPeriodTo, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
+  }, [movementPeriodFrom, movementPeriodTo, selectedDate, summaryScope, activeActivity, unlockedSlugs, localeAccessCode, localeAccessMetaReady, protectedSlugs])
 
   function selectActivity(activityId) {
     if (operatorMode) return
@@ -1105,13 +1135,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       setLoading(false)
       return
     }
-    let from = periodOverride?.from ?? movementPeriodFrom
-    let to = periodOverride?.to ?? movementPeriodTo
-    if (from && to && from > to) {
-      const swap = from
-      from = to
-      to = swap
-    }
+    const { from, to } = resolveListPeriod(periodOverride)
     try {
       setLoading(true)
       setError('')
@@ -1866,13 +1890,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   }, [entriesForSummary, openingCashInput, summaryScope, activeActivity, locales])
 
   const filteredMovementRows = useMemo(() => {
-    let from = movementPeriodFrom
-    let to = movementPeriodTo
-    if (from && to && from > to) {
-      const swap = from
-      from = to
-      to = swap
-    }
+    const { from, to } = resolveListPeriod()
     const q = movementSearch.trim().toLowerCase()
     return rowsWithLedger.rows.filter((entry) => {
       const d = entry.entry_date ? String(entry.entry_date).slice(0, 10) : ''
@@ -1892,7 +1910,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       if (movementKind === 'movimento_cassetto' && !isMovimentoCassetto(entry)) return false
       return primaNotaMovementMatchesSearch(entry, q)
     })
-  }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo])
+  }, [rowsWithLedger.rows, movementSearch, movementKind, movementPeriodFrom, movementPeriodTo, selectedDate, summaryScope])
 
   function sumMovementRows(rows) {
     return (rows || []).reduce(
@@ -2134,13 +2152,13 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         <p className="staff-page-lead">
           {operatorMode ? (
             <>
-              Registra entrate e uscite per il registro scelto in <strong>Registri prima nota</strong>. Stessi dati e salvataggio del
-              gestionale ATLAS.
+              Registra entrate e uscite per il registro locale. Con <strong>Giorno</strong> vedi solo la Data giornata;
+              con <strong>Intervallo</strong> il Periodo elenco. Stessi dati del gestionale ATLAS.
             </>
           ) : (
             <>
               Registro separato per locale: <strong>{activeActivityLabel}</strong>.
-              Riepilogo per giornata o per intervallo; l’elenco movimenti usa lo stesso periodo impostato in alto.
+              Riepilogo ed elenco: con «Giorno» vale la Data giornata; con «Intervallo» vale il Periodo elenco.
             </>
           )}
         </p>
@@ -2187,6 +2205,27 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
       <div className="ui-toolbar-one card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem' }}>
         <div className="form-group">
+          <label>Ambito elenco</label>
+          <div className="btn-group" role="group" aria-label="Giorno o intervallo">
+            <button
+              type="button"
+              className={`btn btn-sm ${summaryScope === 'day' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSummaryScope('day')}
+              title="Mostra solo i movimenti della Data giornata"
+            >
+              Giorno
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${summaryScope === 'interval' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setSummaryScope('interval')}
+              title="Mostra i movimenti del Periodo elenco"
+            >
+              Intervallo
+            </button>
+          </div>
+        </div>
+        <div className="form-group">
           <label>Data giornata</label>
           <input
             type="date"
@@ -2195,6 +2234,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             onChange={e => {
               const ymd = e.target.value
               setSelectedDate(ymd)
+              setSummaryScope('day')
               if (ymd) setFormEntryDate(ymd)
             }}
             style={{ maxWidth: 160 }}
@@ -2207,7 +2247,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               type="date"
               className="form-control"
               value={movementPeriodFrom}
-              onChange={e => setMovementPeriodFrom(e.target.value)}
+              onChange={e => {
+                setSummaryScope('interval')
+                setMovementPeriodFrom(e.target.value)
+              }}
               aria-label="Data inizio periodo movimenti"
               style={{ maxWidth: 150 }}
             />
@@ -2216,7 +2259,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               type="date"
               className="form-control"
               value={movementPeriodTo}
-              onChange={e => setMovementPeriodTo(e.target.value)}
+              onChange={e => {
+                setSummaryScope('interval')
+                setMovementPeriodTo(e.target.value)
+              }}
               aria-label="Data fine periodo movimenti"
               style={{ maxWidth: 150 }}
             />
@@ -2229,7 +2275,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyMovementPeriodPreset('month')} title="Mese corrente">
               Mese
             </button>
-            <button type="button" className="btn btn-outline-secondary btn-sm" onClick={alignMovementPeriodToSelectedDay} title="Dal un mese prima della giornata riepilogo, al quella data">
+            <button type="button" className="btn btn-outline-secondary btn-sm" onClick={alignMovementPeriodToSelectedDay} title="Elenco = sola Data giornata">
               = giornata
             </button>
           </div>
@@ -2667,7 +2713,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         {!loading && !error && filteredMovementRows.length > 0 && (
           <div className="pn-movement-totals" style={{ margin: '0 1rem 0.75rem' }} aria-label="Totali movimenti nel periodo">
             <span className="pn-movement-totals-label">
-              Totali periodo ({movementPeriodTotals.count} movimenti)
+              {summaryScope === 'day' ? 'Totali giornata' : 'Totali periodo'} ({movementPeriodTotals.count} movimenti)
             </span>
             <span className="pn-movement-totals-item">
               Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
@@ -2716,9 +2762,11 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           loading={loading}
           emptyMessage={
             rowsWithLedger.rows.length === 0
-              ? 'Nessun movimento nel periodo selezionato.'
+              ? (summaryScope === 'day'
+                ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
+                : 'Nessun movimento nel periodo selezionato.')
               : movementSearch.trim()
-                ? `Nessuna operazione per «${movementSearch.trim()}». Allarga il periodo o cambia il testo.`
+                ? `Nessuna operazione per «${movementSearch.trim()}». ${summaryScope === 'day' ? 'Cambia giornata o testo.' : 'Allarga il periodo o cambia il testo.'}`
                 : 'Nessun movimento corrisponde ai filtri.'
           }
           rowKey={(row) => String(row.id)}
