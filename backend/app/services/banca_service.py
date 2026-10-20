@@ -3087,6 +3087,13 @@ def _invoice_row_out(
     "saldo_fatture",
     "bundle_fornitore",
   }
+  # Ciclo di vita stile Sibill (una sola verità operativa)
+  if status == "paid" or aligned:
+    lifecycle = "pagata"
+  elif status == "partial" or reason == "acconto":
+    lifecycle = "parziale"
+  else:
+    lifecycle = "aperta"
   out = {
     "invoice_id": getattr(inv, "id", None),
     "supplier_name": getattr(inv, "supplier_name", "") or "",
@@ -3097,6 +3104,7 @@ def _invoice_row_out(
     "amount_paid": float(paid),
     "residuo": float(residuo),
     "payment_status": status,
+    "lifecycle": lifecycle,
     "payment_method": getattr(inv, "payment_method", None),
     "company": getattr(inv, "company", None),
     "match_reason": reason,
@@ -3512,6 +3520,8 @@ def reconciliation_snapshot(
       }
     )
 
+  partial_rows = [r for r in da_pagare if r.get("lifecycle") == "parziale"]
+  open_rows = [r for r in da_pagare if r.get("lifecycle") != "parziale"]
   return {
     "company": company_id or "",
     "suggestions": suggestions,
@@ -3536,6 +3546,20 @@ def reconciliation_snapshot(
     ],
     "expected_banks": expected_banks_for_company(company_id),
     "fast": True,
+    # Modello inbox (Sibill-like): banca = verità post cut-off; file = storico/contanti
+    "truth_model": {
+      "primary": "enable_banking",
+      "secondary": "pagamenti_file_contanti_e_storico",
+      "bank_auto_from": "2026-08-01",
+      "label": "Enable Banking chiude le fatture da agosto; file Pagamenti per contanti/carta e storico.",
+    },
+    "lifecycle_counts": {
+      "pagata": len(paid_by_bank),
+      "parziale": len(partial_rows),
+      "aperta": len(open_rows),
+      "da_riconciliare": unmatched_count,
+      "proposta": 0,
+    },
   }
 
 
@@ -3664,10 +3688,28 @@ def enrich_probable_suggestions(
 
   out = dict(snapshot or {})
   out["suggestions"] = suggestions
-  out["unmatched_movements"] = len([s for s in suggestions if s["status"] == "unmatched"])
-  out["probable_count"] = len(
-    [s for s in suggestions if s.get("match_band") == "probable" or s.get("status") == "difference"]
-  )
+  proposals = [
+    s
+    for s in suggestions
+    if s.get("suggested_invoice")
+    and (s.get("match_band") == "probable" or s.get("status") == "difference" or (s.get("match_score") or 0) >= _SCORE_PROBABLE)
+  ]
+  unmatched_only = [s for s in suggestions if not s.get("suggested_invoice")]
+  out["unmatched_movements"] = len(unmatched_only)
+  out["probable_count"] = len(proposals)
+  out["proposals"] = proposals
+  out["unmatched"] = unmatched_only
+  lc = dict(out.get("lifecycle_counts") or {})
+  lc["proposta"] = len(proposals)
+  lc["da_riconciliare"] = len(unmatched_only)
+  out["lifecycle_counts"] = lc
+  out["inbox"] = {
+    "proposals": proposals,
+    "unmatched": unmatched_only,
+    "partial": [r for r in (out.get("da_pagare") or []) if r.get("lifecycle") == "parziale"],
+    "open": [r for r in (out.get("da_pagare") or []) if r.get("lifecycle") != "parziale"],
+    "paid": list(out.get("paid_by_bank") or []),
+  }
   out["fast"] = False
   return out
 
@@ -4670,11 +4712,14 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
   mov = db.query(BankMovement).filter(BankMovement.id == movement_id).first()
   if not mov:
     raise ValueError("Movimento non trovato")
-  if status not in {"matched", "unmatched", "difference"}:
+  if status not in {"matched", "unmatched", "difference", "excluded"}:
     raise ValueError("Stato non valido")
   prev_invoice_id = mov.matched_invoice_id
   mov.reconciliation_status = status
-  mov.matched_invoice_id = invoice_id if status != "unmatched" else None
+  # Escluso = non è un pagamento fornitore (commissioni, F24, stipendi…): fuori dall'inbox
+  if status == "excluded":
+    invoice_id = None
+  mov.matched_invoice_id = invoice_id if status not in {"unmatched", "excluded"} else None
   if status == "difference" and invoice_id:
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if inv:
@@ -4691,8 +4736,8 @@ def apply_match(db: Session, movement_id: int, invoice_id: Optional[int], status
       inv.is_paid = True
   else:
     mov.difference_amount = None
-    # Scollega: ripristina da pagare se non resta altro match valido
-    if status == "unmatched" and prev_invoice_id:
+    # Scollega / escludi: ripristina da pagare se non resta altro match valido
+    if status in {"unmatched", "excluded"} and prev_invoice_id:
       still = (
         db.query(BankMovement)
         .filter(

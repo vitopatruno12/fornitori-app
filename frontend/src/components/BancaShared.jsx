@@ -87,6 +87,7 @@ export function reconciliationStatusLabel(status) {
   const key = String(status || '').trim().toLowerCase()
   if (key === 'matched') return 'Riconciliato'
   if (key === 'difference') return 'Differenza'
+  if (key === 'excluded' || key === 'ignored') return 'Escluso'
   if (key === 'unmatched' || key === 'unreconciled') return 'Da riconciliare'
   if (!key) return '—'
   return String(status)
@@ -106,6 +107,9 @@ export function ReconBadge({ status }) {
   }
   if (status === 'difference') {
     return <span style={{ ...base, background: '#fef3c7', color: '#b45309' }}>{label}</span>
+  }
+  if (status === 'excluded' || status === 'ignored') {
+    return <span style={{ ...base, background: '#e5e7eb', color: '#4b5563' }}>{label}</span>
   }
   return <span style={{ ...base, background: '#fee2e2', color: '#dc2626' }}>{label}</span>
 }

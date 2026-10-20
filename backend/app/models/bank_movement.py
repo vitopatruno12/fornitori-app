@@ -17,7 +17,7 @@ class BankMovement(Base):
   amount = Column(Numeric(14, 2), nullable=False)
   counterparty = Column(String(256), nullable=True)
   category = Column(String(120), nullable=True)
-  reconciliation_status = Column(String(32), nullable=False, default="unmatched")  # unmatched|matched|difference
+  reconciliation_status = Column(String(32), nullable=False, default="unmatched")  # unmatched|matched|difference|excluded
   matched_invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
   matched_cash_entry_id = Column(Integer, ForeignKey("cash_entries.id"), nullable=True)
   difference_amount = Column(Numeric(14, 2), nullable=True)

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 SCHEDULE_LABEL = os.getenv(
   "PAGAMENTI_WATCH_SCHEDULE_LABEL",
-  "automatico · martedì, mercoledì, giovedì e venerdì alle 9:30 e alle 18:30 (ora di Roma)",
+  "automatico · lun–sab alle 8:00, 13:00 e 18:30 (ora di Roma) · Enable Banking = verità primaria",
 ).strip()
 LOCK_STALE_SEC = 30 * 60
 # Periodo scarico movimenti (giorni indietro). Default 120.

@@ -596,6 +596,18 @@ const BANK_INVOICE_STATUS_COLUMNS = [
   { id: 'amount_paid', label: 'Pagato', width: 10, fluid: true, numeric: true },
   { id: 'residuo', label: 'Residuo', width: 10, fluid: true, numeric: true },
   {
+    id: 'lifecycle',
+    label: 'Stato',
+    width: 10,
+    fluid: true,
+    tone: (row) => {
+      const life = String(row?.lifecycle || '')
+      if (life === 'pagata' || invoiceIsAligned(row)) return 'banca-recon-ok-cell'
+      if (life === 'parziale') return 'banca-recon-warn-cell'
+      return 'banca-recon-open-cell'
+    },
+  },
+  {
     id: 'ok',
     label: 'OK',
     width: 5,
@@ -668,7 +680,18 @@ function bankReconCellValue(row, col) {
   return ''
 }
 
+function invoiceLifecycleLabel(row) {
+  const life = String(row?.lifecycle || '').trim().toLowerCase()
+  if (life === 'pagata' || invoiceIsAligned(row)) return 'Pagata'
+  if (life === 'parziale' || row?.match_reason === 'acconto') return 'Parziale'
+  if (life === 'aperta' || row?.match_reason === 'da_pagare') return 'Aperta'
+  if (row?.payment_status === 'paid') return 'Pagata'
+  if (row?.payment_status === 'partial') return 'Parziale'
+  return 'Aperta'
+}
+
 function bankInvoiceStatusCellValue(row, col) {
+  if (col.id === 'lifecycle') return invoiceLifecycleLabel(row)
   if (col.id === 'ok') return invoiceIsAligned(row) ? '✔' : '○'
   if (col.id === 'invoice_number') return row?.invoice_number || '—'
   if (col.id === 'supplier_name') return row?.supplier_name || '—'
@@ -719,7 +742,7 @@ const AMM_HUB_MODULES = [
     kicker: 'Liquidità',
     title: 'Banca',
     value: 'Conti e movimenti',
-    desc: 'Saldi, sync Enable Banking e riconciliazione automatica',
+    desc: 'Saldi, sync Enable Banking e inbox riconciliazione (Sibill-like)',
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <path
@@ -781,7 +804,7 @@ const AMM_HUB_MODULES = [
 
 const AMM_HUB_QUICK = [
   { to: '/banca/conti', label: 'Conti correnti' },
-  { to: '/banca/riconciliazione', label: 'Riconciliazione' },
+  { to: '/banca/riconciliazione', label: 'Inbox riconciliazione' },
   { to: '/fatture/scadenziario', label: 'Scadenziario fatture' },
   { to: '/pagamenti', label: 'Pagamenti' },
   { to: '/amministrazione/mastrini', label: 'Mastrini contabili' },
@@ -2673,6 +2696,8 @@ export function BancaRiconciliazionePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
+  /** Inbox Sibill-like: proposte | unmatched | parziali | aperte | pagate */
+  const [inboxTab, setInboxTab] = useState('proposte')
   const [unpaidSupplierDraft, setUnpaidSupplierDraft] = useState('')
   const [unpaidSupplierHit, setUnpaidSupplierHit] = useState('')
   const [paidSupplierDraft, setPaidSupplierDraft] = useState('')
@@ -2719,19 +2744,28 @@ export function BancaRiconciliazionePage() {
       void fetchBancaRiconciliazioneProposte(nextCompany)
         .then((proposte) => {
           const probable = Number(proposte?.probable_count) || 0
+          const unmatchedN = Number(proposte?.unmatched_movements) || 0
           setData((prev) => ({
             ...(prev || {}),
             suggestions: proposte?.suggestions || prev?.suggestions || [],
+            proposals: proposte?.proposals || proposte?.inbox?.proposals || [],
+            unmatched: proposte?.unmatched || proposte?.inbox?.unmatched || [],
+            inbox: proposte?.inbox || prev?.inbox,
+            lifecycle_counts: proposte?.lifecycle_counts || prev?.lifecycle_counts,
             probable_count: probable,
-            unmatched_movements: proposte?.unmatched_movements ?? prev?.unmatched_movements,
+            unmatched_movements: unmatchedN || (proposte?.unmatched_movements ?? prev?.unmatched_movements),
             score_thresholds: proposte?.score_thresholds || prev?.score_thresholds,
             suggestions_pending: false,
           }))
-          if (auto && probable) {
+          if (auto && (probable || unmatchedN)) {
             setSuccess((prev) =>
-              `${prev || ''} ${probable} proposte da confermare.`.replace(/\s+/g, ' ').trim(),
+              `${prev || ''} Inbox: ${probable} proposte, ${unmatchedN} da abbinare.`
+                .replace(/\s+/g, ' ')
+                .trim(),
             )
           }
+          if (probable > 0) setInboxTab('proposte')
+          else if (unmatchedN > 0) setInboxTab('unmatched')
         })
         .catch(() => {
           setData((prev) => (prev ? { ...prev, suggestions_pending: false } : prev))
@@ -2797,6 +2831,33 @@ export function BancaRiconciliazionePage() {
     }
   }
 
+  async function excludeMovement(row) {
+    const movId = row?.movement?.id
+    if (!movId || typeof movId !== 'number') {
+      setError('Movimento non valido.')
+      return
+    }
+    if (
+      !window.confirm(
+        'Escludere questa uscita dall’inbox? (commissioni, F24, stipendi, ecc. — non è un pagamento fornitore)',
+      )
+    ) {
+      return
+    }
+    setBusyId(movId)
+    setError('')
+    setSuccess('')
+    try {
+      await postBancaRiconcilia(movId, { invoice_id: null, status: 'excluded' })
+      setSuccess('Uscita esclusa dall’inbox')
+      await reload(companyId, { auto: false })
+    } catch (e) {
+      setError(e?.message || 'Errore esclusione')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function confirmAllProbable() {
     const rows = pendingSuggestions.filter(
       (s) =>
@@ -2839,10 +2900,37 @@ export function BancaRiconciliazionePage() {
     }
   }
 
-  const paidRows = data?.paid_by_bank || []
+  const paidRows = data?.inbox?.paid || data?.paid_by_bank || []
   const unpaidRows = data?.da_pagare || []
+  const partialRows =
+    data?.inbox?.partial
+    || unpaidRows.filter((r) => r?.lifecycle === 'parziale' || r?.match_reason === 'acconto')
+  const openRows =
+    data?.inbox?.open
+    || unpaidRows.filter((r) => r?.lifecycle !== 'parziale' && r?.match_reason !== 'acconto')
   const companyName = companyId ? companyLabel(companyId) : ''
   const pendingSuggestions = (data?.suggestions || []).filter((s) => s?.status !== 'matched')
+  const proposalRows =
+    data?.proposals?.length
+      ? data.proposals
+      : pendingSuggestions.filter(
+          (s) =>
+            s?.suggested_invoice
+            && (s.match_band === 'probable'
+              || s.status === 'difference'
+              || (Number(s.match_score) || 0) >= 70),
+        )
+  const unmatchedRows =
+    data?.unmatched?.length
+      ? data.unmatched
+      : pendingSuggestions.filter((s) => !s?.suggested_invoice)
+  const lifecycleCounts = data?.lifecycle_counts || {
+    proposta: proposalRows.length,
+    da_riconciliare: unmatchedRows.length,
+    parziale: partialRows.length,
+    aperta: openRows.length,
+    pagata: paidRows.length,
+  }
   const schedaRows = [...unpaidRows, ...paidRows]
 
   const unpaidHitIds = useMemo(() => {
@@ -2952,13 +3040,195 @@ export function BancaRiconciliazionePage() {
     }
   }
 
+  const inboxTabs = [
+    { id: 'proposte', label: 'Proposte', count: lifecycleCounts.proposta ?? proposalRows.length },
+    { id: 'unmatched', label: 'Da abbinare', count: lifecycleCounts.da_riconciliare ?? unmatchedRows.length },
+    { id: 'parziali', label: 'Parziali', count: lifecycleCounts.parziale ?? partialRows.length },
+    { id: 'aperte', label: 'Aperte', count: lifecycleCounts.aperta ?? openRows.length },
+    { id: 'pagate', label: 'Pagate', count: lifecycleCounts.pagata ?? paidRows.length },
+  ]
+
+  function renderInvoiceGrid({ title, rows, kind, emptyMessage }) {
+    const hitIds = kind === 'paid' ? paidHitIds : unpaidHitIds
+    const draft = kind === 'paid' ? paidSupplierDraft : unpaidSupplierDraft
+    const setDraft = kind === 'paid' ? setPaidSupplierDraft : setUnpaidSupplierDraft
+    const hit = kind === 'paid' ? paidSupplierHit : unpaidSupplierHit
+    return (
+      <section className="card fatture-panel banca-fit-panel">
+        <div className="banca-recon-panel-head">
+          <div>
+            <h2 className="fatture-panel-title">{title}</h2>
+          </div>
+          <form
+            className="banca-recon-supplier-search"
+            onSubmit={(e) => {
+              e.preventDefault()
+              cercaFornitoreInLista(kind === 'paid' ? 'paid' : 'unpaid')
+            }}
+          >
+            <label className="banca-recon-supplier-search-label">
+              Cerca fornitore
+              <input
+                className="form-control"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="es. Fatano, Metro…"
+                autoComplete="off"
+              />
+            </label>
+            <button type="submit" className="btn btn-primary btn-sm">
+              Cerca
+            </button>
+            {hit ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setDraft('')
+                  if (kind === 'paid') setPaidSupplierHit('')
+                  else setUnpaidSupplierHit('')
+                  setSupplierSearchNote('')
+                  setSupplierSearchScope('')
+                }}
+              >
+                Pulisci
+              </button>
+            ) : null}
+          </form>
+        </div>
+        {supplierSearchNote && supplierSearchScope === (kind === 'paid' ? 'paid' : 'unpaid') ? (
+          <p className="fatture-note banca-recon-supplier-hit-note">{supplierSearchNote}</p>
+        ) : null}
+        <WorkbookGrid
+          title={title}
+          sheetLabel={`${rows.length} doc.`}
+          columns={BANK_INVOICE_STATUS_COLUMNS}
+          rows={rows}
+          cellValue={bankInvoiceStatusCellValue}
+          emptyMessage={emptyMessage}
+          gridClassName="banca-fit-grid"
+          rowKey={(row) => `${kind}-${row.invoice_id}`}
+          getRowId={(row) =>
+            kind === 'paid' ? `banca-recon-paid-${row.invoice_id}` : `banca-recon-open-${row.invoice_id}`
+          }
+          getRowClassName={(row) =>
+            [
+              kind === 'paid' || invoiceIsAligned(row) ? 'banca-recon-row-ok' : 'banca-recon-row-open',
+              hitIds.has(String(row.invoice_id)) ? 'banca-recon-supplier-hit' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          }
+          totals={
+            rows.length
+              ? {
+                  total: rows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+                  amount_paid: rows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
+                  residuo: rows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
+                }
+              : null
+          }
+          totalsLabel={(colId, totals) => {
+            if (colId === 'supplier_name') return 'TOTALI'
+            if (colId === 'total') return eur(totals?.total)
+            if (colId === 'amount_paid') return eur(totals?.amount_paid)
+            if (colId === 'residuo') return eur(totals?.residuo)
+            return ''
+          }}
+        />
+      </section>
+    )
+  }
+
+  function renderMovementInbox({ title, note, rows, showConfirmAll }) {
+    return (
+      <section className="card fatture-panel banca-fit-panel">
+        <h2 className="fatture-panel-title">{title}</h2>
+        {note ? (
+          <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
+            {note}
+          </p>
+        ) : null}
+        {showConfirmAll ? (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={loading || agentBusy || busyId != null || !proposalRows.length}
+              onClick={() => void confirmAllProbable()}
+            >
+              {busyId === 'all' ? 'Confermo…' : 'Conferma tutte le proposte'}
+            </button>
+          </div>
+        ) : null}
+        <WorkbookGrid
+          title={title}
+          sheetLabel={`${rows.length} righe`}
+          columns={BANK_RECON_COLUMNS}
+          rows={rows}
+          cellValue={bankReconCellValue}
+          emptyMessage="Niente in questa coda."
+          gridClassName="banca-fit-grid"
+          rowKey={(row, idx) => row?.movement?.id || idx}
+          totals={{
+            amount: rows.reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),
+            difference: rows.reduce(
+              (acc, row) => acc + (Number(row?.suggested_invoice?.difference) || 0),
+              0,
+            ),
+          }}
+          totalsLabel={(colId, totals) => {
+            if (colId === 'date') return 'TOTALI'
+            if (colId === 'amount') return eur(totals?.amount)
+            if (colId === 'difference') return eur(totals?.difference)
+            return ''
+          }}
+          actionsHeader="Azioni"
+          renderActions={(row) => {
+            if (typeof row?.movement?.id !== 'number') return null
+            const canConfirm = Boolean(row?.suggested_invoice)
+            return (
+              <div className="banca-recon-row-actions">
+                {canConfirm ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={busyId === row.movement.id || busyId === 'all'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      confirmMatch(row)
+                    }}
+                  >
+                    Conferma
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busyId === row.movement.id || busyId === 'all'}
+                  title="Non è un pagamento fornitore: togli dall’inbox"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void excludeMovement(row)
+                  }}
+                >
+                  Escludi
+                </button>
+              </div>
+            )
+          }}
+        />
+      </section>
+    )
+  }
+
   return (
     <BancaPageShell
-      title="Riconciliazione automatica"
+      title="Inbox riconciliazione"
       lead={
         companyId
-          ? `Fatture ${companyName}: pagate / da pagare aggiornate all’apertura. Il file Pagamenti chiude la fattura se PAGATO è compilato; da agosto, se manca nel file, la chiude il bonifico.`
-          : 'Scegli la società: l’elenco pagate e da pagare si aggiorna dal file Pagamenti e, da agosto, anche dai bonifici.'
+          ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da agosto; contanti/carta dal file Pagamenti. Lavora le eccezioni nell’inbox.`
+          : 'Scegli la società: sync banca automatico, match ≥80 applicati, proposte 70–79 in un click.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
@@ -2975,9 +3245,9 @@ export function BancaRiconciliazionePage() {
               className="btn btn-primary btn-sm"
               onClick={() => void runAgent()}
               disabled={agentBusy || loading}
-              title="Scarica movimenti, abbina fatture dalle causali e allinea i contanti dal file fornitori"
+              title="Scarica movimenti Enable Banking e riconcilia (lun–sab 8 / 13 / 18:30)"
             >
-              {agentBusy ? 'Agente in corso…' : 'Avvia agente automatico'}
+              {agentBusy ? 'Agente in corso…' : 'Sync banca ora'}
             </button>
             <button
               type="button"
@@ -2988,7 +3258,7 @@ export function BancaRiconciliazionePage() {
               }}
               disabled={loading || agentBusy || !companyId}
             >
-              {loading ? 'Riconcilio…' : 'Aggiorna e riconcilia'}
+              {loading ? 'Riconcilio…' : 'Aggiorna inbox'}
             </button>
             <button
               type="button"
@@ -3007,274 +3277,89 @@ export function BancaRiconciliazionePage() {
       {success && <div className="alert alert-success">{success}</div>}
 
       {!companyId ? (
-        <p className="fatture-note">Seleziona una società dal menu nel banner verde per avviare la riconciliazione.</p>
+        <p className="fatture-note">Seleziona una società dal menu nel banner verde per aprire l’inbox.</p>
       ) : null}
 
       {companyId ? (
         <>
-          <div className="ui-kpi-row">
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Pagate</div>
-              <div className="ui-kpi-card-value">{data?.paid_count ?? paidRows.length ?? '—'}</div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Da pagare</div>
-              <div className="ui-kpi-card-value">{data?.open_invoices_count ?? unpaidRows.length ?? '—'}</div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Uscite da riconciliare</div>
-              <div className="ui-kpi-card-value">{data?.unmatched_movements ?? '—'}</div>
-            </div>
-            <div className="ui-kpi-card">
-              <div className="ui-kpi-card-label">Conti usati</div>
-              <div className="ui-kpi-card-value" style={{ fontSize: '0.95rem' }}>
-                {(data?.accounts_used || []).map((a) => a.label).filter(Boolean).join(' · ')
-                  || (data?.expected_banks || []).join(' · ')
-                  || '—'}
-              </div>
-              {(data?.expected_banks || []).length > 0 ? (
-                <div className="dashboard-kpi-sub" style={{ marginTop: '0.35rem' }}>
-                  Attesi: {(data.expected_banks || []).join(' + ')}
-                </div>
-              ) : null}
-            </div>
+          <div className="ui-kpi-row banca-inbox-kpi">
+            {inboxTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`ui-kpi-card banca-inbox-kpi-btn${inboxTab === tab.id ? ' is-active' : ''}`}
+                onClick={() => setInboxTab(tab.id)}
+              >
+                <div className="ui-kpi-card-label">{tab.label}</div>
+                <div className="ui-kpi-card-value">{tab.count ?? '—'}</div>
+              </button>
+            ))}
           </div>
 
+          {data?.truth_model?.label ? (
+            <p className="fatture-note banca-inbox-truth">{data.truth_model.label}</p>
+          ) : null}
+
           {loading && !data ? (
-            <AnalisiLoadingBar active label="Aggiorno pagate e da pagare" variant="subtle" />
+            <AnalisiLoadingBar active label="Aggiorno inbox riconciliazione" variant="subtle" />
           ) : null}
 
           {data ? (
             <>
-              <section className="card fatture-panel banca-fit-panel">
-                <div className="banca-recon-panel-head">
-                  <div>
-                    <h2 className="fatture-panel-title">Da pagare</h2>
-                  </div>
-                  <form
-                    className="banca-recon-supplier-search"
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      cercaFornitoreInLista('unpaid')
-                    }}
-                  >
-                    <label className="banca-recon-supplier-search-label">
-                      Cerca fornitore
-                      <input
-                        className="form-control"
-                        value={unpaidSupplierDraft}
-                        onChange={(e) => setUnpaidSupplierDraft(e.target.value)}
-                        placeholder="es. Fatano, Metro…"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <button type="submit" className="btn btn-primary btn-sm">
-                      Cerca
-                    </button>
-                    {unpaidSupplierHit ? (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setUnpaidSupplierDraft('')
-                          setUnpaidSupplierHit('')
-                          setSupplierSearchNote('')
-                          setSupplierSearchScope('')
-                        }}
-                      >
-                        Pulisci
-                      </button>
-                    ) : null}
-                  </form>
-                </div>
-                {supplierSearchNote && supplierSearchScope === 'unpaid' ? (
-                  <p className="fatture-note banca-recon-supplier-hit-note">{supplierSearchNote}</p>
-                ) : null}
-                <WorkbookGrid
-                  title="Fatture da pagare"
-                  sheetLabel={`${unpaidRows.length} doc.`}
-                  columns={BANK_INVOICE_STATUS_COLUMNS}
-                  rows={unpaidRows}
-                  cellValue={bankInvoiceStatusCellValue}
-                  emptyMessage="Nessuna fattura da pagare: tutte allineate ai movimenti o al file PAGATO."
-                  gridClassName="banca-fit-grid"
-                  rowKey={(row) => row.invoice_id}
-                  getRowId={(row) => `banca-recon-open-${row.invoice_id}`}
-                  getRowClassName={(row) =>
-                    [
-                      invoiceIsAligned(row) ? 'banca-recon-row-ok' : 'banca-recon-row-open',
-                      unpaidHitIds.has(String(row.invoice_id)) ? 'banca-recon-supplier-hit' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')
-                  }
-                  totals={
-                    unpaidRows.length
-                      ? {
-                          total: unpaidRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
-                          amount_paid: unpaidRows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
-                          residuo: unpaidRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
-                        }
-                      : null
-                  }
-                  totalsLabel={(colId, totals) => {
-                    if (colId === 'supplier_name') return 'TOTALI'
-                    if (colId === 'total') return eur(totals?.total)
-                    if (colId === 'amount_paid') return eur(totals?.amount_paid)
-                    if (colId === 'residuo') return eur(totals?.residuo)
-                    return ''
-                  }}
-                />
-              </section>
-
-              <section className="card fatture-panel banca-fit-panel">
-                <div className="banca-recon-panel-head">
-                  <div>
-                    <h2 className="fatture-panel-title">Pagate / abbinate (✔ verde)</h2>
-                  </div>
-                  <form
-                    className="banca-recon-supplier-search"
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      cercaFornitoreInLista('paid')
-                    }}
-                  >
-                    <label className="banca-recon-supplier-search-label">
-                      Cerca fornitore
-                      <input
-                        className="form-control"
-                        value={paidSupplierDraft}
-                        onChange={(e) => setPaidSupplierDraft(e.target.value)}
-                        placeholder="es. Fatano, Metro…"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <button type="submit" className="btn btn-primary btn-sm">
-                      Cerca
-                    </button>
-                    {paidSupplierHit ? (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setPaidSupplierDraft('')
-                          setPaidSupplierHit('')
-                          setSupplierSearchNote('')
-                          setSupplierSearchScope('')
-                        }}
-                      >
-                        Pulisci
-                      </button>
-                    ) : null}
-                  </form>
-                </div>
-                {supplierSearchNote && supplierSearchScope === 'paid' ? (
-                  <p className="fatture-note banca-recon-supplier-hit-note">{supplierSearchNote}</p>
-                ) : null}
-                <WorkbookGrid
-                  title="Fatture pagate o abbinate"
-                  sheetLabel={`${paidRows.length} doc.`}
-                  columns={BANK_INVOICE_STATUS_COLUMNS}
-                  rows={paidRows}
-                  cellValue={bankInvoiceStatusCellValue}
-                  emptyMessage="Nessuna fattura ancora pagata (file Pagamenti o banca)."
-                  gridClassName="banca-fit-grid"
-                  rowKey={(row) => `paid-${row.invoice_id}`}
-                  getRowId={(row) => `banca-recon-paid-${row.invoice_id}`}
-                  getRowClassName={(row) =>
-                    [
-                      'banca-recon-row-ok',
-                      paidHitIds.has(String(row.invoice_id)) ? 'banca-recon-supplier-hit' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')
-                  }
-                  totals={
-                    paidRows.length
-                      ? {
-                          total: paidRows.reduce((a, r) => a + (Number(r.total) || 0), 0),
-                          amount_paid: paidRows.reduce((a, r) => a + (Number(r.amount_paid) || 0), 0),
-                          residuo: paidRows.reduce((a, r) => a + (Number(r.residuo) || 0), 0),
-                        }
-                      : null
-                  }
-                  totalsLabel={(colId, totals) => {
-                    if (colId === 'supplier_name') return 'TOTALI'
-                    if (colId === 'total') return eur(totals?.total)
-                    if (colId === 'amount_paid') return eur(totals?.amount_paid)
-                    if (colId === 'residuo') return eur(totals?.residuo)
-                    return ''
-                  }}
-                />
-              </section>
-
-              <section className="card fatture-panel banca-fit-panel">
-                <h2 className="fatture-panel-title">Da controllare (differenze / da riconciliare)</h2>
-                <p className="fatture-note" style={{ marginBottom: '0.75rem' }}>
-                  Proposte score 70–79: un click conferma. I match ≥80 e i bonifici multi-fattura
-                  vengono applicati da «Aggiorna e riconcilia».
-                </p>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+              <nav className="banca-inbox-tabs" aria-label="Code inbox">
+                {inboxTabs.map((tab) => (
                   <button
+                    key={tab.id}
                     type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={
-                      loading
-                      || agentBusy
-                      || busyId != null
-                      || !pendingSuggestions.some(
-                        (s) =>
-                          s?.suggested_invoice
-                          && (s.match_band === 'probable'
-                            || s.status === 'difference'
-                            || (Number(s.match_score) || 0) >= 70),
-                      )
-                    }
-                    onClick={() => void confirmAllProbable()}
+                    className={`banca-inbox-tab${inboxTab === tab.id ? ' is-active' : ''}`}
+                    onClick={() => setInboxTab(tab.id)}
                   >
-                    {busyId === 'all' ? 'Confermo…' : 'Conferma tutte le proposte'}
+                    {tab.label}
+                    <span className="banca-inbox-tab-count">{tab.count ?? 0}</span>
                   </button>
-                </div>
-                <WorkbookGrid
-                  title="Residui da controllare"
-                  sheetLabel={`${pendingSuggestions.length} righe`}
-                  columns={BANK_RECON_COLUMNS}
-                  rows={pendingSuggestions}
-                  cellValue={bankReconCellValue}
-                  emptyMessage="Niente da controllare: tutto riconciliato automaticamente o nessun movimento in uscita."
-                  gridClassName="banca-fit-grid"
-                  rowKey={(row, idx) => row?.movement?.id || idx}
-                  totals={{
-                    amount: pendingSuggestions.reduce((acc, row) => acc + (Number(row?.movement?.amount) || 0), 0),
-                    difference: pendingSuggestions.reduce(
-                      (acc, row) => acc + (Number(row?.suggested_invoice?.difference) || 0),
-                      0,
-                    ),
-                  }}
-                  totalsLabel={(colId, totals) => {
-                    if (colId === 'date') return 'TOTALI'
-                    if (colId === 'amount') return eur(totals?.amount)
-                    if (colId === 'difference') return eur(totals?.difference)
-                    return ''
-                  }}
-                  actionsHeader="Azioni"
-                  renderActions={(row) =>
-                    row?.suggested_invoice && typeof row?.movement?.id === 'number' ? (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        disabled={busyId === row.movement.id || busyId === 'all'}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          confirmMatch(row)
-                        }}
-                      >
-                        Conferma
-                      </button>
-                    ) : null
-                  }
-                />
-              </section>
+                ))}
+              </nav>
+
+              {inboxTab === 'proposte'
+                ? renderMovementInbox({
+                    title: 'Proposte da confermare (score 70–79)',
+                    note: 'Un click conferma. I match ≥80 e i bonifici multi-fattura li applica «Aggiorna inbox» / sync automatico.',
+                    rows: proposalRows,
+                    showConfirmAll: true,
+                  })
+                : null}
+              {inboxTab === 'unmatched'
+                ? renderMovementInbox({
+                    title: 'Uscite senza fattura abbinata',
+                    note: 'Abbina a mano da Movimenti oppure escludi se non è un pagamento fornitore (F24, commissioni, stipendi…).',
+                    rows: unmatchedRows,
+                    showConfirmAll: false,
+                  })
+                : null}
+              {inboxTab === 'parziali'
+                ? renderInvoiceGrid({
+                    title: 'Fatture parziali (acconti)',
+                    rows: partialRows,
+                    kind: 'unpaid',
+                    emptyMessage: 'Nessun acconto in sospeso.',
+                  })
+                : null}
+              {inboxTab === 'aperte'
+                ? renderInvoiceGrid({
+                    title: 'Fatture aperte',
+                    rows: openRows,
+                    kind: 'unpaid',
+                    emptyMessage: 'Nessuna fattura aperta: tutto allineato alla banca o al file.',
+                  })
+                : null}
+              {inboxTab === 'pagate'
+                ? renderInvoiceGrid({
+                    title: 'Fatture pagate / abbinate',
+                    rows: paidRows,
+                    kind: 'paid',
+                    emptyMessage: 'Nessuna fattura ancora pagata (banca o contanti).',
+                  })
+                : null}
             </>
           ) : null}
         </>

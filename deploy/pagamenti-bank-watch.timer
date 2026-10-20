@@ -1,12 +1,14 @@
 [Unit]
-Description=ATLAS agente Pagamenti + banca (mar, mer, gio, ven alle 9:30 e 18:30 ora di Roma)
+Description=ATLAS agente riconciliazione banca (lun–sab 8:00 · 13:00 · 18:30 ora di Roma)
 Requires=pagamenti-bank-watch.service
 
 [Timer]
 # Orari italiani (CET/CEST), indipendenti dal fuso del server
+# Modello Sibill-like: sync più volte al giorno su tutti i conti Enable Banking
 Timezone=Europe/Rome
-OnCalendar=Tue,Wed,Thu,Fri *-*-* 09:30:00
-OnCalendar=Tue,Wed,Thu,Fri *-*-* 18:30:00
+OnCalendar=Mon,Tue,Wed,Thu,Fri,Sat *-*-* 08:00:00
+OnCalendar=Mon,Tue,Wed,Thu,Fri,Sat *-*-* 13:00:00
+OnCalendar=Mon,Tue,Wed,Thu,Fri,Sat *-*-* 18:30:00
 Persistent=true
 RandomizedDelaySec=120
 Unit=pagamenti-bank-watch.service

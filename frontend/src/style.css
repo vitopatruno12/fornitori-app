@@ -10992,6 +10992,71 @@ select.form-control {
   overflow-x: hidden !important;
 }
 
+.banca-inbox-kpi .banca-inbox-kpi-btn {
+  cursor: pointer;
+  text-align: left;
+  border: 1px solid var(--border, #e5e7eb);
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.banca-inbox-kpi .banca-inbox-kpi-btn.is-active {
+  border-color: #0f766e;
+  box-shadow: inset 0 0 0 1px #0f766e;
+}
+
+.banca-inbox-truth {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.banca-inbox-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+}
+
+.banca-inbox-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 0.4rem;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.banca-inbox-tab.is-active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.banca-inbox-tab-count {
+  display: inline-flex;
+  min-width: 1.4rem;
+  justify-content: center;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.78rem;
+}
+
+.banca-inbox-tab.is-active .banca-inbox-tab-count {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.banca-recon-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 .banca-recon-ok-cell {
   color: #047857 !important;
   font-weight: 700 !important;
