@@ -3238,12 +3238,12 @@ def _open_invoices_near_amount(indexed: List[tuple], amount: Decimal) -> List[An
 
 _RECON_INVOICE_LOOKBACK_DAYS = 800  # ~26 mesi: abbastanza per bonifici ritardati
 _RECON_MOVEMENT_LIMIT = 1200
-# PSD2/Enable Banking non copre mesi troppo vecchi: fino al 31/07 si usa il file Pagamenti.
-BANK_AUTO_RECON_FROM = date(2026, 8, 1)
+# Enable Banking ha storico da ~giugno 2026: prima di questa data vale solo il file Pagamenti.
+BANK_AUTO_RECON_FROM = date(2026, 6, 1)
 
 
 def _uses_pagamenti_file_recon(inv: Any) -> bool:
-  """True se la fattura è anteriore al 1/8/2026: niente movimenti banca recuperabili."""
+  """True se la fattura è anteriore a BANK_AUTO_RECON_FROM: niente match banca auto."""
   d = _as_date(getattr(inv, "invoice_date", None))
   return d is not None and d < BANK_AUTO_RECON_FROM
 
@@ -3252,7 +3252,7 @@ def apply_pagamenti_file_window_payments(
   db: Session,
   company: Optional[str] = None,
 ) -> int:
-  """Chiude le fatture se PAGATO (DARE) > 0 nel file Pagamenti, anche dopo il 31/07."""
+  """Chiude le fatture se PAGATO (DARE) > 0 nel file Pagamenti (tutti i workbook)."""
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
@@ -3266,7 +3266,7 @@ def apply_pagamenti_file_window_payments(
     return 0
   try:
     paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=False
+      db, company=company_id, all_workbooks=True
     )
   except Exception:
     logger.warning("File Pagamenti non leggibile per riconciliazione scheda", exc_info=True)
@@ -3280,6 +3280,14 @@ def apply_pagamenti_file_window_payments(
   }
   marked = 0
   for inv in unpaid:
+    # Note di credito / documenti a zero: non restano «da pagare»
+    if abs(_dec(getattr(inv, "total", 0))) <= Decimal("0.009"):
+      row = orm_by_id.get(int(getattr(inv, "id")))
+      if row and not row.is_paid:
+        row.amount_paid = _dec(row.total)
+        row.is_paid = True
+        marked += 1
+      continue
     num = str(getattr(inv, "invoice_number", None) or "").strip()
     if not num:
       continue
@@ -3550,8 +3558,8 @@ def reconciliation_snapshot(
     "truth_model": {
       "primary": "enable_banking",
       "secondary": "pagamenti_file_contanti_e_storico",
-      "bank_auto_from": "2026-08-01",
-      "label": "Enable Banking chiude le fatture da agosto; file Pagamenti per contanti/carta e storico.",
+      "bank_auto_from": "2026-06-01",
+      "label": "Enable Banking chiude le fatture da giugno; file Pagamenti per contanti/carta e storico pre-giugno.",
     },
     "lifecycle_counts": {
       "pagata": len(paid_by_bank),
@@ -3737,7 +3745,7 @@ def reconciliation_preview(
 
   try:
     paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=False
+      db, company=company_id, all_workbooks=True
     )
   except Exception:
     paid_file_rows = []
@@ -4080,8 +4088,8 @@ def sync_payment_status_from_bank(
   """
   Aggiorna lo stato pagamento fatture ricevute in base a:
   - file Pagamenti (colonna PAGATO DARE > 0), in qualsiasi mese.
-  - fino al 31/07/2026 i movimenti banca non sono recuperabili: vale solo il file.
-  - dal 1/08/2026: prima il bonifico (importo + fornitore e/o n. documento);
+  - fino al 31/05/2026 i movimenti banca non sono recuperabili: vale solo il file.
+  - dal 1/06/2026: prima il bonifico (importo + fornitore e/o n. documento);
     se il bonifico non c'è, chiude comunque il file Pagamenti.
   - fatture già chiuse dal file: il bonifico si collega lo stesso (stesso fornitore
     o alias, stesso importo oppure somma di più fatture, data entro un anno).
@@ -4114,8 +4122,9 @@ def sync_payment_status_from_bank(
   )
 
   try:
+    # Tutti i workbook: evita di lasciare aperte fatture pagate in un altro foglio/società
     paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=False
+      db, company=company_id, all_workbooks=True
     )
   except Exception:
     paid_file_rows = []
@@ -4349,6 +4358,22 @@ def sync_payment_status_from_bank(
   for inv_dto in unpaid:
     inv_id = int(getattr(inv_dto, "id"))
     num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+    row = orm_by_id.get(inv_id)
+    if not row:
+      continue
+    # Documenti a zero (NC / annulli): chiudi senza cercare bonifico
+    if abs(_dec(getattr(inv_dto, "total", 0))) <= Decimal("0.009"):
+      row.amount_paid = _dec(row.total)
+      row.is_paid = True
+      changed = True
+      marked.append(
+        {
+          "invoice_id": inv_id,
+          "invoice_number": num,
+          "reason": "file_pagamenti",
+        }
+      )
+      continue
     cand = bank_assignments.get(inv_id)
     found = cand["mov"] if cand else None
     saldo_hit = None if found else saldo_by_invoice.get(inv_id)
@@ -4366,9 +4391,6 @@ def sync_payment_status_from_bank(
     if not found and not saldo_hit and not cited_hit and not cash_hit and not acconto_hit:
       continue
 
-    row = orm_by_id.get(inv_id)
-    if not row:
-      continue
     if acconto_hit and not found and not saldo_hit and not cited_hit and not cash_hit:
       settled = _apply_acconto_state(row, acconto_hit)
       changed = True
@@ -4534,67 +4556,75 @@ def sync_payment_status_from_bank(
       }
     )
 
-  # Riapri «pagate» senza prova banca né contanti/POS da file.
-  # Proteggi anche saldi multi-fattura (nota [fatture collegate] / numeri in causale).
+  # Riapri «pagate» senza prova banca né file Pagamenti — solo se esplicitamente attivo.
+  # Di default OFF: riaprire 70+ documenti già chiusi gonfiava «Da pagare» senza prova.
+  # BANK_RECON_REOPEN=1 per riabilitare la verifica aggressiva.
+  allow_reopen = (os.getenv("BANK_RECON_REOPEN") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+  }
   marked_ids = {int(item["invoice_id"]) for item in marked if item.get("invoice_id") is not None}
-  for inv_dto in paid_listed:
-    inv_id = int(getattr(inv_dto, "id"))
-    num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
-    if str(getattr(inv_dto, "payment_method", None) or "").strip().lower() == "contanti":
-      continue
-    if (
-      inv_id in marked_ids
-      or inv_id in bank_assignments
-      or inv_id in saldo_by_invoice
-      or inv_id in cited_by_invoice
-      or inv_id in paid_wire_by_invoice
-    ):
-      continue
-    if _invoice_protected_by_bank_evidence(inv_dto, mov_meta):
-      continue
-    part_sum = sum(
-      (
-        abs(_dec(meta["mov"].amount))
-        for meta in mov_meta
-        if getattr(meta["mov"], "matched_invoice_id", None)
-        and int(meta["mov"].matched_invoice_id) == inv_id
-      ),
-      Decimal("0.00"),
-    )
-    total_inv = abs(_dec(getattr(inv_dto, "total", 0)))
-    if total_inv > Decimal("0.009") and part_sum + Decimal("0.05") >= total_inv:
-      continue
-    already = mov_index["by_invoice"].get(inv_id)
-    if already and str(getattr(already["mov"], "reconciliation_status", "") or "") in {
-      "matched",
-      "difference",
-    }:
-      continue
-    if _uses_pagamenti_file_recon(inv_dto):
-      continue
-    if _pagamenti_file_hit(inv_dto):
-      continue
-    row = orm_by_id.get(inv_id)
-    if not row:
-      continue
-    if str(getattr(row, "payment_method", None) or "").strip().lower() == "contanti":
-      continue
-    row.amount_paid = Decimal("0.00")
-    row.is_paid = False
-    for meta in mov_meta:
-      mov = meta["mov"]
-      if mov.matched_invoice_id == inv_id:
-        mov.matched_invoice_id = None
-        mov.reconciliation_status = "unmatched"
-        mov.difference_amount = None
-    changed = True
-    reopened.append(
-      {
-        "invoice_id": inv_id,
-        "invoice_number": num,
-        "reason": "no_bank_match",
-      }
-    )
+  if allow_reopen:
+    for inv_dto in paid_listed:
+      inv_id = int(getattr(inv_dto, "id"))
+      num = str(getattr(inv_dto, "invoice_number", None) or "").strip()
+      if str(getattr(inv_dto, "payment_method", None) or "").strip().lower() == "contanti":
+        continue
+      if (
+        inv_id in marked_ids
+        or inv_id in bank_assignments
+        or inv_id in saldo_by_invoice
+        or inv_id in cited_by_invoice
+        or inv_id in paid_wire_by_invoice
+      ):
+        continue
+      if _invoice_protected_by_bank_evidence(inv_dto, mov_meta):
+        continue
+      part_sum = sum(
+        (
+          abs(_dec(meta["mov"].amount))
+          for meta in mov_meta
+          if getattr(meta["mov"], "matched_invoice_id", None)
+          and int(meta["mov"].matched_invoice_id) == inv_id
+        ),
+        Decimal("0.00"),
+      )
+      total_inv = abs(_dec(getattr(inv_dto, "total", 0)))
+      if total_inv > Decimal("0.009") and part_sum + Decimal("0.05") >= total_inv:
+        continue
+      already = mov_index["by_invoice"].get(inv_id)
+      if already and str(getattr(already["mov"], "reconciliation_status", "") or "") in {
+        "matched",
+        "difference",
+      }:
+        continue
+      if _uses_pagamenti_file_recon(inv_dto):
+        continue
+      if _pagamenti_file_hit(inv_dto):
+        continue
+      row = orm_by_id.get(inv_id)
+      if not row:
+        continue
+      if str(getattr(row, "payment_method", None) or "").strip().lower() == "contanti":
+        continue
+      row.amount_paid = Decimal("0.00")
+      row.is_paid = False
+      for meta in mov_meta:
+        mov = meta["mov"]
+        if mov.matched_invoice_id == inv_id:
+          mov.matched_invoice_id = None
+          mov.reconciliation_status = "unmatched"
+          mov.difference_amount = None
+      changed = True
+      reopened.append(
+        {
+          "invoice_id": inv_id,
+          "invoice_number": num,
+          "reason": "no_bank_match",
+        }
+      )
 
   # Persisti sul bonifico l'elenco fatture (saldo cumulativo / multi-fattura)
   by_mov_items: Dict[int, List[Dict[str, Any]]] = {}

@@ -3227,7 +3227,7 @@ export function BancaRiconciliazionePage() {
       title="Inbox riconciliazione"
       lead={
         companyId
-          ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da agosto; contanti/carta dal file Pagamenti. Lavora le eccezioni nell’inbox.`
+          ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da giugno; contanti/carta e pre-giugno dal file Pagamenti. Lavora le eccezioni nell’inbox.`
           : 'Scegli la società: sync banca automatico, match ≥80 applicati, proposte 70–79 in un click.'
       }
       actions={

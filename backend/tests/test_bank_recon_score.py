@@ -688,13 +688,14 @@ def test_somma_di_fatture_gia_pagate_dello_stesso_fornitore():
   assert linked[1]["reason"] == "bundle_fornitore"
 
 
-def test_pagamenti_file_window_before_august_2026():
-  """Fino al 31/07 il file è l'unica prova: la banca non recupera quei mesi.
-  Da agosto la banca resta attiva, e il file chiude lo stesso se PAGATO è compilato."""
+def test_pagamenti_file_window_before_june_2026():
+  """Fino al 31/05 il file è l'unica prova: lo storico EB parte da ~giugno.
+  Da giugno la banca resta attiva, e il file chiude lo stesso se PAGATO è compilato."""
   from app.services.banca_service import _uses_pagamenti_file_recon
 
   assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 1, 1)))
-  assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 7, 31)))
-  assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 8, 1)))
+  assert _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 5, 31)))
+  assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 6, 1)))
+  assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 7, 31)))
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 10, 4)))
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=None))
