@@ -25,7 +25,9 @@ fi
 
 mkdir -p "$KEYS_DIR"
 install -m 600 "$PEM_SRC" "$KEYS_DIR/$PEM_NAME"
-chown root:root "$KEYS_DIR/$PEM_NAME" 2>/dev/null || true
+# L'API gira come User=fornitori: root:root 600 → Permission denied in lettura
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$APP_DIR" bash "$SCRIPT_DIR/ensure-enable-banking-key-perms.sh"
 
 # Rimuove chiavi precedenti Enable Banking / BANK_* del profilo (le riscriviamo)
 cp -a "$ENV_FILE" "$ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"

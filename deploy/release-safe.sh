@@ -17,6 +17,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-/var/www/app-fornitori/fornitori-app}"
 if [[ ! -d "$APP_DIR/.git" && -d /opt/fornitori-app/.git ]]; then
   APP_DIR="/opt/fornitori-app"
@@ -201,6 +202,16 @@ if [[ "$RESTART_API" == "1" ]] && [[ -d "$API_DIR/.git" ]] && [[ "$(readlink -f 
       warn "pip install in $API_DIR fallito; verifica dipendenze Python."
     }
   fi
+fi
+
+# Chiavi Enable Banking: devono essere leggibili dall'utente API (non root:root 600)
+if [[ -f "$SCRIPT_DIR/ensure-enable-banking-key-perms.sh" ]]; then
+  for _keys_dir in "$API_DIR/backend/keys" "$APP_DIR/backend/keys" "/opt/fornitori-app/backend/keys"; do
+    if [[ -d "$_keys_dir" ]]; then
+      log "Permessi chiavi Enable Banking in $_keys_dir"
+      APP_DIR="$(dirname "$(dirname "$_keys_dir")")" bash "$SCRIPT_DIR/ensure-enable-banking-key-perms.sh" || warn "Fix permessi keys fallito in $_keys_dir"
+    fi
+  done
 fi
 
 if [[ "$RESTART_API" == "1" ]]; then
