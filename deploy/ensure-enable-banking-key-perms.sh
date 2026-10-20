@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rende leggibili le chiavi Enable Banking (.pem) all'utente di fornitori-api.
+# Rende leggibili le chiavi Enable Banking (.pem) all'utente che esegue l'API.
 # Causa tipica di 502: install -m 600 + chown root:root → Permission denied.
 #
 # Uso:
@@ -13,17 +13,56 @@ if [[ ! -d "$APP_DIR/backend/keys" && -d /var/www/app-fornitori/fornitori-app/ba
 fi
 KEYS_DIR="$APP_DIR/backend/keys"
 
-API_USER="$(systemctl show -p User --value fornitori-api 2>/dev/null || true)"
-API_USER="${API_USER:-fornitori}"
-API_GROUP="$(systemctl show -p Group --value fornitori-api 2>/dev/null || true)"
-API_GROUP="${API_GROUP:-$API_USER}"
+resolve_api_user() {
+  local u g s
+  for s in fornitori-api atlas-api fornitori-app; do
+    u="$(systemctl show -p User --value "$s" 2>/dev/null || true)"
+    if [[ -n "$u" ]] && id -u "$u" &>/dev/null; then
+      g="$(systemctl show -p Group --value "$s" 2>/dev/null || true)"
+      echo "${u}:${g:-$u}"
+      return 0
+    fi
+  done
+  # Processo uvicorn/API in ascolto su 8000
+  u="$(ps -o user= -C uvicorn 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+  if [[ -n "$u" ]] && id -u "$u" &>/dev/null; then
+    echo "${u}:${u}"
+    return 0
+  fi
+  # Owner della cartella backend (spesso mic04 in produzione)
+  if [[ -d "$APP_DIR/backend" ]]; then
+    u="$(stat -c '%U' "$APP_DIR/backend" 2>/dev/null || true)"
+    if [[ -n "$u" && "$u" != "root" ]] && id -u "$u" &>/dev/null; then
+      echo "${u}:${u}"
+      return 0
+    fi
+  fi
+  for u in mic04 www-data fornitori; do
+    if id -u "$u" &>/dev/null; then
+      echo "${u}:${u}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+OWNER="$(resolve_api_user || true)"
+if [[ -z "${OWNER:-}" ]]; then
+  echo "ERRORE: nessun utente API valido (fornitori/mic04/…)."
+  echo "  Controlla: systemctl show -p User --value fornitori-api"
+  echo "             ps -o user= -C uvicorn"
+  exit 1
+fi
+API_USER="${OWNER%%:*}"
+API_GROUP="${OWNER#*:}"
 
 if [[ ! -d "$KEYS_DIR" ]]; then
   echo "AVVISO: manca $KEYS_DIR — niente da fare"
   exit 0
 fi
 
-# Directory traversabile (senza listare a terzi se 711; 750 se gruppo API)
+echo "API user: $API_USER:$API_GROUP  keys: $KEYS_DIR"
+
 chmod 750 "$KEYS_DIR" 2>/dev/null || true
 chown "$API_USER:$API_GROUP" "$KEYS_DIR" 2>/dev/null || true
 
