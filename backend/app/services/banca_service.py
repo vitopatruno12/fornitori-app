@@ -905,6 +905,114 @@ def sync_account_from_cash(db: Session, account_id: int) -> Dict[str, Any]:
   }
 
 
+def _signed_bank_amount(movement_type: str, amount) -> Decimal:
+  amt = abs(_dec(amount))
+  if str(movement_type or "").strip().lower() == "entrata":
+    return amt
+  return -amt
+
+
+def build_statement_rows(
+  movements: List[Dict[str, Any]],
+  *,
+  current_balance,
+  date_to: Optional[date] = None,
+) -> Dict[str, Any]:
+  """Saldo iniziale e progressivo a partire dal saldo contabile aggiornato.
+
+  I movimenti con data successiva a date_to restano fuori dall'estratto e
+  correggono il saldo finale. L'ordine è cronologico.
+  """
+  current = _dec(current_balance)
+  period: List[Dict[str, Any]] = []
+  net_after = Decimal("0")
+  for row in movements:
+    raw_day = row.get("movement_date")
+    day = raw_day if isinstance(raw_day, date) else None
+    if day is None and raw_day:
+      day = date.fromisoformat(str(raw_day)[:10])
+    signed = _signed_bank_amount(row.get("movement_type"), row.get("amount"))
+    if date_to and day and day > date_to:
+      net_after += signed
+      continue
+    period.append({**row, "_day": day, "_signed": signed})
+  period.sort(key=lambda row: (row.get("_day") or date.min, int(row.get("id") or 0)))
+  net_period = sum((row["_signed"] for row in period), Decimal("0"))
+  closing = current - net_after
+  opening = closing - net_period
+  running = opening
+  lines: List[Dict[str, Any]] = []
+  entrate = Decimal("0")
+  uscite = Decimal("0")
+  for row in period:
+    signed = row["_signed"]
+    running += signed
+    if signed >= 0:
+      entrate += signed
+    else:
+      uscite += -signed
+    day = row.get("_day")
+    lines.append(
+      {
+        "id": row.get("id"),
+        "date": day.isoformat() if day else "",
+        "description": str(row.get("description") or "").strip(),
+        "counterparty": str(row.get("counterparty") or "").strip(),
+        "entrata": float(signed) if signed > 0 else 0.0,
+        "uscita": float(-signed) if signed < 0 else 0.0,
+        "saldo": float(running),
+      }
+    )
+  return {
+    "saldo_iniziale": float(opening),
+    "saldo_finale": float(running),
+    "entrate": float(entrate),
+    "uscite": float(uscite),
+    "lines": lines,
+  }
+
+
+def account_statement(
+  db: Session,
+  account_id: int,
+  *,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+) -> Dict[str, Any]:
+  account = db.query(BankAccount).filter(BankAccount.id == int(account_id)).first()
+  if not account:
+    raise ValueError("Conto non trovato")
+  q = db.query(BankMovement).filter(BankMovement.bank_account_id == account.id)
+  if date_from:
+    q = q.filter(BankMovement.movement_date >= date_from)
+  rows = q.order_by(BankMovement.movement_date.asc(), BankMovement.id.asc()).limit(8000).all()
+  built = build_statement_rows(
+    [
+      {
+        "id": row.id,
+        "movement_date": row.movement_date,
+        "movement_type": row.movement_type,
+        "amount": row.amount,
+        "description": row.description,
+        "counterparty": row.counterparty,
+      }
+      for row in rows
+    ],
+    current_balance=account.saldo_contabile,
+    date_to=date_to,
+  )
+  return {
+    "account_id": account.id,
+    "bank_name": account.bank_name,
+    "account_name": account.account_name,
+    "label": _account_display_label(account),
+    "date_from": date_from.isoformat() if date_from else None,
+    "date_to": date_to.isoformat() if date_to else None,
+    "count": len(built["lines"]),
+    **built,
+  }
+
+
 def list_movements(
   db: Session,
   *,

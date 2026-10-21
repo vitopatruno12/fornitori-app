@@ -24,6 +24,7 @@ import {
   fetchBancaAccounts,
   fetchBancaConnectProfile,
   fetchBancaDashboard,
+  fetchBancaEstratto,
   fetchBancaMovimenti,
   fetchBancaRiconciliazione,
   fetchBancaRiconciliazioneAgent,
@@ -2552,6 +2553,84 @@ export function BancaMovimentiPage() {
               }}
             >
               Stampa scheda PDF
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={loading || syncBusy || !accountId}
+              title={
+                accountId
+                  ? 'Estratto del conto selezionato: saldo iniziale, movimenti e saldo finale'
+                  : 'Scegli prima un conto'
+              }
+              onClick={() => {
+                void (async () => {
+                  setSyncBusy(true)
+                  setError('')
+                  try {
+                    const statement = await fetchBancaEstratto(accountId, {
+                      date_from: dateFrom || undefined,
+                      date_to: dateTo || undefined,
+                    })
+                    const lines = Array.isArray(statement?.lines) ? statement.lines : []
+                    printVneTable({
+                      title: `Estratto conto · ${statement?.label || viewAccountLabel}`,
+                      subtitle: [
+                        statement?.date_from || statement?.date_to
+                          ? `Periodo ${statement?.date_from || '…'} → ${statement?.date_to || '…'}`
+                          : 'Tutti i movimenti importati',
+                        `Saldo iniziale ${eur(statement?.saldo_iniziale)}`,
+                        `Saldo finale ${eur(statement?.saldo_finale)}`,
+                        `${lines.length} movimenti`,
+                      ].join(' · '),
+                      columns: [
+                        { id: 'date', label: 'Data' },
+                        { id: 'counterparty', label: 'Beneficiario' },
+                        { id: 'description', label: 'Descrizione' },
+                        { id: 'entrata', label: 'Entrata' },
+                        { id: 'uscita', label: 'Uscita' },
+                        { id: 'saldo', label: 'Saldo' },
+                      ],
+                      rows: [
+                        {
+                          date: statement?.date_from || '',
+                          description: 'Saldo iniziale',
+                          counterparty: '',
+                          entrata: '',
+                          uscita: '',
+                          saldo: statement?.saldo_iniziale,
+                        },
+                        ...lines,
+                      ],
+                      cellValue: (row, col) => {
+                        if (col.id === 'date') return row.date ? formatDate(row.date) : ''
+                        if (col.id === 'entrata') return row.entrata ? eur(row.entrata) : ''
+                        if (col.id === 'uscita') return row.uscita ? eur(row.uscita) : ''
+                        if (col.id === 'saldo') return eur(row.saldo)
+                        return row[col.id] || ''
+                      },
+                      totals: {
+                        entrata: statement?.entrate,
+                        uscita: statement?.uscite,
+                        saldo: statement?.saldo_finale,
+                      },
+                      totalsLabel: (colId, totals) => {
+                        if (colId === 'description') return 'SALDO FINALE'
+                        if (colId === 'entrata') return eur(totals?.entrata)
+                        if (colId === 'uscita') return eur(totals?.uscita)
+                        if (colId === 'saldo') return eur(totals?.saldo)
+                        return ''
+                      },
+                    })
+                  } catch (err) {
+                    setError(err?.message || 'Estratto conto non disponibile')
+                  } finally {
+                    setSyncBusy(false)
+                  }
+                })()
+              }}
+            >
+              {syncBusy ? 'Estratto…' : 'Estratto conto'}
             </button>
           </div>
 

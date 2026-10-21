@@ -346,6 +346,22 @@ def banca_delete_account_post(account_id: int, db: Session = Depends(get_db)) ->
     raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+@router.get("/accounts/{account_id}/estratto")
+def banca_estratto_conto(
+  account_id: int,
+  date_from: Optional[date] = Query(None),
+  date_to: Optional[date] = Query(None),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  """Estratto del singolo conto: saldo iniziale, movimenti, saldo finale."""
+  try:
+    return banca_service.account_statement(
+      db, account_id, date_from=date_from, date_to=date_to
+    )
+  except ValueError as e:
+    raise HTTPException(status_code=404, detail=str(e)) from e
+
+
 @router.post("/accounts/{account_id}/sync")
 def banca_sync(account_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
   try:
