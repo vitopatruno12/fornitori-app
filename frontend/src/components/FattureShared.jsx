@@ -50,6 +50,34 @@ export function safeMastrinoHref(raw) {
   return allowed ? value : ''
 }
 
+function mastrinoPartyLabel(href) {
+  try {
+    const party = new URL(href, 'https://atlass.it').searchParams.get('party') || ''
+    return party
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/(^|\s)\S/g, (chunk) => chunk.toUpperCase())
+  } catch {
+    return ''
+  }
+}
+
+export function MastrinoReturnBar({ href }) {
+  const to = safeMastrinoHref(href)
+  if (!to) return null
+  const party = mastrinoPartyLabel(to)
+  return (
+    <div className="mastrino-return-bar" role="region" aria-label="Ritorno al mastrino">
+      <span>
+        Fattura evidenziata dal mastrino{party ? ` di ${party}` : ''}.
+      </span>
+      <FattureLink className="btn btn-primary" to={to}>
+        ← Torna al mastrino
+      </FattureLink>
+    </div>
+  )
+}
+
 export function FattureNavigate({ to, ...props }) {
   const resolved = useFattureTo(to)
   return <Navigate to={resolved} {...props} />

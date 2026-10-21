@@ -766,13 +766,6 @@ export default function InvoicesPage() {
       ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      {safeMastrinoHref(searchParams.get('mastrino')) ? (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <FattureLink className="btn btn-primary" to={safeMastrinoHref(searchParams.get('mastrino'))}>
-            ← Torna al mastrino
-          </FattureLink>
-        </div>
-      ) : null}
 
       <div className="ui-kpi-row">
         <div className="ui-kpi-card">
@@ -1105,6 +1098,15 @@ export default function InvoicesPage() {
             }
             toolbarActions={
               <>
+                {safeMastrinoHref(searchParams.get('mastrino')) ? (
+                  <FattureLink
+                    className="btn btn-primary btn-sm"
+                    to={safeMastrinoHref(searchParams.get('mastrino'))}
+                    title="Torna alla scheda fornitore da cui hai aperto questa fattura"
+                  >
+                    ← Torna al mastrino
+                  </FattureLink>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"

@@ -9,6 +9,7 @@ import {
   SeriesBars,
   eur,
   formatDate,
+  MastrinoReturnBar,
   safeMastrinoHref,
 } from '../components/FattureShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
@@ -1358,13 +1359,7 @@ export function FattureEmessePage() {
         </aside>
       }
     >
-      {safeMastrinoHref(searchParams.get('mastrino')) ? (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <FattureLink className="btn btn-primary" to={safeMastrinoHref(searchParams.get('mastrino'))}>
-            ← Torna al mastrino
-          </FattureLink>
-        </div>
-      ) : null}
+      <MastrinoReturnBar href={searchParams.get('mastrino')} />
       {error && <div className="alert alert-danger">{error}</div>}
       {!companyId ? (
         <div className="alert alert-info">

@@ -10,13 +10,29 @@ import {
   loadSchedaContabileFornitori,
   printSchedaContabileFornitore,
 } from '../services/schedaContabileFornitore.js'
-import { companyLabel } from '../utils/fattureCompany.js'
+import { companyLabel, readFattureCompany } from '../utils/fattureCompany.js'
 import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import { printVneTable } from '../utils/vneTableExport.js'
 
 function yearBounds(d = new Date()) {
   const y = d.getFullYear()
   return { from: `${y}-01-01`, to: `${y}-12-31` }
+}
+
+function schedaCacheKey(companyId, dateFrom, dateTo) {
+  return `${companyId}|${dateFrom}|${dateTo}`
+}
+
+/** Resta in memoria finché la scheda è aperta nel browser: cambiare pagina non ricarica. */
+const schedaViewCache = {
+  byKey: new Map(),
+  last: new Map(),
+  inflight: new Map(),
+  generation: new Map(),
+}
+
+function isoDay(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : ''
 }
 
 function eurPlain(value) {
@@ -102,71 +118,146 @@ export function SchedaContabileFornitorePage({
   const bounds = useMemo(() => yearBounds(), [])
   const [searchParams] = useSearchParams()
   const returnParty = searchParams.get('party') || ''
-  const returnFrom = searchParams.get('from') || ''
-  const returnTo = searchParams.get('to') || ''
+  const returnFrom = isoDay(searchParams.get('from'))
+  const returnTo = isoDay(searchParams.get('to'))
   const returnCompanyRef = useRef(searchParams.get('company') || '')
+  const preferUrlRef = useRef(Boolean(returnParty || returnFrom || returnTo || returnCompanyRef.current))
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
-  const [dateFrom, setDateFrom] = useState(/^\d{4}-\d{2}-\d{2}$/.test(returnFrom) ? returnFrom : bounds.from)
-  const [dateTo, setDateTo] = useState(/^\d{4}-\d{2}-\d{2}$/.test(returnTo) ? returnTo : bounds.to)
-  const [data, setData] = useState(null)
+  const openingCompany = returnCompanyRef.current || companyId || readFattureCompany() || ''
+  const rememberedOpening = preferUrlRef.current ? null : schedaViewCache.last.get(openingCompany)
+  const openingFrom = returnFrom || rememberedOpening?.dateFrom || bounds.from
+  const openingTo = returnTo || rememberedOpening?.dateTo || bounds.to
+  const openingHit = schedaViewCache.byKey.get(schedaCacheKey(openingCompany, openingFrom, openingTo))
+  const [dateFrom, setDateFrom] = useState(openingFrom)
+  const [dateTo, setDateTo] = useState(openingTo)
+  const [data, setData] = useState(openingHit?.data || null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [query, setQuery] = useState('')
-  const [selectedKey, setSelectedKey] = useState(returnParty)
-  const loadAbortRef = useRef(null)
+  const [loadingLabel, setLoadingLabel] = useState('Carico le schede')
+  const [error, setError] = useState(openingHit?.error || '')
+  const [query, setQuery] = useState(rememberedOpening?.query || '')
+  const [selectedKey, setSelectedKey] = useState(returnParty || rememberedOpening?.selectedKey || '')
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    const wanted = returnCompanyRef.current
-    if (!wanted || loadingCompanies) return
-    returnCompanyRef.current = ''
-    if (wanted !== companyId) setCompanyId(wanted)
-  }, [loadingCompanies, companyId, setCompanyId])
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
-  async function reload() {
-    if (!companyId) {
+  async function reload({ reconcile = false, from = dateFrom, to = dateTo, company = companyId } = {}) {
+    if (!company) {
       setData(null)
       setLoading(false)
       return
     }
-    loadAbortRef.current?.abort()
-    const controller = new AbortController()
-    loadAbortRef.current = controller
+    const key = schedaCacheKey(company, from, to)
+    if (!reconcile) {
+      const cached = schedaViewCache.byKey.get(key)
+      if (cached) {
+        setData(cached.data)
+        setError(cached.error || '')
+        setLoading(false)
+        return
+      }
+      const pending = schedaViewCache.inflight.get(key)
+      if (pending) {
+        setLoadingLabel('Carico le schede')
+        setLoading(true)
+        try {
+          const res = await pending
+          if (!mountedRef.current) return
+          setData(res)
+          setError(res.warnings?.length ? res.warnings.join(' ') : '')
+        } catch (e) {
+          if (!mountedRef.current || e?.name === 'AbortError') return
+          setError(e?.message || 'Errore caricamento scheda contabile')
+        } finally {
+          if (mountedRef.current) setLoading(false)
+        }
+        return
+      }
+    }
+
+    setLoadingLabel(reconcile ? 'Allineo i pagamenti e ricarico le schede' : 'Carico le schede')
     setLoading(true)
     setError('')
-    try {
-      try {
-        await postBancaRiconciliazioneAuto(companyId)
-      } catch {
-        /* scheda comunque in lettura; riconciliazione può già essere stata fatta in Banca */
+    const gen = (schedaViewCache.generation.get(key) || 0) + 1
+    schedaViewCache.generation.set(key, gen)
+    const run = (async () => {
+      if (reconcile) {
+        try {
+          await postBancaRiconciliazioneAuto(company)
+        } catch {
+          /* la scheda si legge comunque; l'allineamento si ripete da Aggiorna */
+        }
       }
-      const res = await loadSchedaContabileFornitori({
-        company: companyId,
-        dateFrom,
-        dateTo,
-        signal: controller.signal,
+      return loadSchedaContabileFornitori({
+        company,
+        dateFrom: from,
+        dateTo: to,
       })
-      if (controller.signal.aborted) return
+    })()
+    if (!reconcile) schedaViewCache.inflight.set(key, run)
+    try {
+      const res = await run
+      if (schedaViewCache.generation.get(key) !== gen) return
+      const warning = res.warnings?.length ? res.warnings.join(' ') : ''
+      schedaViewCache.byKey.set(key, { data: res, error: warning })
+      if (!mountedRef.current) return
       setData(res)
-      if (res.warnings?.length) setError(res.warnings.join(' '))
+      setError(warning)
     } catch (e) {
-      if (controller.signal.aborted || e?.name === 'AbortError') return
+      if (!mountedRef.current || e?.name === 'AbortError') return
       setError(e?.message || 'Errore caricamento scheda contabile')
       setData(null)
     } finally {
-      if (loadAbortRef.current === controller) {
-        setLoading(false)
-        loadAbortRef.current = null
-      }
+      if (schedaViewCache.inflight.get(key) === run) schedaViewCache.inflight.delete(key)
+      if (mountedRef.current && schedaViewCache.generation.get(key) === gen) setLoading(false)
     }
   }
 
   useEffect(() => {
-    reload()
-    return () => {
-      loadAbortRef.current?.abort()
+    if (!companyId || loadingCompanies) return
+    const wanted = returnCompanyRef.current
+    if (wanted && wanted !== companyId) {
+      setCompanyId(wanted)
+      return
     }
+    returnCompanyRef.current = ''
+
+    let from = dateFrom
+    let to = dateTo
+    if (!preferUrlRef.current) {
+      const remembered = schedaViewCache.last.get(companyId)
+      if (remembered) {
+        from = remembered.dateFrom
+        to = remembered.dateTo
+        setDateFrom(from)
+        setDateTo(to)
+        setSelectedKey(remembered.selectedKey || '')
+        setQuery(remembered.query || '')
+      }
+    }
+    preferUrlRef.current = false
+
+    const hit = schedaViewCache.byKey.get(schedaCacheKey(companyId, from, to))
+    if (hit) {
+      setData(hit.data)
+      setError(hit.error || '')
+      setLoading(false)
+      return
+    }
+    void reload({ reconcile: false, from, to, company: companyId })
+    // Il periodo si applica con Aggiorna: non rifare la lettura a ogni cambio data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId])
+  }, [companyId, loadingCompanies])
+
+  useEffect(() => {
+    if (!companyId || !data) return
+    if (data.company && data.company !== companyId) return
+    schedaViewCache.last.set(companyId, { dateFrom, dateTo, selectedKey, query })
+  }, [companyId, data, dateFrom, dateTo, selectedKey, query])
 
   const parties = useMemo(() => {
     const rows = Array.isArray(data?.parties) ? data.parties : []
@@ -191,7 +282,7 @@ export function SchedaContabileFornitorePage({
       title="Scheda contabile fornitori"
       lead={
         companyId
-          ? `${companyName}: esercizio ${dateFrom.slice(0, 4)}. Aggiorna allinea i pagamenti (file Pagamenti e, da agosto, anche i bonifici) e ricarica le schede. I clienti sono in Mastrini → Scheda clienti.`
+          ? `${companyName}: esercizio ${dateFrom.slice(0, 4)}. La scheda resta aperta se cambi pagina. Aggiorna riallinea i pagamenti e ricarica. I clienti sono in Mastrini → Scheda clienti.`
           : 'Scegli la società nel banner, poi Aggiorna per aprire le schede fornitore di quel registro.'
       }
       actions={
@@ -220,7 +311,7 @@ export function SchedaContabileFornitorePage({
                 ← Mastrini
               </Link>
             ) : null}
-            <button type="button" className="btn btn-primary btn-sm" disabled={!companyId || loading} onClick={reload}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={!companyId || loading} onClick={() => reload({ reconcile: true })}>
               {loading ? 'Aggiorno…' : 'Aggiorna'}
             </button>
           </div>
@@ -228,7 +319,7 @@ export function SchedaContabileFornitorePage({
       }
     >
       {error ? <p className="form-error">{error}</p> : null}
-      {loading ? <AnalisiLoadingBar active label="Riconcilio pagamenti e carico le schede" variant="subtle" /> : null}
+      {loading ? <AnalisiLoadingBar active label={loadingLabel} variant="subtle" /> : null}
 
       {!companyId ? (
         <p className="fatture-note">Seleziona una società per vedere i fornitori.</p>
