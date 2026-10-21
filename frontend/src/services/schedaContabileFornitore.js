@@ -313,6 +313,7 @@ export function buildSchedaContabileFornitori(
       source: 'pagamento_cc',
       invoiceKind: 'pagamento',
       paymentStatus: 'paid',
+      invoiceNumber: numbers[0] || (matched ? invoiceNumber(matched) : ''),
       linkedInvoiceId: matched?.id ? String(matched.id) : '',
     })
   }
@@ -374,6 +375,7 @@ export function buildSchedaContabileFornitori(
       source: 'fatture_ricevute',
       invoiceKind: 'ricevuta',
       paymentStatus: status,
+      invoiceNumber: number || '',
       linkedInvoiceId: inv?.id ? String(inv.id) : '',
       residuo: Math.max(0, amount - paidAmt),
     })
@@ -412,6 +414,7 @@ export function buildSchedaContabileFornitori(
           source: 'pagamento_atlas',
           invoiceKind: 'pagamento',
           paymentStatus: 'paid',
+          invoiceNumber: number || '',
           linkedInvoiceId: inv?.id ? String(inv.id) : '',
         })
       }
@@ -450,6 +453,7 @@ export function buildSchedaContabileFornitori(
       source: 'fatture_emesse',
       invoiceKind: 'emessa',
       paymentStatus: '',
+      invoiceNumber: invoiceNumber(inv) || '',
       linkedInvoiceId: inv?.id ? String(inv.id) : '',
     })
   }

@@ -39,6 +39,17 @@ export function FattureLink({ to, ...props }) {
   return <Link to={resolved} {...props} />
 }
 
+/** Ritorno alla scheda fornitore aperto dal documento. Solo path interni della scheda. */
+export function safeMastrinoHref(raw) {
+  const value = String(raw || '').trim()
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\') || value.includes('://')) return ''
+  const path = value.split('?')[0]
+  const allowed =
+    path === '/amministrazione/mastrini/scheda-fornitori' ||
+    /^\/[a-z0-9/_-]*\/scheda-contabile$/.test(path)
+  return allowed ? value : ''
+}
+
 export function FattureNavigate({ to, ...props }) {
   const resolved = useFattureTo(to)
   return <Navigate to={resolved} {...props} />

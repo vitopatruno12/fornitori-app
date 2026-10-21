@@ -10594,6 +10594,22 @@ select.form-control {
   text-overflow: ellipsis;
 }
 
+.scheda-contabile-panel .scheda-doc-link {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.4rem;
+  color: #1d4ed8;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  text-decoration: underline;
+  word-break: break-word;
+}
+
+.scheda-contabile-panel .scheda-doc-link:hover {
+  color: #1e3a8a;
+}
+
 .fatture-scope-mode-btns .btn-primary {
   grid-column: auto;
 }

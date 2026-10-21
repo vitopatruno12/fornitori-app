@@ -4,7 +4,7 @@ import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, fetchInvoiceByNumber, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureLink, FattureNavBaseContext, FatturePageShell, formatDate } from '../components/FattureShared.jsx'
+import { FattureLink, FattureNavBaseContext, FatturePageShell, formatDate, safeMastrinoHref } from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
@@ -384,6 +384,8 @@ export default function InvoicesPage() {
       // Keep id in URL for share/reload, drop helper params once applied.
       const next = new URLSearchParams()
       next.set('id', String(inv.id))
+      const back = safeMastrinoHref(searchParams.get('mastrino'))
+      if (back) next.set('mastrino', back)
       setSearchParams(next, { replace: true })
     }
 
@@ -764,6 +766,13 @@ export default function InvoicesPage() {
       ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+      {safeMastrinoHref(searchParams.get('mastrino')) ? (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <FattureLink className="btn btn-primary" to={safeMastrinoHref(searchParams.get('mastrino'))}>
+            ← Torna al mastrino
+          </FattureLink>
+        </div>
+      ) : null}
 
       <div className="ui-kpi-row">
         <div className="ui-kpi-card">
@@ -818,8 +827,17 @@ export default function InvoicesPage() {
         </div>
         {activeFocusId && !editingId ? (
           <p className="fatture-note" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-            Arrivo da movimenti banca: il documento è evidenziato nello{' '}
-            <a href="#fatture-storico-elenco">Storico fatture</a> sotto.
+            {safeMastrinoHref(searchParams.get('mastrino')) ? (
+              <>
+                Arrivo dal mastrino: la fattura è evidenziata nello{' '}
+                <a href="#fatture-storico-elenco">storico</a> sotto.
+              </>
+            ) : (
+              <>
+                Arrivo da movimenti banca: il documento è evidenziato nello{' '}
+                <a href="#fatture-storico-elenco">storico fatture</a> sotto.
+              </>
+            )}
           </p>
         ) : null}
         <div

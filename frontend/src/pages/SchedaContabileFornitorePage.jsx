@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { AmministrazionePageShell } from '../components/BancaShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
@@ -60,6 +60,20 @@ const DETAIL_COLUMNS = [
   { id: 'stato', label: 'Stato', width: 10, fluid: true },
 ]
 
+function invoiceSearchHref(row, fattureBase, mastrinoHref) {
+  const id = String(row?.linkedInvoiceId || '').trim()
+  const number = String(row?.invoiceNumber || '').trim()
+  if (!id && !number) return ''
+  const params = new URLSearchParams()
+  if (id) params.set('id', id)
+  if (number) params.set('n', number)
+  if (row?.company && row.company !== 'non_classificata') params.set('company', String(row.company))
+  if (mastrinoHref) params.set('mastrino', mastrinoHref)
+  const section = row?.documentoTipo === 'FE' ? 'emesse' : 'registrate'
+  const base = String(fattureBase || '/fatture').replace(/\/+$/, '')
+  return `${base}/${section}?${params.toString()}`
+}
+
 function detailCellValue(row, col) {
   if (!row) return ''
   if (col.id === 'date') return formatDate(row.date)
@@ -86,15 +100,27 @@ export function SchedaContabileFornitorePage({
   shell = 'amministrazione',
 } = {}) {
   const bounds = useMemo(() => yearBounds(), [])
+  const [searchParams] = useSearchParams()
+  const returnParty = searchParams.get('party') || ''
+  const returnFrom = searchParams.get('from') || ''
+  const returnTo = searchParams.get('to') || ''
+  const returnCompanyRef = useRef(searchParams.get('company') || '')
   const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
-  const [dateFrom, setDateFrom] = useState(bounds.from)
-  const [dateTo, setDateTo] = useState(bounds.to)
+  const [dateFrom, setDateFrom] = useState(/^\d{4}-\d{2}-\d{2}$/.test(returnFrom) ? returnFrom : bounds.from)
+  const [dateTo, setDateTo] = useState(/^\d{4}-\d{2}-\d{2}$/.test(returnTo) ? returnTo : bounds.to)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
-  const [selectedKey, setSelectedKey] = useState('')
+  const [selectedKey, setSelectedKey] = useState(returnParty)
   const loadAbortRef = useRef(null)
+
+  useEffect(() => {
+    const wanted = returnCompanyRef.current
+    if (!wanted || loadingCompanies) return
+    returnCompanyRef.current = ''
+    if (wanted !== companyId) setCompanyId(wanted)
+  }, [loadingCompanies, companyId, setCompanyId])
 
   async function reload() {
     if (!companyId) {
@@ -396,6 +422,31 @@ export function SchedaContabileFornitorePage({
             columns={DETAIL_COLUMNS}
             rows={selected.movements || []}
             cellValue={detailCellValue}
+            renderCell={(row, col, { value }) => {
+              if (col.id !== 'documento') return null
+              const backParams = new URLSearchParams()
+              if (selected.key) backParams.set('party', selected.key)
+              if (dateFrom) backParams.set('from', dateFrom)
+              if (dateTo) backParams.set('to', dateTo)
+              if (companyId) backParams.set('company', companyId)
+              const backQuery = backParams.toString()
+              const backPath =
+                shell === 'fatture'
+                  ? `${String(fattureBase || '/fatture').replace(/\/+$/, '')}/scheda-contabile`
+                  : '/amministrazione/mastrini/scheda-fornitori'
+              const href = invoiceSearchHref(row, fattureBase, backQuery ? `${backPath}?${backQuery}` : backPath)
+              if (!href || !value || value === '—') return null
+              return (
+                <Link
+                  to={href}
+                  className="scheda-doc-link"
+                  title="Apri la fattura nello storico"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {value}
+                </Link>
+              )
+            }}
             emptyMessage="Nessun movimento nel periodo."
             rowKey={(row, idx) => `${row.registrationNumber || 'r'}-${idx}`}
             totals={{

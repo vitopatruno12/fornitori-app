@@ -9,6 +9,7 @@ import {
   SeriesBars,
   eur,
   formatDate,
+  safeMastrinoHref,
 } from '../components/FattureShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import {
@@ -1089,6 +1090,8 @@ export function FattureEmessePage() {
     const cleaned = new URLSearchParams()
     if (qId) cleaned.set('id', qId)
     if (qNum) cleaned.set('n', qNum)
+    const back = safeMastrinoHref(searchParams.get('mastrino'))
+    if (back) cleaned.set('mastrino', back)
     setSearchParams(cleaned, { replace: true })
   }, [searchParams, companyPicker, companyId, setCompanyId, setSearchParams])
 
@@ -1355,6 +1358,13 @@ export function FattureEmessePage() {
         </aside>
       }
     >
+      {safeMastrinoHref(searchParams.get('mastrino')) ? (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <FattureLink className="btn btn-primary" to={safeMastrinoHref(searchParams.get('mastrino'))}>
+            ← Torna al mastrino
+          </FattureLink>
+        </div>
+      ) : null}
       {error && <div className="alert alert-danger">{error}</div>}
       {!companyId ? (
         <div className="alert alert-info">
