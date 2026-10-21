@@ -10891,6 +10891,33 @@ select.form-control {
   text-overflow: ellipsis;
 }
 
+.workbook-grid.banca-fit-grid.estratto-conto-grid {
+  min-width: 0 !important;
+  width: max-content;
+  max-width: 100%;
+  table-layout: auto;
+}
+
+.workbook-grid.estratto-conto-grid th,
+.workbook-grid.estratto-conto-grid td,
+.workbook-grid.estratto-conto-grid .excel-cell {
+  width: auto;
+  white-space: nowrap;
+  word-break: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.workbook-grid.estratto-conto-grid th:nth-child(2),
+.workbook-grid.estratto-conto-grid td:nth-child(2),
+.workbook-grid.estratto-conto-grid th:nth-child(3),
+.workbook-grid.estratto-conto-grid td:nth-child(3),
+.workbook-grid.estratto-conto-grid td:nth-child(2) .excel-cell,
+.workbook-grid.estratto-conto-grid td:nth-child(3) .excel-cell {
+  white-space: normal;
+  max-width: 14rem;
+}
+
 .workbook-grid.banca-fit-grid tr.banca-mov-hit td {
   background: #fef08a;
 }

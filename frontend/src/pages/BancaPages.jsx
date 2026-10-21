@@ -2721,7 +2721,7 @@ export function BancaMovimentiPage() {
       </section>
 
       {estratto ? (
-        <section className="card fatture-panel" id="estratto-conto">
+        <section className="card fatture-panel banca-fit-panel" id="estratto-conto">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <h2 className="fatture-panel-title" style={{ margin: 0 }}>
               Estratto conto · {estratto.label || viewAccountLabel}
@@ -2747,13 +2747,14 @@ export function BancaMovimentiPage() {
           <WorkbookGrid
             title="Estratto conto"
             sheetLabel={`${estratto.count || 0} movimenti`}
+            gridClassName="banca-fit-grid estratto-conto-grid"
             columns={[
-              { id: 'date', label: 'Data', width: 10, fluid: true },
-              { id: 'counterparty', label: 'Beneficiario', width: 18, fluid: true },
-              { id: 'description', label: 'Descrizione', width: 28, fluid: true, emphasis: true },
-              { id: 'entrata', label: 'Entrata', width: 12, fluid: true, numeric: true },
-              { id: 'uscita', label: 'Uscita', width: 12, fluid: true, numeric: true },
-              { id: 'saldo', label: 'Saldo', width: 14, fluid: true, numeric: true },
+              { id: 'date', label: 'Data', width: 92 },
+              { id: 'counterparty', label: 'Beneficiario', width: 160 },
+              { id: 'description', label: 'Descrizione', width: 220, emphasis: true },
+              { id: 'entrata', label: 'Entrata', width: 108, numeric: true },
+              { id: 'uscita', label: 'Uscita', width: 108, numeric: true },
+              { id: 'saldo', label: 'Saldo', width: 118, numeric: true },
             ]}
             rows={[
               {
