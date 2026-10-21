@@ -44,7 +44,7 @@ import WorkbookGrid from '../components/WorkbookGrid.jsx'
 import EbConsentMonitor from '../components/EbConsentMonitor.jsx'
 import { parseBanFile } from '../utils/banFileParser'
 import { companyLabel, FATTURE_COMPANY_ORDER, FATTURE_COMPANY_LABELS } from '../utils/fattureCompany.js'
-import { printVneTable } from '../utils/vneTableExport.js'
+import { buildVneTableHtml, openVneTableDocument, printVneTable } from '../utils/vneTableExport.js'
 
 function resolveEnableBankingPayload(account) {
   const bank = String(account?.bank_name || '').toLowerCase()
@@ -2220,20 +2220,24 @@ export function BancaMovimentiPage() {
   const [lastSyncedLabel, setLastSyncedLabel] = useState('')
   const [estratto, setEstratto] = useState(null)
   const [estrattoBusy, setEstrattoBusy] = useState(false)
+  const [estrattoDocHtml, setEstrattoDocHtml] = useState('')
 
   useEffect(() => {
     setEstratto(null)
+    setEstrattoDocHtml('')
   }, [accountId])
 
-  function printEstrattoConto(statement) {
+  function buildEstrattoPrintOptions(statement) {
     const lines = Array.isArray(statement?.lines) ? statement.lines : []
-    printVneTable({
+    return {
       title: `Estratto conto · ${statement?.label || viewAccountLabel}`,
       subtitle: [
         statement?.date_from || statement?.date_to
-          ? `Periodo ${statement?.date_from || '…'} → ${statement?.date_to || '…'}`
+          ? `Periodo ${formatDate(statement?.date_from) || '…'} → ${formatDate(statement?.date_to) || '…'}`
           : 'Tutti i movimenti importati',
         `Saldo iniziale ${eur(statement?.saldo_iniziale)}`,
+        `Entrate ${eur(statement?.entrate)}`,
+        `Uscite ${eur(statement?.uscite)}`,
         `Saldo finale ${eur(statement?.saldo_finale)}`,
         `${lines.length} movimenti`,
       ].join(' · '),
@@ -2275,7 +2279,20 @@ export function BancaMovimentiPage() {
         if (colId === 'saldo') return eur(totals?.saldo)
         return ''
       },
-    })
+    }
+  }
+
+  function showEstrattoDocumento(statement, { print = false } = {}) {
+    const opts = buildEstrattoPrintOptions(statement)
+    const html = buildVneTableHtml({ ...opts, autoPrint: false })
+    setEstrattoDocHtml(html)
+    if (print) {
+      printVneTable(opts)
+    }
+  }
+
+  function printEstrattoConto(statement) {
+    showEstrattoDocumento(statement, { print: true })
   }
 
   const showingSingleAccount = Boolean(accountId) || Boolean(highlightMovementId)
@@ -2624,7 +2641,7 @@ export function BancaMovimentiPage() {
               disabled={loading || syncBusy || !accountId}
               title={
                 accountId
-                  ? 'Estratto del conto selezionato: saldo iniziale, movimenti e saldo finale'
+                  ? 'Apre l’estratto a video (layout documento, senza stampare)'
                   : 'Scegli prima un conto'
               }
               onClick={() => {
@@ -2637,11 +2654,13 @@ export function BancaMovimentiPage() {
                       date_to: dateTo || undefined,
                     })
                     setEstratto(statement)
+                    showEstrattoDocumento(statement, { print: false })
                     window.setTimeout(() => {
                       document.getElementById('estratto-conto')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     }, 40)
                   } catch (err) {
                     setError(err?.message || 'Estratto conto non disponibile')
+                    setEstrattoDocHtml('')
                   } finally {
                     setEstrattoBusy(false)
                   }
@@ -2721,74 +2740,62 @@ export function BancaMovimentiPage() {
       </section>
 
       {estratto ? (
-        <section className="card fatture-panel banca-fit-panel" id="estratto-conto">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <section className="card fatture-panel banca-estratto-doc-panel" id="estratto-conto">
+          <div className="banca-estratto-doc-toolbar">
             <h2 className="fatture-panel-title" style={{ margin: 0 }}>
               Estratto conto · {estratto.label || viewAccountLabel}
             </h2>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEstratto(null)}>
-              Chiudi estratto
-            </button>
+            <div className="banca-estratto-doc-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title="Apre lo stesso documento in una scheda (senza stampare)"
+                onClick={() => {
+                  try {
+                    openVneTableDocument({ ...buildEstrattoPrintOptions(estratto), autoPrint: false })
+                  } catch (err) {
+                    window.alert(err?.message || 'Impossibile aprire l’estratto')
+                  }
+                }}
+              >
+                Apri in scheda
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                title="Stampa / salva PDF"
+                onClick={() => {
+                  try {
+                    printEstrattoConto(estratto)
+                  } catch (err) {
+                    window.alert(err?.message || 'Stampa non riuscita')
+                  }
+                }}
+              >
+                Stampa PDF
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setEstratto(null)
+                  setEstrattoDocHtml('')
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
           </div>
-          <p className="fatture-note" style={{ marginTop: '0.45rem' }}>
-            {estratto.date_from || estratto.date_to
-              ? `Periodo ${formatDate(estratto.date_from)} → ${formatDate(estratto.date_to)}`
-              : 'Tutti i movimenti importati'}
-            {' · '}
-            Saldo iniziale {eur(estratto.saldo_iniziale)}
-            {' · '}
-            Entrate {eur(estratto.entrate)}
-            {' · '}
-            Uscite {eur(estratto.uscite)}
-            {' · '}
-            Saldo finale {eur(estratto.saldo_finale)}
-            . Per stampare usa Stampa scheda PDF.
+          <p className="fatture-note" style={{ marginTop: '0.45rem', marginBottom: '0.75rem' }}>
+            Vista documento (come il PDF): scorri per leggere tutto. La stampa si avvia solo con «Stampa PDF».
           </p>
-          <WorkbookGrid
-            title="Estratto conto"
-            sheetLabel={`${estratto.count || 0} movimenti`}
-            gridClassName="banca-fit-grid estratto-conto-grid"
-            columns={[
-              { id: 'date', label: 'Data', width: 92 },
-              { id: 'counterparty', label: 'Beneficiario', width: 160 },
-              { id: 'description', label: 'Descrizione', width: 220, emphasis: true },
-              { id: 'entrata', label: 'Entrata', width: 108, numeric: true },
-              { id: 'uscita', label: 'Uscita', width: 108, numeric: true },
-              { id: 'saldo', label: 'Saldo', width: 118, numeric: true },
-            ]}
-            rows={[
-              {
-                date: estratto.date_from || '',
-                description: 'Saldo iniziale',
-                counterparty: '',
-                entrata: 0,
-                uscita: 0,
-                saldo: estratto.saldo_iniziale,
-              },
-              ...(Array.isArray(estratto.lines) ? estratto.lines : []),
-            ]}
-            cellValue={(row, col) => {
-              if (col.id === 'date') return row.date ? formatDate(row.date) : ''
-              if (col.id === 'entrata') return row.entrata ? eur(row.entrata) : ''
-              if (col.id === 'uscita') return row.uscita ? eur(row.uscita) : ''
-              if (col.id === 'saldo') return eur(row.saldo)
-              return row[col.id] || ''
-            }}
-            totals={{
-              entrata: estratto.entrate,
-              uscita: estratto.uscite,
-              saldo: estratto.saldo_finale,
-            }}
-            totalsLabel={(colId, totals) => {
-              if (colId === 'description') return 'SALDO FINALE'
-              if (colId === 'entrata') return eur(totals?.entrata)
-              if (colId === 'uscita') return eur(totals?.uscita)
-              if (colId === 'saldo') return eur(totals?.saldo)
-              return ''
-            }}
-            emptyMessage="Nessun movimento nel periodo."
-            rowKey={(row, idx) => `${row.id || 'apertura'}-${idx}`}
-          />
+          {estrattoDocHtml ? (
+            <iframe
+              className="banca-estratto-doc-frame"
+              title={`Estratto conto ${estratto.label || viewAccountLabel}`}
+              srcDoc={estrattoDocHtml}
+            />
+          ) : null}
         </section>
       ) : null}
 

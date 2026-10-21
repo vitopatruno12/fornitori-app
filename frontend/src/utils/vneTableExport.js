@@ -63,9 +63,19 @@ export function downloadVneTableExcel({ title, columns, rows, cellValue, totalsL
   })
 }
 
-export function printVneTable({ title, subtitle, columns, rows, cellValue, totalsLabel, totals }) {
+/** HTML documento (stesso layout della stampa PDF). */
+export function buildVneTableHtml({
+  title,
+  subtitle,
+  columns,
+  rows,
+  cellValue,
+  totalsLabel,
+  totals,
+  autoPrint = false,
+}) {
   const list = Array.isArray(rows) ? rows : []
-  if (list.length === 0) throw new Error('Nessun dato da stampare')
+  if (list.length === 0) throw new Error('Nessun dato da mostrare')
 
   const aoa = buildVneTableAoA(columns, rows, cellValue, { totalsLabel, totals })
   const header = aoa[0] || []
@@ -87,24 +97,28 @@ export function printVneTable({ title, subtitle, columns, rows, cellValue, total
 
   const safeTitle = escapeHtml(title || 'VNE')
   const safeSubtitle = escapeHtml(subtitle || '')
-  const html = `<!DOCTYPE html>
+  const onload = autoPrint
+    ? ' onload="setTimeout(function(){ try { window.focus(); window.print(); } catch (e) {} }, 300)"'
+    : ''
+  return `<!DOCTYPE html>
 <html lang="it">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>${safeTitle}</title>
   <style>
-    body { font-family: Segoe UI, system-ui, sans-serif; color: #111; padding: 1rem; margin: 0; }
-    h1 { font-size: 1.1rem; margin: 0 0 0.25rem 0; }
-    .sub { color: #555; font-size: 0.85rem; margin-bottom: 0.75rem; }
-    table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
-    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
-    th { background: #f0f4f8; }
+    body { font-family: Segoe UI, system-ui, sans-serif; color: #111; padding: 1rem; margin: 0; background: #fff; }
+    h1 { font-size: 1.15rem; margin: 0 0 0.25rem 0; }
+    .sub { color: #555; font-size: 0.88rem; margin: 0 0 0.85rem 0; line-height: 1.4; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+    th, td { border: 1px solid #ccc; padding: 7px 9px; text-align: left; vertical-align: top; }
+    th { background: #f0f4f8; font-weight: 700; }
     tr.totals td { font-weight: 700; background: #f8fafc; }
+    td:nth-child(n+4) { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
     @media print { body { padding: 0.5rem; } }
   </style>
 </head>
-<body onload="setTimeout(function(){ try { window.focus(); window.print(); } catch (e) {} }, 300)">
+<body${onload}>
   <h1>${safeTitle}</h1>
   ${safeSubtitle ? `<p class="sub">${safeSubtitle}</p>` : ''}
   <table>
@@ -113,13 +127,22 @@ export function printVneTable({ title, subtitle, columns, rows, cellValue, total
   </table>
 </body>
 </html>`
+}
 
+/** Apre il documento in una scheda: lettura a video (default) oppure stampa PDF. */
+export function openVneTableDocument(options = {}) {
+  const { autoPrint = false } = options
+  const html = buildVneTableHtml({ ...options, autoPrint })
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const blobUrl = URL.createObjectURL(blob)
   const popup = window.open(blobUrl, '_blank')
   if (!popup) {
     URL.revokeObjectURL(blobUrl)
-    throw new Error('Abilita i popup per stampare o salvare come PDF')
+    throw new Error(
+      autoPrint
+        ? 'Abilita i popup per stampare o salvare come PDF'
+        : 'Abilita i popup per aprire l’estratto conto',
+    )
   }
   window.setTimeout(() => {
     try {
@@ -128,4 +151,9 @@ export function printVneTable({ title, subtitle, columns, rows, cellValue, total
       // ignore
     }
   }, 120000)
+  return popup
+}
+
+export function printVneTable(options) {
+  return openVneTableDocument({ ...options, autoPrint: true })
 }

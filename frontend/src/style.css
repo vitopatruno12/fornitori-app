@@ -11061,6 +11061,35 @@ select.form-control {
   overflow-x: hidden !important;
 }
 
+.banca-estratto-doc-panel {
+  background: #f3f4f6;
+}
+
+.banca-estratto-doc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.banca-estratto-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.banca-estratto-doc-frame {
+  display: block;
+  width: 100%;
+  min-height: min(78vh, 920px);
+  height: 78vh;
+  border: 1px solid #d1d5db;
+  border-radius: 0.35rem;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
 .banca-inbox-kpi .banca-inbox-kpi-btn {
   cursor: pointer;
   text-align: left;
