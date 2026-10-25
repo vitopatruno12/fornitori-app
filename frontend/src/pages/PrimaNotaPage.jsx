@@ -9,6 +9,7 @@ import { fetchCustomers } from '../services/customersService'
 import PrimaNotaLocalePicker from '../components/PrimaNotaLocalePicker'
 import StaffSectionBackupBar from '../components/StaffSectionBackupBar.jsx'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
+import VirtualList from '../components/VirtualList.jsx'
 import {
   formatPrimaNotaBackupLabel,
   getLatestPrimaNotaBackup,
@@ -2759,65 +2760,70 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           <div className="pn-movements-cards" aria-label="Movimenti Prima Nota (vista tablet, tutti gli attributi)">
             {loading ? (
               <p className="fatture-note" style={{ margin: '0 1rem' }}>Caricamento…</p>
-            ) : filteredMovementRows.length === 0 ? (
-              <p className="fatture-note" style={{ margin: '0 1rem 1rem' }}>
-                {rowsWithLedger.rows.length === 0
-                  ? (summaryScope === 'day'
-                    ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
-                    : 'Nessun movimento nel periodo selezionato.')
-                  : movementSearch.trim()
-                    ? `Nessuna operazione per «${movementSearch.trim()}».`
-                    : 'Nessun movimento corrisponde ai filtri.'}
-              </p>
             ) : (
-              filteredMovementRows.map((entry) => {
-                const fields = PRIMA_NOTA_MOVEMENTS_COLUMNS.map((col) => {
-                  const value = primaNotaMovementCellValue(entry, col)
-                  const text = value == null ? '' : String(value).trim()
-                  return { id: col.id, label: col.label, text, numeric: Boolean(col.numeric) }
-                }).filter((f) => f.id === 'description' || f.text)
-                const title =
-                  fields.find((f) => f.id === 'description')?.text
-                  || fields.find((f) => f.id === 'entry_date')?.text
-                  || `Movimento ${entry.id}`
-                return (
-                  <article
-                    key={entry.id}
-                    id={`cash-entry-row-${entry.id}`}
-                    className={`pn-movement-card${
-                      highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-                        ? ' is-selected'
-                        : ''
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      className="pn-movement-card-main"
-                      onClick={() => setDrawerEntry(entry)}
+              <VirtualList
+                className="pn-movements-virtual"
+                items={filteredMovementRows}
+                estimateItemHeight={220}
+                overscan={3}
+                getItemKey={(entry) => entry.id}
+                emptyMessage={
+                  rowsWithLedger.rows.length === 0
+                    ? (summaryScope === 'day'
+                      ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
+                      : 'Nessun movimento nel periodo selezionato.')
+                    : movementSearch.trim()
+                      ? `Nessuna operazione per «${movementSearch.trim()}».`
+                      : 'Nessun movimento corrisponde ai filtri.'
+                }
+                renderItem={(entry) => {
+                  const fields = PRIMA_NOTA_MOVEMENTS_COLUMNS.map((col) => {
+                    const value = primaNotaMovementCellValue(entry, col)
+                    const text = value == null ? '' : String(value).trim()
+                    return { id: col.id, label: col.label, text, numeric: Boolean(col.numeric) }
+                  }).filter((f) => f.id === 'description' || f.text)
+                  const title =
+                    fields.find((f) => f.id === 'description')?.text
+                    || fields.find((f) => f.id === 'entry_date')?.text
+                    || `Movimento ${entry.id}`
+                  return (
+                    <article
+                      id={`cash-entry-row-${entry.id}`}
+                      className={`pn-movement-card${
+                        highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+                          ? ' is-selected'
+                          : ''
+                      }`}
                     >
-                      <p className="pn-movement-card-desc">{title}</p>
-                      <dl className="pn-movement-card-attrs">
-                        {fields
-                          .filter((f) => f.id !== 'description' && f.id !== 'row')
-                          .map((f) => (
-                            <div key={f.id} className={`pn-movement-card-attr${f.numeric ? ' is-num' : ''}`}>
-                              <dt>{f.label}</dt>
-                              <dd>{f.text}</dd>
-                            </div>
-                          ))}
-                      </dl>
-                    </button>
-                    <div className="pn-movement-card-actions">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(entry)}>
-                        Modifica
+                      <button
+                        type="button"
+                        className="pn-movement-card-main"
+                        onClick={() => setDrawerEntry(entry)}
+                      >
+                        <p className="pn-movement-card-desc">{title}</p>
+                        <dl className="pn-movement-card-attrs">
+                          {fields
+                            .filter((f) => f.id !== 'description' && f.id !== 'row')
+                            .map((f) => (
+                              <div key={f.id} className={`pn-movement-card-attr${f.numeric ? ' is-num' : ''}`}>
+                                <dt>{f.label}</dt>
+                                <dd>{f.text}</dd>
+                              </div>
+                            ))}
+                        </dl>
                       </button>
-                      <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(entry)}>
-                        Elimina
-                      </button>
-                    </div>
-                  </article>
-                )
-              })
+                      <div className="pn-movement-card-actions">
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(entry)}>
+                          Modifica
+                        </button>
+                        <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(entry)}>
+                          Elimina
+                        </button>
+                      </div>
+                    </article>
+                  )
+                }}
+              />
             )}
           </div>
         ) : (

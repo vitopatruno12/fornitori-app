@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
 import {
   validateAtlasMainLogin,
@@ -12,54 +12,8 @@ import { pathnameToPage, pageToPath, VALID_PAGES, type PageKey } from './appPath
 import HomePage from './pages/HomePage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
-import MagazzinoPage from './pages/MagazzinoPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
-import InvoicesPage from './pages/InvoicesPage.jsx'
-import PagamentiPage from './pages/PagamentiPage.jsx'
-import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
-import StaffPage from './pages/StaffPage.jsx'
-import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
-import StipendiPage from './pages/StipendiPage.jsx'
-import OperatorLinksPage from './pages/OperatorLinksPage.jsx'
-import LocaleCodesPage from './pages/LocaleCodesPage.jsx'
-import MastriniContabiliPage from './pages/MastriniContabiliPage.jsx'
-import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
-import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
-import VnePage from './pages/VnePage.jsx'
-import GestioneLocaliPage, { GazzaLadraSalaPage } from './pages/GestioneLocaliPage.jsx'
-import {
-  AnalisiDashboardPage,
-  AnalisiGiornalieroPage,
-  AnalisiMensilePage,
-  AnalisiOrariaPage,
-  AnalisiPianificazionePage,
-  AnalisiSettimanalePage,
-} from './pages/AnalisiPages.jsx'
-import {
-  AmministrazioneDashboardPage,
-  AmministrazioneImpostazioniPage,
-  BancaContiPage,
-  BancaDashboardPage,
-  BancaMovimentiPage,
-  BancaRiconciliazionePage,
-} from './pages/BancaPages.jsx'
-
-import {
-  FattureConservazionePage,
-  FattureDaRegistrarePage,
-  FatturePagatePage,
-  FattureDashboardPage,
-  FattureEmessePage,
-  FattureImportXmlPage,
-  FatturePassivePage,
-  FattureImpostazioniPage,
-  FattureLogPage,
-  FattureRicevutePage,
-  FattureScadenziarioPage,
-  FattureSincronizzazionePage,
-} from './pages/FatturePages.jsx'
-import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import { askAi, suggestInvoiceFields, suggestOrderLines, suggestPrimaNota, suggestSupplierFields } from './services/aiService'
 import { readFattureCompany, resolveEmbeddedFattureCompany, companyLabel } from './utils/fattureCompany'
 import AiManagerPopups from './components/AiManagerPopups.jsx'
@@ -71,10 +25,80 @@ import AtlasUpdateButton from './components/AtlasUpdateButton.jsx'
 import AppNavDropdown from './components/AppNavDropdown.tsx'
 import { OfflineProvider, useOffline } from './offline/OfflineContext.jsx'
 import { PwaUpdateProvider } from './pwa/PwaUpdateContext.jsx'
-import OperatorOrderApp from './OperatorOrderApp.tsx'
-import OperatorDeliveryApp from './OperatorDeliveryApp.tsx'
-import OperatorPrimaNotaApp from './OperatorPrimaNotaApp.tsx'
-import OperatorStationApp from './OperatorStationApp.tsx'
+
+function lazyNamed(loader: () => Promise<Record<string, React.ComponentType>>, exportName: string) {
+  return lazy(() => loader().then((m) => ({ default: m[exportName] })))
+}
+
+const MagazzinoPage = lazy(() => import('./pages/MagazzinoPage.jsx'))
+const InvoicesPage = lazy(() => import('./pages/InvoicesPage.jsx'))
+const PagamentiPage = lazy(() => import('./pages/PagamentiPage.jsx'))
+const PrimaNotaPage = lazy(() => import('./pages/PrimaNotaPage.jsx'))
+const StaffPage = lazy(() => import('./pages/StaffPage.jsx'))
+const ReportPersonalePage = lazy(() => import('./pages/ReportPersonalePage.jsx'))
+const StipendiPage = lazy(() => import('./pages/StipendiPage.jsx'))
+const OperatorLinksPage = lazy(() => import('./pages/OperatorLinksPage.jsx'))
+const LocaleCodesPage = lazy(() => import('./pages/LocaleCodesPage.jsx'))
+const MastriniContabiliPage = lazy(() => import('./pages/MastriniContabiliPage.jsx'))
+const SupportTechniciansPage = lazy(() => import('./pages/SupportTechniciansPage.jsx'))
+const TrasportatoriPage = lazy(() => import('./pages/TrasportatoriPage.jsx'))
+const VnePage = lazy(() => import('./pages/VnePage.jsx'))
+const GestioneLocaliPage = lazy(() => import('./pages/GestioneLocaliPage.jsx'))
+const GazzaLadraSalaPage = lazyNamed(() => import('./pages/GestioneLocaliPage.jsx'), 'GazzaLadraSalaPage')
+
+const AnalisiDashboardPage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiDashboardPage')
+const AnalisiGiornalieroPage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiGiornalieroPage')
+const AnalisiMensilePage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiMensilePage')
+const AnalisiOrariaPage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiOrariaPage')
+const AnalisiPianificazionePage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiPianificazionePage')
+const AnalisiSettimanalePage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiSettimanalePage')
+
+const AmministrazioneDashboardPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'AmministrazioneDashboardPage')
+const AmministrazioneImpostazioniPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'AmministrazioneImpostazioniPage')
+const BancaContiPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaContiPage')
+const BancaDashboardPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaDashboardPage')
+const BancaMovimentiPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaMovimentiPage')
+const BancaRiconciliazionePage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaRiconciliazionePage')
+
+const FattureConservazionePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureConservazionePage')
+const FattureDaRegistrarePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureDaRegistrarePage')
+const FatturePagatePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FatturePagatePage')
+const FattureDashboardPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureDashboardPage')
+const FattureEmessePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureEmessePage')
+const FattureImportXmlPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureImportXmlPage')
+const FatturePassivePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FatturePassivePage')
+const FattureImpostazioniPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureImpostazioniPage')
+const FattureLogPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureLogPage')
+const FattureRicevutePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureRicevutePage')
+const FattureScadenziarioPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureScadenziarioPage')
+const FattureSincronizzazionePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureSincronizzazionePage')
+const SchedaContabileFornitorePage = lazy(() =>
+  import('./pages/SchedaContabileFornitorePage.jsx').then((m) => ({
+    default: m.SchedaContabileFornitorePage as React.ComponentType<{
+      fattureBase?: string
+      shell?: string
+    }>,
+  })),
+)
+
+const OperatorOrderApp = lazy(() => import('./OperatorOrderApp.tsx'))
+const OperatorDeliveryApp = lazy(() => import('./OperatorDeliveryApp.tsx'))
+const OperatorPrimaNotaApp = lazy(() => import('./OperatorPrimaNotaApp.tsx'))
+const OperatorStationApp = lazy(() =>
+  import('./OperatorStationApp.tsx').then((m) => ({
+    default: m.default as React.ComponentType<{ stationId: 'abba' | 'zanardelli' | 'lattea' }>,
+  })),
+)
+
+function RouteFallback() {
+  return (
+    <div className="card" style={{ margin: '1rem', padding: '1.25rem' }}>
+      <p className="fatture-note" style={{ margin: 0 }}>
+        Caricamento sezione…
+      </p>
+    </div>
+  )
+}
 import {
   OPERATOR_DELIVERY_PATH,
   OPERATOR_ORDER_PATH,
@@ -1052,6 +1076,7 @@ function App() {
       <div className="app-version-strip" aria-label="Versione software">Versione 1.0</div>
 
       <main className="app-main">
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/analisi" element={<AnalisiDashboardPage />} />
@@ -1108,6 +1133,7 @@ function App() {
           <Route path="/vne" element={<VnePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </main>
 
       <button
@@ -1241,18 +1267,20 @@ function RootRouter() {
     <OfflineProvider>
       <PwaUpdateProvider>
         <BrowserRouter>
-          <Routes>
-            <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
-            <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
-            <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
-            <Route
-              path={`${OPERATOR_STATION_ZANARDELLI_PATH}/*`}
-              element={<OperatorStationApp stationId="zanardelli" />}
-            />
-            <Route path={`${OPERATOR_STATION_LATTEA_PATH}/*`} element={<OperatorStationApp stationId="lattea" />} />
-            <Route path={`${OPERATOR_STATION_PATH}/*`} element={<OperatorStationApp stationId="abba" />} />
-            <Route path="/*" element={<MainAppGate />} />
-          </Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path={OPERATOR_ORDER_PATH} element={<OperatorOrderApp />} />
+              <Route path={`${OPERATOR_DELIVERY_PATH}/*`} element={<OperatorDeliveryApp />} />
+              <Route path={OPERATOR_PRIMA_NOTA_PATH} element={<OperatorPrimaNotaApp />} />
+              <Route
+                path={`${OPERATOR_STATION_ZANARDELLI_PATH}/*`}
+                element={<OperatorStationApp stationId="zanardelli" />}
+              />
+              <Route path={`${OPERATOR_STATION_LATTEA_PATH}/*`} element={<OperatorStationApp stationId="lattea" />} />
+              <Route path={`${OPERATOR_STATION_PATH}/*`} element={<OperatorStationApp stationId="abba" />} />
+              <Route path="/*" element={<MainAppGate />} />
+            </Routes>
+          </Suspense>
         </BrowserRouter>
       </PwaUpdateProvider>
     </OfflineProvider>

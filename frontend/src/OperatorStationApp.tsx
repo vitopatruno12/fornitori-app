@@ -1,35 +1,12 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import OperatorSatelliteShell from './components/OperatorSatelliteShell.tsx'
 import { FattureNavBaseProvider } from './components/FattureShared.jsx'
 import HomePage from './pages/HomePage.jsx'
-import StaffPage from './pages/StaffPage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
-import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
-import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
-import MagazzinoPage from './pages/MagazzinoPage.jsx'
-import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
-import StipendiPage from './pages/StipendiPage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
-import InvoicesPage from './pages/InvoicesPage.jsx'
-import SupportTechniciansPage from './pages/SupportTechniciansPage.jsx'
-import {
-  FattureConservazionePage,
-  FattureDaRegistrarePage,
-  FatturePagatePage,
-  FattureDashboardPage,
-  FattureEmessePage,
-  FattureImpostazioniPage,
-  FattureImportXmlPage,
-  FattureLogPage,
-  FatturePassivePage,
-  FattureRicevutePage,
-  FattureScadenziarioPage,
-  FattureSincronizzazionePage,
-} from './pages/FatturePages.jsx'
-import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
 import { type OperatorStationId, stationIdToAuthMode } from './utils/atlasAuth'
 import {
   getOperatorStationFatturePath,
@@ -40,6 +17,60 @@ import {
   type OperatorStationView,
 } from './utils/operatorMode.ts'
 import { applyContextPwaManifest, markOperatorPwaLaunchPreferred } from './utils/pwaManifest.ts'
+
+const StaffPage = lazy(() => import('./pages/StaffPage.jsx'))
+const PrimaNotaPage = lazy(() => import('./pages/PrimaNotaPage.jsx'))
+const TrasportatoriPage = lazy(() => import('./pages/TrasportatoriPage.jsx'))
+const MagazzinoPage = lazy(() => import('./pages/MagazzinoPage.jsx'))
+const ReportPersonalePage = lazy(() => import('./pages/ReportPersonalePage.jsx'))
+const StipendiPage = lazy(() => import('./pages/StipendiPage.jsx'))
+const SupportTechniciansPage = lazy(() => import('./pages/SupportTechniciansPage.jsx'))
+const InvoicesPage = lazy(() => import('./pages/InvoicesPage.jsx'))
+const SchedaContabileFornitorePage = lazy(() =>
+  import('./pages/SchedaContabileFornitorePage.jsx').then((m) => ({
+    default: m.SchedaContabileFornitorePage as React.ComponentType<{
+      fattureBase: string
+      shell?: string
+    }>,
+  })),
+)
+
+function lazyFatture(exportName: string) {
+  return lazy(() =>
+    import('./pages/FatturePages.jsx').then((m) => ({
+      default: (m as Record<string, React.ComponentType>)[exportName],
+    })),
+  )
+}
+
+const FattureDashboardPage = lazyFatture('FattureDashboardPage')
+const FattureRicevutePage = lazyFatture('FattureRicevutePage')
+const FattureEmessePage = lazyFatture('FattureEmessePage')
+const FatturePassivePage = lazyFatture('FatturePassivePage')
+const FattureDaRegistrarePage = lazyFatture('FattureDaRegistrarePage')
+const FatturePagatePage = lazyFatture('FatturePagatePage')
+const FattureScadenziarioPage = lazyFatture('FattureScadenziarioPage')
+const FattureSincronizzazionePage = lazyFatture('FattureSincronizzazionePage')
+const FattureConservazionePage = lazyFatture('FattureConservazionePage')
+const FattureImportXmlPage = lazyFatture('FattureImportXmlPage')
+const FattureLogPage = lazyFatture('FattureLogPage')
+const FattureImpostazioniPage = lazyFatture('FattureImpostazioniPage')
+
+function LazySection({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="card" style={{ margin: '1rem', padding: '1.25rem' }}>
+          <p className="fatture-note" style={{ margin: 0 }}>
+            Caricamento sezione…
+          </p>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
+}
 
 type StationSection = { id: OperatorStationView; label: string; title: string }
 
@@ -116,25 +147,27 @@ function resolveStationTitle(view: OperatorStationView): string {
 
 function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
   return (
-    <FattureNavBaseProvider base={fattureBase}>
-      <Routes>
-        <Route index element={<FattureDashboardPage />} />
-        <Route path="ricevute" element={<FattureRicevutePage />} />
-        <Route path="emesse" element={<FattureEmessePage />} />
-        <Route path="passive" element={<FatturePassivePage />} />
-        <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
-        <Route path="pagate" element={<FatturePagatePage />} />
-        <Route path="scheda-contabile" element={<SchedaContabileFornitorePage fattureBase={fattureBase} shell="fatture" />} />
-        <Route path="registrate" element={<InvoicesPage />} />
-        <Route path="scadenziario" element={<FattureScadenziarioPage />} />
-        <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
-        <Route path="conservazione" element={<FattureConservazionePage />} />
-        <Route path="importa-xml" element={<FattureImportXmlPage />} />
-        <Route path="log" element={<FattureLogPage />} />
-        <Route path="impostazioni" element={<FattureImpostazioniPage />} />
-        <Route path="*" element={<Navigate to="." replace />} />
-      </Routes>
-    </FattureNavBaseProvider>
+    <LazySection>
+      <FattureNavBaseProvider base={fattureBase}>
+        <Routes>
+          <Route index element={<FattureDashboardPage />} />
+          <Route path="ricevute" element={<FattureRicevutePage />} />
+          <Route path="emesse" element={<FattureEmessePage />} />
+          <Route path="passive" element={<FatturePassivePage />} />
+          <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
+          <Route path="pagate" element={<FatturePagatePage />} />
+          <Route path="scheda-contabile" element={<SchedaContabileFornitorePage fattureBase={fattureBase} shell="fatture" />} />
+          <Route path="registrate" element={<InvoicesPage />} />
+          <Route path="scadenziario" element={<FattureScadenziarioPage />} />
+          <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
+          <Route path="conservazione" element={<FattureConservazionePage />} />
+          <Route path="importa-xml" element={<FattureImportXmlPage />} />
+          <Route path="log" element={<FattureLogPage />} />
+          <Route path="impostazioni" element={<FattureImpostazioniPage />} />
+          <Route path="*" element={<Navigate to="." replace />} />
+        </Routes>
+      </FattureNavBaseProvider>
+    </LazySection>
   )
 }
 
@@ -150,20 +183,37 @@ function StationMainContent({
   setStationView: (next: OperatorStationView) => void
 }) {
   // Non tenere Prima Nota montata nascosta: su tablet Android continua a pesare CPU/RAM.
+  // Sezioni pesanti in lazy chunk (Staff/Fatture/Prima Nota/…).
   if (view === 'overview') {
     return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
   }
   if (view === 'staff') {
-    return <StaffPage operatorMode stationId={stationId} />
+    return (
+      <LazySection>
+        <StaffPage operatorMode stationId={stationId} />
+      </LazySection>
+    )
   }
   if (view === 'prima-nota') {
-    return <PrimaNotaPage operatorMode stationId={stationId} />
+    return (
+      <LazySection>
+        <PrimaNotaPage operatorMode stationId={stationId} />
+      </LazySection>
+    )
   }
   if (view === 'staff-report') {
-    return <ReportPersonalePage operatorMode stationId={stationId} />
+    return (
+      <LazySection>
+        <ReportPersonalePage operatorMode stationId={stationId} />
+      </LazySection>
+    )
   }
   if (view === 'stipendi') {
-    return <StipendiPage operatorMode stationId={stationId} />
+    return (
+      <LazySection>
+        <StipendiPage operatorMode stationId={stationId} />
+      </LazySection>
+    )
   }
   if (view === 'suppliers') {
     return <SuppliersPage />
@@ -175,13 +225,25 @@ function StationMainContent({
     return <DeliveriesHistoryPage operatorMode />
   }
   if (view === 'magazzino') {
-    return <MagazzinoPage operatorMode onBackToDelivery={() => setStationView('delivery')} />
+    return (
+      <LazySection>
+        <MagazzinoPage operatorMode onBackToDelivery={() => setStationView('delivery')} />
+      </LazySection>
+    )
   }
   if (view === 'trasportatori') {
-    return <TrasportatoriPage operatorMode />
+    return (
+      <LazySection>
+        <TrasportatoriPage operatorMode />
+      </LazySection>
+    )
   }
   if (view === 'support-tech') {
-    return <SupportTechniciansPage />
+    return (
+      <LazySection>
+        <SupportTechniciansPage />
+      </LazySection>
+    )
   }
   return <NewOrderPage operatorMode />
 }

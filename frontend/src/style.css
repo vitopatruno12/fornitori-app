@@ -7626,6 +7626,16 @@ select.form-control {
   padding: 0 1rem 1rem;
 }
 
+.pn-movements-cards .virtual-list,
+.pn-movements-virtual {
+  display: block;
+  width: 100%;
+}
+
+.pn-movements-cards .virtual-list-item {
+  padding-bottom: 0.65rem;
+}
+
 .pn-movement-card {
   border: 1px solid var(--border, #d1d5db);
   border-radius: 0.5rem;

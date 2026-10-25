@@ -1,44 +1,12 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import OperatorSatelliteShell from './components/OperatorSatelliteShell.tsx'
 import { FattureNavBaseProvider } from './components/FattureShared.jsx'
+import { BancaNavBaseProvider } from './components/BancaShared.jsx'
 import HomePage from './pages/HomePage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import NewDeliveryPage from './pages/NewDeliveryPage.jsx'
 import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
-import MagazzinoPage from './pages/MagazzinoPage.jsx'
-import TrasportatoriPage from './pages/TrasportatoriPage.jsx'
-import PrimaNotaPage from './pages/PrimaNotaPage.jsx'
-import InvoicesPage from './pages/InvoicesPage.jsx'
-import ReportPersonalePage from './pages/ReportPersonalePage.jsx'
-import StipendiPage from './pages/StipendiPage.jsx'
-import {
-  AnalisiGiornalieroPage,
-  AnalisiMensilePage,
-  AnalisiSettimanalePage,
-} from './pages/AnalisiPages.jsx'
-import {
-  FattureConservazionePage,
-  FattureDaRegistrarePage,
-  FatturePagatePage,
-  FattureDashboardPage,
-  FattureEmessePage,
-  FattureImpostazioniPage,
-  FattureImportXmlPage,
-  FattureLogPage,
-  FatturePassivePage,
-  FattureRicevutePage,
-  FattureScadenziarioPage,
-  FattureSincronizzazionePage,
-} from './pages/FatturePages.jsx'
-import { SchedaContabileFornitorePage } from './pages/SchedaContabileFornitorePage.jsx'
-import {
-  BancaContiPage,
-  BancaDashboardPage,
-  BancaMovimentiPage,
-  BancaRiconciliazionePage,
-} from './pages/BancaPages.jsx'
-import { BancaNavBaseProvider } from './components/BancaShared.jsx'
 import {
   getOperatorDeliveryRouterPath,
   getOperatorDeliveryView,
@@ -47,6 +15,63 @@ import {
   type OperatorDeliveryView,
 } from './utils/operatorMode.ts'
 import { applyContextPwaManifest, markCarrierPwaLaunchPreferred } from './utils/pwaManifest.ts'
+
+const MagazzinoPage = lazy(() => import('./pages/MagazzinoPage.jsx'))
+const TrasportatoriPage = lazy(() => import('./pages/TrasportatoriPage.jsx'))
+const PrimaNotaPage = lazy(() => import('./pages/PrimaNotaPage.jsx'))
+const InvoicesPage = lazy(() => import('./pages/InvoicesPage.jsx'))
+const ReportPersonalePage = lazy(() => import('./pages/ReportPersonalePage.jsx'))
+const StipendiPage = lazy(() => import('./pages/StipendiPage.jsx'))
+const SchedaContabileFornitorePage = lazy(() =>
+  import('./pages/SchedaContabileFornitorePage.jsx').then((m) => ({
+    default: m.SchedaContabileFornitorePage as React.ComponentType<{
+      fattureBase: string
+      shell?: string
+    }>,
+  })),
+)
+
+function lazyNamed(loader: () => Promise<Record<string, React.ComponentType>>, exportName: string) {
+  return lazy(() => loader().then((m) => ({ default: m[exportName] })))
+}
+
+const AnalisiGiornalieroPage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiGiornalieroPage')
+const AnalisiSettimanalePage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiSettimanalePage')
+const AnalisiMensilePage = lazyNamed(() => import('./pages/AnalisiPages.jsx'), 'AnalisiMensilePage')
+
+const FattureDashboardPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureDashboardPage')
+const FattureRicevutePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureRicevutePage')
+const FattureEmessePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureEmessePage')
+const FatturePassivePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FatturePassivePage')
+const FattureDaRegistrarePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureDaRegistrarePage')
+const FatturePagatePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FatturePagatePage')
+const FattureScadenziarioPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureScadenziarioPage')
+const FattureSincronizzazionePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureSincronizzazionePage')
+const FattureConservazionePage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureConservazionePage')
+const FattureImportXmlPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureImportXmlPage')
+const FattureLogPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureLogPage')
+const FattureImpostazioniPage = lazyNamed(() => import('./pages/FatturePages.jsx'), 'FattureImpostazioniPage')
+
+const BancaDashboardPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaDashboardPage')
+const BancaContiPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaContiPage')
+const BancaMovimentiPage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaMovimentiPage')
+const BancaRiconciliazionePage = lazyNamed(() => import('./pages/BancaPages.jsx'), 'BancaRiconciliazionePage')
+
+function LazySection({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="card" style={{ margin: '1rem', padding: '1.25rem' }}>
+          <p className="fatture-note" style={{ margin: 0 }}>
+            Caricamento sezione…
+          </p>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
+}
 
 const DELIVERY_SUBMENU: { id: OperatorDeliveryView; label: string }[] = [
   { id: 'trasportatori', label: 'Trasportatori' },
@@ -100,42 +125,46 @@ const TITLES: Record<OperatorDeliveryView, string> = {
 
 function DeliveryFattureRoutes() {
   return (
-    <FattureNavBaseProvider base={OPERATOR_DELIVERY_FATTURE_PATH}>
-      <Routes>
-        <Route index element={<FattureDashboardPage />} />
-        <Route path="ricevute" element={<FattureRicevutePage />} />
-        <Route path="emesse" element={<FattureEmessePage />} />
-        <Route path="passive" element={<FatturePassivePage />} />
-        <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
-        <Route path="pagate" element={<FatturePagatePage />} />
-        <Route
-          path="scheda-contabile"
-          element={<SchedaContabileFornitorePage fattureBase={OPERATOR_DELIVERY_FATTURE_PATH} shell="fatture" />}
-        />
-        <Route path="registrate" element={<InvoicesPage />} />
-        <Route path="scadenziario" element={<FattureScadenziarioPage />} />
-        <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
-        <Route path="conservazione" element={<FattureConservazionePage />} />
-        <Route path="importa-xml" element={<FattureImportXmlPage />} />
-        <Route path="log" element={<FattureLogPage />} />
-        <Route path="impostazioni" element={<FattureImpostazioniPage />} />
-        <Route path="*" element={<Navigate to="." replace />} />
-      </Routes>
-    </FattureNavBaseProvider>
+    <LazySection>
+      <FattureNavBaseProvider base={OPERATOR_DELIVERY_FATTURE_PATH}>
+        <Routes>
+          <Route index element={<FattureDashboardPage />} />
+          <Route path="ricevute" element={<FattureRicevutePage />} />
+          <Route path="emesse" element={<FattureEmessePage />} />
+          <Route path="passive" element={<FatturePassivePage />} />
+          <Route path="da-registrare" element={<FattureDaRegistrarePage />} />
+          <Route path="pagate" element={<FatturePagatePage />} />
+          <Route
+            path="scheda-contabile"
+            element={<SchedaContabileFornitorePage fattureBase={OPERATOR_DELIVERY_FATTURE_PATH} shell="fatture" />}
+          />
+          <Route path="registrate" element={<InvoicesPage />} />
+          <Route path="scadenziario" element={<FattureScadenziarioPage />} />
+          <Route path="sincronizzazione" element={<FattureSincronizzazionePage />} />
+          <Route path="conservazione" element={<FattureConservazionePage />} />
+          <Route path="importa-xml" element={<FattureImportXmlPage />} />
+          <Route path="log" element={<FattureLogPage />} />
+          <Route path="impostazioni" element={<FattureImpostazioniPage />} />
+          <Route path="*" element={<Navigate to="." replace />} />
+        </Routes>
+      </FattureNavBaseProvider>
+    </LazySection>
   )
 }
 
 function DeliveryBancaRoutes() {
   return (
-    <BancaNavBaseProvider base={OPERATOR_DELIVERY_BANCA_PATH}>
-      <Routes>
-        <Route index element={<BancaDashboardPage />} />
-        <Route path="conti" element={<BancaContiPage />} />
-        <Route path="movimenti" element={<BancaMovimentiPage />} />
-        <Route path="riconciliazione" element={<BancaRiconciliazionePage />} />
-        <Route path="*" element={<Navigate to="." replace />} />
-      </Routes>
-    </BancaNavBaseProvider>
+    <LazySection>
+      <BancaNavBaseProvider base={OPERATOR_DELIVERY_BANCA_PATH}>
+        <Routes>
+          <Route index element={<BancaDashboardPage />} />
+          <Route path="conti" element={<BancaContiPage />} />
+          <Route path="movimenti" element={<BancaMovimentiPage />} />
+          <Route path="riconciliazione" element={<BancaRiconciliazionePage />} />
+          <Route path="*" element={<Navigate to="." replace />} />
+        </Routes>
+      </BancaNavBaseProvider>
+    </LazySection>
   )
 }
 
@@ -153,34 +182,66 @@ function DeliveryMainContent({
     return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
   }
   if (view === 'analisi-giornaliero') {
-    return <AnalisiGiornalieroPage />
+    return (
+      <LazySection>
+        <AnalisiGiornalieroPage />
+      </LazySection>
+    )
   }
   if (view === 'analisi-settimanale') {
-    return <AnalisiSettimanalePage />
+    return (
+      <LazySection>
+        <AnalisiSettimanalePage />
+      </LazySection>
+    )
   }
   if (view === 'analisi-mensile') {
-    return <AnalisiMensilePage />
+    return (
+      <LazySection>
+        <AnalisiMensilePage />
+      </LazySection>
+    )
   }
   if (view === 'suppliers') {
     return <SuppliersPage />
   }
   if (view === 'magazzino') {
-    return <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+    return (
+      <LazySection>
+        <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
+      </LazySection>
+    )
   }
   if (view === 'trasportatori') {
-    return <TrasportatoriPage operatorMode />
+    return (
+      <LazySection>
+        <TrasportatoriPage operatorMode />
+      </LazySection>
+    )
   }
   if (view === 'new-delivery') {
     return <NewDeliveryPage operatorMode />
   }
   if (view === 'staff-report') {
-    return <ReportPersonalePage />
+    return (
+      <LazySection>
+        <ReportPersonalePage />
+      </LazySection>
+    )
   }
   if (view === 'stipendi') {
-    return <StipendiPage />
+    return (
+      <LazySection>
+        <StipendiPage />
+      </LazySection>
+    )
   }
   if (view === 'prima-nota') {
-    return <PrimaNotaPage operatorMode stationId="carrier" />
+    return (
+      <LazySection>
+        <PrimaNotaPage operatorMode stationId="carrier" />
+      </LazySection>
+    )
   }
   if (view === 'fatturazione') {
     return <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
