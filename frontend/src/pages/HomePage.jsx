@@ -534,7 +534,9 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
           Panoramica
         </h1>
         <p className="dashboard-subtitle staff-page-lead">
-          Situazione al volo: cassa, banca, flussi del mese, fatture e attività recenti.
+          {operatorMode
+            ? 'Vista light postazione: saldi e scorciatoie. I grafici pesanti restano sul gestionale.'
+            : 'Situazione al volo: cassa, banca, flussi del mese, fatture e attività recenti.'}
         </p>
       </header>
 
@@ -686,7 +688,39 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
             </section>
           ) : null}
 
-          {(pendingOrders.length > 0) && (
+          {operatorMode ? (
+            <section className="card dashboard-panel operator-home-light-actions" style={{ marginBottom: '1rem' }}>
+              <h2 className="page-subheader" style={{ marginTop: 0 }}>
+                Scorciatoie postazione
+              </h2>
+              <div className="operator-home-light-btns">
+                <button type="button" className="btn btn-primary" onClick={() => onOperatorNavigate?.('prima-nota')}>
+                  Prima Nota
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => onOperatorNavigate?.('orders')}>
+                  Nuovo ordine
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => onOperatorNavigate?.('delivery')}>
+                  Consegna
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => onOperatorNavigate?.('fatture')}>
+                  Fatture
+                </button>
+              </div>
+              {pendingOrders.length > 0 ? (
+                <p className="fatture-note" style={{ margin: '0.85rem 0 0' }}>
+                  {pendingOrders.length} ordini in sospeso con data consegna passata — apri Nuovo ordine per gestirli.
+                </p>
+              ) : null}
+              {overdueInvoices.length > 0 ? (
+                <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
+                  {overdueInvoices.length} fatture scadute · residuo {eur(data.fatture_scadute_residuo)}.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {!operatorMode && pendingOrders.length > 0 ? (
             <section
               className="card dashboard-panel pagamenti-workbook-card"
               style={{ marginBottom: '1rem', borderLeft: '4px solid var(--danger, #c0392b)' }}
@@ -697,7 +731,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm dashboard-panel-action"
-                onClick={() => (operatorMode ? onOperatorNavigate?.('orders') : onNavigate?.('new-order'))}
+                onClick={() => onNavigate?.('new-order')}
               >
                 Nuovo ordine
               </button>
@@ -713,193 +747,193 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                 rowKey={(row) => String(row.id)}
               />
             </section>
-          )}
+          ) : null}
 
-          <section className="card" style={{ marginBottom: '1rem' }}>
-            <div className="ui-toolbar-one" style={{ marginBottom: 0, display: 'flex', flexWrap: 'wrap', gap: '0.75rem 1.25rem', alignItems: 'flex-end' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="home-charts-societa">Società grafici</label>
-                <select
-                  id="home-charts-societa"
-                  className="form-control"
-                  value={societaKpi}
-                  onChange={(e) => onSocietaKpiChange(e.target.value)}
-                  style={{ minWidth: 180 }}
-                >
-                  <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
-                  {HOME_SOCIETA.map((soc) => (
-                    <option key={soc.id} value={soc.id}>
-                      {soc.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="home-charts-periodo">Periodo grafici</label>
-                <select
-                  id="home-charts-periodo"
-                  className="form-control"
-                  value={windowMonths}
-                  onChange={(e) => setWindowMonths(e.target.value)}
-                  style={{ minWidth: 140 }}
-                >
-                  <option value="3">Ultimi 3 mesi</option>
-                  <option value="6">Ultimi 6 mesi</option>
-                  <option value="12">Ultimi 12 mesi</option>
-                </select>
-              </div>
-              {societaKpi !== HOME_SOCIETA_TUTTE ? (
-                <p className="dashboard-hint" style={{ margin: 0 }}>
-                  Grafici · {chartsBundle.label}
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <div className="dashboard-two-col">
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Entrate vs uscite mese per mese</h2>
-              <MonthlyFlowChart
-                rows={monthlyRows}
-                onOpenPrimaNota={(monthKey, kind) => openPrimaNotaWithFilter(monthKey, kind)}
-                onOpenInvoices={operatorMode ? undefined : (monthKey) => openInvoicesWithFilter(monthKey)}
-              />
-            </section>
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Andamento spese ultimi {windowMonths} mesi</h2>
-              <Last6MonthsTrend rows={spendTrendRows} onOpenInvoices={operatorMode ? undefined : (monthKey) => openInvoicesWithFilter(monthKey)} />
-            </section>
-          </div>
-
-          <div className="dashboard-two-col">
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Costi per categoria</h2>
-              <BreakdownBars
-                rows={chartsBundle.costiCategoria}
-                onSelect={(r) => openPrimaNotaWithFilter(latestMonthKey, 'uscita', r.label)}
-              />
-            </section>
-            <section className="card dashboard-panel">
-              <h2 className="page-subheader">Costi per fornitore</h2>
-              <BreakdownBars
-                rows={chartsBundle.costiFornitore}
-                onSelect={operatorMode ? undefined : (r) => openInvoicesWithFilter(latestMonthKey, r.label)}
-              />
-            </section>
-          </div>
-
-          <div className="dashboard-two-col">
-            <section className="card dashboard-panel pagamenti-workbook-card">
-              <WorkbookGrid
-                title={DASHBOARD_MOVEMENTS_TITLE}
-                sheetLabel={`${latestMovements.length} movimenti · ${movimentiSocietaLabel}`}
-                columns={DASHBOARD_MOVEMENTS_COLUMNS}
-                rows={latestMovements}
-                cellValue={dashboardMovementCellValue}
-                totalsLabel={dashboardMovementsTotalsLabel}
-                totals={movementsTotals}
-                gridClassName="dashboard-movements-grid"
-                emptyMessage={
-                  movimentiSocieta === HOME_SOCIETA_TUTTE
-                    ? 'Nessun movimento registrato.'
-                    : `Nessun movimento per ${movimentiSocietaLabel}.`
-                }
-                rowKey={(row) => String(row.id)}
-                toolbarActions={
-                  <div className="dashboard-movements-toolbar">
-                    <label className="dashboard-movements-societa-label" htmlFor="home-movimenti-cassa-societa">
-                      <span className="sr-only">Società ultimi movimenti cassa</span>
-                      <select
-                        id="home-movimenti-cassa-societa"
-                        className="dashboard-kpi-locale-select dashboard-movements-societa-select"
-                        value={movimentiSocieta}
-                        onChange={(e) => onMovimentiSocietaChange(e.target.value)}
-                      >
-                        <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
-                        {HOME_SOCIETA.map((soc) => (
-                          <option key={soc.id} value={soc.id}>
-                            {soc.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={openPrimaNotaFromMovimenti}
-                      title={
-                        movimentiActivity
-                          ? `Apri Prima Nota · registro ${movimentiSocietaLabel}`
-                          : 'Apri Prima Nota'
-                      }
+          {!operatorMode ? (
+            <>
+              <section className="card" style={{ marginBottom: '1rem' }}>
+                <div className="ui-toolbar-one" style={{ marginBottom: 0, display: 'flex', flexWrap: 'wrap', gap: '0.75rem 1.25rem', alignItems: 'flex-end' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="home-charts-societa">Società grafici</label>
+                    <select
+                      id="home-charts-societa"
+                      className="form-control"
+                      value={societaKpi}
+                      onChange={(e) => onSocietaKpiChange(e.target.value)}
+                      style={{ minWidth: 180 }}
                     >
-                      Prima Nota
-                    </button>
+                      <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
+                      {HOME_SOCIETA.map((soc) => (
+                        <option key={soc.id} value={soc.id}>
+                          {soc.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                }
-              />
-            </section>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="home-charts-periodo">Periodo grafici</label>
+                    <select
+                      id="home-charts-periodo"
+                      className="form-control"
+                      value={windowMonths}
+                      onChange={(e) => setWindowMonths(e.target.value)}
+                      style={{ minWidth: 140 }}
+                    >
+                      <option value="3">Ultimi 3 mesi</option>
+                      <option value="6">Ultimi 6 mesi</option>
+                      <option value="12">Ultimi 12 mesi</option>
+                    </select>
+                  </div>
+                  {societaKpi !== HOME_SOCIETA_TUTTE ? (
+                    <p className="dashboard-hint" style={{ margin: 0 }}>
+                      Grafici · {chartsBundle.label}
+                    </p>
+                  ) : null}
+                </div>
+              </section>
 
-            <section className="card dashboard-panel pagamenti-workbook-card">
-              {!operatorMode ? (
-                <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('history')}>
-                  Storico consegne
-                </button>
-              ) : null}
-              <WorkbookGrid
-                title={DASHBOARD_DELIVERIES_TITLE}
-                sheetLabel={`${recentDeliveries.length} consegne`}
-                columns={DASHBOARD_DELIVERIES_COLUMNS}
-                rows={recentDeliveries}
-                cellValue={dashboardDeliveryCellValue}
-                totalsLabel={dashboardDeliveriesTotalsLabel}
-                totals={deliveriesTotals}
-                gridClassName="dashboard-deliveries-grid"
-                emptyMessage="Nessuna consegna."
-                rowKey={(row) => String(row.id)}
-              />
-            </section>
-          </div>
+              <div className="dashboard-two-col">
+                <section className="card dashboard-panel">
+                  <h2 className="page-subheader">Entrate vs uscite mese per mese</h2>
+                  <MonthlyFlowChart
+                    rows={monthlyRows}
+                    onOpenPrimaNota={(monthKey, kind) => openPrimaNotaWithFilter(monthKey, kind)}
+                    onOpenInvoices={(monthKey) => openInvoicesWithFilter(monthKey)}
+                  />
+                </section>
+                <section className="card dashboard-panel">
+                  <h2 className="page-subheader">Andamento spese ultimi {windowMonths} mesi</h2>
+                  <Last6MonthsTrend rows={spendTrendRows} onOpenInvoices={(monthKey) => openInvoicesWithFilter(monthKey)} />
+                </section>
+              </div>
 
-          <div className="dashboard-two-col">
-            <section className="card dashboard-panel pagamenti-workbook-card">
-              {!operatorMode ? (
-                <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
-                  Apri fatture scadute
-                </button>
-              ) : null}
-              <WorkbookGrid
-                title={DASHBOARD_OVERDUE_INVOICES_TITLE}
-                sheetLabel={`${overdueInvoices.length} fatture`}
-                columns={DASHBOARD_OVERDUE_INVOICES_COLUMNS}
-                rows={overdueInvoices}
-                cellValue={dashboardOverdueInvoiceCellValue}
-                totalsLabel={dashboardOverdueInvoicesTotalsLabel}
-                totals={overdueTotals}
-                gridClassName="dashboard-overdue-invoices-grid"
-                emptyMessage="Nessuna fattura scaduta (o tutto saldato)."
-                rowKey={(row) => String(row.id)}
-              />
-            </section>
+              <div className="dashboard-two-col">
+                <section className="card dashboard-panel">
+                  <h2 className="page-subheader">Costi per categoria</h2>
+                  <BreakdownBars
+                    rows={chartsBundle.costiCategoria}
+                    onSelect={(r) => openPrimaNotaWithFilter(latestMonthKey, 'uscita', r.label)}
+                  />
+                </section>
+                <section className="card dashboard-panel">
+                  <h2 className="page-subheader">Costi per fornitore</h2>
+                  <BreakdownBars
+                    rows={chartsBundle.costiFornitore}
+                    onSelect={(r) => openInvoicesWithFilter(latestMonthKey, r.label)}
+                  />
+                </section>
+              </div>
 
-            <section className="card dashboard-panel pagamenti-workbook-card">
-              <p className="dashboard-hint">
-                Confronto tra le ultime due consegne dello stesso prodotto (stesso fornitore): prezzo unitario in aumento.
-              </p>
-              <WorkbookGrid
-                title={DASHBOARD_PRICE_INCREASE_TITLE}
-                sheetLabel={`${priceIncreases.length} righe`}
-                columns={DASHBOARD_PRICE_INCREASE_COLUMNS}
-                rows={priceIncreases}
-                cellValue={dashboardPriceIncreaseCellValue}
-                totalsLabel={dashboardPriceIncreaseTotalsLabel}
-                totals={priceIncreases.length}
-                gridClassName="dashboard-price-increase-grid"
-                emptyMessage="Nessun aumento rilevato (servono almeno due consegne per prodotto)."
-                rowKey={(row, rowIndex) => `${row.supplier_name}-${row.product_description}-${rowIndex}`}
-              />
-            </section>
-          </div>
+              <div className="dashboard-two-col">
+                <section className="card dashboard-panel pagamenti-workbook-card">
+                  <WorkbookGrid
+                    title={DASHBOARD_MOVEMENTS_TITLE}
+                    sheetLabel={`${latestMovements.length} movimenti · ${movimentiSocietaLabel}`}
+                    columns={DASHBOARD_MOVEMENTS_COLUMNS}
+                    rows={latestMovements}
+                    cellValue={dashboardMovementCellValue}
+                    totalsLabel={dashboardMovementsTotalsLabel}
+                    totals={movementsTotals}
+                    gridClassName="dashboard-movements-grid"
+                    emptyMessage={
+                      movimentiSocieta === HOME_SOCIETA_TUTTE
+                        ? 'Nessun movimento registrato.'
+                        : `Nessun movimento per ${movimentiSocietaLabel}.`
+                    }
+                    rowKey={(row) => String(row.id)}
+                    toolbarActions={
+                      <div className="dashboard-movements-toolbar">
+                        <label className="dashboard-movements-societa-label" htmlFor="home-movimenti-cassa-societa">
+                          <span className="sr-only">Società ultimi movimenti cassa</span>
+                          <select
+                            id="home-movimenti-cassa-societa"
+                            className="dashboard-kpi-locale-select dashboard-movements-societa-select"
+                            value={movimentiSocieta}
+                            onChange={(e) => onMovimentiSocietaChange(e.target.value)}
+                          >
+                            <option value={HOME_SOCIETA_TUTTE}>Tutte le società</option>
+                            {HOME_SOCIETA.map((soc) => (
+                              <option key={soc.id} value={soc.id}>
+                                {soc.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={openPrimaNotaFromMovimenti}
+                          title={
+                            movimentiActivity
+                              ? `Apri Prima Nota · registro ${movimentiSocietaLabel}`
+                              : 'Apri Prima Nota'
+                          }
+                        >
+                          Prima Nota
+                        </button>
+                      </div>
+                    }
+                  />
+                </section>
+
+                <section className="card dashboard-panel pagamenti-workbook-card">
+                  <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={() => onNavigate?.('history')}>
+                    Storico consegne
+                  </button>
+                  <WorkbookGrid
+                    title={DASHBOARD_DELIVERIES_TITLE}
+                    sheetLabel={`${recentDeliveries.length} consegne`}
+                    columns={DASHBOARD_DELIVERIES_COLUMNS}
+                    rows={recentDeliveries}
+                    cellValue={dashboardDeliveryCellValue}
+                    totalsLabel={dashboardDeliveriesTotalsLabel}
+                    totals={deliveriesTotals}
+                    gridClassName="dashboard-deliveries-grid"
+                    emptyMessage="Nessuna consegna."
+                    rowKey={(row) => String(row.id)}
+                  />
+                </section>
+              </div>
+
+              <div className="dashboard-two-col">
+                <section className="card dashboard-panel pagamenti-workbook-card">
+                  <button type="button" className="btn btn-secondary btn-sm dashboard-panel-action" onClick={openInvoicesOverdue}>
+                    Apri fatture scadute
+                  </button>
+                  <WorkbookGrid
+                    title={DASHBOARD_OVERDUE_INVOICES_TITLE}
+                    sheetLabel={`${overdueInvoices.length} fatture`}
+                    columns={DASHBOARD_OVERDUE_INVOICES_COLUMNS}
+                    rows={overdueInvoices}
+                    cellValue={dashboardOverdueInvoiceCellValue}
+                    totalsLabel={dashboardOverdueInvoicesTotalsLabel}
+                    totals={overdueTotals}
+                    gridClassName="dashboard-overdue-invoices-grid"
+                    emptyMessage="Nessuna fattura scaduta (o tutto saldato)."
+                    rowKey={(row) => String(row.id)}
+                  />
+                </section>
+
+                <section className="card dashboard-panel pagamenti-workbook-card">
+                  <p className="dashboard-hint">
+                    Confronto tra le ultime due consegne dello stesso prodotto (stesso fornitore): prezzo unitario in aumento.
+                  </p>
+                  <WorkbookGrid
+                    title={DASHBOARD_PRICE_INCREASE_TITLE}
+                    sheetLabel={`${priceIncreases.length} righe`}
+                    columns={DASHBOARD_PRICE_INCREASE_COLUMNS}
+                    rows={priceIncreases}
+                    cellValue={dashboardPriceIncreaseCellValue}
+                    totalsLabel={dashboardPriceIncreaseTotalsLabel}
+                    totals={priceIncreases.length}
+                    gridClassName="dashboard-price-increase-grid"
+                    emptyMessage="Nessun aumento rilevato (servono almeno due consegne per prodotto)."
+                    rowKey={(row, rowIndex) => `${row.supplier_name}-${row.product_description}-${rowIndex}`}
+                  />
+                </section>
+              </div>
+            </>
+          ) : null}
         </>
       )}
     </div>

@@ -148,116 +148,44 @@ function DeliveryMainContent({
   onOperatorNavigate: (section: string) => void
   setDeliveryView: (next: OperatorDeliveryView) => void
 }) {
-  const [keepPrimaNotaMounted, setKeepPrimaNotaMounted] = React.useState(view === 'prima-nota')
-
-  React.useEffect(() => {
-    if (view === 'prima-nota') setKeepPrimaNotaMounted(true)
-  }, [view])
-
-  const primaNotaLayer =
-    keepPrimaNotaMounted ? (
-      <div style={{ display: view === 'prima-nota' ? 'block' : 'none' }} aria-hidden={view !== 'prima-nota'}>
-        <PrimaNotaPage operatorMode stationId="carrier" />
-      </div>
-    ) : null
-
+  // Non tenere Prima Nota montata nascosta: su tablet Android continua a pesare CPU/RAM.
   if (view === 'overview') {
-    return (
-      <>
-        {primaNotaLayer}
-        <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
-      </>
-    )
+    return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
   }
   if (view === 'analisi-giornaliero') {
-    return (
-      <>
-        {primaNotaLayer}
-        <AnalisiGiornalieroPage />
-      </>
-    )
+    return <AnalisiGiornalieroPage />
   }
   if (view === 'analisi-settimanale') {
-    return (
-      <>
-        {primaNotaLayer}
-        <AnalisiSettimanalePage />
-      </>
-    )
+    return <AnalisiSettimanalePage />
   }
   if (view === 'analisi-mensile') {
-    return (
-      <>
-        {primaNotaLayer}
-        <AnalisiMensilePage />
-      </>
-    )
+    return <AnalisiMensilePage />
   }
   if (view === 'suppliers') {
-    return (
-      <>
-        {primaNotaLayer}
-        <SuppliersPage />
-      </>
-    )
+    return <SuppliersPage />
   }
   if (view === 'magazzino') {
-    return (
-      <>
-        {primaNotaLayer}
-        <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
-      </>
-    )
+    return <MagazzinoPage operatorMode onBackToDelivery={() => setDeliveryView('new-delivery')} />
   }
   if (view === 'trasportatori') {
-    return (
-      <>
-        {primaNotaLayer}
-        <TrasportatoriPage operatorMode />
-      </>
-    )
+    return <TrasportatoriPage operatorMode />
   }
   if (view === 'new-delivery') {
-    return (
-      <>
-        {primaNotaLayer}
-        <NewDeliveryPage operatorMode />
-      </>
-    )
+    return <NewDeliveryPage operatorMode />
   }
   if (view === 'staff-report') {
-    return (
-      <>
-        {primaNotaLayer}
-        <ReportPersonalePage />
-      </>
-    )
+    return <ReportPersonalePage />
   }
   if (view === 'stipendi') {
-    return (
-      <>
-        {primaNotaLayer}
-        <StipendiPage />
-      </>
-    )
+    return <StipendiPage />
   }
   if (view === 'prima-nota') {
-    return primaNotaLayer
+    return <PrimaNotaPage operatorMode stationId="carrier" />
   }
   if (view === 'fatturazione') {
-    return (
-      <>
-        {primaNotaLayer}
-        <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
-      </>
-    )
+    return <Navigate to={OPERATOR_DELIVERY_FATTURE_PATH} replace />
   }
-  return (
-    <>
-      {primaNotaLayer}
-      <DeliveriesHistoryPage operatorMode />
-    </>
-  )
+  return <DeliveriesHistoryPage operatorMode />
 }
 
 export default function OperatorDeliveryApp() {

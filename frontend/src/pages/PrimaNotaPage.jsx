@@ -28,6 +28,10 @@ import {
   primaNotaMovementMatchesSearch,
   primaNotaMovementTotalsLabel,
 } from '../utils/primaNotaMovementsWorkbook.js'
+import {
+  PRIMA_NOTA_TABLET_LIGHT_COLUMN_IDS,
+  useOperatorTabletLight,
+} from '../utils/operatorTabletLight.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
 import { downloadVneTableExcel } from '../utils/vneTableExport.js'
 import {
@@ -168,6 +172,16 @@ function normalizeDateRange(from, to) {
 
 export default function PrimaNotaPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const tabletLight = useOperatorTabletLight()
+  const movementsLight = Boolean(operatorMode && tabletLight)
+  const movementColumns = useMemo(() => {
+    if (!movementsLight) return PRIMA_NOTA_MOVEMENTS_COLUMNS
+    const allow = new Set(PRIMA_NOTA_TABLET_LIGHT_COLUMN_IDS)
+    return PRIMA_NOTA_MOVEMENTS_COLUMNS.filter((col) => allow.has(col.id)).map((col) => ({
+      ...col,
+      sticky: undefined,
+    }))
+  }, [movementsLight])
   const operatorActivitySlug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
   const operatorPrimaNotaBackupScope = operatorStationId ? String(operatorStationId).trim().toLowerCase() : ''
   const formatLocalIsoDate = (d) => {
@@ -2711,95 +2725,169 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           <div className="alert alert-danger" style={{ margin: '0 1rem 0.75rem' }}>{focusEntryMessage}</div>
         )}
         {!loading && !error && filteredMovementRows.length > 0 && (
-          <div className="pn-movement-totals" style={{ margin: '0 1rem 0.75rem' }} aria-label="Totali movimenti nel periodo">
+          <div
+            className={`pn-movement-totals${movementsLight ? ' pn-movement-totals--light' : ''}`}
+            style={{ margin: '0 1rem 0.75rem' }}
+            aria-label="Totali movimenti nel periodo"
+          >
             <span className="pn-movement-totals-label">
               {summaryScope === 'day' ? 'Totali giornata' : 'Totali periodo'} ({movementPeriodTotals.count} movimenti)
             </span>
-            <span className="pn-movement-totals-item">
-              Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
-            </span>
-            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-              NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
-            </span>
-            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-              NC usc: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleUscita)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Fatture emesse: <strong>€ {formatAmount(movementPeriodTotals.fattureEmesse)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Stacker: <strong>€ {formatAmount(movementPeriodTotals.stackerSvuotamento)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
-            </span>
-            <span className="pn-movement-totals-item">
-              Cassetto: <strong>€ {formatAmount(movementPeriodTotals.movimentoCassetto)}</strong>
-            </span>
+            {!movementsLight ? (
+              <>
+                <span className="pn-movement-totals-item">
+                  Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
+                </span>
+                <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+                  NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
+                </span>
+                <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+                  NC usc: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleUscita)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Fatture emesse: <strong>€ {formatAmount(movementPeriodTotals.fattureEmesse)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Stacker: <strong>€ {formatAmount(movementPeriodTotals.stackerSvuotamento)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
+                </span>
+                <span className="pn-movement-totals-item">
+                  Cassetto: <strong>€ {formatAmount(movementPeriodTotals.movimentoCassetto)}</strong>
+                </span>
+              </>
+            ) : null}
             <span className="pn-movement-totals-item">
               Incasso: <strong>€ {formatAmount(movementPeriodTotals.incasso)}</strong>
             </span>
           </div>
         )}
-        <WorkbookGrid
-          title={`${PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE} — ${activeActivityLabel}`}
-          sheetLabel={`${filteredMovementRows.length} righe · registro ${activeActivityLabel}`}
-          columns={PRIMA_NOTA_MOVEMENTS_COLUMNS}
-          rows={filteredMovementRows}
-          cellValue={primaNotaMovementCellValue}
-          totalsLabel={primaNotaMovementTotalsLabel}
-          totals={movementPeriodTotals}
-          gridClassName="prima-nota-movements-grid"
-          loading={loading}
-          emptyMessage={
-            rowsWithLedger.rows.length === 0
-              ? (summaryScope === 'day'
-                ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
-                : 'Nessun movimento nel periodo selezionato.')
-              : movementSearch.trim()
-                ? `Nessuna operazione per «${movementSearch.trim()}». ${summaryScope === 'day' ? 'Cambia giornata o testo.' : 'Allarga il periodo o cambia il testo.'}`
-                : 'Nessun movimento corrisponde ai filtri.'
-          }
-          rowKey={(row) => String(row.id)}
-          getRowId={(row) => `cash-entry-row-${row.id}`}
-          onRowClick={(entry) => setDrawerEntry(entry)}
-          getRowClassName={(entry) =>
-            highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
-              ? 'workbook-row-selected'
-              : ''
-          }
-          getTotalsCellClassName={(columnId) =>
-            columnId === 'non_fiscale_ent' || columnId === 'non_fiscale_usc' ? 'pn-table-totals-nf' : ''
-          }
-          actionsHeader="Azioni"
-          renderActions={(entry) => (
-            <div className="sup-actions-btns" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => handleEdit(entry)}
-              >
-                Modifica
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm"
-                onClick={() => handleDelete(entry)}
-              >
-                Elimina
-              </button>
-            </div>
-          )}
-        />
+        {movementsLight ? (
+          <div className="pn-movements-cards" aria-label="Movimenti Prima Nota (vista tablet)">
+            {loading ? (
+              <p className="fatture-note" style={{ margin: '0 1rem' }}>Caricamento…</p>
+            ) : filteredMovementRows.length === 0 ? (
+              <p className="fatture-note" style={{ margin: '0 1rem 1rem' }}>
+                {rowsWithLedger.rows.length === 0
+                  ? (summaryScope === 'day'
+                    ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
+                    : 'Nessun movimento nel periodo selezionato.')
+                  : movementSearch.trim()
+                    ? `Nessuna operazione per «${movementSearch.trim()}».`
+                    : 'Nessun movimento corrisponde ai filtri.'}
+              </p>
+            ) : (
+              filteredMovementRows.map((entry) => {
+                const entrata = primaNotaMovementCellValue(entry, { id: 'entrata' })
+                const uscita = primaNotaMovementCellValue(entry, { id: 'uscita' })
+                const saldo = primaNotaMovementCellValue(entry, { id: 'cassa_sera' })
+                return (
+                  <article
+                    key={entry.id}
+                    id={`cash-entry-row-${entry.id}`}
+                    className={`pn-movement-card${
+                      highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+                        ? ' is-selected'
+                        : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      className="pn-movement-card-main"
+                      onClick={() => setDrawerEntry(entry)}
+                    >
+                      <div className="pn-movement-card-top">
+                        <span className="pn-movement-card-date">
+                          {primaNotaMovementCellValue(entry, { id: 'entry_date' }) || '—'}
+                        </span>
+                        {saldo ? <span className="pn-movement-card-saldo">Saldo {saldo}</span> : null}
+                      </div>
+                      <p className="pn-movement-card-desc">
+                        {primaNotaMovementCellValue(entry, { id: 'description' }) || '—'}
+                      </p>
+                      <div className="pn-movement-card-amounts">
+                        {entrata ? <span className="is-in">+ {entrata}</span> : null}
+                        {uscita ? <span className="is-out">− {uscita}</span> : null}
+                        {!entrata && !uscita ? (
+                          <span>{primaNotaMovementCellValue(entry, { id: 'incasso' }) || '—'}</span>
+                        ) : null}
+                      </div>
+                    </button>
+                    <div className="pn-movement-card-actions">
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(entry)}>
+                        Modifica
+                      </button>
+                      <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(entry)}>
+                        Elimina
+                      </button>
+                    </div>
+                  </article>
+                )
+              })
+            )}
+          </div>
+        ) : (
+          <WorkbookGrid
+            title={`${PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE} — ${activeActivityLabel}`}
+            sheetLabel={`${filteredMovementRows.length} righe · registro ${activeActivityLabel}`}
+            columns={movementColumns}
+            rows={filteredMovementRows}
+            cellValue={primaNotaMovementCellValue}
+            totalsLabel={primaNotaMovementTotalsLabel}
+            totals={movementPeriodTotals}
+            gridClassName="prima-nota-movements-grid"
+            loading={loading}
+            emptyMessage={
+              rowsWithLedger.rows.length === 0
+                ? (summaryScope === 'day'
+                  ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
+                  : 'Nessun movimento nel periodo selezionato.')
+                : movementSearch.trim()
+                  ? `Nessuna operazione per «${movementSearch.trim()}». ${summaryScope === 'day' ? 'Cambia giornata o testo.' : 'Allarga il periodo o cambia il testo.'}`
+                  : 'Nessun movimento corrisponde ai filtri.'
+            }
+            rowKey={(row) => String(row.id)}
+            getRowId={(row) => `cash-entry-row-${row.id}`}
+            onRowClick={(entry) => setDrawerEntry(entry)}
+            getRowClassName={(entry) =>
+              highlightEntryId != null && Number(entry.id) === Number(highlightEntryId)
+                ? 'workbook-row-selected'
+                : ''
+            }
+            getTotalsCellClassName={(columnId) =>
+              columnId === 'non_fiscale_ent' || columnId === 'non_fiscale_usc' ? 'pn-table-totals-nf' : ''
+            }
+            actionsHeader="Azioni"
+            renderActions={(entry) => (
+              <div className="sup-actions-btns" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleEdit(entry)}
+                >
+                  Modifica
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-danger btn-sm"
+                  onClick={() => handleDelete(entry)}
+                >
+                  Elimina
+                </button>
+              </div>
+            )}
+          />
+        )}
       </section>
 
       <section className="card">
