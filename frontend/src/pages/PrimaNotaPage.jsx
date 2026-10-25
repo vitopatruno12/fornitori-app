@@ -28,10 +28,7 @@ import {
   primaNotaMovementMatchesSearch,
   primaNotaMovementTotalsLabel,
 } from '../utils/primaNotaMovementsWorkbook.js'
-import {
-  PRIMA_NOTA_TABLET_LIGHT_COLUMN_IDS,
-  useOperatorTabletLight,
-} from '../utils/operatorTabletLight.js'
+import { useOperatorTabletLight } from '../utils/operatorTabletLight.js'
 import { downloadPrimaNotaMovementsPdf, generatePrimaNotaMovementsPdf } from '../utils/primaNotaMovementsPdf.js'
 import { downloadVneTableExcel } from '../utils/vneTableExport.js'
 import {
@@ -173,15 +170,9 @@ function normalizeDateRange(from, to) {
 export default function PrimaNotaPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
   const tabletLight = useOperatorTabletLight()
-  const movementsLight = Boolean(operatorMode && tabletLight)
-  const movementColumns = useMemo(() => {
-    if (!movementsLight) return PRIMA_NOTA_MOVEMENTS_COLUMNS
-    const allow = new Set(PRIMA_NOTA_TABLET_LIGHT_COLUMN_IDS)
-    return PRIMA_NOTA_MOVEMENTS_COLUMNS.filter((col) => allow.has(col.id)).map((col) => ({
-      ...col,
-      sticky: undefined,
-    }))
-  }, [movementsLight])
+  /** Vista schede su tablet: tutti gli attributi come la griglia desktop (nessun taglio colonne). */
+  const movementsCards = Boolean(operatorMode && tabletLight)
+  const movementColumns = PRIMA_NOTA_MOVEMENTS_COLUMNS
   const operatorActivitySlug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
   const operatorPrimaNotaBackupScope = operatorStationId ? String(operatorStationId).trim().toLowerCase() : ''
   const formatLocalIsoDate = (d) => {
@@ -2725,55 +2716,47 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           <div className="alert alert-danger" style={{ margin: '0 1rem 0.75rem' }}>{focusEntryMessage}</div>
         )}
         {!loading && !error && filteredMovementRows.length > 0 && (
-          <div
-            className={`pn-movement-totals${movementsLight ? ' pn-movement-totals--light' : ''}`}
-            style={{ margin: '0 1rem 0.75rem' }}
-            aria-label="Totali movimenti nel periodo"
-          >
+          <div className="pn-movement-totals" style={{ margin: '0 1rem 0.75rem' }} aria-label="Totali movimenti nel periodo">
             <span className="pn-movement-totals-label">
               {summaryScope === 'day' ? 'Totali giornata' : 'Totali periodo'} ({movementPeriodTotals.count} movimenti)
             </span>
-            {!movementsLight ? (
-              <>
-                <span className="pn-movement-totals-item">
-                  Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
-                </span>
-                <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-                  NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
-                </span>
-                <span className="pn-movement-totals-item pn-movement-totals-item--nf">
-                  NC usc: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleUscita)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Fatture emesse: <strong>€ {formatAmount(movementPeriodTotals.fattureEmesse)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Stacker: <strong>€ {formatAmount(movementPeriodTotals.stackerSvuotamento)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
-                </span>
-                <span className="pn-movement-totals-item">
-                  Cassetto: <strong>€ {formatAmount(movementPeriodTotals.movimentoCassetto)}</strong>
-                </span>
-              </>
-            ) : null}
+            <span className="pn-movement-totals-item">
+              Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
+            </span>
+            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+              NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
+            </span>
+            <span className="pn-movement-totals-item pn-movement-totals-item--nf">
+              NC usc: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleUscita)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              POS: <strong>€ {formatAmount(movementPeriodTotals.pos)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Fatture emesse: <strong>€ {formatAmount(movementPeriodTotals.fattureEmesse)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Refill: <strong>€ {formatAmount(movementPeriodTotals.refill)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Stacker: <strong>€ {formatAmount(movementPeriodTotals.stackerSvuotamento)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Banca: <strong>€ {formatAmount(movementPeriodTotals.versamentoBanca)}</strong>
+            </span>
+            <span className="pn-movement-totals-item">
+              Cassetto: <strong>€ {formatAmount(movementPeriodTotals.movimentoCassetto)}</strong>
+            </span>
             <span className="pn-movement-totals-item">
               Incasso: <strong>€ {formatAmount(movementPeriodTotals.incasso)}</strong>
             </span>
           </div>
         )}
-        {movementsLight ? (
-          <div className="pn-movements-cards" aria-label="Movimenti Prima Nota (vista tablet)">
+        {movementsCards ? (
+          <div className="pn-movements-cards" aria-label="Movimenti Prima Nota (vista tablet, tutti gli attributi)">
             {loading ? (
               <p className="fatture-note" style={{ margin: '0 1rem' }}>Caricamento…</p>
             ) : filteredMovementRows.length === 0 ? (
@@ -2788,9 +2771,15 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               </p>
             ) : (
               filteredMovementRows.map((entry) => {
-                const entrata = primaNotaMovementCellValue(entry, { id: 'entrata' })
-                const uscita = primaNotaMovementCellValue(entry, { id: 'uscita' })
-                const saldo = primaNotaMovementCellValue(entry, { id: 'cassa_sera' })
+                const fields = PRIMA_NOTA_MOVEMENTS_COLUMNS.map((col) => {
+                  const value = primaNotaMovementCellValue(entry, col)
+                  const text = value == null ? '' : String(value).trim()
+                  return { id: col.id, label: col.label, text, numeric: Boolean(col.numeric) }
+                }).filter((f) => f.id === 'description' || f.text)
+                const title =
+                  fields.find((f) => f.id === 'description')?.text
+                  || fields.find((f) => f.id === 'entry_date')?.text
+                  || `Movimento ${entry.id}`
                 return (
                   <article
                     key={entry.id}
@@ -2806,22 +2795,17 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                       className="pn-movement-card-main"
                       onClick={() => setDrawerEntry(entry)}
                     >
-                      <div className="pn-movement-card-top">
-                        <span className="pn-movement-card-date">
-                          {primaNotaMovementCellValue(entry, { id: 'entry_date' }) || '—'}
-                        </span>
-                        {saldo ? <span className="pn-movement-card-saldo">Saldo {saldo}</span> : null}
-                      </div>
-                      <p className="pn-movement-card-desc">
-                        {primaNotaMovementCellValue(entry, { id: 'description' }) || '—'}
-                      </p>
-                      <div className="pn-movement-card-amounts">
-                        {entrata ? <span className="is-in">+ {entrata}</span> : null}
-                        {uscita ? <span className="is-out">− {uscita}</span> : null}
-                        {!entrata && !uscita ? (
-                          <span>{primaNotaMovementCellValue(entry, { id: 'incasso' }) || '—'}</span>
-                        ) : null}
-                      </div>
+                      <p className="pn-movement-card-desc">{title}</p>
+                      <dl className="pn-movement-card-attrs">
+                        {fields
+                          .filter((f) => f.id !== 'description' && f.id !== 'row')
+                          .map((f) => (
+                            <div key={f.id} className={`pn-movement-card-attr${f.numeric ? ' is-num' : ''}`}>
+                              <dt>{f.label}</dt>
+                              <dd>{f.text}</dd>
+                            </div>
+                          ))}
+                      </dl>
                     </button>
                     <div className="pn-movement-card-actions">
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(entry)}>

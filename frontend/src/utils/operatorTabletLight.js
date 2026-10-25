@@ -34,13 +34,3 @@ export function useOperatorTabletLight() {
 
   return light
 }
-
-/** Colonne Prima Nota essenziali su tablet (evita griglia 2200px). */
-export const PRIMA_NOTA_TABLET_LIGHT_COLUMN_IDS = [
-  'entry_date',
-  'description',
-  'entrata',
-  'uscita',
-  'incasso',
-  'cassa_sera',
-]

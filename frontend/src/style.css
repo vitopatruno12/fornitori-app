@@ -7664,30 +7664,40 @@ select.form-control {
   line-height: 1.35;
 }
 
-.pn-movement-card-amounts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
+.pn-movement-card-attrs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.pn-movement-card-attr {
+  min-width: 0;
+}
+
+.pn-movement-card-attr dt {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted, #6b7280);
+  font-weight: 600;
+}
+
+.pn-movement-card-attr dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.pn-movement-card-attr.is-num dd {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-}
-
-.pn-movement-card-amounts .is-in {
-  color: #047857;
-}
-
-.pn-movement-card-amounts .is-out {
-  color: #b91c1c;
 }
 
 .pn-movement-card-actions {
   display: flex;
   gap: 0.4rem;
   padding: 0 0.75rem 0.75rem;
-}
-
-.pn-movement-totals--light {
-  flex-wrap: wrap;
 }
 
 .operator-station-band-inner {
