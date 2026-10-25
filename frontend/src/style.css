@@ -7613,6 +7613,18 @@ select.form-control {
   }
 }
 
+.operator-home-light-actions.dashboard-panel {
+  padding-top: 1rem;
+}
+
+.operator-home-light-actions .page-subheader {
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  margin: 0 0 1rem;
+}
+
 .operator-home-light-btns {
   display: flex;
   flex-wrap: wrap;
