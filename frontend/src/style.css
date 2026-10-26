@@ -3069,11 +3069,29 @@ select.form-control {
 }
 
 .operator-links-grid {
-  min-width: 1280px;
+  min-width: 0 !important;
+  width: 100%;
+  max-width: 100%;
+  table-layout: auto;
+}
+
+.operator-links-page .workbook-grid-wrap {
+  overflow-x: auto;
+}
+
+.workbook-grid.operator-links-grid th,
+.workbook-grid.operator-links-grid td,
+.workbook-grid.operator-links-grid .excel-cell {
+  width: auto;
+  max-width: 22rem;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .operator-links-grid .sup-actions-col {
   min-width: 11rem;
+  max-width: 13rem;
 }
 
 .workbook-grid-row.order-line-row--dup .excel-cell {
