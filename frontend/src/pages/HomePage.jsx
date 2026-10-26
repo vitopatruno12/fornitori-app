@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchDashboardSummary } from '../services/dashboardService'
 import { fetchAnalyticsSnapshot } from '../services/analyticsService'
-import { useAppNavigate } from '../hooks/useAppNavigate'
+import { stationIdToFattureCompany } from '../utils/fattureCompany.js'
 import { useOffline } from '../offline/OfflineContext'
 import { getCachedResponseWithMeta } from '../offline/offlineCache'
 import WorkbookGrid from '../components/WorkbookGrid.jsx'
@@ -231,7 +231,8 @@ function Last6MonthsTrend({ rows, onOpenInvoices }) {
   )
 }
 
-export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
+export default function HomePage({ operatorMode = false, stationId = '', onOperatorNavigate }) {
+  const pgStation = operatorMode && stationIdToFattureCompany(stationId) === 'pg'
   const onNavigate = useAppNavigate()
   const { online } = useOffline()
   const [data, setData] = useState(null)
@@ -272,18 +273,25 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
     })
   }, [data])
 
+  const societaShown = pgStation ? 'pg' : societaKpi
+  const cassaShown = pgStation ? 'pg' : cassaLocale
+
   const saldoCassaDisplayed = useMemo(() => {
     if (!data) return null
-    if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) return data.saldo_cassa
-    const hit = saldiCassaLocali.find((l) => l.id === cassaLocale)
-    return hit?.saldo != null ? hit.saldo : data.saldo_cassa
-  }, [data, cassaLocale, saldiCassaLocali])
+    if (cassaShown === HOME_CASSA_LOCALE_TUTTI) return data.saldo_cassa
+    const hit = saldiCassaLocali.find((l) => l.id === cassaShown)
+    if (hit?.saldo != null) return hit.saldo
+    const raw = (Array.isArray(data?.saldi_cassa_locali) ? data.saldi_cassa_locali : []).find(
+      (row) => String(row.activity || '').toLowerCase() === cassaShown,
+    )
+    return raw?.saldo != null ? Number(raw.saldo) : 0
+  }, [data, cassaShown, saldiCassaLocali])
 
   const societaKpiDisplayed = useMemo(() => {
     if (!data) {
       return { saldo_banca: null, entrate_mese: null, uscite_mese: null, hint: '' }
     }
-    if (societaKpi === HOME_SOCIETA_TUTTE) {
+    if (societaShown === HOME_SOCIETA_TUTTE) {
       return {
         saldo_banca: data.saldo_banca,
         entrate_mese: data.entrate_mese,
@@ -291,23 +299,24 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
         hint: 'Totale tutte le società',
       }
     }
-    const hit = kpiPerSocieta.find((s) => s.id === societaKpi)
-    const label = hit?.label || HOME_SOCIETA.find((s) => s.id === societaKpi)?.label || societaKpi
+    const hit = kpiPerSocieta.find((s) => s.id === societaShown)
+    const label = hit?.label || HOME_SOCIETA.find((s) => s.id === societaShown)?.label || societaShown
     return {
       saldo_banca: hit?.saldo_banca ?? 0,
       entrate_mese: hit?.entrate_mese ?? 0,
       uscite_mese: hit?.uscite_mese ?? 0,
-      hint: `Società · ${label}`,
+      hint: pgStation ? 'Società · PG · Gazza Ladra' : `Società · ${label}`,
     }
-  }, [data, societaKpi, kpiPerSocieta])
+  }, [data, societaShown, kpiPerSocieta, pgStation])
 
   const cassaLocaleHint = useMemo(() => {
-    if (cassaLocale === HOME_CASSA_LOCALE_TUTTI) {
+    if (pgStation) return 'Saldo cassa Prima Nota · Gazza Ladra'
+    if (cassaShown === HOME_CASSA_LOCALE_TUTTI) {
       return 'Saldo cassa Prima Nota · tutti i registri'
     }
-    const hit = HOME_CASSA_LOCALI.find((l) => l.id === cassaLocale)
+    const hit = HOME_CASSA_LOCALI.find((l) => l.id === cassaShown)
     return hit ? `Saldo cassa Prima Nota · ${hit.label}` : 'Movimenti non bancari (cassa / contanti default)'
-  }, [cassaLocale])
+  }, [cassaShown, pgStation])
 
   function onCassaLocaleChange(next) {
     setCassaLocale(next)
@@ -328,6 +337,9 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
   }
 
   function SocietaSelect({ id }) {
+    if (pgStation) {
+      return <span className="dashboard-kpi-locale-label">PG · Gazza Ladra</span>
+    }
     return (
       <label className="dashboard-kpi-locale-label" htmlFor={id}>
         <span className="sr-only">Società</span>
@@ -580,6 +592,9 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                 <div className="dashboard-kpi-label">Saldo cassa Prima Nota</div>
                 <label className="dashboard-kpi-locale-label" htmlFor="home-saldo-cassa-locale">
                   <span className="sr-only">Locale</span>
+                  {pgStation ? (
+                    <span className="dashboard-kpi-locale-select">Gazza Ladra</span>
+                  ) : (
                   <select
                     id="home-saldo-cassa-locale"
                     className="dashboard-kpi-locale-select"
@@ -593,6 +608,7 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                       </option>
                     ))}
                   </select>
+                  )}
                 </label>
               </div>
               <div className="dashboard-kpi-value">{eur(saldoCassaDisplayed)}</div>
@@ -622,6 +638,8 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
               <div className="dashboard-kpi-value dashboard-kpi-value--neg">{eur(societaKpiDisplayed.uscite_mese)}</div>
               <div className="dashboard-kpi-hint">{societaKpiDisplayed.hint}</div>
             </div>
+            {pgStation ? null : (
+            <>
             <div className="dashboard-kpi dashboard-kpi--warn">
               <div className="dashboard-kpi-label">Fatture da pagare</div>
               <div className="dashboard-kpi-value">{data.fatture_da_pagare_count}</div>
@@ -650,6 +668,8 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                 </button>
               )}
             </div>
+            </>
+            )}
           </section>
 
           {!operatorMode && analisiSnap ? (
@@ -707,12 +727,12 @@ export default function HomePage({ operatorMode = false, onOperatorNavigate }) {
                   Fatture
                 </button>
               </div>
-              {pendingOrders.length > 0 ? (
+              {!pgStation && pendingOrders.length > 0 ? (
                 <p className="fatture-note" style={{ margin: '0.85rem 0 0' }}>
                   {pendingOrders.length} ordini in sospeso con data consegna passata — apri Nuovo ordine per gestirli.
                 </p>
               ) : null}
-              {overdueInvoices.length > 0 ? (
+              {!pgStation && overdueInvoices.length > 0 ? (
                 <p className="fatture-note" style={{ margin: '0.35rem 0 0' }}>
                   {overdueInvoices.length} fatture scadute · residuo {eur(data.fatture_scadute_residuo)}.
                 </p>

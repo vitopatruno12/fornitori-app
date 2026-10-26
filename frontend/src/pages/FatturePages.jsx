@@ -62,6 +62,7 @@ import {
   companyLabel,
   FATTURE_COMPANY_ORDER,
   isGestionaleFattureContext,
+  resolveEmbeddedFattureCompany,
 } from '../utils/fattureCompany.js'
 import { fetchBancaRiconciliazione, postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import {
@@ -592,11 +593,15 @@ export function AdeSdiInvoicesPanel({
 }
 
 export function FattureDashboardPage() {
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const lockedCompany = gestionaleMode ? '' : resolveEmbeddedFattureCompany()
   const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(gestionaleMode)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!gestionaleMode) return undefined
     let cancelled = false
     ;(async () => {
       setLoading(true)
@@ -613,13 +618,19 @@ export function FattureDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [gestionaleMode])
 
   return (
     <FatturePageShell
       title="Dashboard"
-      lead="Colpo d'occhio: ricevute, da pagare, scadenze, totali del mese e IVA."
+      lead={
+        gestionaleMode
+          ? "Colpo d'occhio: ricevute, da pagare, scadenze, totali del mese e IVA."
+          : `Registro ${companyLabel(lockedCompany) || 'della postazione'}. I totali delle altre società non sono in questa postazione.`
+      }
     >
+      {gestionaleMode ? (
+      <>
       {loading && <AnalisiLoadingBar active label="Caricamento fatture" variant="subtle" />}
       {error && <div className="alert alert-danger">{error}</div>}
       {data && (
@@ -676,6 +687,28 @@ export function FattureDashboardPage() {
             </div>
           </section>
         </>
+      )}
+      </>
+      ) : (
+        <section className="card fatture-panel">
+          <p className="fatture-note" style={{ marginTop: 0 }}>
+            Qui vedi solo le fatture di {companyLabel(lockedCompany) || 'questa società'}.
+          </p>
+          <div className="analisi-panel-actions">
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/ricevute">
+              Fatture ricevute
+            </FattureLink>
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/da-registrare">
+              Fatture da pagare
+            </FattureLink>
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/pagate">
+              Fatture pagate
+            </FattureLink>
+            <FattureLink className="btn btn-secondary btn-sm" to="/fatture/scadenziario">
+              Scadenziario
+            </FattureLink>
+          </div>
+        </section>
       )}
     </FatturePageShell>
   )
@@ -1916,7 +1949,9 @@ export function FattureDaRegistrarePage() {
 }
 
 export function FatturePagatePage() {
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const [paidRows, setPaidRows] = useState([])
   const [openRows, setOpenRows] = useState([])
   const [verifySummary, setVerifySummary] = useState('')
@@ -2135,11 +2170,15 @@ export function FatturePagatePage() {
         <div className="mastrini-hero-tools" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <FattureCompanySelect
             className="mastrini-hero-tools-company"
-            companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
+            companies={
+              gestionaleMode
+                ? [...companies, { id: 'non_classificata', label: 'Non classificate' }]
+                : companies
+            }
             value={companyId}
             onChange={setCompanyId}
             loading={loadingCompanies}
-            disabled={loadingCompanies}
+            disabled={loadingCompanies || !gestionaleMode}
           />
           <button
             type="button"
@@ -2680,7 +2719,9 @@ export function FattureSincronizzazionePage() {
 }
 
 export function FattureConservazionePage() {
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const fattureBase = React.useContext(FattureNavBaseContext)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const [periodFrom, setPeriodFrom] = useState('')
   const [periodTo, setPeriodTo] = useState('')
   const [candidates, setCandidates] = useState([])
@@ -2861,7 +2902,7 @@ export function FattureConservazionePage() {
           value={companyId}
           onChange={setCompanyId}
           loading={loadingCompanies}
-          disabled={loadingCompanies}
+          disabled={loadingCompanies || !gestionaleMode}
         />
       }
     >

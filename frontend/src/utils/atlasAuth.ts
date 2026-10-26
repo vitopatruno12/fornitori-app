@@ -22,13 +22,21 @@ const ATLAS_OPERATOR_LATTEA_LOGIN_PASSWORD = (
   import.meta.env.VITE_OPERATOR_LATTEA_LOGIN_PASSWORD || 'prosciuttocrudo'
 ).trim()
 
+/** Credenziali login postazione PG S.r.l. · Gazza Ladra (/operatore-postazione-gazza). */
+const ATLAS_OPERATOR_GAZZA_LOGIN_USER = (
+  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_USER || 'pg.gazza.ladra'
+).trim()
+const ATLAS_OPERATOR_GAZZA_LOGIN_PASSWORD = (
+  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_PASSWORD || 'gazzaladra'
+).trim()
+
 /** Credenziali login postazione trasportatore (/operatore-consegne). */
 const ATLAS_CARRIER_LOGIN_USER = (import.meta.env.VITE_CARRIER_LOGIN_USER || 'simone.colapietro90@gmail.com').trim()
 const ATLAS_CARRIER_LOGIN_PASSWORD = (import.meta.env.VITE_CARRIER_LOGIN_PASSWORD || 'SimoC90@tL4s5!#').trim()
 
-export type OperatorStationId = 'abba' | 'zanardelli' | 'lattea'
+export type OperatorStationId = 'abba' | 'zanardelli' | 'lattea' | 'gazza'
 
-export type OperatorAuthMode = 'operator' | 'operator-zanardelli' | 'operator-lattea' | 'carrier'
+export type OperatorAuthMode = 'operator' | 'operator-zanardelli' | 'operator-lattea' | 'operator-gazza' | 'carrier'
 
 function normalizeCredentials(username: string, password: string) {
   const u = String(username || '')
@@ -64,6 +72,10 @@ export function validateAtlasOperatorLatteaLogin(username: string, password: str
   return matchPair(username, password, ATLAS_OPERATOR_LATTEA_LOGIN_USER, ATLAS_OPERATOR_LATTEA_LOGIN_PASSWORD)
 }
 
+export function validateAtlasOperatorGazzaLogin(username: string, password: string): boolean {
+  return matchPair(username, password, ATLAS_OPERATOR_GAZZA_LOGIN_USER, ATLAS_OPERATOR_GAZZA_LOGIN_PASSWORD)
+}
+
 export function validateAtlasCarrierLogin(username: string, password: string): boolean {
   return matchPair(username, password, ATLAS_CARRIER_LOGIN_USER, ATLAS_CARRIER_LOGIN_PASSWORD)
 }
@@ -71,6 +83,7 @@ export function validateAtlasCarrierLogin(username: string, password: string): b
 export function stationIdToAuthMode(stationId: OperatorStationId): OperatorAuthMode {
   if (stationId === 'zanardelli') return 'operator-zanardelli'
   if (stationId === 'lattea') return 'operator-lattea'
+  if (stationId === 'gazza') return 'operator-gazza'
   return 'operator'
 }
 
@@ -79,6 +92,7 @@ export function matchOperatorStationCredentials(username: string, password: stri
   if (validateAtlasOperatorLogin(username, password)) return 'abba'
   if (validateAtlasOperatorZanardelliLogin(username, password)) return 'zanardelli'
   if (validateAtlasOperatorLatteaLogin(username, password)) return 'lattea'
+  if (validateAtlasOperatorGazzaLogin(username, password)) return 'gazza'
   return null
 }
 
@@ -96,5 +110,6 @@ export function validateOperatorAuthMode(mode: OperatorAuthMode, username: strin
   if (mode === 'carrier') return validateAtlasCarrierLogin(username, password)
   if (mode === 'operator-zanardelli') return validateAtlasOperatorZanardelliLogin(username, password)
   if (mode === 'operator-lattea') return validateAtlasOperatorLatteaLogin(username, password)
+  if (mode === 'operator-gazza') return validateAtlasOperatorGazzaLogin(username, password)
   return validateAtlasOperatorLogin(username, password)
 }

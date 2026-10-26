@@ -109,7 +109,7 @@ function todayIsoDate() {
 }
 
 /** Sala Gazza Ladra: griglia Excel 15 tavoli (giallo / verde). */
-export function GazzaLadraSalaPage() {
+export function GazzaLadraSalaPage({ operatorMode = false }) {
   const [date, setDate] = useState(todayIsoDate)
   const [fascia, setFascia] = useState('pranzo')
   const [rows, setRows] = useState(() => createEmptyGazzaSalaRows())
@@ -189,10 +189,14 @@ export function GazzaLadraSalaPage() {
   return (
     <div className="page">
       <header className="page-header-block" style={{ marginBottom: '1rem' }}>
-        <p className="analisi-machine-scope" style={{ marginBottom: '0.35rem' }}>
-          <Link to="/gestione-locali">← Gestione locali</Link>
-        </p>
-        <h1 className="page-header staff-page-title">Gazza Ladra · Gestisci sala</h1>
+        {operatorMode ? null : (
+          <p className="analisi-machine-scope" style={{ marginBottom: '0.35rem' }}>
+            <Link to="/gestione-locali">← Gestione locali</Link>
+          </p>
+        )}
+        <h1 className="page-header staff-page-title">
+          {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
+        </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
           Modello Excel della sala ({GAZZA_SALA_TABLE_COUNT} tavoli): ID tavolo, clienti, menu,
           conti e pagamenti. Intestazione <strong>verde</strong>, righe dati bianche, riga totali{' '}

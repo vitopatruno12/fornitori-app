@@ -15,12 +15,13 @@ const OPERATOR_MANIFEST_BY_STATION: Record<OperatorStationId, string> = {
   abba: '/manifest-operator.webmanifest',
   zanardelli: '/manifest-operator-zanardelli.webmanifest',
   lattea: '/manifest-operator-lattea.webmanifest',
+  gazza: '/manifest-operator-gazza.webmanifest',
 }
 
 const CARRIER_MANIFEST_HREF = '/manifest-carrier.webmanifest'
 const PWA_LAUNCH_KEY = 'atlasPwaLaunchTarget'
 
-export type PwaLaunchTarget = 'station' | 'station-zanardelli' | 'station-lattea' | 'carrier'
+export type PwaLaunchTarget = 'station' | 'station-zanardelli' | 'station-lattea' | 'station-gazza' | 'carrier'
 
 function stationIdToPwaTarget(stationId: OperatorStationId): PwaLaunchTarget {
   return stationIdToEntryPoint(stationId) as PwaLaunchTarget

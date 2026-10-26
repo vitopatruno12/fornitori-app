@@ -20,11 +20,14 @@ export const OPERATOR_STATION_PATH = '/operatore-postazione'
 export const OPERATOR_STATION_ZANARDELLI_PATH = '/operatore-postazione-zanardelli'
 /** Postazione operativa Via Lattea. */
 export const OPERATOR_STATION_LATTEA_PATH = '/operatore-postazione-lattea'
+/** Postazione operativa PG S.r.l. · La Gazza Ladra. */
+export const OPERATOR_STATION_GAZZA_PATH = '/operatore-postazione-gazza'
 
 export const OPERATOR_STATION_PATHS: Record<OperatorStationId, string> = {
   abba: OPERATOR_STATION_PATH,
   zanardelli: OPERATOR_STATION_ZANARDELLI_PATH,
   lattea: OPERATOR_STATION_LATTEA_PATH,
+  gazza: OPERATOR_STATION_GAZZA_PATH,
 }
 
 const OPERATOR_STATION_LOCK_KEY = 'atlasOperatorStation'
@@ -65,6 +68,7 @@ export type OperatorStationView =
   | 'prima-nota'
   | 'trasportatori'
   | 'fatture'
+  | 'gestione-sala'
   | 'support-tech'
 
 /** Origine pubblica per link satelliti (sempre https in produzione se VITE_PUBLIC_APP_URL è impostato). */
@@ -134,6 +138,9 @@ export function resolveOperatorStationIdFromPath(pathname?: string): OperatorSta
   if (path === OPERATOR_STATION_LATTEA_PATH || path.startsWith(`${OPERATOR_STATION_LATTEA_PATH}/`)) {
     return 'lattea'
   }
+  if (path === OPERATOR_STATION_GAZZA_PATH || path.startsWith(`${OPERATOR_STATION_GAZZA_PATH}/`)) {
+    return 'gazza'
+  }
   if (path === OPERATOR_STATION_PATH || path.startsWith(`${OPERATOR_STATION_PATH}/`)) {
     return 'abba'
   }
@@ -147,12 +154,14 @@ export function entryPointToStationId(raw: string | null | undefined): OperatorS
   if (value === 'station' || value === 'station-abba') return 'abba'
   if (value === 'station-zanardelli') return 'zanardelli'
   if (value === 'station-lattea') return 'lattea'
+  if (value === 'station-gazza') return 'gazza'
   return null
 }
 
 export function stationIdToEntryPoint(stationId: OperatorStationId): string {
   if (stationId === 'zanardelli') return 'station-zanardelli'
   if (stationId === 'lattea') return 'station-lattea'
+  if (stationId === 'gazza') return 'station-gazza'
   return 'station'
 }
 
@@ -184,10 +193,12 @@ export function isOperatorStationMode(): boolean {
   if (hashMatches('operatore-postazione')) return true
   if (hashMatches('operatore-postazione-zanardelli')) return true
   if (hashMatches('operatore-postazione-lattea')) return true
+  if (hashMatches('operatore-postazione-gazza')) return true
   return (
     queryMatches('operatore-postazione') ||
     queryMatches('operatore-postazione-zanardelli') ||
-    queryMatches('operatore-postazione-lattea')
+    queryMatches('operatore-postazione-lattea') ||
+    queryMatches('operatore-postazione-gazza')
   )
 }
 
@@ -263,6 +274,7 @@ const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview' | 
   stipendi: 'stipendi',
   'prima-nota': 'prima-nota',
   trasportatori: 'trasportatori',
+  'gestione-sala': 'gestione-sala',
   'support-tech': 'assistenza-tecnici',
 }
 
@@ -294,6 +306,9 @@ const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
   fatture: 'fatture',
   fatturazione: 'fatture',
   'fatture-fornitori': 'fatture',
+  'gestione-sala': 'gestione-sala',
+  'gestisci-sala': 'gestione-sala',
+  sala: 'gestione-sala',
   'assistenza-tecnici': 'support-tech',
   'support-tech': 'support-tech',
   tecnici: 'support-tech',
@@ -310,7 +325,11 @@ export function getOperatorStationView(stationId: OperatorStationId = 'abba'): O
   if (path === fatturePath || path.startsWith(`${fatturePath}/`)) return 'fatture'
   const q = new URLSearchParams(window.location.search)
   const raw = String(q.get('sezione') || '').trim().toLowerCase()
-  if (raw && STATION_VIEW_ALIASES[raw]) return STATION_VIEW_ALIASES[raw]
+  if (raw && STATION_VIEW_ALIASES[raw]) {
+    const view = STATION_VIEW_ALIASES[raw]
+    if (view === 'gestione-sala' && stationId !== 'gazza') return 'overview'
+    return view
+  }
   return 'overview'
 }
 

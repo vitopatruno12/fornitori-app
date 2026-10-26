@@ -10,7 +10,7 @@ import {
   loadSchedaContabileFornitori,
   printSchedaContabileFornitore,
 } from '../services/schedaContabileFornitore.js'
-import { companyLabel, readFattureCompany } from '../utils/fattureCompany.js'
+import { companyLabel, isGestionaleFattureContext, readFattureCompany } from '../utils/fattureCompany.js'
 import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import { printVneTable } from '../utils/vneTableExport.js'
 
@@ -122,7 +122,8 @@ export function SchedaContabileFornitorePage({
   const returnTo = isoDay(searchParams.get('to'))
   const returnCompanyRef = useRef(searchParams.get('company') || '')
   const preferUrlRef = useRef(Boolean(returnParty || returnFrom || returnTo || returnCompanyRef.current))
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const gestionaleMode = isGestionaleFattureContext(fattureBase)
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
   const openingCompany = returnCompanyRef.current || companyId || readFattureCompany() || ''
   const rememberedOpening = preferUrlRef.current ? null : schedaViewCache.last.get(openingCompany)
   const openingFrom = returnFrom || rememberedOpening?.dateFrom || bounds.from
@@ -296,6 +297,7 @@ export function SchedaContabileFornitorePage({
               setCompanyId(id)
             }}
             loading={loadingCompanies}
+            disabled={loadingCompanies || !gestionaleMode}
           />
           <label className="mastrini-hero-tools-dates">
             Dal

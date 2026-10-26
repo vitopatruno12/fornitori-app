@@ -105,7 +105,7 @@ function normalizeDdt(value) {
   return String(value || '').trim().toLowerCase()
 }
 
-export default function NewDeliveryPage({ operatorMode = false }) {
+export default function NewDeliveryPage({ operatorMode = false, hideCarriers = false }) {
   const [suppliers, setSuppliers] = useState([])
   const [supplierId, setSupplierId] = useState('')
   const [date, setDate] = useState('')
@@ -153,6 +153,12 @@ export default function NewDeliveryPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadSuppliers()
+    if (hideCarriers) {
+      setCarriers([])
+      setCarrierId('')
+      setCarriersLoading(false)
+      return
+    }
     ;(async () => {
       setCarriersLoading(true)
       try {
@@ -164,7 +170,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
         setCarriersLoading(false)
       }
     })()
-  }, [])
+  }, [hideCarriers])
 
   useEffect(() => {
     try {
@@ -559,7 +565,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
         unloading_signed_by: unloadingSignedBy.trim() || null,
         vat_percent: Number(vatPercent) || 23,
         note: mergedNote,
-        carrier_id: carrierId ? Number(carrierId) : null,
+        carrier_id: hideCarriers || !carrierId ? null : Number(carrierId),
         items: validItems,
       })
       setSuccess(`Consegna registrata${supplierLabel ? ` — ${supplierLabel}` : ''}`)
@@ -788,7 +794,9 @@ export default function NewDeliveryPage({ operatorMode = false }) {
           <div>
             <h2 className="delivery-hub-work-title">Registra scarico</h2>
             <p className="delivery-hub-work-lead">
-              Seleziona fornitore e trasportatore, inserisci DDT e prodotti consegnati.
+              {hideCarriers
+                ? 'Seleziona il fornitore, inserisci DDT e prodotti consegnati.'
+                : 'Seleziona fornitore e trasportatore, inserisci DDT e prodotti consegnati.'}
             </p>
           </div>
         </div>
@@ -810,6 +818,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                 ))}
               </select>
             </div>
+            {hideCarriers ? null : (
             <div className="form-group">
               <label>Trasportatore</label>
               <select
@@ -835,6 +844,7 @@ export default function NewDeliveryPage({ operatorMode = false }) {
                 <Link to="/trasportatori">Gestisci anagrafica</Link>
               </p>
             </div>
+            )}
             <div className="form-group">
               <label>Data consegna</label>
               <input type="date" className="form-control" value={date} onChange={(e) => setDate(e.target.value)} />

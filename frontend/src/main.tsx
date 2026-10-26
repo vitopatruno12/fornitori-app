@@ -86,7 +86,7 @@ const OperatorDeliveryApp = lazy(() => import('./OperatorDeliveryApp.tsx'))
 const OperatorPrimaNotaApp = lazy(() => import('./OperatorPrimaNotaApp.tsx'))
 const OperatorStationApp = lazy(() =>
   import('./OperatorStationApp.tsx').then((m) => ({
-    default: m.default as React.ComponentType<{ stationId: 'abba' | 'zanardelli' | 'lattea' }>,
+    default: m.default as React.ComponentType<{ stationId: 'abba' | 'zanardelli' | 'lattea' | 'gazza' }>,
   })),
 )
 
@@ -103,6 +103,7 @@ import {
   OPERATOR_DELIVERY_PATH,
   OPERATOR_ORDER_PATH,
   OPERATOR_PRIMA_NOTA_PATH,
+  OPERATOR_STATION_GAZZA_PATH,
   OPERATOR_STATION_LATTEA_PATH,
   OPERATOR_STATION_PATH,
   OPERATOR_STATION_ZANARDELLI_PATH,
@@ -823,7 +824,7 @@ function App() {
     setAiOpen(false)
   }
 
-  function goToOperatorStationLogin(stationId: 'abba' | 'zanardelli' | 'lattea' = 'abba') {
+  function goToOperatorStationLogin(stationId: 'abba' | 'zanardelli' | 'lattea' | 'gazza' = 'abba') {
     markOperatorStationEntryPoint(stationId)
     markOperatorPwaLaunchPreferred(stationId)
     setOperatorStationLock(true, stationId)
@@ -1277,6 +1278,7 @@ function RootRouter() {
                 element={<OperatorStationApp stationId="zanardelli" />}
               />
               <Route path={`${OPERATOR_STATION_LATTEA_PATH}/*`} element={<OperatorStationApp stationId="lattea" />} />
+              <Route path={`${OPERATOR_STATION_GAZZA_PATH}/*`} element={<OperatorStationApp stationId="gazza" />} />
               <Route path={`${OPERATOR_STATION_PATH}/*`} element={<OperatorStationApp stationId="abba" />} />
               <Route path="/*" element={<MainAppGate />} />
             </Routes>

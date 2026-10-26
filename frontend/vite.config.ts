@@ -57,6 +57,7 @@ export default defineConfig(({ mode }) => {
         'atlas-api-fetch-fix.js',
         'favicon.svg',
         'manifest-operator.webmanifest',
+        'manifest-operator-gazza.webmanifest',
         'manifest-carrier.webmanifest',
       ],
       manifest: {

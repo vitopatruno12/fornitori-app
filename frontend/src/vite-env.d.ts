@@ -24,6 +24,10 @@ interface ImportMetaEnv {
   readonly VITE_OPERATOR_LATTEA_LOGIN_USER?: string
   /** Password login postazione Via Lattea */
   readonly VITE_OPERATOR_LATTEA_LOGIN_PASSWORD?: string
+  /** Username login postazione PG S.r.l. · Gazza Ladra */
+  readonly VITE_OPERATOR_GAZZA_LOGIN_USER?: string
+  /** Password login postazione PG S.r.l. · Gazza Ladra */
+  readonly VITE_OPERATOR_GAZZA_LOGIN_PASSWORD?: string
   /** Username login postazione trasportatore (/operatore-consegne) */
   readonly VITE_CARRIER_LOGIN_USER?: string
   /** Password login postazione trasportatore */

@@ -133,7 +133,12 @@ export function FattureSubnav() {
     const insertAt = pagateIdx >= 0 ? pagateIdx + 1 : sourceItems.length
     sourceItems.splice(insertAt, 0, { to: '/fatture/scheda-contabile', label: 'Scheda contabile' })
   }
-  const items = sourceItems.filter((item) => !(embedded && item.to === '/pagamenti')).map((item) => {
+  const items = sourceItems.filter((item) => {
+    if (!embedded) return true
+    if (item.to === '/pagamenti') return false
+    if (item.to === '/fatture/impostazioni') return false
+    return true
+  }).map((item) => {
     if (item.to === '/pagamenti') return item
     if (item.to === '/fatture') return { ...item, to: base }
     return { ...item, to: `${base}/${item.to.slice('/fatture/'.length)}` }

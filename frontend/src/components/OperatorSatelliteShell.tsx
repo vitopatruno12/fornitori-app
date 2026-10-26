@@ -15,6 +15,7 @@ const SESSION_KEY_BY_MODE: Record<OperatorAuthMode, string> = {
   operator: 'atlasAuthOperator',
   'operator-zanardelli': 'atlasAuthOperatorZanardelli',
   'operator-lattea': 'atlasAuthOperatorLattea',
+  'operator-gazza': 'atlasAuthOperatorGazza',
   carrier: 'atlasAuthCarrier',
 }
 

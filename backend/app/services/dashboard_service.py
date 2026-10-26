@@ -35,6 +35,7 @@ HOME_CASSA_LOCALI = (
     ("via_abba", "Mani_In_Pasta_Abba"),
     ("via_zanardelli", "Mani_in_pasta_Z.delli"),
     ("via_lattea", "La Via Lattea Registro"),
+    ("pg", "Gazza Ladra"),
 )
 
 # Società SDI → attività Prima Nota + etichetta Home.

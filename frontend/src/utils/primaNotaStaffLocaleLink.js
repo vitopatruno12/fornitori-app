@@ -5,11 +5,13 @@ export const DEFAULT_PRIMA_NOTA_STAFF_LOCALE_LINKS = {
   via_zanardelli: 'La mediazione via zanardelli',
   via_abba: 'Mediazione via abba',
   via_lattea: 'Mucche Volanti',
+  pg: 'Gazza Ladra',
 }
 
 /** Nomi alternativi accettati per il locale personale (es. «La Via Lattea» = Mucche Volanti). */
 export const STAFF_LOCALE_MATCH_CANDIDATES = {
   via_lattea: ['Mucche Volanti', 'Le Mucche Volanti', 'La Via Lattea'],
+  pg: ['Gazza Ladra', 'La Gazza Ladra', 'PG SRL', 'PG S.r.l.', 'PG', 'Gazza Ladra (PG)'],
 }
 
 /** Token distintivi per trovare il nome locale salvato sul server (es. *_zanardelli_19). */
@@ -18,11 +20,13 @@ export const STAFF_LOCALE_SLUG_TOKENS = {
   via_abba: ['abba'],
   via_lattea: ['mucche', 'volanti'],
   risacca: ['risacca', 'momento'],
+  pg: ['gazza'],
 }
 
 /** Frammenti da escludere nel match fuzzy (evita Mani in Pasta / altre sedi). */
 export const STAFF_LOCALE_EXCLUDED_NAME_FRAGMENTS = {
   via_lattea: ['abba', 'zanardelli', 'maninpasta', 'maniinpasta', 'mediazione'],
+  pg: ['abba', 'zanardelli', 'lattea', 'mucche', 'risacca', 'mediazione', 'momento'],
 }
 
 export function staffLocaleCompareKey(value) {
@@ -63,6 +67,15 @@ export function matchStaffLocaleName(preferredName, availableNames = [], activit
       const nameKey = staffLocaleCompareKey(name)
       if (excluded.some((fragment) => nameKey.includes(fragment))) continue
       if (nameKey.includes('lattea')) return String(name)
+    }
+  }
+  if (slug === 'pg') {
+    for (const name of availableNames) {
+      const nameKey = staffLocaleCompareKey(name)
+      if (excluded.some((fragment) => nameKey.includes(fragment))) continue
+      if (nameKey.includes('gazza') || nameKey === 'pg' || nameKey === 'pgsrl' || nameKey.includes('pgs.r.l')) {
+        return String(name)
+      }
     }
   }
   return String(preferredName || '').trim()

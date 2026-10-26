@@ -12,6 +12,7 @@ export const OPERATOR_STATION_ACTIVITY_SLUGS = {
   abba: 'via_abba',
   zanardelli: 'via_zanardelli',
   lattea: 'via_lattea',
+  gazza: 'pg',
 }
 
 export function getOperatorStationActivitySlug(stationId) {
@@ -61,6 +62,9 @@ export function operatorStationLocaleNameMatches(stationId, localeName, availabl
   const tokens = STAFF_LOCALE_SLUG_TOKENS[slug] || []
   if (tokens.length && tokens.every((token) => nameKey.includes(token))) return true
   if (slug === 'via_lattea' && nameKey.includes('lattea')) return true
+  if (slug === 'pg' && (nameKey.includes('gazza') || nameKey === 'pg' || nameKey === 'pgsrl' || nameKey.includes('pgs.r.l'))) {
+    return true
+  }
 
   return false
 }

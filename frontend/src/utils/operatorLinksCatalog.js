@@ -5,6 +5,9 @@ export const OPERATOR_LINKS_WORKBOOK_TITLE = 'Link operatori'
 const STATION_DESCRIPTION =
   'Postazione operativa PWA: Panoramica, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, Trasportatori), Storico consegne, Personale (turni, report, stipendi), Amministrazione ▾ (Fatture fornitori, Prima Nota) e Assistenza tecnici.'
 
+const GAZZA_DESCRIPTION =
+  'Postazione operativa PWA di PG S.r.l. · La Gazza Ladra: solo i dati di questa società. Panoramica, Gestione sala, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, senza trasportatori), Storico consegne, Personale, Amministrazione (Fatture fornitori, Prima Nota) e Assistenza tecnici.'
+
 const CARRIER_DESCRIPTION =
   'Postazione trasportatore PWA: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatture fornitori, Prima Nota, Banca).'
 
@@ -34,6 +37,13 @@ export function buildOperatorLinksCatalog() {
       sede: 'Via Lattea/abba 44',
       description: STATION_DESCRIPTION,
       url: getOperatorStationPublicUrl('overview', 'lattea'),
+    },
+    {
+      id: 'station-gazza-pg',
+      role: 'Postazione operativa',
+      sede: 'PG S.r.l. · La Gazza Ladra',
+      description: GAZZA_DESCRIPTION,
+      url: getOperatorStationPublicUrl('overview', 'gazza'),
     },
     {
       id: 'carrier-guidatore',

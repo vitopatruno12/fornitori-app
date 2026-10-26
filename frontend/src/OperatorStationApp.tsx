@@ -25,6 +25,11 @@ const MagazzinoPage = lazy(() => import('./pages/MagazzinoPage.jsx'))
 const ReportPersonalePage = lazy(() => import('./pages/ReportPersonalePage.jsx'))
 const StipendiPage = lazy(() => import('./pages/StipendiPage.jsx'))
 const SupportTechniciansPage = lazy(() => import('./pages/SupportTechniciansPage.jsx'))
+const GazzaLadraSalaPage = lazy(() =>
+  import('./pages/GestioneLocaliPage.jsx').then((m) => ({
+    default: m.GazzaLadraSalaPage as React.ComponentType<{ operatorMode?: boolean }>,
+  })),
+)
 const InvoicesPage = lazy(() => import('./pages/InvoicesPage.jsx'))
 const SchedaContabileFornitorePage = lazy(() =>
   import('./pages/SchedaContabileFornitorePage.jsx').then((m) => ({
@@ -103,6 +108,7 @@ const ALL_SECTIONS: StationSection[] = [
   ...DELIVERY_SUBMENU,
   ...PERSONALE_MENU,
   ...ADMIN_MENU,
+  { id: 'gestione-sala', label: 'Gestione sala', title: 'Gestione sala' },
   { id: 'support-tech', label: 'Assistenza tecnici', title: 'Assistenza tecnici' },
 ]
 
@@ -114,6 +120,7 @@ const STATION_LABELS: Record<OperatorStationId, string> = {
   abba: 'Abba 42',
   zanardelli: 'Zanardelli 19',
   lattea: 'Via Lattea',
+  gazza: 'Gazza Ladra · PG S.r.l.',
 }
 
 const SECTION_ALIASES: Record<string, OperatorStationView> = {
@@ -135,6 +142,9 @@ const SECTION_ALIASES: Record<string, OperatorStationView> = {
   fatture: 'fatture',
   fatturazione: 'fatture',
   invoices: 'fatture',
+  'gestione-sala': 'gestione-sala',
+  'gestisci-sala': 'gestione-sala',
+  sala: 'gestione-sala',
   'support-tech': 'support-tech',
   'assistenza-tecnici': 'support-tech',
   tecnici: 'support-tech',
@@ -185,7 +195,7 @@ function StationMainContent({
   // Non tenere Prima Nota montata nascosta: su tablet Android continua a pesare CPU/RAM.
   // Sezioni pesanti in lazy chunk (Staff/Fatture/Prima Nota/…).
   if (view === 'overview') {
-    return <HomePage operatorMode onOperatorNavigate={onOperatorNavigate} />
+    return <HomePage operatorMode stationId={stationId} onOperatorNavigate={onOperatorNavigate} />
   }
   if (view === 'staff') {
     return (
@@ -219,7 +229,7 @@ function StationMainContent({
     return <SuppliersPage />
   }
   if (view === 'delivery') {
-    return <NewDeliveryPage operatorMode />
+    return <NewDeliveryPage operatorMode hideCarriers={stationId === 'gazza'} />
   }
   if (view === 'delivery-history') {
     return <DeliveriesHistoryPage operatorMode />
@@ -232,9 +242,19 @@ function StationMainContent({
     )
   }
   if (view === 'trasportatori') {
+    if (stationId === 'gazza') {
+      return <NewDeliveryPage operatorMode hideCarriers />
+    }
     return (
       <LazySection>
         <TrasportatoriPage operatorMode />
+      </LazySection>
+    )
+  }
+  if (view === 'gestione-sala' && stationId === 'gazza') {
+    return (
+      <LazySection>
+        <GazzaLadraSalaPage operatorMode />
       </LazySection>
     )
   }
@@ -258,8 +278,15 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
   const fatturePath = getOperatorStationFatturePath(stationId)
   const authMode = stationIdToAuthMode(stationId)
   const sedeLabel = STATION_LABELS[stationId]
+  const hideCarriers = stationId === 'gazza'
+  const deliverySubmenu = hideCarriers
+    ? DELIVERY_SUBMENU.filter((item) => item.id !== 'trasportatori')
+    : DELIVERY_SUBMENU
 
-  const [view, setView] = React.useState<OperatorStationView>(() => getOperatorStationView(stationId))
+  const [view, setView] = React.useState<OperatorStationView>(() => {
+    const initial = getOperatorStationView(stationId)
+    return hideCarriers && initial === 'trasportatori' ? 'delivery' : initial
+  })
 
   const onFatturePath = location.pathname === fatturePath || location.pathname.startsWith(`${fatturePath}/`)
 
@@ -281,15 +308,24 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
   }, [stationId])
 
   React.useEffect(() => {
-    setView(getOperatorStationView(stationId))
-  }, [location.pathname, location.search, stationId])
+    const next = getOperatorStationView(stationId)
+    if (hideCarriers && next === 'trasportatori') {
+      setView('delivery')
+      navigate(getOperatorStationRouterPath('delivery', stationId), { replace: true })
+      return
+    }
+    setView(next)
+  }, [location.pathname, location.search, stationId, hideCarriers, navigate])
 
   const setStationView = React.useCallback(
     (next: OperatorStationView) => {
-      setView(next)
-      navigate(getOperatorStationRouterPath(next, stationId))
+      const blockedSala = next === 'gestione-sala' && stationId !== 'gazza'
+      const blockedCarriers = hideCarriers && next === 'trasportatori'
+      const safe = blockedSala ? 'overview' : blockedCarriers ? 'delivery' : next
+      setView(safe)
+      navigate(getOperatorStationRouterPath(safe, stationId))
     },
-    [navigate, stationId],
+    [navigate, stationId, hideCarriers],
   )
 
   const onOperatorNavigate = React.useCallback(
@@ -315,12 +351,22 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
       active: effectiveView === section.id,
       onClick: () => setStationView(section.id),
     })),
+    ...(stationId === 'gazza'
+      ? [
+          {
+            id: 'gestione-sala',
+            label: 'Gestione sala',
+            active: effectiveView === 'gestione-sala',
+            onClick: () => setStationView('gestione-sala'),
+          },
+        ]
+      : []),
     {
       id: 'delivery-menu',
       label: 'Nuova consegna',
       active: deliveryActive,
       onClick: () => setStationView('delivery'),
-      items: DELIVERY_SUBMENU.map((item) => ({
+      items: deliverySubmenu.map((item) => ({
         id: item.id,
         label: item.label,
         active: effectiveView === item.id,
@@ -370,7 +416,11 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
       authMode={authMode}
       stationId={stationId}
       documentTitle={`ATLAS — ${activeTitle} (${sedeLabel})`}
-      loginHint={`Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, amministrazione, assistenza tecnici`}
+      loginHint={
+        stationId === 'gazza'
+          ? `Accesso postazione ${sedeLabel} — gestione sala, fornitori, ordini, consegne, personale, amministrazione`
+          : `Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, amministrazione, assistenza tecnici`
+      }
       headerTitle={`Postazione operativa · ${sedeLabel}`}
       headerSubtitle=""
       stationOnly
