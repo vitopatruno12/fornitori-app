@@ -1875,32 +1875,6 @@ export function BancaContiPage() {
     >
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
-      {connectProfile && (
-        <p className="fatture-note">
-          Enable Banking:{' '}
-          {connectProfile.enable_banking?.configured ? (
-            <>
-              attivo ({connectProfile.enable_banking.environment || 'sandbox'})
-              {connectProfile.enable_banking.aspsp_name
-                ? ` · test ASPSP: ${connectProfile.enable_banking.aspsp_name} (${connectProfile.enable_banking.aspsp_country})`
-                : ''}
-            </>
-          ) : (
-            <strong>non configurato</strong>
-          )}
-          {' · '}
-          Login .env + OTP:{' '}
-          {connectProfile.credentials_configured ? (
-            <>
-              configurato ({connectProfile.username_hint || 'user'})
-              {connectProfile.bank_name ? ` · ${connectProfile.bank_name}` : ''}
-            </>
-          ) : (
-            <strong>mancano BANK_USERNAME / BANK_PASSWORD</strong>
-          )}
-          .
-        </p>
-      )}
 
       {otpAccountId != null && (
         <section className="card fatture-panel">

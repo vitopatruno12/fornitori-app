@@ -429,7 +429,11 @@ def consent_monitor_summary(rows: List[BankAccount]) -> Dict[str, Any]:
   connected = [x for x in items if x.get("connected")]
   down_ids = _detached_account_ids()
   for item in items:
-    if item.get("account_id") in down_ids and item.get("status") not in ("disconnected", "expired"):
+    # Un ricollegamento riuscito (stato ok/warn) vale più dell'ultimo errore
+    # salvato dall'agente: i movimenti nuovi significano che la sessione è viva.
+    if item.get("status") in ("ok", "warn", "disconnected", "expired"):
+      continue
+    if item.get("account_id") in down_ids:
       item["status"] = "detached"
       item["message"] = "Conto staccato — ricollega"
   expired = [x for x in connected if x.get("status") == "expired"]
