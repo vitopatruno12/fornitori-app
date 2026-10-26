@@ -8,13 +8,11 @@ import {
   GAZZA_SALA_WORKBOOK_TITLE,
   createEmptyGazzaSalaRows,
   gazzaSalaCellDisplay,
-  gazzaSalaResidual,
   gazzaSalaRowsToAoa,
   gazzaSalaStorageKey,
   gazzaSalaTotals,
   gazzaSalaTotalsLabel,
   normalizeGazzaSalaRows,
-  residualToneClass,
 } from '../utils/gazzaSalaWorkbook.js'
 
 const LOCALI = [
@@ -199,8 +197,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
           Modello Excel della sala ({GAZZA_SALA_TABLE_COUNT} tavoli): ID tavolo, clienti, menu,
-          conti e pagamenti. Intestazione <strong>verde</strong>, righe dati bianche, riga totali{' '}
-          <strong>gialla</strong>. Salvataggio sul dispositivo finché non c’è API / POS Poste.
+          fattura, pagamenti e cameriere. Intestazione <strong>verde</strong>, righe dati bianche,
+          riga totali <strong>gialla</strong>. Salvataggio sul dispositivo finché non c’è API / POS
+          Poste.
         </p>
       </header>
 
@@ -250,11 +249,12 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         <p className="analisi-machine-scope" role="status" style={{ padding: '0 0.85rem 0.35rem' }}>
           Coperti: <strong>{totals.clients}</strong>
           {' · '}
-          Conti: <strong>{totals.bill ? totals.bill.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'} €</strong>
+          Fatture: <strong>{totals.invoices}</strong>
           {' · '}
-          Importo pagamenti: <strong>{totals.paid ? totals.paid.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'} €</strong>
-          {' · '}
-          Residuo: <strong>{totals.residual.toLocaleString('it-IT', { minimumFractionDigits: 2 })} €</strong>
+          Conto totale pagato:{' '}
+          <strong>
+            {totals.paid ? totals.paid.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'} €
+          </strong>
           {savedAt
             ? ` · salvato ${new Date(savedAt).toLocaleString('it-IT')}`
             : ' · non ancora salvato'}
@@ -293,7 +293,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                     const tdClass = col.sticky === 'left' ? 'workbook-col-sticky-left' : ''
 
                     if (col.readonly || !col.editable) {
-                      const residual = col.id === 'residual' ? residualToneClass(row) : ''
                       return (
                         <td key={col.id} className={tdClass}>
                           <input
@@ -302,7 +301,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                               'pagamenti-cell-readonly',
                               col.numeric ? 'excel-cell-num' : '',
                               col.emphasis ? 'workbook-cell-emphasis' : '',
-                              residual,
                             ]
                               .filter(Boolean)
                               .join(' ')}
@@ -310,11 +308,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                             readOnly
                             tabIndex={-1}
                             aria-label={`${col.label} tavolo ${row.table_id}`}
-                            title={
-                              col.id === 'residual' && gazzaSalaResidual(row) != null
-                                ? `Conto − pagato = ${gazzaSalaCellDisplay(row, col)} €`
-                                : undefined
-                            }
                           />
                         </td>
                       )
@@ -351,7 +344,15 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                           value={row[col.id] ?? ''}
                           onChange={(e) => updateCell(row.table_id, col.id, e.target.value)}
                           aria-label={`${col.label} tavolo ${row.table_id}`}
-                          placeholder={col.id === 'menu' ? 'es. menù degustazione' : undefined}
+                          placeholder={
+                            col.id === 'menu'
+                              ? 'es. menù degustazione'
+                              : col.id === 'invoice_number'
+                                ? 'es. FT-123'
+                                : col.id === 'waiter'
+                                  ? 'nome cameriere'
+                                  : undefined
+                          }
                         />
                       </td>
                     )
