@@ -24,10 +24,10 @@ const ATLAS_OPERATOR_LATTEA_LOGIN_PASSWORD = (
 
 /** Credenziali login postazione PG S.r.l. · Gazza Ladra (/operatore-postazione-gazza). */
 const ATLAS_OPERATOR_GAZZA_LOGIN_USER = (
-  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_USER || 'pg.gazza.ladra'
+  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_USER || 'La_Gazza_ladra@gmail.com'
 ).trim()
 const ATLAS_OPERATOR_GAZZA_LOGIN_PASSWORD = (
-  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_PASSWORD || 'gazzaladra'
+  import.meta.env.VITE_OPERATOR_GAZZA_LOGIN_PASSWORD || 'G.Calabretto'
 ).trim()
 
 /** Credenziali login postazione trasportatore (/operatore-consegne). */
