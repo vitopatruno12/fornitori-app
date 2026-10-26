@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useAppNavigate } from '../hooks/useAppNavigate'
 import { fetchDashboardSummary } from '../services/dashboardService'
 import { fetchAnalyticsSnapshot } from '../services/analyticsService'
 import { stationIdToFattureCompany } from '../utils/fattureCompany.js'
