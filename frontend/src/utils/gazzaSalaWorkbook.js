@@ -91,6 +91,22 @@ export const GAZZA_SALA_COLUMNS = [
     inputType: 'text',
   },
   {
+    id: 'waiter',
+    label: 'Cameriere',
+    width: 11,
+    fluid: true,
+    editable: true,
+    inputType: 'text',
+  },
+  {
+    id: 'note',
+    label: 'Note',
+    width: 17,
+    fluid: true,
+    editable: true,
+    inputType: 'text',
+  },
+  {
     id: 'payment_type',
     label: 'Metodo pagamento',
     width: 12,
@@ -108,22 +124,6 @@ export const GAZZA_SALA_COLUMNS = [
     editable: true,
     inputType: 'number',
     step: '0.01',
-  },
-  {
-    id: 'waiter',
-    label: 'Cameriere',
-    width: 11,
-    fluid: true,
-    editable: true,
-    inputType: 'text',
-  },
-  {
-    id: 'note',
-    label: 'Note',
-    width: 17,
-    fluid: true,
-    editable: true,
-    inputType: 'text',
   },
 ]
 
