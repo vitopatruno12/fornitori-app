@@ -184,8 +184,9 @@ function matchReasonLabel(reason) {
   if (reason === 'numero_in_movimento') return 'N. in banca'
   if (reason === 'importo_in_movimento') return 'Importo in banca'
   if (reason === 'matched') return 'Riconciliata'
-  if (reason === 'pagata_contanti') return 'Pagata in contanti'
-  if (reason === 'file_contanti' || reason === 'file_pagamenti') return 'Contanti'
+  if (reason === 'bonifico_data' || reason === 'file_pagamenti') return 'Bonifico'
+  if (reason === 'pagata_contanti' || reason === 'file_contanti') return 'Contanti'
+  if (reason === 'file_carta') return 'Carta'
   if (reason === 'saldo_fatture') return 'Saldo fatture'
   if (reason === 'da_pagare') return 'Da pagare'
   return reason || '—'
@@ -206,7 +207,9 @@ function invoiceIsPaidRow(row) {
     || reason === 'importo_in_movimento'
     || reason === 'matched'
     || reason === 'file_contanti'
+    || reason === 'file_carta'
     || reason === 'file_pagamenti'
+    || reason === 'bonifico_data'
     || reason === 'pagata_contanti'
     || reason === 'saldo_fatture'
   ) {
@@ -247,7 +250,13 @@ function buildBankVerifySuppliers(paidRows, openRows) {
     party.invoices.push({
       ...row,
       payment_label:
-        String(row?.match_reason || '') === 'pagata_contanti' ? 'Pagata in contanti' : paid ? 'Pagata' : 'Da pagare',
+        String(row?.match_reason || '') === 'pagata_contanti' || String(row?.match_reason || '') === 'file_contanti'
+          ? 'Pagata in contanti'
+          : String(row?.match_reason || '') === 'file_carta'
+            ? 'Pagata con carta'
+            : paid
+              ? 'Pagata'
+              : 'Da pagare',
     })
     party.invoice_count += 1
     if (paid) {
@@ -2141,10 +2150,11 @@ export function FatturePagatePage() {
     if (col.id === 'payment_label') return row.payment_label || (invoiceIsPaidRow(row) ? 'Pagata' : 'Da pagare')
     if (col.id === 'contanti') return rowMarkedCash(row) ? '✔ Annulla contanti' : ''
     if (col.id === 'bank_hit') {
-      if (rowMarkedCash(row)) return 'Contanti'
+      if (rowMarkedCash(row) || String(row?.match_reason || '') === 'file_contanti') return 'Contanti'
+      if (String(row?.match_reason || '') === 'file_carta') return 'Carta'
       const m = row.matched_movement
       if (!m) return invoiceIsPaidRow(row) ? '—' : 'Nessun bonifico'
-      return [formatDate(m.movement_date), m.description || m.causale || `BA-${m.id}`].filter(Boolean).join(' · ')
+      return [formatDate(m.movement_date), m.description || m.causale || ''].filter(Boolean).join(' · ')
     }
     if (col.id === 'reason') return matchReasonLabel(row.match_reason)
     return ''

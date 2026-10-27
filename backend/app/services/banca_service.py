@@ -3539,6 +3539,71 @@ def _load_recon_movements_by_tiers(
   return out, tier_of
 
 
+def _load_wires_on_dates(
+  db: Session,
+  account_ids: set,
+  days: set,
+) -> Dict[date, List[Dict[str, Any]]]:
+  """Uscite dell'estratto nei giorni scritti in DATA PAGAMENTO."""
+  if not days:
+    return {}
+  q = (
+    db.query(BankMovement, BankAccount)
+    .join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+    .filter(
+      BankMovement.movement_type == "uscita",
+      BankMovement.movement_date.in_(list(days)),
+    )
+  )
+  if account_ids:
+    q = q.filter(BankMovement.bank_account_id.in_(list(account_ids)))
+  grouped: Dict[date, List[Dict[str, Any]]] = {}
+  for mov, acc in q.all():
+    day = _as_date(mov.movement_date)
+    if day is None:
+      continue
+    grouped.setdefault(day, []).append(
+      {
+        "mov": mov,
+        "blob": _movement_search_blob(mov),
+        "out": _movement_out(mov, acc),
+      }
+    )
+  return grouped
+
+
+def _pick_wire_on_payment_date(
+  candidates: List[Dict[str, Any]],
+  *,
+  invoice_number: Optional[str],
+  supplier_name: Optional[str],
+  amount: Any,
+) -> Optional[Dict[str, Any]]:
+  """Bonifico del giorno indicato nel file: prima il numero fattura, poi il fornitore."""
+  target = abs(_dec(amount))
+  numbered: List[Dict[str, Any]] = []
+  named: List[Dict[str, Any]] = []
+  for meta in candidates:
+    amt = abs(_dec(getattr(meta["mov"], "amount", 0)))
+    if amt < Decimal("1"):
+      continue
+    blob = meta.get("blob") or ""
+    if _invoice_number_in_text(invoice_number, blob):
+      numbered.append(meta)
+    elif _supplier_in_blob(supplier_name, blob):
+      named.append(meta)
+  pool = numbered or named
+  if not pool:
+    return None
+
+  def _rank(meta: Dict[str, Any]) -> tuple:
+    amt = abs(_dec(getattr(meta["mov"], "amount", 0)))
+    cites = 0 if _invoice_number_in_text(invoice_number, meta.get("blob") or "") else 1
+    return (cites, abs(amt - target), int(getattr(meta["mov"], "id") or 0))
+
+  return min(pool, key=_rank)
+
+
 def reconciliation_snapshot(
   db: Session,
   limit: int = 40,
@@ -3546,6 +3611,7 @@ def reconciliation_snapshot(
 ) -> Dict[str, Any]:
   """Elenco pagate/da pagare: chiude dal file Pagamenti ogni fattura con PAGATO > 0.
 
+  DATA PAGAMENTO è la data del bonifico. Contanti solo se la cella lo scrive.
   Il confronto completo sui bonifici (da agosto) resta su POST /riconciliazione/auto.
   """
   company_id = (company or "").strip() or None
@@ -3575,6 +3641,48 @@ def reconciliation_snapshot(
         "out": _movement_out(mov, acc),
       }
 
+  from . import supplier_payments_service
+
+  try:
+    paid_file_rows = supplier_payments_service.list_paid_document_rows(
+      db, company=company_id, all_workbooks=True
+    )
+  except Exception:
+    logger.warning("File Pagamenti non leggibile in verifica scheda", exc_info=True)
+    paid_file_rows = []
+  file_by_number = _cash_rows_by_number(paid_file_rows)
+
+  def _file_hit(inv: Any) -> Optional[Dict[str, Any]]:
+    num = str(getattr(inv, "invoice_number", None) or "").strip()
+    if not num:
+      return None
+    subset = file_by_number.get(supplier_payments_service._normalize_doc(num)) or []
+    if not subset:
+      return None
+    return supplier_payments_service.find_paid_row_for_invoice(
+      subset,
+      invoice_number=num,
+      supplier_name=str(getattr(inv, "supplier_name", None) or "").strip(),
+      supplier_vat=str(
+        getattr(inv, "supplier_vat", None) or getattr(inv, "vat_number", None) or ""
+      ).strip(),
+      invoice_total=float(_dec(getattr(inv, "total", 0)) or 0),
+      invoice_amount_paid=float(_dec(getattr(inv, "amount_paid", 0)) or 0),
+    )
+
+  file_hit_by_id: Dict[int, Optional[Dict[str, Any]]] = {}
+  pay_days = set()
+  for inv in invoices:
+    if str(getattr(inv, "payment_status", None) or "") != "paid":
+      continue
+    hit = _file_hit(inv)
+    file_hit_by_id[int(inv.id)] = hit
+    if hit and supplier_payments_service.payment_cell_kind(hit.get("payment_date")) == "data":
+      day = supplier_payments_service.parse_file_payment_date(hit.get("payment_date"))
+      if day is not None:
+        pay_days.add(day)
+  wires_by_day = _load_wires_on_dates(db, account_ids, pay_days)
+
   paid_by_bank: List[Dict[str, Any]] = []
   da_pagare: List[Dict[str, Any]] = []
   for inv in invoices:
@@ -3582,19 +3690,65 @@ def reconciliation_snapshot(
     status = str(getattr(inv, "payment_status", None) or "")
     linked = linked_by_invoice.get(inv_id)
     if status == "paid":
+      hit = file_hit_by_id.get(inv_id)
+      cell_kind = supplier_payments_service.payment_cell_kind((hit or {}).get("payment_date"))
       cash_method = str(getattr(inv, "payment_method", None) or "").strip().lower() == "contanti"
-      if linked:
+      pay_day = (
+        supplier_payments_service.parse_file_payment_date((hit or {}).get("payment_date"))
+        if cell_kind == "data"
+        else None
+      )
+      wire = None
+      if pay_day is not None and not cash_method:
+        wire = _pick_wire_on_payment_date(
+          wires_by_day.get(pay_day) or [],
+          invoice_number=str(getattr(inv, "invoice_number", None) or ""),
+          supplier_name=str(getattr(inv, "supplier_name", None) or ""),
+          amount=getattr(inv, "total", 0),
+        )
+      if wire:
+        cited = _invoice_number_in_text(
+          str(getattr(inv, "invoice_number", None) or ""),
+          wire.get("blob") or "",
+        )
+        mov_out = dict(wire["out"])
+        mov_out["description"] = "Bonifico"
+        mov_out["causale"] = "BONIFICO"
+        reason = "numero_in_movimento" if cited else "bonifico_data"
+        movement = mov_out
+      elif linked:
         reason = "matched"
-      elif cash_method:
-        reason = "pagata_contanti"
-      elif _uses_pagamenti_file_recon(inv):
-        reason = "file_pagamenti"
+        movement = _enrich_movement_out(linked["out"], linked["mov"], linked["blob"])
+      elif cell_kind == "contanti" or cash_method:
+        reason = "pagata_contanti" if cash_method and cell_kind != "contanti" else "file_contanti"
+        movement = {
+          "description": "Pagata in contanti",
+          "causale": "CONTANTI",
+          "amount": float(_dec(getattr(inv, "total", 0))),
+          "id": None,
+        }
+      elif cell_kind == "carta":
+        reason = "file_carta"
+        movement = {
+          "description": "Carta",
+          "causale": "CARTA",
+          "amount": float((hit or {}).get("amount_paid") or 0),
+          "id": None,
+        }
       else:
-        reason = "file_contanti"
+        # Data o PAGATO (DARE): bonifico, anche se l'estratto di quel giorno non cita la fattura.
+        reason = "file_pagamenti"
+        movement = {
+          "movement_date": pay_day.isoformat() if pay_day else None,
+          "description": "Data bonifico" if pay_day else "File Pagamenti",
+          "causale": "BONIFICO",
+          "amount": float((hit or {}).get("amount_paid") or _dec(getattr(inv, "total", 0))),
+          "id": None,
+        }
       paid_by_bank.append(
         _invoice_row_out(
           inv,
-          match_movement=_enrich_movement_out(linked["out"], linked["mov"], linked["blob"]) if linked else None,
+          match_movement=movement,
           reason=reason,
           match_score=100,
           match_band="auto",
@@ -4051,19 +4205,32 @@ def reconciliation_preview(
         )
       )
     elif cash_hit:
-      cash_only = bool(cash_hit.get("is_cash_payment")) and not file_window
+      cell_kind = supplier_payments_service.payment_cell_kind(cash_hit.get("payment_date"))
+      pay_day = (
+        supplier_payments_service.parse_file_payment_date(cash_hit.get("payment_date"))
+        if cell_kind == "data"
+        else None
+      )
+      if cell_kind == "contanti":
+        file_reason = "file_contanti"
+        file_desc = "Pagata in contanti"
+        file_causale = "CONTANTI"
+      elif cell_kind == "carta":
+        file_reason = "file_carta"
+        file_desc = "Carta"
+        file_causale = "CARTA"
+      else:
+        file_reason = "file_pagamenti"
+        file_desc = "Data bonifico" if pay_day else "File Pagamenti"
+        file_causale = "BONIFICO"
       paid_by_bank.append(
         _invoice_row_out(
           inv,
-          reason="file_contanti" if cash_only else "file_pagamenti",
+          reason=file_reason,
           match_movement={
-            "movement_date": (cash_hit.get("payment_date") or "")[:10] or None,
-            "description": (
-              f"File Pagamenti · contanti · {cash_hit.get('sheet') or ''}".strip(" ·")
-              if cash_only
-              else f"File Pagamenti · {cash_hit.get('sheet') or ''}".strip(" ·")
-            ),
-            "causale": "CONTANTI" if cash_only else "PAGAMENTI",
+            "movement_date": pay_day.isoformat() if pay_day else None,
+            "description": file_desc,
+            "causale": file_causale,
             "amount": cash_hit.get("amount_paid"),
             "id": None,
           },
@@ -4514,7 +4681,13 @@ def sync_payment_status_from_bank(
       continue
     row.amount_paid = _dec(row.total)
     row.is_paid = True
-    reason = "file_pagamenti" if file_window else "file_contanti"
+    cell_kind = supplier_payments_service.payment_cell_kind((cash_hit or {}).get("payment_date"))
+    if cell_kind == "contanti":
+      reason = "file_contanti"
+    elif cell_kind == "carta":
+      reason = "file_carta"
+    else:
+      reason = "file_pagamenti"
     movement_id = None
     match_score = None
     match_band = None
@@ -4555,7 +4728,12 @@ def sync_payment_status_from_bank(
         group_mov.difference_amount = None
     else:
       marked_from_file += 1
-      reason = "file_pagamenti"
+      if cell_kind == "contanti":
+        reason = "file_contanti"
+      elif cell_kind == "carta":
+        reason = "file_carta"
+      else:
+        reason = "file_pagamenti"
     changed = True
     item = {
       "invoice_id": inv_id,

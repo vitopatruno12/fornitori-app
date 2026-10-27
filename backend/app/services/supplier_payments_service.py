@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -603,15 +604,64 @@ _CASH_PAYMENT_MARKERS = (
 )
 
 
-def is_cash_payment_marker(value: Any) -> bool:
-  """True se DATA PAGAMENTO / nota indica pagamento fuori bonifico (contanti/carta/…)."""
-  text = str(value or "").strip().upper()
+def parse_file_payment_date(value: Any) -> Optional[date]:
+  """Data in colonna DATA PAGAMENTO: è il giorno del bonifico, non un pagamento in contanti."""
+  if value is None or value == "":
+    return None
+  if isinstance(value, datetime):
+    return value.date()
+  if isinstance(value, date):
+    return value
+  if isinstance(value, (int, float)) and not isinstance(value, bool):
+    serial = float(value)
+    if 20000 < serial < 80000:
+      return date(1899, 12, 30) + timedelta(days=int(serial))
+    return None
+  text = str(value).strip()
   if not text:
-    return False
-  # Date ISO/IT non sono contanti
-  if re.match(r"^\d{4}-\d{2}-\d{2}", text) or re.match(r"^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}", text):
-    return False
-  return any(marker in text for marker in _CASH_PAYMENT_MARKERS)
+    return None
+  head = text[:10]
+  if len(head) >= 10 and head[4] == "-" and head[7] == "-":
+    try:
+      return date.fromisoformat(head)
+    except ValueError:
+      return None
+  match = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})", text)
+  if not match:
+    return None
+  day_n, month_n, year_n = (int(part) for part in match.groups())
+  if year_n < 100:
+    year_n += 2000
+  try:
+    return date(year_n, month_n, day_n)
+  except ValueError:
+    return None
+
+
+def payment_cell_kind(value: Any) -> str:
+  """Come leggere DATA PAGAMENTO.
+
+  Una data è il giorno del bonifico. Contanti solo se la cella lo scrive.
+  """
+  text = str(value or "").strip()
+  if not text:
+    return "vuoto"
+  upper = text.upper()
+  if any(marker in upper for marker in ("CONTANTI", "CONTANTE", "CASH")):
+    return "contanti"
+  if any(marker in upper for marker in ("CARTA", "POS", "ASSEGNO", "COMPENSATA", "COMPENSAZIONE")):
+    return "carta"
+  if parse_file_payment_date(value):
+    return "data"
+  return "altro"
+
+
+def is_cash_payment_marker(value: Any) -> bool:
+  """True se DATA PAGAMENTO indica un pagamento fuori bonifico (contanti/carta/…).
+
+  Una data, anche da sola, è la data del bonifico: non è contanti.
+  """
+  return payment_cell_kind(value) in ("contanti", "carta")
 
 
 def list_cash_paid_document_rows(

@@ -629,7 +629,9 @@ function invoiceIsAligned(row) {
       'numero_in_movimento',
       'importo_in_movimento',
       'file_contanti',
+      'file_carta',
       'file_pagamenti',
+      'bonifico_data',
       'pagata_contanti',
       'score_auto',
       'saldo_fatture',
@@ -697,17 +699,17 @@ function bankInvoiceStatusCellValue(row, col) {
   if (col.id === 'invoice_number') return row?.invoice_number || '—'
   if (col.id === 'supplier_name') return row?.supplier_name || '—'
   if (col.id === 'bonifico_ref') {
-    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti' || row?.match_reason === 'pagata_contanti') return '—'
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_carta' || row?.match_reason === 'pagata_contanti') return '—'
     return row?.matched_movement?.bonifico_ref || '—'
   }
   if (col.id === 'doc_ref') {
-    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti' || row?.match_reason === 'pagata_contanti') return '—'
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_carta' || row?.match_reason === 'pagata_contanti') return '—'
     return row?.matched_movement?.bonifico_ref || row?.matched_movement?.doc_ref || '—'
   }
   if (col.id === 'beneficiary') {
     const m = row?.matched_movement
     // Contanti = match da file Pagamenti, non un beneficiario di bonifico
-    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_pagamenti' || row?.match_reason === 'pagata_contanti') {
+    if (row?.match_reason === 'file_contanti' || row?.match_reason === 'file_carta' || row?.match_reason === 'pagata_contanti') {
       return '—'
     }
     return m?.counterparty || m?.beneficiary || '—'
@@ -723,8 +725,9 @@ function bankInvoiceStatusCellValue(row, col) {
     if (row?.match_reason === 'bundle_fornitore') return '✔ Bonifico multi-fattura'
     if (row?.match_reason === 'score_auto') return '✔ Score ≥80'
     if (row?.match_reason === 'matched') return '✔ Riconciliata'
-    if (row?.match_reason === 'file_pagamenti') return '✔ File Pagamenti'
-    if (row?.match_reason === 'file_contanti') return '✔ Contanti/carta (file Pagamenti)'
+    if (row?.match_reason === 'file_pagamenti' || row?.match_reason === 'bonifico_data') return '✔ Bonifico'
+    if (row?.match_reason === 'file_contanti') return '✔ Contanti'
+    if (row?.match_reason === 'file_carta') return '✔ Carta'
     if (row?.match_reason === 'pagata_contanti') return '✔ Pagata in contanti'
     if (row?.match_reason === 'acconto') {
       const left = Number(row?.residuo) || 0
