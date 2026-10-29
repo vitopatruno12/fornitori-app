@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react'
 import { AnalisiLoadingBar } from './AnalisiShared.jsx'
+import { useOperatorTabletLight } from '../utils/operatorTabletLight.js'
+import { isOperatorStationMode } from '../utils/operatorMode.ts'
 
 const VIRTUALIZE_FROM = 48
 const ROW_H = 42
@@ -36,6 +38,7 @@ export default function WorkbookGrid({
   virtualize,
   plainCells = false,
 }) {
+  const lightCells = plainCells || (useOperatorTabletLight() && isOperatorStationMode())
   const showTotals = totals != null && typeof totalsLabel === 'function' && rows.length > 0
   const hasActions = Boolean(actionsHeader && typeof renderActions === 'function')
   const colSpan = columns.length + (hasActions ? 1 : 0)
@@ -47,8 +50,8 @@ export default function WorkbookGrid({
   const pendingScroll = useRef(0)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportH, setViewportH] = useState(480)
-  const overscanBefore = plainCells ? 2 : 6
-  const overscanAfter = plainCells ? 4 : 12
+  const overscanBefore = lightCells ? 2 : 6
+  const overscanAfter = lightCells ? 4 : 12
 
   const onScroll = useCallback((e) => {
     if (!useVirtual) return
@@ -147,15 +150,15 @@ export default function WorkbookGrid({
             <td
               key={col.id}
               data-label={col.label}
-              title={plainCells && !customCell && titleAttr ? titleAttr : undefined}
+              title={lightCells && !customCell && titleAttr ? titleAttr : undefined}
               className={[
                 col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
-                plainCells && !customCell ? plainClass : '',
+                lightCells && !customCell ? plainClass : '',
               ].filter(Boolean).join(' ')}
             >
               {customCell != null ? (
                 customCell
-              ) : plainCells ? (
+              ) : lightCells ? (
                 cellValueText
               ) : col.multiline ? (
                 <textarea
@@ -200,7 +203,7 @@ export default function WorkbookGrid({
       {!loading && (
         <div
           ref={setWrapNode}
-          className={plainCells
+          className={lightCells
             ? 'pagamenti-grid-wrap excel-wrap workbook-grid-wrap workbook-grid-wrap-light'
             : 'pagamenti-grid-wrap excel-wrap workbook-grid-wrap'}
           onScroll={onScroll}
@@ -270,7 +273,7 @@ export default function WorkbookGrid({
                     <td
                       key={`tot-${col.id}`}
                       data-label={col.label}
-                      className={plainCells ? [
+                      className={lightCells ? [
                         col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
                         'excel-cell',
                         'excel-cell-plain',
@@ -282,7 +285,7 @@ export default function WorkbookGrid({
                           : '',
                       ].filter(Boolean).join(' ') : (col.sticky === 'left' ? 'workbook-col-sticky-left' : '')}
                     >
-                      {plainCells ? totalsLabel(col.id, totals) : (
+                      {lightCells ? totalsLabel(col.id, totals) : (
                       <input
                         className={[
                           'excel-cell',
