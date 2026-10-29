@@ -3030,6 +3030,17 @@ select.form-control {
   /* sticky thead non funziona bene con border-collapse: collapse */
   border-collapse: separate;
   border-spacing: 0;
+  border-top: 1px solid #d1d5db;
+  border-left: 1px solid #d1d5db;
+}
+
+.prima-nota-movements-grid th,
+.prima-nota-movements-grid td,
+.prima-nota-movements-grid tr td:last-child,
+.prima-nota-movements-grid tr th:last-child,
+.workbook-grid.prima-nota-movements-grid td.excel-cell-plain {
+  border-right: 1px solid #d1d5db;
+  border-bottom: 1px solid #d1d5db;
 }
 
 .workbook-card-nested:has(.prima-nota-movements-grid) .pagamenti-grid-wrap {
