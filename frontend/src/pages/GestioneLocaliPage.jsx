@@ -4,6 +4,7 @@ import { downloadWorkbookAsExcel } from '../utils/pagamentiExcel.js'
 import {
   GAZZA_SALA_COLUMNS,
   GAZZA_SALA_FASCE,
+  GAZZA_SALA_STATUS_SELECT_OPTIONS,
   GAZZA_SALA_TABLE_COUNT,
   GAZZA_SALA_WORKBOOK_TITLE,
   addGazzaSalaPaidTotal,
@@ -215,6 +216,13 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     updateCell(tableId, 'status', value)
   }
 
+  function canMarkPaid(row) {
+    if (!row || row.status === 'pagato') return false
+    if (row.status === 'occupato' || row.status === 'conto' || row.status === 'chiuso') return true
+    const paid = Number(String(row.paid ?? '').replace(',', '.'))
+    return Number.isFinite(paid) && paid > 0
+  }
+
   function onSave() {
     persistRows(rows)
   }
@@ -253,8 +261,8 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
           Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso,{' '}
-          <strong className="gazza-sala-legend-conto">Conto</strong> giallo (in uscita),{' '}
-          <strong className="gazza-sala-legend-pagato">Pagato</strong> verde → aggiorna contatore e libera.
+          <strong className="gazza-sala-legend-conto">Conto</strong> giallo (in uscita). Usa il pulsante{' '}
+          <strong className="gazza-sala-legend-pagato">Pagato</strong> in Azioni (verde → contatore + libera).
           <em> Cancella</em> azzera anche il contatore.
         </p>
       </header>
@@ -331,7 +339,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
               {GAZZA_SALA_COLUMNS.map((col) => (
                 <col key={col.id} style={{ width: `${col.width}%` }} />
               ))}
-              <col style={{ width: '7%' }} />
+              <col style={{ width: '11%' }} />
             </colgroup>
             <thead>
               <tr>
@@ -403,7 +411,10 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                             }
                             aria-label={`${col.label} tavolo ${row.table_id}`}
                           >
-                            {(col.options || []).map((opt) => (
+                            {(col.id === 'status'
+                              ? GAZZA_SALA_STATUS_SELECT_OPTIONS
+                              : col.options || []
+                            ).map((opt) => (
                               <option key={opt.value || 'empty'} value={opt.value}>
                                 {opt.label}
                               </option>
@@ -439,15 +450,26 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                     )
                   })}
                   <td className="gazza-sala-actions-col">
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm gazza-sala-clear-btn"
-                      onClick={() => clearTableRow(row.table_id)}
-                      disabled={!gazzaSalaRowHasData(row)}
-                      title={`Cancella dati tavolo ${row.table_id}`}
-                    >
-                      Cancella
-                    </button>
+                    <div className="gazza-sala-actions-btns">
+                      <button
+                        type="button"
+                        className="btn btn-sm gazza-sala-paid-btn"
+                        onClick={() => markTablePaid(row.table_id)}
+                        disabled={!canMarkPaid(row)}
+                        title={`Segna pagato tavolo ${row.table_id}`}
+                      >
+                        Pagato
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm gazza-sala-clear-btn"
+                        onClick={() => clearTableRow(row.table_id)}
+                        disabled={!gazzaSalaRowHasData(row)}
+                        title={`Cancella dati tavolo ${row.table_id}`}
+                      >
+                        Cancella
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

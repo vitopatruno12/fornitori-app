@@ -19,6 +19,11 @@ export const GAZZA_SALA_STATUS_OPTIONS = [
   { value: 'chiuso', label: 'Chiuso' },
 ]
 
+/** Stati selezionabili nel menu (Pagato è un pulsante in Azioni). */
+export const GAZZA_SALA_STATUS_SELECT_OPTIONS = GAZZA_SALA_STATUS_OPTIONS.filter(
+  (o) => o.value !== 'pagato',
+)
+
 /** Classe riga per colore stato tavolo. */
 export function gazzaSalaStatusRowClass(status) {
   switch (String(status || '').trim()) {

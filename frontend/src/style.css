@@ -1859,11 +1859,33 @@ select.form-control {
   padding: 0.25rem 0.2rem;
 }
 
-.gazza-sala-grid .gazza-sala-clear-btn {
+.gazza-sala-actions-btns {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.gazza-sala-grid .gazza-sala-clear-btn,
+.gazza-sala-grid .gazza-sala-paid-btn {
   min-height: 2rem;
   padding: 0.2rem 0.45rem;
   font-size: 0.72rem;
   white-space: nowrap;
+}
+
+.gazza-sala-grid .gazza-sala-paid-btn {
+  background: #16a34a;
+  border-color: #15803d;
+  color: #fff;
+}
+
+.gazza-sala-grid .gazza-sala-paid-btn:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.gazza-sala-grid .gazza-sala-paid-btn:disabled {
+  opacity: 0.45;
 }
 
 .gazza-sala-legend-occupato { color: #b91c1c; }
