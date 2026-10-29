@@ -7740,6 +7740,54 @@ select.form-control {
   padding: 0 0.75rem 0.75rem;
 }
 
+.pn-tablet-table-open {
+  margin: 0.25rem 1rem 1.25rem;
+  padding: 1.25rem 1rem 1.35rem;
+  border: 1px solid var(--border, rgba(15, 76, 92, 0.16));
+  border-radius: 14px;
+  background: #f7fbfc;
+  text-align: center;
+}
+
+.pn-tablet-table-open-lead {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  line-height: 1.4;
+}
+
+.pn-tablet-table-open-btn {
+  min-width: 14rem;
+  min-height: 3.1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.pn-table-pdf-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.pn-table-pdf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  background: #0f4c5c;
+  color: #fff;
+}
+
+.pn-table-pdf-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
 .operator-station-band-inner {
   width: 100%;
   max-width: 1440px;
