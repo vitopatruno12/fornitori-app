@@ -122,15 +122,6 @@ export const GAZZA_SALA_COLUMNS = [
     inputType: 'text',
   },
   {
-    id: 'paid_total',
-    label: 'Contatore €',
-    width: 10,
-    fluid: true,
-    numeric: true,
-    readonly: true,
-    emphasis: true,
-  },
-  {
     id: 'payment_type',
     label: 'Metodo pagamento',
     width: 11,
@@ -148,6 +139,15 @@ export const GAZZA_SALA_COLUMNS = [
     editable: true,
     inputType: 'number',
     step: '0.01',
+  },
+  {
+    id: 'paid_total',
+    label: 'Contatore €',
+    width: 10,
+    fluid: true,
+    numeric: true,
+    readonly: true,
+    emphasis: true,
   },
 ]
 

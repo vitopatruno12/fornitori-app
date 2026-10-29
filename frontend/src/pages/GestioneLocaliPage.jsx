@@ -444,15 +444,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                           value={row[col.id] ?? ''}
                           onChange={(e) => updateCell(row.table_id, col.id, e.target.value)}
                           aria-label={`${col.label} tavolo ${row.table_id}`}
-                          placeholder={
-                            col.id === 'reservation_name'
-                              ? 'nome prenotazione'
-                              : col.id === 'invoice_number'
-                                ? 'es. FT-123'
-                                : col.id === 'waiter'
-                                  ? 'nome cameriere'
-                                  : undefined
-                          }
                         />
                       </td>
                     )
