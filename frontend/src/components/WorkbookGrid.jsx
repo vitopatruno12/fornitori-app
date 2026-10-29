@@ -43,12 +43,24 @@ export default function WorkbookGrid({
     virtualize === true || (virtualize !== false && Array.isArray(rows) && rows.length >= VIRTUALIZE_FROM)
 
   const wrapRef = useRef(null)
+  const scrollRaf = useRef(0)
+  const pendingScroll = useRef(0)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportH, setViewportH] = useState(480)
+  const overscanBefore = plainCells ? 2 : 6
+  const overscanAfter = plainCells ? 4 : 12
 
   const onScroll = useCallback((e) => {
     if (!useVirtual) return
-    setScrollTop(e.currentTarget.scrollTop)
+    pendingScroll.current = e.currentTarget.scrollTop
+    if (scrollRaf.current) return
+    scrollRaf.current = requestAnimationFrame(() => {
+      scrollRaf.current = 0
+      const next = pendingScroll.current
+      setScrollTop((prev) => (
+        Math.floor(prev / ROW_H) === Math.floor(next / ROW_H) ? prev : next
+      ))
+    })
   }, [useVirtual])
 
   const setWrapNode = useCallback((node) => {
@@ -65,10 +77,14 @@ export default function WorkbookGrid({
     return () => ro.disconnect()
   }, [useVirtual, rows.length])
 
+  React.useEffect(() => () => {
+    if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current)
+  }, [])
+
   const start = useVirtual
-    ? Math.max(0, Math.floor(scrollTop / ROW_H) - 6)
+    ? Math.max(0, Math.floor(scrollTop / ROW_H) - overscanBefore)
     : 0
-  const visibleCount = useVirtual ? Math.ceil(viewportH / ROW_H) + 12 : rows.length
+  const visibleCount = useVirtual ? Math.ceil(viewportH / ROW_H) + overscanBefore + overscanAfter : rows.length
   const end = useVirtual ? Math.min(rows.length, start + visibleCount) : rows.length
   const visibleRows = useMemo(
     () => (useVirtual ? rows.slice(start, end) : rows),
@@ -126,19 +142,21 @@ export default function WorkbookGrid({
           const multilineRows = col.multiline
             ? Math.min(10, Math.max(2, String(cellValueText).split('\n').length))
             : undefined
-          const plainClass = plainCells ? `${cellClasses} excel-cell-plain` : cellClasses
+          const plainClass = `${cellClasses} excel-cell-plain`
           return (
             <td
               key={col.id}
               data-label={col.label}
-              className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+              title={plainCells && !customCell && titleAttr ? titleAttr : undefined}
+              className={[
+                col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                plainCells && !customCell ? plainClass : '',
+              ].filter(Boolean).join(' ')}
             >
               {customCell != null ? (
                 customCell
               ) : plainCells ? (
-                <span className={plainClass} title={titleAttr || undefined}>
-                  {cellValueText}
-                </span>
+                cellValueText
               ) : col.multiline ? (
                 <textarea
                   className={cellClasses}
@@ -182,7 +200,9 @@ export default function WorkbookGrid({
       {!loading && (
         <div
           ref={setWrapNode}
-          className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap"
+          className={plainCells
+            ? 'pagamenti-grid-wrap excel-wrap workbook-grid-wrap workbook-grid-wrap-light'
+            : 'pagamenti-grid-wrap excel-wrap workbook-grid-wrap'}
           onScroll={onScroll}
         >
           <table
@@ -250,26 +270,19 @@ export default function WorkbookGrid({
                     <td
                       key={`tot-${col.id}`}
                       data-label={col.label}
-                      className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
+                      className={plainCells ? [
+                        col.sticky === 'left' ? 'workbook-col-sticky-left' : '',
+                        'excel-cell',
+                        'excel-cell-plain',
+                        'pagamenti-cell-readonly',
+                        col.numeric ? 'excel-cell-num' : '',
+                        'workbook-cell-total',
+                        typeof getTotalsCellClassName === 'function'
+                          ? getTotalsCellClassName(col.id, totals)
+                          : '',
+                      ].filter(Boolean).join(' ') : (col.sticky === 'left' ? 'workbook-col-sticky-left' : '')}
                     >
-                      {plainCells ? (
-                        <span
-                          className={[
-                            'excel-cell',
-                            'excel-cell-plain',
-                            'pagamenti-cell-readonly',
-                            col.numeric ? 'excel-cell-num' : '',
-                            'workbook-cell-total',
-                            typeof getTotalsCellClassName === 'function'
-                              ? getTotalsCellClassName(col.id, totals)
-                              : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {totalsLabel(col.id, totals)}
-                        </span>
-                      ) : (
+                      {plainCells ? totalsLabel(col.id, totals) : (
                       <input
                         className={[
                           'excel-cell',

@@ -2773,7 +2773,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             totals={movementPeriodTotals}
             gridClassName={tabletTable ? 'prima-nota-movements-grid workbook-grid-light' : 'prima-nota-movements-grid'}
             plainCells={tabletTable}
-            virtualize={tabletTable ? true : undefined}
             loading={loading}
             emptyMessage={
               rowsWithLedger.rows.length === 0
