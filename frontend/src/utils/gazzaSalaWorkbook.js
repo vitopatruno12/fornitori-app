@@ -101,7 +101,7 @@ export const GAZZA_SALA_COLUMNS = [
   {
     id: 'note',
     label: 'Note',
-    width: 17,
+    width: 12,
     fluid: true,
     editable: true,
     inputType: 'text',
@@ -109,7 +109,7 @@ export const GAZZA_SALA_COLUMNS = [
   {
     id: 'payment_type',
     label: 'Metodo pagamento',
-    width: 12,
+    width: 11,
     fluid: true,
     editable: true,
     inputType: 'select',
@@ -118,7 +118,7 @@ export const GAZZA_SALA_COLUMNS = [
   {
     id: 'paid',
     label: 'Conto totale pagato €',
-    width: 12,
+    width: 11,
     fluid: true,
     numeric: true,
     editable: true,
@@ -147,9 +147,114 @@ function emptyTableRow(tableId) {
   }
 }
 
+/** Una riga tavolo vuota (stato Libero). */
+export function createEmptyGazzaSalaRow(tableId) {
+  return emptyTableRow(tableId)
+}
+
 /** 15 righe fisse (tavoli 1–15). */
 export function createEmptyGazzaSalaRows() {
   return Array.from({ length: GAZZA_SALA_TABLE_COUNT }, (_, i) => emptyTableRow(i + 1))
+}
+
+/** True se la riga ha dati oltre ID/stato libero. */
+export function gazzaSalaRowHasData(row) {
+  if (!row) return false
+  if (row.status && row.status !== 'libero') return true
+  return ['clients', 'menu', 'invoice_number', 'payment_type', 'paid', 'waiter', 'note'].some(
+    (key) => row[key] != null && String(row[key]).trim() !== '',
+  )
+}
+
+function rowToExportValues(row) {
+  return GAZZA_SALA_COLUMNS.map((col) => {
+    if (col.id === 'status') return statusLabel(row.status)
+    if (col.id === 'payment_type') return paymentLabel(row.payment_type) || null
+    if (col.id === 'clients' || col.id === 'paid') {
+      const v = num(row[col.id])
+      return row[col.id] === '' || row[col.id] == null ? null : v
+    }
+    const text = row[col.id]
+    return text == null || text === '' ? null : text
+  })
+}
+
+/**
+ * Excel di un singolo tavolo appena segnato come pagato.
+ * @param {Record<string, unknown>} row
+ * @param {{ date: string, fascia: string, paidAt?: string }} meta
+ */
+export function gazzaSalaPaidRowToAoa(row, meta) {
+  const paidAt = meta.paidAt || new Date().toISOString()
+  const snapshot = { ...row, status: 'pagato' }
+  return [
+    [
+      'Gazza Ladra — Tavolo pagato',
+      meta.date || '',
+      meta.fascia === 'cena' ? 'Cena' : 'Pranzo',
+      paidAt,
+    ],
+    [],
+    [...GAZZA_SALA_COLUMNS.map((c) => c.label), 'Pagato alle'],
+    [...rowToExportValues(snapshot), paidAt],
+  ]
+}
+
+/** Archivia i pagati del giorno in localStorage. */
+export function gazzaSalaPaidArchiveKey(date) {
+  return `gazza_sala_paid_archive:${date}`
+}
+
+/**
+ * @param {string} date
+ * @param {Record<string, unknown>} entry
+ */
+export function appendGazzaSalaPaidArchive(date, entry) {
+  try {
+    const key = gazzaSalaPaidArchiveKey(date)
+    const raw = localStorage.getItem(key)
+    const list = raw ? JSON.parse(raw) : []
+    const next = Array.isArray(list) ? list : []
+    next.push(entry)
+    localStorage.setItem(key, JSON.stringify(next))
+    return next
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Excel con tutti i tavoli pagati archiviati per la data.
+ * @param {string} date
+ * @param {Array<Record<string, unknown>>} [entries]
+ */
+export function gazzaSalaPaidArchiveToAoa(date, entries) {
+  let list = entries
+  if (!list) {
+    try {
+      const raw = localStorage.getItem(gazzaSalaPaidArchiveKey(date))
+      list = raw ? JSON.parse(raw) : []
+    } catch {
+      list = []
+    }
+  }
+  const rows = Array.isArray(list) ? list : []
+  const headers = [
+    'Data',
+    'Fascia',
+    'Pagato alle',
+    ...GAZZA_SALA_COLUMNS.map((c) => c.label),
+  ]
+  const body = rows.map((entry) => {
+    const row = entry.row || entry
+    return [
+      entry.date || date || '',
+      entry.fascia === 'cena' ? 'Cena' : 'Pranzo',
+      entry.paidAt || '',
+      ...rowToExportValues({ ...row, status: row.status || 'pagato' }),
+    ]
+  })
+  return [[`Gazza Ladra — Pagati ${date || ''}`], [], headers, ...body]
 }
 
 /**
@@ -284,18 +389,7 @@ export function gazzaSalaStorageKey(date, fascia) {
  */
 export function gazzaSalaRowsToAoa(rows, meta) {
   const headers = GAZZA_SALA_COLUMNS.map((c) => c.label)
-  const body = normalizeGazzaSalaRows(rows).map((row) =>
-    GAZZA_SALA_COLUMNS.map((col) => {
-      if (col.id === 'status') return statusLabel(row.status)
-      if (col.id === 'payment_type') return paymentLabel(row.payment_type) || null
-      if (col.id === 'clients' || col.id === 'paid') {
-        const v = num(row[col.id])
-        return row[col.id] === '' || row[col.id] == null ? null : v
-      }
-      const text = row[col.id]
-      return text == null || text === '' ? null : text
-    }),
-  )
+  const body = normalizeGazzaSalaRows(rows).map((row) => rowToExportValues(row))
   const totals = gazzaSalaTotals(rows)
   const totRow = GAZZA_SALA_COLUMNS.map((col) => {
     const label = gazzaSalaTotalsLabel(col.id, totals)

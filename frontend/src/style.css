@@ -1853,6 +1853,19 @@ select.form-control {
   position: static;
 }
 
+.gazza-sala-grid .gazza-sala-actions-col {
+  text-align: center;
+  vertical-align: middle;
+  padding: 0.25rem 0.2rem;
+}
+
+.gazza-sala-grid .gazza-sala-clear-btn {
+  min-height: 2rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 .workbook-card-nested {
   margin-top: 1rem;
   border: 1px solid var(--border);

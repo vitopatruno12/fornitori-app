@@ -6,8 +6,13 @@ import {
   GAZZA_SALA_FASCE,
   GAZZA_SALA_TABLE_COUNT,
   GAZZA_SALA_WORKBOOK_TITLE,
+  appendGazzaSalaPaidArchive,
+  createEmptyGazzaSalaRow,
   createEmptyGazzaSalaRows,
   gazzaSalaCellDisplay,
+  gazzaSalaPaidArchiveToAoa,
+  gazzaSalaPaidRowToAoa,
+  gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
   gazzaSalaStorageKey,
   gazzaSalaTotals,
@@ -141,6 +146,22 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     loadSheet(date, fascia)
   }, [date, fascia, loadSheet])
 
+  function persistRows(nextRows, { markDirty = false } = {}) {
+    try {
+      const payload = {
+        date,
+        fascia,
+        tables: nextRows,
+        savedAt: new Date().toISOString(),
+      }
+      localStorage.setItem(gazzaSalaStorageKey(date, fascia), JSON.stringify(payload))
+      setSavedAt(payload.savedAt)
+      setDirty(Boolean(markDirty))
+    } catch {
+      setDirty(true)
+    }
+  }
+
   function updateCell(tableId, field, value) {
     setRows((prev) =>
       prev.map((row) => (row.table_id === tableId ? { ...row, [field]: value } : row)),
@@ -148,20 +169,57 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     setDirty(true)
   }
 
-  function onSave() {
-    try {
-      const payload = {
-        date,
-        fascia,
-        tables: rows,
-        savedAt: new Date().toISOString(),
-      }
-      localStorage.setItem(gazzaSalaStorageKey(date, fascia), JSON.stringify(payload))
-      setSavedAt(payload.savedAt)
-      setDirty(false)
-    } catch {
-      /* ignore quota */
+  function clearTableRow(tableId) {
+    const current = rows.find((r) => r.table_id === tableId)
+    if (!gazzaSalaRowHasData(current)) return
+    if (!window.confirm(`Cancellare tutti i dati del tavolo ${tableId}?`)) return
+    const nextRows = rows.map((row) =>
+      row.table_id === tableId ? createEmptyGazzaSalaRow(tableId) : row,
+    )
+    setRows(nextRows)
+    persistRows(nextRows)
+  }
+
+  function markTablePaid(tableId) {
+    const current = rows.find((r) => Number(r.table_id) === Number(tableId))
+    if (!current) return
+    const paidAt = new Date().toISOString()
+    const snapshot = { ...current, status: 'pagato' }
+
+    downloadWorkbookAsExcel({
+      title: `Gazza_Ladra_Tavolo_${tableId}_pagato_${date}_${fascia}`,
+      sheets: [
+        {
+          name: `Tavolo ${tableId}`,
+          rows: gazzaSalaPaidRowToAoa(snapshot, { date, fascia, paidAt }),
+        },
+      ],
+    })
+
+    appendGazzaSalaPaidArchive(date, {
+      date,
+      fascia,
+      paidAt,
+      row: snapshot,
+    })
+
+    const nextRows = rows.map((row) =>
+      Number(row.table_id) === Number(tableId) ? createEmptyGazzaSalaRow(tableId) : row,
+    )
+    setRows(nextRows)
+    persistRows(nextRows)
+  }
+
+  function onStatusChange(tableId, value) {
+    if (value === 'pagato') {
+      markTablePaid(tableId)
+      return
     }
+    updateCell(tableId, 'status', value)
+  }
+
+  function onSave() {
+    persistRows(rows)
   }
 
   function onResetSheet() {
@@ -172,8 +230,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     ) {
       return
     }
-    setRows(createEmptyGazzaSalaRows())
-    setDirty(true)
+    const nextRows = createEmptyGazzaSalaRows()
+    setRows(nextRows)
+    persistRows(nextRows, { markDirty: false })
   }
 
   function onExportExcel() {
@@ -181,6 +240,14 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     downloadWorkbookAsExcel({
       title: `Gazza_Ladra_Sala_${date}_${fascia}`,
       sheets: [{ name: `Sala ${fasciaLabel}`, rows: aoa }],
+    })
+  }
+
+  function onExportPaidExcel() {
+    const aoa = gazzaSalaPaidArchiveToAoa(date)
+    downloadWorkbookAsExcel({
+      title: `Gazza_Ladra_Pagati_${date}`,
+      sheets: [{ name: `Pagati ${date}`, rows: aoa }],
     })
   }
 
@@ -196,10 +263,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
-          Modello Excel della sala ({GAZZA_SALA_TABLE_COUNT} tavoli): ID tavolo, clienti, menu,
-          fattura, pagamenti e cameriere. Intestazione <strong>verde</strong>, righe dati bianche,
-          riga totali <strong>gialla</strong>. Salvataggio sul dispositivo finché non c’è API / POS
-          Poste.
+          Modello Excel della sala ({GAZZA_SALA_TABLE_COUNT} tavoli). Con <strong>Pagato</strong> il
+          tavolo viene esportato in Excel, archiviato e liberato in automatico. Usa{' '}
+          <em>Cancella</em> sulla riga per azzerare i dati senza esportare.
         </p>
       </header>
 
@@ -237,6 +303,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
             <button type="button" className="btn btn-secondary btn-sm" onClick={onExportExcel}>
               Esporta Excel
             </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onExportPaidExcel}>
+              Esporta pagati
+            </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={onResetSheet}>
               Azzera foglio
             </button>
@@ -267,6 +336,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
               {GAZZA_SALA_COLUMNS.map((col) => (
                 <col key={col.id} style={{ width: `${col.width}%` }} />
               ))}
+              <col style={{ width: '7%' }} />
             </colgroup>
             <thead>
               <tr>
@@ -284,6 +354,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                     {col.label}
                   </th>
                 ))}
+                <th className="pagamenti-hl-green gazza-sala-actions-col">Azioni</th>
               </tr>
             </thead>
             <tbody>
@@ -319,7 +390,11 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                           <select
                             className="excel-cell excel-cell-select"
                             value={row[col.id] ?? ''}
-                            onChange={(e) => updateCell(row.table_id, col.id, e.target.value)}
+                            onChange={(e) =>
+                              col.id === 'status'
+                                ? onStatusChange(row.table_id, e.target.value)
+                                : updateCell(row.table_id, col.id, e.target.value)
+                            }
                             aria-label={`${col.label} tavolo ${row.table_id}`}
                           >
                             {(col.options || []).map((opt) => (
@@ -357,6 +432,17 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                       </td>
                     )
                   })}
+                  <td className="gazza-sala-actions-col">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm gazza-sala-clear-btn"
+                      onClick={() => clearTableRow(row.table_id)}
+                      disabled={!gazzaSalaRowHasData(row)}
+                      title={`Cancella dati tavolo ${row.table_id}`}
+                    >
+                      Cancella
+                    </button>
+                  </td>
                 </tr>
               ))}
               <tr className="workbook-row-totals gazza-sala-totals-row">
@@ -385,6 +471,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                     />
                   </td>
                 ))}
+                <td className="pagamenti-hl-yellow gazza-sala-actions-col" />
               </tr>
             </tbody>
           </table>
@@ -393,8 +480,8 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
 
       <p className="analisi-note" style={{ marginTop: '0.85rem', maxWidth: '48rem' }}>
         Ogni fascia (pranzo / cena) ha un foglio separato con i {GAZZA_SALA_TABLE_COUNT} tavoli.
-        Usa <em>Esporta Excel</em> per scaricare il modello compilato; il salvataggio in app resta
-        locale al browser.
+        A ogni <strong>Pagato</strong> parte un Excel del tavolo e i dati restano anche in{' '}
+        <em>Esporta pagati</em> (archivio del giorno).
       </p>
     </div>
   )
