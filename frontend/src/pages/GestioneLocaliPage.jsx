@@ -6,12 +6,10 @@ import {
   GAZZA_SALA_FASCE,
   GAZZA_SALA_TABLE_COUNT,
   GAZZA_SALA_WORKBOOK_TITLE,
-  appendGazzaSalaPaidArchive,
+  addGazzaSalaPaidTotal,
   createEmptyGazzaSalaRow,
   createEmptyGazzaSalaRows,
   gazzaSalaCellDisplay,
-  gazzaSalaPaidArchiveToAoa,
-  gazzaSalaPaidRowToAoa,
   gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
   gazzaSalaStorageKey,
@@ -172,7 +170,13 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
   function clearTableRow(tableId) {
     const current = rows.find((r) => r.table_id === tableId)
     if (!gazzaSalaRowHasData(current)) return
-    if (!window.confirm(`Cancellare tutti i dati del tavolo ${tableId}?`)) return
+    if (
+      !window.confirm(
+        `Cancellare tutti i dati del tavolo ${tableId}, compreso il contatore incassi?`,
+      )
+    ) {
+      return
+    }
     const nextRows = rows.map((row) =>
       row.table_id === tableId ? createEmptyGazzaSalaRow(tableId) : row,
     )
@@ -183,28 +187,11 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
   function markTablePaid(tableId) {
     const current = rows.find((r) => Number(r.table_id) === Number(tableId))
     if (!current) return
-    const paidAt = new Date().toISOString()
-    const snapshot = { ...current, status: 'pagato' }
-
-    downloadWorkbookAsExcel({
-      title: `Gazza_Ladra_Tavolo_${tableId}_pagato_${date}_${fascia}`,
-      sheets: [
-        {
-          name: `Tavolo ${tableId}`,
-          rows: gazzaSalaPaidRowToAoa(snapshot, { date, fascia, paidAt }),
-        },
-      ],
-    })
-
-    appendGazzaSalaPaidArchive(date, {
-      date,
-      fascia,
-      paidAt,
-      row: snapshot,
-    })
-
+    const nextTotal = addGazzaSalaPaidTotal(current.paid_total, current.paid)
     const nextRows = rows.map((row) =>
-      Number(row.table_id) === Number(tableId) ? createEmptyGazzaSalaRow(tableId) : row,
+      Number(row.table_id) === Number(tableId)
+        ? createEmptyGazzaSalaRow(tableId, { keepPaidTotal: nextTotal })
+        : row,
     )
     setRows(nextRows)
     persistRows(nextRows)
@@ -243,14 +230,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     })
   }
 
-  function onExportPaidExcel() {
-    const aoa = gazzaSalaPaidArchiveToAoa(date)
-    downloadWorkbookAsExcel({
-      title: `Gazza_Ladra_Pagati_${date}`,
-      sheets: [{ name: `Pagati ${date}`, rows: aoa }],
-    })
-  }
-
   return (
     <div className="page">
       <header className="page-header-block" style={{ marginBottom: '1rem' }}>
@@ -263,9 +242,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
-          Modello Excel della sala ({GAZZA_SALA_TABLE_COUNT} tavoli). Con <strong>Pagato</strong> il
-          tavolo viene esportato in Excel, archiviato e liberato in automatico. Usa{' '}
-          <em>Cancella</em> sulla riga per azzerare i dati senza esportare.
+          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli). Con <strong>Pagato</strong> l’importo del
+          conto si somma nel <strong>Contatore €</strong> del tavolo e il tavolo torna libero per un
+          nuovo conto. <em>Cancella</em> azzera anche il contatore.
         </p>
       </header>
 
@@ -303,9 +282,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
             <button type="button" className="btn btn-secondary btn-sm" onClick={onExportExcel}>
               Esporta Excel
             </button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onExportPaidExcel}>
-              Esporta pagati
-            </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={onResetSheet}>
               Azzera foglio
             </button>
@@ -320,7 +296,15 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           {' · '}
           Fatture: <strong>{totals.invoices}</strong>
           {' · '}
-          Conto totale pagato:{' '}
+          Contatori tavoli:{' '}
+          <strong>
+            {totals.paidTotal
+              ? totals.paidTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })
+              : '0,00'}{' '}
+            €
+          </strong>
+          {' · '}
+          Conti aperti:{' '}
           <strong>
             {totals.paid ? totals.paid.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'} €
           </strong>
@@ -480,8 +464,8 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
 
       <p className="analisi-note" style={{ marginTop: '0.85rem', maxWidth: '48rem' }}>
         Ogni fascia (pranzo / cena) ha un foglio separato con i {GAZZA_SALA_TABLE_COUNT} tavoli.
-        A ogni <strong>Pagato</strong> parte un Excel del tavolo e i dati restano anche in{' '}
-        <em>Esporta pagati</em> (archivio del giorno).
+        Il <strong>Contatore €</strong> resta sul tavolo tra un conto e l’altro; si azzera solo con
+        Cancella o Azzera foglio.
       </p>
     </div>
   )

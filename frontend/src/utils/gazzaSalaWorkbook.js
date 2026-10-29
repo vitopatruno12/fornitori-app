@@ -99,12 +99,13 @@ export const GAZZA_SALA_COLUMNS = [
     inputType: 'text',
   },
   {
-    id: 'note',
-    label: 'Note',
-    width: 12,
+    id: 'paid_total',
+    label: 'Contatore €',
+    width: 10,
     fluid: true,
-    editable: true,
-    inputType: 'text',
+    numeric: true,
+    readonly: true,
+    emphasis: true,
   },
   {
     id: 'payment_type',
@@ -133,7 +134,12 @@ export function headerToneClass(tone) {
   return ''
 }
 
-function emptyTableRow(tableId) {
+function emptyTableRow(tableId, paidTotal = '') {
+  const totalNum = Number(String(paidTotal ?? '').replace(',', '.'))
+  const paid_total =
+    paidTotal !== '' && paidTotal != null && Number.isFinite(totalNum) && totalNum > 0
+      ? String(Math.round(totalNum * 100) / 100)
+      : ''
   return {
     table_id: tableId,
     status: 'libero',
@@ -143,13 +149,19 @@ function emptyTableRow(tableId) {
     payment_type: '',
     paid: '',
     waiter: '',
-    note: '',
+    paid_total,
   }
 }
 
-/** Una riga tavolo vuota (stato Libero). */
-export function createEmptyGazzaSalaRow(tableId) {
-  return emptyTableRow(tableId)
+/** Una riga tavolo vuota (stato Libero). Opzionale: conserva il contatore incassi. */
+export function createEmptyGazzaSalaRow(tableId, { keepPaidTotal } = {}) {
+  return emptyTableRow(tableId, keepPaidTotal ?? '')
+}
+
+/** Somma contatore + importo conto (2 decimali). */
+export function addGazzaSalaPaidTotal(currentTotal, paidAmount) {
+  const next = Math.round((num(currentTotal) + num(paidAmount)) * 100) / 100
+  return next > 0 ? String(next) : ''
 }
 
 /** 15 righe fisse (tavoli 1–15). */
@@ -161,7 +173,7 @@ export function createEmptyGazzaSalaRows() {
 export function gazzaSalaRowHasData(row) {
   if (!row) return false
   if (row.status && row.status !== 'libero') return true
-  return ['clients', 'menu', 'invoice_number', 'payment_type', 'paid', 'waiter', 'note'].some(
+  return ['clients', 'menu', 'invoice_number', 'payment_type', 'paid', 'waiter', 'paid_total'].some(
     (key) => row[key] != null && String(row[key]).trim() !== '',
   )
 }
@@ -170,7 +182,7 @@ function rowToExportValues(row) {
   return GAZZA_SALA_COLUMNS.map((col) => {
     if (col.id === 'status') return statusLabel(row.status)
     if (col.id === 'payment_type') return paymentLabel(row.payment_type) || null
-    if (col.id === 'clients' || col.id === 'paid') {
+    if (col.id === 'clients' || col.id === 'paid' || col.id === 'paid_total') {
       const v = num(row[col.id])
       return row[col.id] === '' || row[col.id] == null ? null : v
     }
@@ -274,8 +286,12 @@ export function normalizeGazzaSalaRows(saved) {
           : row.bill != null && String(row.bill).trim() !== ''
             ? String(row.bill)
             : ''
+      const paidTotalRaw =
+        row.paid_total != null && String(row.paid_total).trim() !== ''
+          ? row.paid_total
+          : ''
       byId.set(id, {
-        ...emptyTableRow(id),
+        ...emptyTableRow(id, paidTotalRaw),
         status: row.status || 'libero',
         clients: row.clients != null && row.clients !== '' ? String(row.clients) : '',
         menu: row.menu != null ? String(row.menu) : '',
@@ -283,7 +299,10 @@ export function normalizeGazzaSalaRows(saved) {
         payment_type: row.payment_type != null ? String(row.payment_type) : '',
         paid: row.paid != null && row.paid !== '' ? String(row.paid) : '',
         waiter: row.waiter != null ? String(row.waiter) : '',
-        note: row.note != null ? String(row.note) : '',
+        paid_total:
+          paidTotalRaw !== '' && num(paidTotalRaw) > 0
+            ? String(Math.round(num(paidTotalRaw) * 100) / 100)
+            : '',
       })
     }
   }
@@ -334,8 +353,10 @@ export function gazzaSalaCellDisplay(row, column) {
       return row.paid === '' || row.paid == null ? '' : String(row.paid)
     case 'waiter':
       return row.waiter != null ? String(row.waiter) : ''
-    case 'note':
-      return row.note != null ? String(row.note) : ''
+    case 'paid_total': {
+      const t = num(row.paid_total)
+      return t > 0 ? formatEur(t) : ''
+    }
     default:
       return ''
   }
@@ -345,6 +366,7 @@ export function gazzaSalaTotals(rows) {
   const list = Array.isArray(rows) ? rows : []
   const clients = list.reduce((s, r) => s + num(r.clients), 0)
   const paid = list.reduce((s, r) => s + num(r.paid), 0)
+  const paidTotal = list.reduce((s, r) => s + num(r.paid_total), 0)
   const invoices = list.filter(
     (r) => r.invoice_number != null && String(r.invoice_number).trim() !== '',
   ).length
@@ -354,6 +376,7 @@ export function gazzaSalaTotals(rows) {
     occupied,
     clients,
     paid,
+    paidTotal: Math.round(paidTotal * 100) / 100,
     invoices,
   }
 }
@@ -364,6 +387,7 @@ export function gazzaSalaTotalsLabel(columnId, totals) {
   if (columnId === 'clients') return String(totals.clients || '')
   if (columnId === 'invoice_number') return totals.invoices ? String(totals.invoices) : ''
   if (columnId === 'paid') return formatEur(totals.paid)
+  if (columnId === 'paid_total') return formatEur(totals.paidTotal)
   return ''
 }
 
@@ -394,6 +418,7 @@ export function gazzaSalaRowsToAoa(rows, meta) {
   const totRow = GAZZA_SALA_COLUMNS.map((col) => {
     const label = gazzaSalaTotalsLabel(col.id, totals)
     if (col.id === 'paid') return totals.paid || null
+    if (col.id === 'paid_total') return totals.paidTotal || null
     if (col.id === 'clients') return totals.clients || null
     if (col.id === 'invoice_number') return totals.invoices || null
     return label || null
