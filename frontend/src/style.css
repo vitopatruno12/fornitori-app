@@ -1866,6 +1866,45 @@ select.form-control {
   white-space: nowrap;
 }
 
+.gazza-sala-legend-occupato { color: #b91c1c; }
+.gazza-sala-legend-conto { color: #a16207; }
+.gazza-sala-legend-pagato { color: #15803d; }
+
+.gazza-sala-grid tr.gazza-sala-row-occupato .excel-cell,
+.gazza-sala-grid tr.gazza-sala-row-occupato .excel-cell-select,
+.gazza-sala-grid select.gazza-sala-row-occupato {
+  background: #fecaca !important;
+  border-color: #f87171;
+}
+
+.gazza-sala-grid tr.gazza-sala-row-conto .excel-cell,
+.gazza-sala-grid tr.gazza-sala-row-conto .excel-cell-select,
+.gazza-sala-grid select.gazza-sala-row-conto {
+  background: #fef08a !important;
+  border-color: #eab308;
+}
+
+.gazza-sala-grid tr.gazza-sala-row-pagato .excel-cell,
+.gazza-sala-grid tr.gazza-sala-row-pagato .excel-cell-select,
+.gazza-sala-grid select.gazza-sala-row-pagato {
+  background: #bbf7d0 !important;
+  border-color: #22c55e;
+  transition: background 0.25s ease;
+}
+
+.gazza-sala-grid tr.gazza-sala-row-libero .excel-cell,
+.gazza-sala-grid tr.gazza-sala-row-libero .excel-cell-select,
+.gazza-sala-grid select.gazza-sala-row-libero {
+  background: #f8fafc !important;
+}
+
+.gazza-sala-grid tr.gazza-sala-row-chiuso .excel-cell,
+.gazza-sala-grid tr.gazza-sala-row-chiuso .excel-cell-select,
+.gazza-sala-grid select.gazza-sala-row-chiuso {
+  background: #e2e8f0 !important;
+  border-color: #94a3b8;
+}
+
 .workbook-card-nested {
   margin-top: 1rem;
   border: 1px solid var(--border);

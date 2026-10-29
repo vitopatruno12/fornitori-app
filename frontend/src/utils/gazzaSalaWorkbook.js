@@ -19,6 +19,24 @@ export const GAZZA_SALA_STATUS_OPTIONS = [
   { value: 'chiuso', label: 'Chiuso' },
 ]
 
+/** Classe riga per colore stato tavolo. */
+export function gazzaSalaStatusRowClass(status) {
+  switch (String(status || '').trim()) {
+    case 'occupato':
+      return 'gazza-sala-row-occupato'
+    case 'conto':
+      return 'gazza-sala-row-conto'
+    case 'pagato':
+      return 'gazza-sala-row-pagato'
+    case 'chiuso':
+      return 'gazza-sala-row-chiuso'
+    case 'libero':
+      return 'gazza-sala-row-libero'
+    default:
+      return ''
+  }
+}
+
 export const GAZZA_SALA_PAYMENT_OPTIONS = [
   { value: '', label: '—' },
   { value: 'contanti', label: 'Contanti' },

@@ -12,6 +12,7 @@ import {
   gazzaSalaCellDisplay,
   gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
+  gazzaSalaStatusRowClass,
   gazzaSalaStorageKey,
   gazzaSalaTotals,
   gazzaSalaTotalsLabel,
@@ -187,14 +188,23 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
   function markTablePaid(tableId) {
     const current = rows.find((r) => Number(r.table_id) === Number(tableId))
     if (!current) return
-    const nextTotal = addGazzaSalaPaidTotal(current.paid_total, current.paid)
-    const nextRows = rows.map((row) =>
-      Number(row.table_id) === Number(tableId)
-        ? createEmptyGazzaSalaRow(tableId, { keepPaidTotal: nextTotal })
-        : row,
+    // Mostra subito il verde "Pagato", poi aggiorna contatore e libera.
+    const payingRows = rows.map((row) =>
+      Number(row.table_id) === Number(tableId) ? { ...row, status: 'pagato' } : row,
     )
-    setRows(nextRows)
-    persistRows(nextRows)
+    setRows(payingRows)
+    const nextTotal = addGazzaSalaPaidTotal(current.paid_total, current.paid)
+    window.setTimeout(() => {
+      setRows((prev) => {
+        const nextRows = prev.map((row) =>
+          Number(row.table_id) === Number(tableId)
+            ? createEmptyGazzaSalaRow(tableId, { keepPaidTotal: nextTotal })
+            : row,
+        )
+        persistRows(nextRows)
+        return nextRows
+      })
+    }, 450)
   }
 
   function onStatusChange(tableId, value) {
@@ -242,9 +252,10 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
-          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli). Con <strong>Pagato</strong> l’importo del
-          conto si somma nel <strong>Contatore €</strong> del tavolo e il tavolo torna libero per un
-          nuovo conto. <em>Cancella</em> azzera anche il contatore.
+          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso,{' '}
+          <strong className="gazza-sala-legend-conto">Conto</strong> giallo (in uscita),{' '}
+          <strong className="gazza-sala-legend-pagato">Pagato</strong> verde → aggiorna contatore e libera.
+          <em> Cancella</em> azzera anche il contatore.
         </p>
       </header>
 
@@ -343,7 +354,12 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.table_id} className="workbook-grid-row">
+                <tr
+                  key={row.table_id}
+                  className={['workbook-grid-row', gazzaSalaStatusRowClass(row.status)]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
                   {GAZZA_SALA_COLUMNS.map((col) => {
                     const tdClass = col.sticky === 'left' ? 'workbook-col-sticky-left' : ''
 
@@ -372,7 +388,13 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                       return (
                         <td key={col.id} className={tdClass}>
                           <select
-                            className="excel-cell excel-cell-select"
+                            className={[
+                              'excel-cell',
+                              'excel-cell-select',
+                              col.id === 'status' ? gazzaSalaStatusRowClass(row.status) : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
                             value={row[col.id] ?? ''}
                             onChange={(e) =>
                               col.id === 'status'
