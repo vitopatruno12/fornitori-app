@@ -223,6 +223,15 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     return Number.isFinite(paid) && paid > 0
   }
 
+  function canMarkConto(row) {
+    if (!row || row.status === 'pagato' || row.status === 'conto') return false
+    return row.status === 'occupato' || row.status === 'chiuso' || gazzaSalaRowHasData(row)
+  }
+
+  function markTableConto(tableId) {
+    updateCell(tableId, 'status', 'conto')
+  }
+
   function onSave() {
     persistRows(rows)
   }
@@ -260,10 +269,9 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
         </h1>
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
-          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso,{' '}
-          <strong className="gazza-sala-legend-conto">Conto</strong> giallo (in uscita). Usa il pulsante{' '}
-          <strong className="gazza-sala-legend-pagato">Pagato</strong> in Azioni (verde → contatore + libera).
-          <em> Cancella</em> azzera anche il contatore.
+          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso.
+          In Azioni: <strong className="gazza-sala-legend-conto">Conto</strong> (giallo),{' '}
+          <strong className="gazza-sala-legend-pagato">Pagato</strong> (verde → contatore + libera), Cancella.
         </p>
       </header>
 
@@ -339,7 +347,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
               {GAZZA_SALA_COLUMNS.map((col) => (
                 <col key={col.id} style={{ width: `${col.width}%` }} />
               ))}
-              <col style={{ width: '11%' }} />
+              <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
               <tr>
@@ -437,8 +445,8 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                           onChange={(e) => updateCell(row.table_id, col.id, e.target.value)}
                           aria-label={`${col.label} tavolo ${row.table_id}`}
                           placeholder={
-                            col.id === 'menu'
-                              ? 'es. menù degustazione'
+                            col.id === 'reservation_name'
+                              ? 'nome prenotazione'
                               : col.id === 'invoice_number'
                                 ? 'es. FT-123'
                                 : col.id === 'waiter'
@@ -451,6 +459,15 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                   })}
                   <td className="gazza-sala-actions-col">
                     <div className="gazza-sala-actions-btns">
+                      <button
+                        type="button"
+                        className="btn btn-sm gazza-sala-conto-btn"
+                        onClick={() => markTableConto(row.table_id)}
+                        disabled={!canMarkConto(row)}
+                        title={`Segna conto (in uscita) tavolo ${row.table_id}`}
+                      >
+                        Conto
+                      </button>
                       <button
                         type="button"
                         className="btn btn-sm gazza-sala-paid-btn"

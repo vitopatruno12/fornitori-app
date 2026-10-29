@@ -19,9 +19,9 @@ export const GAZZA_SALA_STATUS_OPTIONS = [
   { value: 'chiuso', label: 'Chiuso' },
 ]
 
-/** Stati selezionabili nel menu (Pagato è un pulsante in Azioni). */
+/** Stati selezionabili nel menu (Conto e Pagato sono pulsanti in Azioni). */
 export const GAZZA_SALA_STATUS_SELECT_OPTIONS = GAZZA_SALA_STATUS_OPTIONS.filter(
-  (o) => o.value !== 'pagato',
+  (o) => o.value !== 'pagato' && o.value !== 'conto',
 )
 
 /** Classe riga per colore stato tavolo. */
@@ -98,8 +98,8 @@ export const GAZZA_SALA_COLUMNS = [
     step: '1',
   },
   {
-    id: 'menu',
-    label: 'Menu',
+    id: 'reservation_name',
+    label: 'Nome prenotazione',
     width: 14,
     fluid: true,
     editable: true,
@@ -167,7 +167,7 @@ function emptyTableRow(tableId, paidTotal = '') {
     table_id: tableId,
     status: 'libero',
     clients: '',
-    menu: '',
+    reservation_name: '',
     invoice_number: '',
     payment_type: '',
     paid: '',
@@ -196,9 +196,15 @@ export function createEmptyGazzaSalaRows() {
 export function gazzaSalaRowHasData(row) {
   if (!row) return false
   if (row.status && row.status !== 'libero') return true
-  return ['clients', 'menu', 'invoice_number', 'payment_type', 'paid', 'waiter', 'paid_total'].some(
-    (key) => row[key] != null && String(row[key]).trim() !== '',
-  )
+  return [
+    'clients',
+    'reservation_name',
+    'invoice_number',
+    'payment_type',
+    'paid',
+    'waiter',
+    'paid_total',
+  ].some((key) => row[key] != null && String(row[key]).trim() !== '')
 }
 
 function rowToExportValues(row) {
@@ -317,7 +323,12 @@ export function normalizeGazzaSalaRows(saved) {
         ...emptyTableRow(id, paidTotalRaw),
         status: row.status || 'libero',
         clients: row.clients != null && row.clients !== '' ? String(row.clients) : '',
-        menu: row.menu != null ? String(row.menu) : '',
+        reservation_name:
+          row.reservation_name != null && String(row.reservation_name).trim() !== ''
+            ? String(row.reservation_name)
+            : row.menu != null
+              ? String(row.menu)
+              : '',
         invoice_number: invoice,
         payment_type: row.payment_type != null ? String(row.payment_type) : '',
         paid: row.paid != null && row.paid !== '' ? String(row.paid) : '',
@@ -366,8 +377,8 @@ export function gazzaSalaCellDisplay(row, column) {
       return statusLabel(row.status)
     case 'clients':
       return row.clients === '' || row.clients == null ? '' : String(row.clients)
-    case 'menu':
-      return row.menu != null ? String(row.menu) : ''
+    case 'reservation_name':
+      return row.reservation_name != null ? String(row.reservation_name) : ''
     case 'invoice_number':
       return row.invoice_number != null ? String(row.invoice_number) : ''
     case 'payment_type':

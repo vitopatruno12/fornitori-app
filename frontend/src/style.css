@@ -1861,17 +1861,32 @@ select.form-control {
 
 .gazza-sala-actions-btns {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.25rem;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
 }
 
 .gazza-sala-grid .gazza-sala-clear-btn,
-.gazza-sala-grid .gazza-sala-paid-btn {
+.gazza-sala-grid .gazza-sala-paid-btn,
+.gazza-sala-grid .gazza-sala-conto-btn {
   min-height: 2rem;
-  padding: 0.2rem 0.45rem;
-  font-size: 0.72rem;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.gazza-sala-grid .gazza-sala-conto-btn {
+  background: #eab308;
+  border-color: #ca8a04;
+  color: #422006;
+}
+
+.gazza-sala-grid .gazza-sala-conto-btn:hover:not(:disabled) {
+  background: #ca8a04;
+  color: #fff;
 }
 
 .gazza-sala-grid .gazza-sala-paid-btn {
@@ -1884,6 +1899,7 @@ select.form-control {
   background: #15803d;
 }
 
+.gazza-sala-grid .gazza-sala-conto-btn:disabled,
 .gazza-sala-grid .gazza-sala-paid-btn:disabled {
   opacity: 0.45;
 }
