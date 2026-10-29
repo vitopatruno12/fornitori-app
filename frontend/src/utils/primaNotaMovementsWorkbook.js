@@ -11,7 +11,6 @@ export const PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE = 'Movimenti cassa'
 
 export const PRIMA_NOTA_MOVEMENTS_COLUMNS = [
   { id: 'row', label: '#', numeric: true, width: 44, sticky: 'left' },
-  { id: 'registro', label: 'Registro', width: 120, sticky: 'left' },
   { id: 'entry_date', label: 'Data', width: 110 },
   { id: 'description', label: 'Operazioni', width: 240, emphasis: true },
   { id: 'entrata', label: 'Cassa entrata', numeric: true, width: 110 },
