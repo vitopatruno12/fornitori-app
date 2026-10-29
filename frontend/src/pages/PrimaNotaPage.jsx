@@ -170,8 +170,8 @@ function normalizeDateRange(from, to) {
 export default function PrimaNotaPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
   const tabletLight = useOperatorTabletLight()
-  /** Vista schede su tablet: tutti gli attributi come la griglia desktop (nessun taglio colonne). */
-  const movementsCards = Boolean(operatorMode && tabletLight)
+  /** Postazione su tablet: stessa tabella Excel, celle di testo al posto di un campo per cella. */
+  const tabletTable = Boolean(operatorMode && tabletLight)
   const movementColumns = PRIMA_NOTA_MOVEMENTS_COLUMNS
   const operatorActivitySlug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
   const operatorPrimaNotaBackupScope = operatorStationId ? String(operatorStationId).trim().toLowerCase() : ''
@@ -279,7 +279,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   )
   const [backupBusy, setBackupBusy] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
-  const [movementsPdfUrl, setMovementsPdfUrl] = useState('')
   const [excelBusy, setExcelBusy] = useState(false)
   const [letturaDay, setLetturaDay] = useState(() => selectedDate)
   const [letturaContanti, setLetturaContanti] = useState('')
@@ -1658,19 +1657,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     }
   }
 
-  useEffect(() => {
-    return () => {
-      if (movementsPdfUrl) URL.revokeObjectURL(movementsPdfUrl)
-    }
-  }, [movementsPdfUrl])
-
-  function closeMovementsPdf() {
-    setMovementsPdfUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return ''
-    })
-  }
-
   function buildMovementsPdfBlob() {
     return generatePrimaNotaMovementsPdf({
       activityLabel: activeActivityLabel,
@@ -1678,32 +1664,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       rows: filteredMovementRows,
       totals: movementPeriodTotals,
     })
-  }
-
-  function handleOpenMovementsTable() {
-    if (!filteredMovementRows.length) {
-      setError('Nessun movimento nel periodo selezionato.')
-      return
-    }
-    setPdfBusy(true)
-    setError('')
-    try {
-      const blob = buildMovementsPdfBlob()
-      const url = URL.createObjectURL(blob)
-      const viewer = window.open(url, '_blank')
-      if (viewer) {
-        window.setTimeout(() => URL.revokeObjectURL(url), 120000)
-        return
-      }
-      setMovementsPdfUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return url
-      })
-    } catch (err) {
-      setError(err?.message || 'Errore nella generazione del PDF')
-    } finally {
-      setPdfBusy(false)
-    }
   }
 
   function handlePrintMovementsPdf() {
@@ -2723,7 +2683,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               </button>
             ) : null}
           </div>
-          {movementsCards ? null : (
+          {tabletTable ? null : (
           <div className="pagamenti-workbook-actions">
             <button
               type="button"
@@ -2755,7 +2715,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           disabled={loading || saving || backupBusy || pdfBusy || excelBusy || deletingDay || deletingRange}
           busy={backupBusy}
         />
-        {movementsCards ? null : (
+        {tabletTable ? null : (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 1rem 0.75rem' }}>
           Cerca un articolo o un importo senza scorrere l’elenco. Excel e PDF stampano le stesse righe e colonne visibili.
         </p>
@@ -2763,7 +2723,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
         {focusEntryMessage && (
           <div className="alert alert-danger" style={{ margin: '0 1rem 0.75rem' }}>{focusEntryMessage}</div>
         )}
-        {!movementsCards && !loading && !error && filteredMovementRows.length > 0 && (
+        {!tabletTable && !loading && !error && filteredMovementRows.length > 0 && (
           <div className="pn-movement-totals" style={{ margin: '0 1rem 0.75rem' }} aria-label="Totali movimenti nel periodo">
             <span className="pn-movement-totals-label">
               {summaryScope === 'day' ? 'Totali giornata' : 'Totali periodo'} ({movementPeriodTotals.count} movimenti)
@@ -2803,37 +2763,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </span>
           </div>
         )}
-        {movementsCards ? (
-          <div className="pn-tablet-table-open" aria-label="Apri la tabella completa in PDF">
-            <p className="pn-tablet-table-open-lead">
-              Tabella completa del periodo selezionato
-              {movementsSectionHeading ? `: ${movementsSectionHeading.replace(/^Movimenti /, '')}` : ''}.
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary pn-tablet-table-open-btn"
-              disabled={loading || pdfBusy || filteredMovementRows.length === 0}
-              onClick={handleOpenMovementsTable}
-            >
-              {pdfBusy ? 'Apertura…' : 'Apri tabelle'}
-            </button>
-            {!loading && filteredMovementRows.length === 0 ? (
-              <p className="fatture-note" style={{ margin: '0.75rem 0 0' }}>
-                {rowsWithLedger.rows.length === 0
-                  ? (summaryScope === 'day'
-                    ? `Nessun movimento nella giornata ${formatDate(selectedDate)}.`
-                    : 'Nessun movimento nel periodo selezionato.')
-                  : 'Nessun movimento corrisponde ai filtri.'}
-              </p>
-            ) : (
-              <p className="fatture-note" style={{ margin: '0.75rem 0 0' }}>
-                {filteredMovementRows.length} movimenti. Il PDF mostra tutte le colonne.
-              </p>
-            )}
-          </div>
-        ) : null}
-        {!movementsCards ? (
-          <WorkbookGrid
+        <WorkbookGrid
             title={`${PRIMA_NOTA_MOVEMENTS_WORKBOOK_TITLE} — ${activeActivityLabel}`}
             sheetLabel={`${filteredMovementRows.length} righe · registro ${activeActivityLabel}`}
             columns={movementColumns}
@@ -2841,7 +2771,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             cellValue={primaNotaMovementCellValue}
             totalsLabel={primaNotaMovementTotalsLabel}
             totals={movementPeriodTotals}
-            gridClassName="prima-nota-movements-grid"
+            gridClassName={tabletTable ? 'prima-nota-movements-grid workbook-grid-light' : 'prima-nota-movements-grid'}
+            plainCells={tabletTable}
+            virtualize={tabletTable ? true : undefined}
             loading={loading}
             emptyMessage={
               rowsWithLedger.rows.length === 0
@@ -2883,7 +2815,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               </div>
             )}
           />
-        ) : null}
       </section>
 
       <section className="card">
@@ -2923,6 +2854,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
             </button>
           </div>
         </div>
+        {tabletTable ? null : (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
           {summaryScope === 'day' ? (
             <>
@@ -2935,6 +2867,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           )}{' '}
           Il saldo cassa usa movimenti fiscali, NC, svuotamento stacker e versamento banca (esclusi POS e Refill).
         </p>
+        )}
         {summaryScope === 'day' ? (
         <div className="form-row">
           <div className="form-group">
@@ -3257,26 +3190,6 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           </aside>
         </>
       )}
-      {movementsPdfUrl ? (
-        <div className="pn-table-pdf-overlay" role="dialog" aria-modal="true" aria-label="Tabella Prima Nota">
-          <div className="pn-table-pdf-bar">
-            <strong>Tabella Prima Nota</strong>
-            <span style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => window.open(movementsPdfUrl, '_blank')}
-              >
-                Apri PDF
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={closeMovementsPdf}>
-                Chiudi
-              </button>
-            </span>
-          </div>
-          <iframe className="pn-table-pdf-frame" title="Tabella Prima Nota" src={movementsPdfUrl} />
-        </div>
-      ) : null}
     </div>
   )
 }

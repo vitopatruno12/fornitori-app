@@ -34,6 +34,7 @@ export default function WorkbookGrid({
   actionsColWidth = '9.5rem',
   renderCell,
   virtualize,
+  plainCells = false,
 }) {
   const showTotals = totals != null && typeof totalsLabel === 'function' && rows.length > 0
   const hasActions = Boolean(actionsHeader && typeof renderActions === 'function')
@@ -125,6 +126,7 @@ export default function WorkbookGrid({
           const multilineRows = col.multiline
             ? Math.min(10, Math.max(2, String(cellValueText).split('\n').length))
             : undefined
+          const plainClass = plainCells ? `${cellClasses} excel-cell-plain` : cellClasses
           return (
             <td
               key={col.id}
@@ -133,6 +135,10 @@ export default function WorkbookGrid({
             >
               {customCell != null ? (
                 customCell
+              ) : plainCells ? (
+                <span className={plainClass} title={titleAttr || undefined}>
+                  {cellValueText}
+                </span>
               ) : col.multiline ? (
                 <textarea
                   className={cellClasses}
@@ -246,6 +252,24 @@ export default function WorkbookGrid({
                       data-label={col.label}
                       className={col.sticky === 'left' ? 'workbook-col-sticky-left' : ''}
                     >
+                      {plainCells ? (
+                        <span
+                          className={[
+                            'excel-cell',
+                            'excel-cell-plain',
+                            'pagamenti-cell-readonly',
+                            col.numeric ? 'excel-cell-num' : '',
+                            'workbook-cell-total',
+                            typeof getTotalsCellClassName === 'function'
+                              ? getTotalsCellClassName(col.id, totals)
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          {totalsLabel(col.id, totals)}
+                        </span>
+                      ) : (
                       <input
                         className={[
                           'excel-cell',
@@ -262,6 +286,7 @@ export default function WorkbookGrid({
                         readOnly
                         tabIndex={-1}
                       />
+                      )}
                     </td>
                   ))}
                   {hasActions ? <td className="sup-actions-col" /> : null}
