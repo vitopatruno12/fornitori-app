@@ -2883,7 +2883,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               </div>
             )}
           />
-        )}
+        ) : null}
       </section>
 
       <section className="card">
