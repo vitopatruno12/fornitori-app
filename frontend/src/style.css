@@ -1939,8 +1939,20 @@ select.form-control {
   min-width: max-content;
 }
 
-.workbook-grid-light .workbook-col-sticky-left,
-.workbook-grid-light .sup-actions-col {
+.workbook-grid-light .workbook-col-sticky-left {
+  box-shadow: none;
+}
+
+.workbook-grid.workbook-grid-light td.sup-actions-col {
+  position: static;
+  right: auto;
+  box-shadow: none;
+}
+
+.workbook-grid.workbook-grid-light thead .sup-actions-col {
+  position: sticky;
+  top: 0;
+  right: auto;
   box-shadow: none;
 }
 
