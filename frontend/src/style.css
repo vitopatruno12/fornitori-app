@@ -1904,6 +1904,24 @@ select.form-control {
   font-size: 0.72rem;
 }
 
+.gazza-sala-history {
+  margin-top: 1rem;
+}
+
+.gazza-sala-history-table {
+  border-top: 1px solid #d1d5db;
+  border-left: 1px solid #d1d5db;
+}
+
+.gazza-sala-history-table th,
+.gazza-sala-history-table td {
+  border-right: 1px solid #d1d5db;
+  border-bottom: 1px solid #d1d5db;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  white-space: normal;
+}
+
 .gazza-sala-grid .gazza-sala-clear-btn,
 .gazza-sala-grid .gazza-sala-paid-btn,
 .gazza-sala-grid .gazza-sala-conto-btn {

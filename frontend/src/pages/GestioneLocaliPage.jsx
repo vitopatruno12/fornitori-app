@@ -8,17 +8,23 @@ import {
   GAZZA_SALA_TABLE_COUNT,
   GAZZA_SALA_WORKBOOK_TITLE,
   addGazzaSalaPaidTotal,
+  appendGazzaSalaEveningHistory,
   createEmptyGazzaSalaRow,
   createEmptyGazzaSalaRows,
   gazzaSalaCellDisplay,
+  gazzaSalaEveningHistoryToAoa,
+  gazzaSalaEveningHistoryTotal,
+  gazzaSalaPaymentLabel,
   gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
   gazzaSalaStatusRowClass,
   gazzaSalaStorageKey,
   gazzaSalaTotals,
   gazzaSalaTotalsLabel,
+  loadGazzaSalaEveningHistory,
   normalizeGazzaSalaRows,
   parseGazzaSalaAmount,
+  snapshotGazzaSalaEveningEntry,
 } from '../utils/gazzaSalaWorkbook.js'
 
 const LOCALI = [
@@ -104,6 +110,19 @@ export default function GestioneLocaliPage() {
   )
 }
 
+function formatHistoryEur(value) {
+  if (value == null || value === '') return ''
+  const n = Number(String(value).replace(',', '.'))
+  if (!Number.isFinite(n)) return ''
+  return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatHistoryTime(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+}
+
 function todayIsoDate() {
   const d = new Date()
   const y = d.getFullYear()
@@ -119,6 +138,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
   const [rows, setRows] = useState(() => createEmptyGazzaSalaRows())
   const [savedAt, setSavedAt] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [history, setHistory] = useState([])
 
   const totals = useMemo(() => gazzaSalaTotals(rows), [rows])
   const fasciaLabel = GAZZA_SALA_FASCE.find((f) => f.id === fascia)?.label || fascia
@@ -145,6 +165,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
 
   useEffect(() => {
     loadSheet(date, fascia)
+    setHistory(loadGazzaSalaEveningHistory(date, fascia))
   }, [date, fascia, loadSheet])
 
   function persistRows(nextRows, { markDirty = false } = {}) {
@@ -225,6 +246,12 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
   function markTablePaid(tableId) {
     const current = rows.find((r) => Number(r.table_id) === Number(tableId))
     if (!current) return
+    const nextHistory = appendGazzaSalaEveningHistory(
+      date,
+      fascia,
+      snapshotGazzaSalaEveningEntry(current),
+    )
+    setHistory(nextHistory)
     // Mostra subito il verde "Pagato", poi aggiorna contatore e libera.
     const payingRows = rows.map((row) =>
       Number(row.table_id) === Number(tableId) ? { ...row, status: 'pagato' } : row,
@@ -287,9 +314,16 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
 
   function onExportExcel() {
     const aoa = gazzaSalaRowsToAoa(rows, { date, fascia })
+    const historyRows = loadGazzaSalaEveningHistory(date, fascia)
     downloadWorkbookAsExcel({
       title: `Gazza_Ladra_Sala_${date}_${fascia}`,
-      sheets: [{ name: `Sala ${fasciaLabel}`, rows: aoa }],
+      sheets: [
+        { name: `Sala ${fasciaLabel}`, rows: aoa },
+        {
+          name: `Storico ${fasciaLabel}`,
+          rows: gazzaSalaEveningHistoryToAoa(date, fascia, historyRows),
+        },
+      ],
     })
   }
 
@@ -567,8 +601,65 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         </div>
       </section>
 
+      <section className="card pagamenti-workbook-card gazza-sala-history">
+        <div className="pagamenti-workbook-toolbar">
+          <span className="pagamenti-workbook-title">
+            {fascia === 'cena' ? 'Storico serata' : 'Storico pranzo'}
+          </span>
+          <span className="pagamenti-workbook-sheet-label">
+            {fasciaLabel} · {date} · {history.length} {history.length === 1 ? 'conto' : 'conti'}
+          </span>
+        </div>
+        {history.length === 0 ? (
+          <p className="analisi-note" style={{ margin: '0.75rem 0.9rem 1rem' }}>
+            I tavoli segnati Pagato restano qui, con prenotazione, clienti, cameriere, conto e metodo.
+          </p>
+        ) : (
+          <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap gazza-sala-grid-wrap">
+            <table className="app-table excel-table pagamenti-grid workbook-grid gazza-sala-grid gazza-sala-history-table">
+              <thead>
+                <tr>
+                  <th className="pagamenti-hl-green">Tavolo</th>
+                  <th className="pagamenti-hl-green">Nome prenotazione</th>
+                  <th className="pagamenti-hl-green text-end">N. clienti</th>
+                  <th className="pagamenti-hl-green">Cameriere</th>
+                  <th className="pagamenti-hl-green text-end">Conto totale pagato €</th>
+                  <th className="pagamenti-hl-green">Metodo pagamento</th>
+                  <th className="pagamenti-hl-green">Ora</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((entry) => (
+                  <tr key={entry.id} className="workbook-grid-row">
+                    <td>{entry.table_id}</td>
+                    <td>{entry.reservation_name}</td>
+                    <td className="text-end">{entry.clients}</td>
+                    <td>{entry.waiter}</td>
+                    <td className="text-end">{formatHistoryEur(entry.paid)}</td>
+                    <td>{gazzaSalaPaymentLabel(entry.payment_type)}</td>
+                    <td>{formatHistoryTime(entry.paidAt)}</td>
+                  </tr>
+                ))}
+                <tr className="workbook-row-totals">
+                  <td className="pagamenti-hl-yellow" />
+                  <td className="pagamenti-hl-yellow" />
+                  <td className="pagamenti-hl-yellow" />
+                  <td className="pagamenti-hl-yellow">Totale</td>
+                  <td className="pagamenti-hl-yellow text-end">
+                    {formatHistoryEur(gazzaSalaEveningHistoryTotal(history))}
+                  </td>
+                  <td className="pagamenti-hl-yellow" />
+                  <td className="pagamenti-hl-yellow" />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <p className="analisi-note" style={{ marginTop: '0.85rem', maxWidth: '48rem' }}>
         Ogni fascia (pranzo / cena) ha un foglio separato con i {GAZZA_SALA_TABLE_COUNT} tavoli.
+        Pagato libera il tavolo e tiene nello storico prenotazione, clienti, cameriere, conto e metodo.
         Il <strong>Contatore €</strong> resta sul tavolo. Cancella toglie solo prenotazione, clienti
         e fattura. Dal menu Contatore si corregge l’importo oppure si azzera a fine serata.
       </p>

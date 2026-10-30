@@ -212,7 +212,7 @@ export function gazzaSalaRowHasData(row) {
 function rowToExportValues(row) {
   return GAZZA_SALA_COLUMNS.map((col) => {
     if (col.id === 'status') return statusLabel(row.status)
-    if (col.id === 'payment_type') return paymentLabel(row.payment_type) || null
+    if (col.id === 'payment_type') return gazzaSalaPaymentLabel(row.payment_type) || null
     if (col.id === 'clients' || col.id === 'paid' || col.id === 'paid_total') {
       const v = num(row[col.id])
       return row[col.id] === '' || row[col.id] == null ? null : v
@@ -240,6 +240,72 @@ export function gazzaSalaPaidRowToAoa(row, meta) {
     [],
     [...GAZZA_SALA_COLUMNS.map((c) => c.label), 'Pagato alle'],
     [...rowToExportValues(snapshot), paidAt],
+  ]
+}
+
+/** Storico della fascia (pranzo o cena) per la data. */
+export function gazzaSalaEveningHistoryKey(date, fascia) {
+  return `gazza_sala_evening_history:${date}:${fascia || 'cena'}`
+}
+
+export function loadGazzaSalaEveningHistory(date, fascia) {
+  try {
+    const raw = localStorage.getItem(gazzaSalaEveningHistoryKey(date, fascia))
+    const list = raw ? JSON.parse(raw) : []
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
+
+/** Copia i dati del servizio prima che Pagato liberi il tavolo. */
+export function snapshotGazzaSalaEveningEntry(row, paidAt = new Date().toISOString()) {
+  return {
+    id: `${paidAt}-${row?.table_id ?? ''}`,
+    table_id: row?.table_id ?? '',
+    reservation_name: row?.reservation_name != null ? String(row.reservation_name) : '',
+    clients: row?.clients != null && row.clients !== '' ? String(row.clients) : '',
+    waiter: row?.waiter != null ? String(row.waiter) : '',
+    paid: row?.paid != null && row.paid !== '' ? String(row.paid) : '',
+    payment_type: row?.payment_type != null ? String(row.payment_type) : '',
+    paidAt,
+  }
+}
+
+export function appendGazzaSalaEveningHistory(date, fascia, entry) {
+  const next = [...loadGazzaSalaEveningHistory(date, fascia), entry]
+  try {
+    localStorage.setItem(gazzaSalaEveningHistoryKey(date, fascia), JSON.stringify(next))
+  } catch {
+    /* quota */
+  }
+  return next
+}
+
+export function gazzaSalaEveningHistoryTotal(entries) {
+  const sum = (Array.isArray(entries) ? entries : []).reduce((s, entry) => s + num(entry?.paid), 0)
+  return Math.round(sum * 100) / 100
+}
+
+export function gazzaSalaEveningHistoryToAoa(date, fascia, entries) {
+  const list = Array.isArray(entries) ? entries : []
+  const fasciaLabel = fascia === 'cena' ? 'Cena' : 'Pranzo'
+  const body = list.map((entry) => [
+    entry.table_id ?? '',
+    entry.reservation_name || '',
+    entry.clients === '' || entry.clients == null ? null : num(entry.clients),
+    entry.waiter || '',
+    entry.paid === '' || entry.paid == null ? null : num(entry.paid),
+    gazzaSalaPaymentLabel(entry.payment_type) || '',
+    entry.paidAt || '',
+  ])
+  const total = gazzaSalaEveningHistoryTotal(list)
+  return [
+    [`Gazza Ladra — Storico ${fasciaLabel} ${date || ''}`],
+    [],
+    ['Tavolo', 'Nome prenotazione', 'N. clienti', 'Cameriere', 'Conto totale pagato €', 'Metodo pagamento', 'Ora'],
+    ...body,
+    ['', '', '', 'Totale', total || null, '', ''],
   ]
 }
 
@@ -363,7 +429,7 @@ function statusLabel(value) {
   return GAZZA_SALA_STATUS_OPTIONS.find((o) => o.value === value)?.label || value || ''
 }
 
-function paymentLabel(value) {
+export function gazzaSalaPaymentLabel(value) {
   return GAZZA_SALA_PAYMENT_OPTIONS.find((o) => o.value === value)?.label || value || ''
 }
 
@@ -384,7 +450,7 @@ export function gazzaSalaCellDisplay(row, column) {
     case 'invoice_number':
       return row.invoice_number != null ? String(row.invoice_number) : ''
     case 'payment_type':
-      return paymentLabel(row.payment_type)
+      return gazzaSalaPaymentLabel(row.payment_type)
     case 'paid':
       return row.paid === '' || row.paid == null ? '' : String(row.paid)
     case 'waiter':
