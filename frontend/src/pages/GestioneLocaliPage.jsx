@@ -338,12 +338,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         <h1 className="page-header staff-page-title">
           {operatorMode ? 'Gestione sala' : 'Gazza Ladra · Gestisci sala'}
         </h1>
-        <p className="page-lead" style={{ maxWidth: '48rem' }}>
-          Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso.
-          In Azioni: <strong className="gazza-sala-legend-conto">Conto</strong> (giallo),{' '}
-          <strong className="gazza-sala-legend-pagato">Pagato</strong> (verde → contatore + libera).
-          Cancella toglie prenotazione, clienti e fattura e lascia il contatore.
-        </p>
       </header>
 
       <section className="card pagamenti-workbook-card">
@@ -351,30 +345,27 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           <div className="gazza-sala-toolbar-main">
             <span className="pagamenti-workbook-title">{GAZZA_SALA_WORKBOOK_TITLE}</span>
             <div className="gazza-sala-toolbar-date">
-            <span className="pagamenti-workbook-sheet-label">
-              {fasciaLabel} · {date}
-            </span>
-            <label className="analisi-machine-scope gazza-sala-date-field">
-              Data
-              <input
-                className="form-control"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </label>
-            <div className="analisi-panel-actions" role="group" aria-label="Fascia">
-              {GAZZA_SALA_FASCE.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  className={`btn btn-sm ${fascia === f.id ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setFascia(f.id)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
+              <label className="gazza-sala-date-field">
+                <span>Data</span>
+                <input
+                  className="form-control"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </label>
+              <div className="gazza-sala-fascia" role="group" aria-label="Fascia">
+                {GAZZA_SALA_FASCE.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`btn btn-sm ${fascia === f.id ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setFascia(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="analisi-panel-actions" style={{ marginLeft: 'auto' }}>
