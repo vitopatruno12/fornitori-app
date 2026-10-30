@@ -108,6 +108,22 @@ export default function GestioneLocaliPage() {
   )
 }
 
+function formatSalaEur(value) {
+  const n = Number(value) || 0
+  return `${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
+
+function formatSalaSavedAt(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function todayIsoDate() {
   const d = new Date()
   const y = d.getFullYear()
@@ -361,28 +377,36 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           </div>
         </div>
 
-        <p className="analisi-machine-scope" role="status" style={{ padding: '0 0.85rem 0.35rem' }}>
-          Coperti: <strong>{totals.clients}</strong>
-          {' · '}
-          Fatture: <strong>{totals.invoices}</strong>
-          {' · '}
-          Contatori tavoli:{' '}
-          <strong>
-            {totals.paidTotal
-              ? totals.paidTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })
-              : '0,00'}{' '}
-            €
-          </strong>
-          {' · '}
-          Conti aperti:{' '}
-          <strong>
-            {totals.paid ? totals.paid.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'} €
-          </strong>
-          {savedAt
-            ? ` · salvato ${new Date(savedAt).toLocaleString('it-IT')}`
-            : ' · non ancora salvato'}
-          {dirty ? ' · modifiche non salvate' : ''}
-        </p>
+        <div className="gazza-sala-stats" role="status">
+          <div className="gazza-sala-stat gazza-sala-stat-covers">
+            <span>Coperti</span>
+            <strong>{totals.clients || 0}</strong>
+          </div>
+          <div className="gazza-sala-stat gazza-sala-stat-invoices">
+            <span>Fatture</span>
+            <strong>{totals.invoices || 0}</strong>
+          </div>
+          <div className="gazza-sala-stat gazza-sala-stat-counter">
+            <span>Contatori</span>
+            <strong>{formatSalaEur(totals.paidTotal)}</strong>
+          </div>
+          <div className="gazza-sala-stat gazza-sala-stat-open">
+            <span>Conti aperti</span>
+            <strong>{formatSalaEur(totals.paid)}</strong>
+          </div>
+          <p
+            className={[
+              'gazza-sala-stat-save',
+              dirty ? 'is-dirty' : savedAt ? 'is-saved' : 'is-empty',
+            ].join(' ')}
+          >
+            {dirty
+              ? 'Modifiche non salvate'
+              : savedAt
+                ? `Salvato ${formatSalaSavedAt(savedAt)}`
+                : 'Non ancora salvato'}
+          </p>
+        </div>
 
         <div className="pagamenti-grid-wrap excel-wrap workbook-grid-wrap gazza-sala-grid-wrap">
           <table className="app-table excel-table pagamenti-grid workbook-grid gazza-sala-grid">
