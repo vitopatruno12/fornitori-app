@@ -187,24 +187,26 @@ export function addGazzaSalaPaidTotal(currentTotal, paidAmount) {
   return next > 0 ? String(next) : ''
 }
 
+/** Importo € digitato a mano. null se non è un numero ≥ 0. */
+export function parseGazzaSalaAmount(value) {
+  if (value == null || String(value).trim() === '') return 0
+  const n = Number(String(value).replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n * 100) / 100
+}
+
 /** 15 righe fisse (tavoli 1–15). */
 export function createEmptyGazzaSalaRows() {
   return Array.from({ length: GAZZA_SALA_TABLE_COUNT }, (_, i) => emptyTableRow(i + 1))
 }
 
-/** True se la riga ha dati oltre ID/stato libero. */
+/** True se ci sono dati del servizio (prenotazione, clienti, fattura, conto). Il contatore non conta. */
 export function gazzaSalaRowHasData(row) {
   if (!row) return false
   if (row.status && row.status !== 'libero') return true
-  return [
-    'clients',
-    'reservation_name',
-    'invoice_number',
-    'payment_type',
-    'paid',
-    'waiter',
-    'paid_total',
-  ].some((key) => row[key] != null && String(row[key]).trim() !== '')
+  return ['clients', 'reservation_name', 'invoice_number', 'payment_type', 'paid', 'waiter'].some(
+    (key) => row[key] != null && String(row[key]).trim() !== '',
+  )
 }
 
 function rowToExportValues(row) {

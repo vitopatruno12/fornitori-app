@@ -18,6 +18,7 @@ import {
   gazzaSalaTotals,
   gazzaSalaTotalsLabel,
   normalizeGazzaSalaRows,
+  parseGazzaSalaAmount,
 } from '../utils/gazzaSalaWorkbook.js'
 
 const LOCALI = [
@@ -174,13 +175,48 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
     if (!gazzaSalaRowHasData(current)) return
     if (
       !window.confirm(
-        `Cancellare tutti i dati del tavolo ${tableId}, compreso il contatore incassi?`,
+        `Cancellare prenotazione, clienti e fattura del tavolo ${tableId}? Il contatore resta.`,
       )
     ) {
       return
     }
     const nextRows = rows.map((row) =>
-      row.table_id === tableId ? createEmptyGazzaSalaRow(tableId) : row,
+      row.table_id === tableId
+        ? createEmptyGazzaSalaRow(tableId, { keepPaidTotal: current.paid_total })
+        : row,
+    )
+    setRows(nextRows)
+    persistRows(nextRows)
+  }
+
+  function editTableCounter(tableId) {
+    const current = rows.find((r) => Number(r.table_id) === Number(tableId))
+    if (!current) return
+    const typed = window.prompt(
+      `Nuovo importo del contatore, tavolo ${tableId} (€)`,
+      String(current.paid_total || '0'),
+    )
+    if (typed == null) return
+    const amount = parseGazzaSalaAmount(typed)
+    if (amount == null) {
+      window.alert('Importo non valido.')
+      return
+    }
+    const nextRows = rows.map((row) =>
+      Number(row.table_id) === Number(tableId)
+        ? { ...row, paid_total: amount > 0 ? String(amount) : '' }
+        : row,
+    )
+    setRows(nextRows)
+    persistRows(nextRows)
+  }
+
+  function resetTableCounter(tableId) {
+    const current = rows.find((r) => Number(r.table_id) === Number(tableId))
+    if (!current || parseGazzaSalaAmount(current.paid_total) === 0) return
+    if (!window.confirm(`Azzerare il contatore del tavolo ${tableId} a fine serata?`)) return
+    const nextRows = rows.map((row) =>
+      Number(row.table_id) === Number(tableId) ? { ...row, paid_total: '' } : row,
     )
     setRows(nextRows)
     persistRows(nextRows)
@@ -271,25 +307,26 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
         <p className="page-lead" style={{ maxWidth: '48rem' }}>
           Modello sala ({GAZZA_SALA_TABLE_COUNT} tavoli): <strong className="gazza-sala-legend-occupato">Occupato</strong> rosso.
           In Azioni: <strong className="gazza-sala-legend-conto">Conto</strong> (giallo),{' '}
-          <strong className="gazza-sala-legend-pagato">Pagato</strong> (verde → contatore + libera), Cancella.
+          <strong className="gazza-sala-legend-pagato">Pagato</strong> (verde → contatore + libera).
+          Cancella toglie prenotazione, clienti e fattura e lascia il contatore.
         </p>
       </header>
 
       <section className="card pagamenti-workbook-card">
-        <div className="pagamenti-workbook-toolbar" style={{ flexWrap: 'wrap', gap: '0.65rem' }}>
-          <div className="pagamenti-workbook-toolbar-left" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div className="pagamenti-workbook-toolbar gazza-sala-toolbar">
+          <div className="gazza-sala-toolbar-main">
             <span className="pagamenti-workbook-title">{GAZZA_SALA_WORKBOOK_TITLE}</span>
+            <div className="gazza-sala-toolbar-date">
             <span className="pagamenti-workbook-sheet-label">
               {fasciaLabel} · {date}
             </span>
-            <label className="analisi-machine-scope" style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+            <label className="analisi-machine-scope gazza-sala-date-field">
               Data
               <input
                 className="form-control"
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                style={{ width: 'auto', minWidth: '9.5rem' }}
               />
             </label>
             <div className="analisi-panel-actions" role="group" aria-label="Fascia">
@@ -303,6 +340,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                   {f.label}
                 </button>
               ))}
+            </div>
             </div>
           </div>
           <div className="analisi-panel-actions" style={{ marginLeft: 'auto' }}>
@@ -347,7 +385,7 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
               {GAZZA_SALA_COLUMNS.map((col) => (
                 <col key={col.id} style={{ width: `${col.width}%` }} />
               ))}
-              <col style={{ width: '14%' }} />
+              <col style={{ width: '18%' }} />
             </colgroup>
             <thead>
               <tr>
@@ -473,10 +511,25 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
                         className="btn btn-secondary btn-sm gazza-sala-clear-btn"
                         onClick={() => clearTableRow(row.table_id)}
                         disabled={!gazzaSalaRowHasData(row)}
-                        title={`Cancella dati tavolo ${row.table_id}`}
+                        title={`Cancella prenotazione, clienti e fattura del tavolo ${row.table_id}. Il contatore resta.`}
                       >
                         Cancella
                       </button>
+                      <select
+                        className="form-control gazza-sala-counter-select"
+                        value=""
+                        aria-label={`Contatore tavolo ${row.table_id}`}
+                        onChange={(e) => {
+                          const action = e.target.value
+                          e.target.value = ''
+                          if (action === 'edit') editTableCounter(row.table_id)
+                          if (action === 'reset') resetTableCounter(row.table_id)
+                        }}
+                      >
+                        <option value="">Contatore</option>
+                        <option value="edit">Modifica importo</option>
+                        <option value="reset">Azzera contatore</option>
+                      </select>
                     </div>
                   </td>
                 </tr>
@@ -516,8 +569,8 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
 
       <p className="analisi-note" style={{ marginTop: '0.85rem', maxWidth: '48rem' }}>
         Ogni fascia (pranzo / cena) ha un foglio separato con i {GAZZA_SALA_TABLE_COUNT} tavoli.
-        Il <strong>Contatore €</strong> resta sul tavolo tra un conto e l’altro; si azzera solo con
-        Cancella o Azzera foglio.
+        Il <strong>Contatore €</strong> resta sul tavolo. Cancella toglie solo prenotazione, clienti
+        e fattura. Dal menu Contatore si corregge l’importo oppure si azzera a fine serata.
       </p>
     </div>
   )
