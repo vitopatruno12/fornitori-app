@@ -571,14 +571,6 @@ export function GazzaLadraSalaPage({ operatorMode = false }) {
           </table>
         </div>
       </section>
-
-      <p className="analisi-note" style={{ marginTop: '0.85rem', maxWidth: '48rem' }}>
-        Ogni fascia (pranzo / cena) ha un foglio separato con i {GAZZA_SALA_TABLE_COUNT} tavoli.
-        Pagato libera il tavolo e tiene nello storico prenotazione, clienti, cameriere, conto e metodo.
-        Lo storico si apre con <strong>Storico PDF</strong>. Il <strong>Contatore €</strong> resta sul
-        tavolo. Cancella toglie solo prenotazione, clienti e fattura. Dal menu Contatore si corregge
-        l’importo oppure si azzera a fine serata.
-      </p>
     </div>
   )
 }
