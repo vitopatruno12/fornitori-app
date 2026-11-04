@@ -3491,10 +3491,160 @@ _RECON_MOVEMENT_LIMIT = 1200
 BANK_AUTO_RECON_FROM = date(2026, 6, 1)
 
 
+def _is_pg_company(company: Optional[str] = None, inv: Any = None) -> bool:
+  """PG S.r.l. non ha il file Pagamenti: la riconciliazione è solo estratto conto."""
+  if str(company or "").strip().lower() == "pg":
+    return True
+  return str(getattr(inv, "company", None) or "").strip().lower() == "pg"
+
+
 def _uses_pagamenti_file_recon(inv: Any) -> bool:
-  """True se la fattura è anteriore a BANK_AUTO_RECON_FROM: niente match banca auto."""
+  """True se la fattura è anteriore a BANK_AUTO_RECON_FROM: niente match banca auto.
+
+  PG resta sempre sul bonifico dell'estratto, anche prima di giugno.
+  """
+  if _is_pg_company(inv=inv):
+    return False
   d = _as_date(getattr(inv, "invoice_date", None))
   return d is not None and d < BANK_AUTO_RECON_FROM
+
+
+def _load_pg_received_invoices(db: Session) -> List[Dict[str, Any]]:
+  """Fatture ricevute PG: numero, fornitore e importo (per collegare l'estratto)."""
+  from ..constants.sdi_companies import (
+    company_pivas,
+    is_our_issued_to_external,
+    normalize_vat,
+    pick_company,
+  )
+  from ..models.electronic_invoice import ElectronicInvoice, IncomingInvoice
+  from ..models.sdi_invoice import SdiInvoice
+
+  pg_vats = {normalize_vat(v) for v in company_pivas("pg")}
+  pg_vats.discard("")
+  since = date.today() - timedelta(days=_RECON_INVOICE_LOOKBACK_DAYS)
+  rows = (
+    db.query(SdiInvoice, ElectronicInvoice, IncomingInvoice)
+    .outerjoin(ElectronicInvoice, ElectronicInvoice.id == SdiInvoice.electronic_invoice_id)
+    .outerjoin(
+      IncomingInvoice,
+      IncomingInvoice.electronic_invoice_id == SdiInvoice.electronic_invoice_id,
+    )
+    .filter(
+      or_(
+        SdiInvoice.invoice_date >= since,
+        and_(SdiInvoice.invoice_date.is_(None), SdiInvoice.created_at >= datetime.combine(since, datetime.min.time()).replace(tzinfo=timezone.utc)),
+      )
+    )
+    .order_by(SdiInvoice.invoice_date.desc().nullslast(), SdiInvoice.id.desc())
+    .limit(4000)
+    .all()
+  )
+  out: List[Dict[str, Any]] = []
+  seen: set = set()
+  for sdi, electronic, incoming in rows:
+    if is_our_issued_to_external(
+      seller_vat=getattr(sdi, "supplier_vat", None),
+      receiver_vat=getattr(sdi, "receiver_vat", None),
+    ):
+      continue
+    receiver = normalize_vat(getattr(sdi, "receiver_vat", None))
+    company = "pg" if receiver and receiver in pg_vats else pick_company(
+      receiver_vat=getattr(sdi, "receiver_vat", None),
+      ade_profile_id=getattr(sdi, "ade_profile_id", None),
+      seller_vat=getattr(sdi, "supplier_vat", None),
+    )
+    if company != "pg":
+      continue
+    number = str(getattr(sdi, "invoice_number", None) or "").strip()
+    if not number:
+      continue
+    key = (number, normalize_vat(getattr(sdi, "supplier_vat", None)), str(getattr(sdi, "invoice_date", None) or ""))
+    if key in seen:
+      continue
+    seen.add(key)
+    total = None
+    if electronic is not None and getattr(electronic, "total_amount", None) is not None:
+      total = abs(_dec(electronic.total_amount))
+    elif incoming is not None and getattr(incoming, "total_amount", None) is not None:
+      total = abs(_dec(incoming.total_amount))
+    out.append(
+      {
+        "sdi_id": int(sdi.id),
+        "invoice_number": number,
+        "supplier_name": str(getattr(sdi, "supplier_name", None) or "").strip(),
+        "supplier_vat": str(getattr(sdi, "supplier_vat", None) or "").strip(),
+        "invoice_date": getattr(sdi, "invoice_date", None),
+        "total": total,
+        "atlas_invoice_id": int(incoming.atlas_invoice_id)
+        if incoming is not None and getattr(incoming, "atlas_invoice_id", None)
+        else None,
+      }
+    )
+  return out
+
+
+def _best_pg_received_match(
+  mov: Any,
+  blob: str,
+  received: List[Dict[str, Any]],
+  used_sdi_ids: set,
+) -> Optional[Dict[str, Any]]:
+  """Collega un'uscita dell'estratto a una fattura ricevuta PG.
+
+  Serve l'importo insieme al beneficiario, oppure il numero già scritto in causale.
+  """
+  amt = abs(_dec(getattr(mov, "amount", 0)))
+  if amt < Decimal("0.01"):
+    return None
+  beneficiary = _movement_beneficiary(mov, blob)
+  numbered: List[tuple] = []
+  named: List[Dict[str, Any]] = []
+  for row in received:
+    sdi_id = int(row.get("sdi_id") or 0)
+    if sdi_id and sdi_id in used_sdi_ids:
+      continue
+    number = str(row.get("invoice_number") or "").strip()
+    total = row.get("total")
+    amount_hit = total is not None and abs(_dec(total) - amt) <= Decimal("0.05")
+    number_hit = bool(number) and _invoice_number_in_text(number, blob)
+    name_hit = bool(beneficiary) and _party_names_align(row.get("supplier_name"), beneficiary)
+    if number_hit and (amount_hit or name_hit or total is None):
+      numbered.append((0 if amount_hit else 1, 0 if name_hit else 1, row))
+    elif name_hit and amount_hit:
+      named.append(row)
+  if numbered:
+    numbered.sort(key=lambda item: (item[0], item[1]))
+    return numbered[0][2]
+  if len(named) == 1:
+    return named[0]
+  if named:
+    named.sort(key=lambda row: abs(_dec(row.get("total") or 0) - amt))
+    return named[0]
+  return None
+
+
+def _pg_received_suggestion(row: Dict[str, Any], mov: Any, blob: str) -> Dict[str, Any]:
+  amt = abs(_dec(getattr(mov, "amount", 0)))
+  total = row.get("total")
+  diff = abs(_dec(total) - amt) if total is not None else None
+  number = str(row.get("invoice_number") or "").strip()
+  number_hit = bool(number) and _invoice_number_in_text(number, blob)
+  return {
+    "invoice_id": row.get("atlas_invoice_id"),
+    "sdi_invoice_id": row.get("sdi_id"),
+    "supplier_name": row.get("supplier_name") or "",
+    "invoice_number": number,
+    "due_date": row.get("invoice_date").isoformat() if getattr(row.get("invoice_date"), "isoformat", None) else None,
+    "residuo": float(total) if total is not None else None,
+    "difference": float(diff) if diff is not None else None,
+    "match_quality": "number" if number_hit else "exact",
+    "match_score": 90 if number_hit else 80,
+    "match_band": "probable",
+    "match_breakdown": {"amount": 40 if diff is not None and diff <= Decimal("0.05") else 0, "party": 30, "number": 20 if number_hit else 0, "date": 0},
+    "partial": False,
+    "source": "fatture_ricevute",
+  }
 
 
 def apply_pagamenti_file_window_payments(
@@ -3505,6 +3655,8 @@ def apply_pagamenti_file_window_payments(
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
+  if _is_pg_company(company_id):
+    return 0
   listed, _ = _load_recon_invoices(db, company_id)
   unpaid = [
     inv
@@ -3784,13 +3936,16 @@ def reconciliation_snapshot(
 
   from . import supplier_payments_service
 
-  try:
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=True
-    )
-  except Exception:
-    logger.warning("File Pagamenti non leggibile in verifica scheda", exc_info=True)
+  if _is_pg_company(company_id):
     paid_file_rows = []
+  else:
+    try:
+      paid_file_rows = supplier_payments_service.list_paid_document_rows(
+        db, company=company_id, all_workbooks=True
+      )
+    except Exception:
+      logger.warning("File Pagamenti non leggibile in verifica scheda", exc_info=True)
+      paid_file_rows = []
   file_by_number = _cash_rows_by_number(paid_file_rows)
 
   def _file_hit(inv: Any) -> Optional[Dict[str, Any]]:
@@ -3958,12 +4113,21 @@ def reconciliation_snapshot(
     "expected_banks": expected_banks_for_company(company_id),
     "fast": True,
     # Modello inbox (Sibill-like): banca = verità post cut-off; file = storico/contanti
-    "truth_model": {
-      "primary": "enable_banking",
-      "secondary": "pagamenti_file_contanti_e_storico",
-      "bank_auto_from": "2026-06-01",
-      "label": "Enable Banking chiude le fatture da giugno; file Pagamenti per contanti/carta e storico pre-giugno.",
-    },
+    "truth_model": (
+      {
+        "primary": "estratto_conto",
+        "secondary": "fatture_ricevute",
+        "bank_auto_from": None,
+        "label": "PG: estratto conto (importo e a favore di chi). Il numero fattura arriva dalle fatture ricevute.",
+      }
+      if _is_pg_company(company_id)
+      else {
+        "primary": "enable_banking",
+        "secondary": "pagamenti_file_contanti_e_storico",
+        "bank_auto_from": "2026-06-01",
+        "label": "Enable Banking chiude le fatture da giugno; file Pagamenti per contanti/carta e storico pre-giugno.",
+      }
+    ),
     "lifecycle_counts": {
       "pagata": len(paid_by_bank),
       "parziale": len(partial_rows),
@@ -4002,6 +4166,9 @@ def enrich_probable_suggestions(
   invoices, _ = _load_recon_invoices(db, company_id)
   open_by_amount = _index_open_invoices_by_amount(invoices)
   used_invoices: set[int] = set()
+  pg_mode = _is_pg_company(company_id)
+  pg_received = _load_pg_received_invoices(db) if pg_mode else []
+  used_sdi_ids: set = set()
 
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
   account_ids = {int(a["id"]) for a in account_items if a.get("id") is not None}
@@ -4063,11 +4230,23 @@ def enrich_probable_suggestions(
           "partial": sc.get("partial"),
         }
 
+    received_hit = (
+      _best_pg_received_match(mov, blob, pg_received, used_sdi_ids) if pg_mode else None
+    )
+    if received_hit:
+      if received_hit.get("sdi_id"):
+        used_sdi_ids.add(int(received_hit["sdi_id"]))
+      best = _pg_received_suggestion(received_hit, mov, blob)
+      best_sc = {"score": best.get("match_score"), "band": best.get("match_band")}
+
     if best and best_sc:
-      used_invoices.add(int(best["invoice_id"]))
+      if best.get("invoice_id"):
+        used_invoices.add(int(best["invoice_id"]))
       band = best.get("match_band") or "review"
       linked_number = str(best.get("invoice_number") or "").strip()
-      if linked_number and _invoice_number_in_text(linked_number, blob):
+      if linked_number and (
+        best.get("source") == "fatture_ricevute" or _invoice_number_in_text(linked_number, blob)
+      ):
         mov_out = dict(mov_out)
         mov_out["doc_ref"] = linked_number
       # auto: già applicati da sync; qui restano i probable da one-click
@@ -4146,12 +4325,15 @@ def reconciliation_preview(
 
   from . import supplier_payments_service
 
-  try:
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=True
-    )
-  except Exception:
+  if _is_pg_company(company_id):
     paid_file_rows = []
+  else:
+    try:
+      paid_file_rows = supplier_payments_service.list_paid_document_rows(
+        db, company=company_id, all_workbooks=True
+      )
+    except Exception:
+      paid_file_rows = []
   cash_file_rows = [row for row in paid_file_rows if row.get("is_cash_payment")]
   paid_file_by_number = _cash_rows_by_number(paid_file_rows)
 
@@ -4537,13 +4719,16 @@ def sync_payment_status_from_bank(
     db, (primary_ids, secondary_ids, other_ids)
   )
 
-  try:
-    # Tutti i workbook: evita di lasciare aperte fatture pagate in un altro foglio/società
-    paid_file_rows = supplier_payments_service.list_paid_document_rows(
-      db, company=company_id, all_workbooks=True
-    )
-  except Exception:
+  if _is_pg_company(company_id):
     paid_file_rows = []
+  else:
+    try:
+      # Tutti i workbook: evita di lasciare aperte fatture pagate in un altro foglio/società
+      paid_file_rows = supplier_payments_service.list_paid_document_rows(
+        db, company=company_id, all_workbooks=True
+      )
+    except Exception:
+      paid_file_rows = []
   cash_file_rows = [row for row in paid_file_rows if row.get("is_cash_payment")]
   paid_file_by_number = _cash_rows_by_number(paid_file_rows)
   cash_by_number = _cash_rows_by_number(cash_file_rows)

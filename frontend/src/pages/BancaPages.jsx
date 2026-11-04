@@ -676,6 +676,9 @@ function bankReconCellValue(row, col) {
   if (col.id === 'amount') return eur(row?.movement?.amount)
   if (col.id === 'status') {
     if (row?.status === 'matched') return '✔ Riconciliato'
+    if (row?.suggested_invoice?.source === 'fatture_ricevute') {
+      return row?.suggested_invoice?.invoice_id ? 'Da confermare · ricevute' : 'N. da ricevute'
+    }
     if (row?.match_band === 'probable' || (Number(row?.match_score) || 0) >= 70) {
       const score = Number(row?.match_score) || 0
       return score ? `Da confermare (${score})` : 'Da confermare'
@@ -2927,14 +2930,22 @@ export function BancaRiconciliazionePage() {
         if (!auto) throw firstErr
         res = await fetchBancaRiconciliazione(nextCompany)
         setError(
-          'Riconciliazione banca lenta: elenco aggiornato dal file Pagamenti e dallo stato già salvato.',
+          lockedCompany === 'pg' || nextCompany === 'pg'
+            ? 'Riconciliazione lenta: elenco aggiornato dall’estratto conto già salvato.'
+            : 'Riconciliazione banca lenta: elenco aggiornato dal file Pagamenti e dallo stato già salvato.',
         )
       }
       setData({ ...res, suggestions_pending: true })
       setLoading(false)
       const n = Number(res?.auto_applied) || 0
       const fromFile = Number(res?.bank_sync?.marked_from_pagamenti ?? res?.marked_from_pagamenti) || 0
-      if (auto && (n > 0 || fromFile > 0)) {
+      if (auto && (lockedCompany === 'pg' || nextCompany === 'pg')) {
+        setSuccess(
+          n > 0
+            ? `Elenco PG aggiornato dall’estratto conto: ${n} collegamenti.`
+            : 'Elenco PG aggiornato dall’estratto conto. Il numero fattura arriva dalle ricevute.',
+        )
+      } else if (auto && (n > 0 || fromFile > 0)) {
         setSuccess(
           `Elenco aggiornato: ${n} da banca, ${fromFile} dal file Pagamenti.`.replace(
             /\s+/g,
@@ -3390,7 +3401,7 @@ export function BancaRiconciliazionePage() {
           actionsHeader="Azioni"
           renderActions={(row) => {
             if (typeof row?.movement?.id !== 'number') return null
-            const canConfirm = Boolean(row?.suggested_invoice)
+            const canConfirm = Boolean(row?.suggested_invoice?.invoice_id)
             return (
               <div className="banca-recon-row-actions">
                 {canConfirm ? (
@@ -3430,9 +3441,11 @@ export function BancaRiconciliazionePage() {
     <BancaPageShell
       title={lockedCompany === 'pg' ? 'Riconciliazione PG · Gazza Ladra' : 'Inbox riconciliazione'}
       lead={
-        companyId
-          ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da giugno; contanti/carta e pre-giugno dal file Pagamenti. Lavora le eccezioni nell’inbox.`
-          : 'Scegli la società: sync banca automatico, match ≥80 applicati, proposte 70–79 in un click.'
+        lockedCompany === 'pg'
+          ? 'Estratto conto PG: importo e a favore di chi. Il numero fattura si prende dalle fatture ricevute, non dal file Pagamenti.'
+          : companyId
+            ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da giugno; contanti/carta e pre-giugno dal file Pagamenti. Lavora le eccezioni nell’inbox.`
+            : 'Scegli la società: sync banca automatico, match ≥80 applicati, proposte 70–79 in un click.'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
