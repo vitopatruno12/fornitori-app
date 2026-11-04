@@ -405,13 +405,35 @@ export default function InvoicesPage() {
     setError('')
     let match = null
     if (qId) match = invoices.find((inv) => String(inv.id) === qId) || null
+    // Se l'id punta a una fattura col totale sbagliato, non fidarsi (es. n. 2000 ripetuto).
+    if (match && qAmount != null) {
+      const idGap = invoiceAmountGap(match, qAmount)
+      if (idGap != null && idGap > 0.05) {
+        const byNumber = qNum ? findInvoiceByNumber(invoices, qNum, qAmount) : null
+        const byAmount = !byNumber
+          ? invoices
+              .filter((inv) => {
+                const g = invoiceAmountGap(inv, qAmount)
+                return g != null && g <= 0.05
+              })
+              .sort((a, b) => (invoiceAmountGap(a, qAmount) ?? 1e12) - (invoiceAmountGap(b, qAmount) ?? 1e12))[0]
+          : null
+        const better = byNumber || byAmount || null
+        const betterGap = invoiceAmountGap(better, qAmount)
+        if (better && betterGap != null && betterGap + 0.05 < idGap) {
+          match = better
+        } else {
+          match = null
+        }
+      }
+    }
     if (qNum) {
       const byNumber = findInvoiceByNumber(invoices, qNum, qAmount)
       const matchGap = invoiceAmountGap(match, qAmount)
       const numberGap = invoiceAmountGap(byNumber, qAmount)
       if (
         byNumber &&
-        (!match || (matchGap != null && numberGap != null && numberGap + 0.05 < matchGap))
+        (!match || (matchGap != null && numberGap != null && numberGap + 0.05 < matchGap) || matchGap == null)
       ) {
         match = byNumber
       }
@@ -419,7 +441,7 @@ export default function InvoicesPage() {
 
     const finishFocus = (inv) => {
       if (!inv?.id) return
-      focusHandledRef.current = `id:${inv.id}`
+      focusHandledRef.current = targetKey
       setFocusInvoiceId(String(inv.id))
       scrolledFocusRef.current = '' // forza nuovo scroll verso l’elenco
       setError('')
@@ -447,28 +469,42 @@ export default function InvoicesPage() {
             if (cancelled) return
             if (full?.id) {
               const fullGap = invoiceAmountGap(full, qAmount)
-              if (qNum && qAmount != null && fullGap != null && fullGap > 0.05) {
+              const lookupForCloser = qNum || String(full.invoice_number || '').trim()
+              if (qAmount != null && fullGap != null && fullGap > 0.05 && lookupForCloser) {
                 try {
-                  const closer = await fetchInvoiceByNumber(qNum, { amount: qAmount, company: qCompany })
-                  if (!cancelled && closer?.id && (invoiceAmountGap(closer, qAmount) ?? 1e12) + 0.05 < fullGap) {
-                    setInvoices((prev) => (prev.some((x) => String(x.id) === String(closer.id)) ? prev : [closer, ...prev]))
+                  const closer = await fetchInvoiceByNumber(lookupForCloser, {
+                    amount: qAmount,
+                    company: qCompany || full.company,
+                  })
+                  if (
+                    !cancelled &&
+                    closer?.id &&
+                    (invoiceAmountGap(closer, qAmount) ?? 1e12) + 0.05 < fullGap
+                  ) {
+                    setInvoices((prev) =>
+                      prev.some((x) => String(x.id) === String(closer.id)) ? prev : [closer, ...prev],
+                    )
                     finishFocus(closer)
                     return
                   }
                 } catch {
                   if (cancelled) return
                 }
+                // Id sbagliato rispetto all'importo: non evidenziare quello, prova by-number sotto.
+              } else {
+                setInvoices((prev) =>
+                  prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev],
+                )
+                finishFocus(full)
+                return
               }
-              setInvoices((prev) => (prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev]))
-              finishFocus(full)
-              return
             }
           } catch {
             if (cancelled) return
           }
         }
 
-        const lookupNum = qNum || qId
+        const lookupNum = qNum || (qId && !/^\d+$/.test(qId) ? qId : '')
         if (lookupNum) {
           try {
             const hit = await fetchInvoiceByNumber(lookupNum, { amount: qAmount, company: qCompany })

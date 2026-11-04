@@ -439,8 +439,16 @@ function linkedInvoicesForMovement(row) {
   if (row?.matched_invoice?.id != null && row.matched_invoice.id !== '') {
     return [row.matched_invoice]
   }
+  // Evita link «nudi» solo-id: senza numero/importo lo storico apre sempre la stessa fattura.
   if (row?.matched_invoice_id != null && row.matched_invoice_id !== '') {
-    return [{ id: row.matched_invoice_id }]
+    return [
+      {
+        id: row.matched_invoice_id,
+        invoice_number: row?.matched_invoice?.invoice_number || null,
+        total: row?.matched_invoice?.total ?? null,
+        company: row?.matched_invoice?.company || row?.account_company || null,
+      },
+    ]
   }
   return []
 }
@@ -462,8 +470,16 @@ function linkedInvoiceHref(inv, movement) {
   if (num) params.set('n', num)
   const company = inv?.company || movement?.account_company
   if (company) params.set('company', String(company))
-  const amount = Math.abs(Number(movement?.amount))
-  if (Number.isFinite(amount) && amount > 0) params.set('importo', amount.toFixed(2))
+  // Preferisci l'importo del movimento: disambigua fatture con lo stesso numero (es. 2000).
+  const movAmt = Math.abs(Number(movement?.amount))
+  const invAmt = Math.abs(Number(inv?.total))
+  const amount =
+    Number.isFinite(movAmt) && movAmt > 0
+      ? movAmt
+      : Number.isFinite(invAmt) && invAmt > 0
+        ? invAmt
+        : null
+  if (amount != null) params.set('importo', amount.toFixed(2))
   const qs = params.toString()
   const base = fattureRegistratePath()
   return qs ? `${base}?${qs}` : base

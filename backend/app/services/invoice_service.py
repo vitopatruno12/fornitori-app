@@ -445,17 +445,34 @@ def find_invoice_id_by_number(
     ]
     if same_company:
       exact_rows = same_company
-  if amount is not None and len(exact_rows) > 1:
+  def _pick_by_amount(rows: list) -> Optional[int]:
+    if not rows:
+      return None
+    if amount is None:
+      return int(rows[0].id)
     target = abs(Decimal(amount))
     exact_amt = [
-      inv for inv in exact_rows if abs(abs(Decimal(inv.total or 0)) - target) <= Decimal("0.05")
+      inv for inv in rows if abs(abs(Decimal(inv.total or 0)) - target) <= Decimal("0.05")
     ]
     if exact_amt:
       return int(exact_amt[0].id)
-    closest = min(exact_rows, key=lambda inv: abs(abs(Decimal(inv.total or 0)) - target))
+    closest = min(rows, key=lambda inv: abs(abs(Decimal(inv.total or 0)) - target))
     return int(closest.id)
-  if exact_rows:
+
+  if amount is not None and exact_rows:
+    picked = _pick_by_amount(exact_rows)
+    if picked is not None:
+      # Una sola riga esatta ma totale lontano: cerca ancora tra i simili.
+      if len(exact_rows) == 1:
+        only = exact_rows[0]
+        gap = abs(abs(Decimal(only.total or 0)) - abs(Decimal(amount)))
+        if gap <= Decimal("0.05"):
+          return picked
+      else:
+        return picked
+  elif exact_rows:
     return int(exact_rows[0].id)
+
   prefix = _invoice_main_number(needle)
   candidates = []
   if prefix:
@@ -474,9 +491,17 @@ def find_invoice_id_by_number(
       .limit(2500)
       .all()
     )
-  for inv in candidates:
-    if invoice_numbers_match(inv.invoice_number, needle):
-      return int(inv.id)
+  matched = [inv for inv in candidates if invoice_numbers_match(inv.invoice_number, needle)]
+  if company_id and matched:
+    same_company = [
+      inv for inv in matched if str(getattr(inv, "company", None) or "").strip().lower() == company_id
+    ]
+    if same_company:
+      matched = same_company
+  if matched:
+    return _pick_by_amount(matched)
+  if amount is not None and exact_rows:
+    return _pick_by_amount(exact_rows)
   return None
 
 

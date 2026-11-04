@@ -3343,7 +3343,10 @@ def _build_linked_invoices(
   if matched is not None:
     key = _normalize_doc_token(str(matched.invoice_number or ""))
     siblings = list(by_norm.get(key) or [])
-    picked = _pick_invoice_for_movement_amount(siblings, mov, account) if len(siblings) > 1 else None
+    if matched not in siblings:
+      siblings = [matched, *siblings]
+    # Anche con un solo «matched» stale: tra i fratelli n. uguale scegli per importo (es. 2000).
+    picked = _pick_invoice_for_movement_amount(siblings, mov, account) if siblings else None
     amt = abs(_dec(getattr(mov, "amount", 0)))
     matched_gap = abs(abs(_dec(getattr(matched, "total", 0))) - amt)
     picked_gap = abs(abs(_dec(getattr(picked, "total", 0))) - amt) if picked is not None else matched_gap
