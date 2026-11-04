@@ -2930,7 +2930,7 @@ export function BancaRiconciliazionePage() {
         if (!auto) throw firstErr
         res = await fetchBancaRiconciliazione(nextCompany)
         setError(
-          lockedCompany === 'pg' || nextCompany === 'pg'
+          pgRecon || nextCompany === 'pg'
             ? 'Riconciliazione lenta: elenco aggiornato dall’estratto conto già salvato.'
             : 'Riconciliazione banca lenta: elenco aggiornato dal file Pagamenti e dallo stato già salvato.',
         )
@@ -2939,7 +2939,7 @@ export function BancaRiconciliazionePage() {
       setLoading(false)
       const n = Number(res?.auto_applied) || 0
       const fromFile = Number(res?.bank_sync?.marked_from_pagamenti ?? res?.marked_from_pagamenti) || 0
-      if (auto && (lockedCompany === 'pg' || nextCompany === 'pg')) {
+      if (auto && (pgRecon || nextCompany === 'pg')) {
         setSuccess(
           n > 0
             ? `Elenco PG aggiornato dall’estratto conto: ${n} collegamenti.`
@@ -3124,6 +3124,7 @@ export function BancaRiconciliazionePage() {
     data?.inbox?.open
     || unpaidRows.filter((r) => r?.lifecycle !== 'parziale' && r?.match_reason !== 'acconto')
   const companyName = companyId ? companyLabel(companyId) : ''
+  const pgRecon = lockedCompany === 'pg' || companyId === 'pg'
   const pendingSuggestions = (data?.suggestions || []).filter((s) => s?.status !== 'matched')
   const proposalRows =
     data?.proposals?.length
@@ -3439,10 +3440,10 @@ export function BancaRiconciliazionePage() {
 
   return (
     <BancaPageShell
-      title={lockedCompany === 'pg' ? 'Riconciliazione PG · Gazza Ladra' : 'Inbox riconciliazione'}
+      title={pgRecon ? 'Riconciliazione PG · Gazza Ladra' : 'Inbox riconciliazione'}
       lead={
-        lockedCompany === 'pg'
-          ? 'Estratto conto PG: importo e a favore di chi. Il numero fattura si prende dalle fatture ricevute, non dal file Pagamenti.'
+        pgRecon
+          ? 'Estratto conto PG: importo e a favore di chi. Il numero fattura si prende dalle fatture ricevute, non dal file Pagamenti. Le spese di bonifico (0,40 e le altre commissioni) si chiudono da sole.'
           : companyId
             ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da giugno; contanti/carta e pre-giugno dal file Pagamenti. Lavora le eccezioni nell’inbox.`
             : 'Scegli la società: sync banca automatico, match ≥80 applicati, proposte 70–79 in un click.'

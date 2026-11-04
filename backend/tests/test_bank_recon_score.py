@@ -699,3 +699,18 @@ def test_pagamenti_file_window_before_june_2026():
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 7, 31)))
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=date(2026, 10, 4)))
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=None))
+
+
+def test_spese_bonifico_sono_costi_banca():
+  from app.services.banca_service import _is_bank_fee_movement
+
+  fee = _mov(amount=Decimal("0.40"), description="BONIFICO A FAVORE DI TOMMASI FATTURA 1551")
+  assert _is_bank_fee_movement(fee)
+  costo = _mov(amount=Decimal("1.50"), description="COMMISSIONE BONIFICO SEPA")
+  assert _is_bank_fee_movement(costo)
+  spese = _mov(amount=Decimal("2.50"), description="SPESE PER BONIFICO")
+  assert _is_bank_fee_movement(spese)
+  wire = _mov(amount=Decimal("899.00"), description="BONIFICO A FAVORE DI TOMMASI")
+  assert not _is_bank_fee_movement(wire)
+  small_supplier = _mov(amount=Decimal("1.50"), description="BONIFICO A FAVORE DI FORNITORE")
+  assert not _is_bank_fee_movement(small_supplier)

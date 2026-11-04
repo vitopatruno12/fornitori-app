@@ -223,6 +223,107 @@ def _is_bank_pos_payment(mov: BankMovement) -> bool:
   return bool(_BANK_POS_RE.search(blob))
 
 
+_BANK_FEE_WORD_RE = re.compile(
+  r"\b(?:COMMISSION\w*|SPESE|COSTO|ONERI|BOLLO|CANONE|RECUPERO)\b",
+  re.IGNORECASE,
+)
+_BANK_FEE_PHRASE_RE = re.compile(
+  r"(?:"
+  r"\bCOMMISSION\w*\b|"
+  r"\bSPESE\s+(?:DI\s+|PER\s+|SU\s+)?(?:BONIFICO|OPERAZION\w*|BANCAR\w*|TENUTA|CONTO)\b|"
+  r"\bCOSTO\s+(?:DI\s+|DEL\s+|PER\s+)?BONIFICO\b|"
+  r"\bONERI\s+BANCAR\w*\b|"
+  r"\bIMPOSTA\s+DI\s+BOLLO\b|"
+  r"\bBOLLO\s+(?:SU\s+)?(?:CONTO|ESTRATTO)\b|"
+  r"\bCANONE\s+(?:CONTO|MENSILE|CC)\b|"
+  r"\bRECUPERO\s+SPESE\b"
+  r")",
+  re.IGNORECASE,
+)
+# Commissioni tipiche del bonifico (BPPB e le altre): 0,40 e i costi vicini.
+_TYPICAL_WIRE_FEE_AMOUNTS = frozenset(
+  {
+    Decimal("0.40"),
+    Decimal("0.50"),
+    Decimal("0.80"),
+    Decimal("1.00"),
+    Decimal("1.50"),
+    Decimal("2.00"),
+    Decimal("2.50"),
+    Decimal("3.50"),
+    Decimal("5.00"),
+  }
+)
+_BANK_FEE_MAX = Decimal("25.00")
+
+
+def _movement_text_blob(mov: Any) -> str:
+  return " ".join(
+    [
+      str(getattr(mov, "description", None) or ""),
+      str(getattr(mov, "causale", None) or ""),
+      str(getattr(mov, "counterparty", None) or ""),
+      str(getattr(mov, "notes", None) or ""),
+    ]
+  )
+
+
+def _is_bank_fee_movement(mov: Any) -> bool:
+  """Uscita che è un costo della banca (0,40 o altra commissione), non un fornitore."""
+  if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+    return False
+  amt = abs(_dec(getattr(mov, "amount", 0))).quantize(Decimal("0.01"))
+  if amt < Decimal("0.01") or amt > _BANK_FEE_MAX:
+    return False
+  blob = _movement_text_blob(mov)
+  if amt == Decimal("0.40"):
+    return True
+  if _BANK_FEE_PHRASE_RE.search(blob):
+    return True
+  if amt in _TYPICAL_WIRE_FEE_AMOUNTS and _BANK_FEE_WORD_RE.search(blob):
+    return True
+  return False
+
+
+def mark_bank_fee_movements(
+  db: Session,
+  *,
+  account_id: Optional[int] = None,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+  company: Optional[str] = None,
+  limit: int = 800,
+) -> int:
+  """Segna riconciliate le spese di bonifico ancora aperte. Non tocca i match già fatti."""
+  q = db.query(BankMovement).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
+  q = q.filter(
+    BankMovement.reconciliation_status == "unmatched",
+    func.lower(BankMovement.movement_type) == "uscita",
+    BankMovement.matched_invoice_id.is_(None),
+  )
+  if account_id:
+    q = q.filter(BankMovement.bank_account_id == account_id)
+  company_id = (company or "").strip().lower()
+  if company_id:
+    q = q.filter(func.lower(func.coalesce(BankAccount.company, "")) == company_id)
+  if date_from:
+    q = q.filter(BankMovement.movement_date >= date_from)
+  if date_to:
+    q = q.filter(BankMovement.movement_date <= date_to)
+  rows = q.order_by(BankMovement.movement_date.desc(), BankMovement.id.desc()).limit(limit).all()
+  marked = 0
+  for mov in rows:
+    if not _is_bank_fee_movement(mov):
+      continue
+    mov.reconciliation_status = "matched"
+    if not (getattr(mov, "category", None) or "").strip():
+      mov.category = "spese_banca"
+    marked += 1
+  if marked:
+    db.commit()
+  return marked
+
+
 def link_pos_payments_to_prima_nota(
   db: Session,
   *,
@@ -1173,6 +1274,16 @@ def list_movements(
     )
   except Exception:
     logger.warning("Auto-link POS → Prima Nota Gazza fallito in list_movements", exc_info=True)
+  try:
+    mark_bank_fee_movements(
+      db,
+      account_id=account_id,
+      date_from=date_from,
+      date_to=date_to,
+      company=company,
+    )
+  except Exception:
+    logger.warning("Auto-riconciliazione spese bonifico fallita in list_movements", exc_info=True)
   q = db.query(BankMovement, BankAccount).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
   if account_id:
     q = q.filter(BankMovement.bank_account_id == account_id)
@@ -3908,6 +4019,10 @@ def reconciliation_snapshot(
   Il confronto completo sui bonifici (da agosto) resta su POST /riconciliazione/auto.
   """
   company_id = (company or "").strip() or None
+  try:
+    mark_bank_fee_movements(db, company=company_id)
+  except Exception:
+    logger.warning("Auto-riconciliazione spese bonifico fallita in snapshot", exc_info=True)
   marked_from_file = 0
   try:
     marked_from_file = apply_pagamenti_file_window_payments(db, company_id)
