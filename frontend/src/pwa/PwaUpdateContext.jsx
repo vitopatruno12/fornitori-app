@@ -126,9 +126,21 @@ async function clearWorkboxCaches() {
   }
 }
 
+async function unregisterAllServiceWorkers() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(regs.map((reg) => reg.unregister().catch(() => false)))
+  } catch {
+    // ignore
+  }
+}
+
 function hardReloadPage() {
   const url = new URL(window.location.href)
   url.searchParams.set('_atlas_u', String(Date.now()))
+  // Evita di restare su query di update precedenti.
+  url.searchParams.delete('_atlas_force')
   window.location.replace(url.toString())
 }
 
@@ -406,17 +418,13 @@ export function PwaUpdateProvider({ children }) {
   }, [swSupported])
 
   const applyUpdate = useCallback(async () => {
-    if (!swSupported) {
-      hardReloadPage()
-      return
-    }
-
-    // Un click = pacchetto unico: azzera il contatore e installa l’ultima build (tutti i deploy).
+    // Un click = forza installazione: pulisce SW/cache e ricarica (anche senza badge).
     setApplying(true)
     clearPendingUpdateState(setUpdateReady, setUpdateCount)
 
     const failsafeId = window.setTimeout(() => {
       setApplying(false)
+      hardReloadPage()
     }, APPLY_FAILSAFE_MS)
 
     try {
@@ -426,14 +434,16 @@ export function PwaUpdateProvider({ children }) {
     }
 
     try {
-      await markVersionsInstalled()
-
-      const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration())
+      const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration().catch(() => null))
       registrationRef.current = reg || null
 
       if (reg) {
-        await reg.update()
-        await waitForWaitingWorker(reg, 3500)
+        try {
+          await reg.update()
+        } catch {
+          // ignore
+        }
+        await waitForWaitingWorker(reg, 2500)
       }
 
       const fn = updateSWRef.current
@@ -445,16 +455,24 @@ export function PwaUpdateProvider({ children }) {
         }
       }
 
+      // Se skipWaiting non basta (PWA bloccata), togli SW e cache così il reload prende i file nuovi.
       await clearWorkboxCaches()
+      await unregisterAllServiceWorkers()
       verifiedAtRef.current = Date.now()
       window.clearTimeout(failsafeId)
       hardReloadPage()
     } catch {
+      try {
+        await clearWorkboxCaches()
+        await unregisterAllServiceWorkers()
+      } catch {
+        // ignore
+      }
       window.clearTimeout(failsafeId)
       setApplying(false)
       hardReloadPage()
     }
-  }, [swSupported, markVersionsInstalled])
+  }, [swSupported])
 
   const value = useMemo(
     () => ({

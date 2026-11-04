@@ -11,10 +11,12 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
   async function handleClick() {
     if (applying || checking) return
     try {
+      // Sempre installa/ricarica: se non c’è badge, forza comunque pulizia cache + reload.
       if (updateReady) {
         await applyUpdate()
       } else {
         await checkForUpdate()
+        await applyUpdate()
       }
     } finally {
       onDone?.()
@@ -38,13 +40,13 @@ export default function AtlasUpdateButton({ className = '', navStyle = false, ic
     ? packageMode
       ? `${pendingCount} aggiornamenti in coda: un click installa il pacchetto completo`
       : 'Nuova versione pronta: clicca per installare l’aggiornamento'
-    : 'Controlla se è disponibile un aggiornamento dell’app'
+    : 'Scarica l’ultima versione: pulisce la cache e ricarica l’app'
 
   const ariaLabel = showUpdateBadge
     ? packageMode
       ? `Installa pacchetto con ${pendingCount} aggiornamenti`
       : 'Installa aggiornamento'
-    : label
+    : 'Forza aggiornamento app'
 
   const badgeAria = packageMode
     ? `Pacchetto con ${pendingCount} aggiornamenti`
