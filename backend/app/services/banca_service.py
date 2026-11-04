@@ -1340,6 +1340,27 @@ def list_movements(
         invoices_by_id[inv.id] = inv
         _remember_norm(inv)
 
+  # Il numero 2000 è anche un anno: la causale lo scarta, e il like %2000% si ferma a 2500 righe.
+  # Qui si prendono tutte le fatture con quel numero esatto, così l'importo sceglie la giusta.
+  exact_numbers = {
+    str(inv.invoice_number or "").strip().lower()
+    for inv in invoices_by_id.values()
+    if str(inv.invoice_number or "").strip()
+  }
+  for tok in lookup_tokens:
+    raw = str(tok or "").strip().lower()
+    if len(re.sub(r"\D", "", raw)) >= 3:
+      exact_numbers.add(raw)
+  for mov, _acc in rows:
+    for match in re.finditer(r"(?<!\d)(\d{3,6})(?!\d)", _movement_search_blob(mov)):
+      exact_numbers.add(match.group(1))
+  exact_numbers.discard("")
+  if exact_numbers:
+    needles = list(exact_numbers)[:300]
+    for inv in db.query(Invoice).filter(func.lower(Invoice.invoice_number).in_(needles)).all():
+      invoices_by_id[inv.id] = inv
+      _remember_norm(inv)
+
   supplier_ids = {inv.supplier_id for inv in invoices_by_id.values() if inv.supplier_id}
   if supplier_ids:
     suppliers_by_id = {
@@ -1364,6 +1385,12 @@ def list_movements(
     # Se abbiamo più fatture ma matched_invoice assente, usa la prima come primaria in UI
     primary = matched
     primary_sn = sn
+    linked_id = linked[0].get("id") if linked else None
+    if linked_id and (primary is None or int(linked_id) != int(getattr(primary, "id") or 0)):
+      alt = invoices_by_id.get(int(linked_id))
+      if alt is not None:
+        primary = alt
+        primary_sn = suppliers_by_id.get(alt.supplier_id) if alt.supplier_id else linked[0].get("supplier_name")
     if primary is None and linked:
       first_id = linked[0].get("id")
       if first_id and first_id in invoices_by_id:

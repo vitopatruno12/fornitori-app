@@ -377,7 +377,13 @@ export default function InvoicesPage() {
       return
     }
 
-    const targetKey = qId ? `id:${qId}` : `n:${qNum}`
+    const targetKey = [
+      qId ? `id:${qId}` : '',
+      qNum ? `n:${qNum}` : '',
+      qAmount != null ? `a:${qAmount.toFixed(2)}` : '',
+    ]
+      .filter(Boolean)
+      .join('|')
     if (focusHandledRef.current === targetKey) return
 
     // Apply scope/filters so the target invoice can appear in the list.
