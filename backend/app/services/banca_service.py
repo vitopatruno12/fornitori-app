@@ -1307,16 +1307,22 @@ def list_movements(
       lookup_tokens.extend(extract_invoice_digit_tokens(_movement_search_blob(m)))
 
   invoices_by_id: Dict[int, Invoice] = {}
-  invoices_by_norm: Dict[str, Invoice] = {}
+  invoices_by_norm: Dict[str, List[Invoice]] = {}
   suppliers_by_id: Dict[int, str] = {}
+
+  def _remember_norm(inv: Invoice) -> None:
+    key = _normalize_doc_token(str(inv.invoice_number or ""))
+    if not key:
+      return
+    bucket = invoices_by_norm.setdefault(key, [])
+    if all(int(getattr(other, "id") or 0) != int(inv.id) for other in bucket):
+      bucket.append(inv)
 
   if invoice_ids:
     inv_rows = db.query(Invoice).filter(Invoice.id.in_(invoice_ids)).all()
     for inv in inv_rows:
       invoices_by_id[inv.id] = inv
-      key = _normalize_doc_token(str(inv.invoice_number or ""))
-      if key:
-        invoices_by_norm[key] = inv
+      _remember_norm(inv)
 
   digit_cores = sorted(
     {
@@ -1332,9 +1338,7 @@ def list_movements(
     if clauses:
       for inv in db.query(Invoice).filter(or_(*clauses)).limit(2500).all():
         invoices_by_id[inv.id] = inv
-        key = _normalize_doc_token(str(inv.invoice_number or ""))
-        if key:
-          invoices_by_norm[key] = inv
+        _remember_norm(inv)
 
   supplier_ids = {inv.supplier_id for inv in invoices_by_id.values() if inv.supplier_id}
   if supplier_ids:
@@ -3215,13 +3219,40 @@ def _invoice_brief(
   }
 
 
+def _pick_invoice_for_movement_amount(
+  candidates: List[Invoice],
+  mov: Any,
+  account: Optional[BankAccount] = None,
+) -> Optional[Invoice]:
+  """Stesso numero su più fatture: tiene quella il cui totale è l'importo del movimento."""
+  if not candidates:
+    return None
+  company = str(getattr(account, "company", None) or "").strip().lower()
+  pool = list(candidates)
+  if company:
+    same = [
+      inv
+      for inv in pool
+      if str(getattr(inv, "company", None) or "").strip().lower() == company
+    ]
+    if same:
+      pool = same
+  if len(pool) == 1:
+    return pool[0]
+  amt = abs(_dec(getattr(mov, "amount", 0)))
+  exact = [inv for inv in pool if abs(abs(_dec(getattr(inv, "total", 0))) - amt) <= Decimal("0.05")]
+  if exact:
+    return exact[0]
+  return min(pool, key=lambda inv: (abs(abs(_dec(getattr(inv, "total", 0))) - amt), -int(getattr(inv, "id") or 0)))
+
+
 def _build_linked_invoices(
   mov: BankMovement,
   *,
   matched: Optional[Invoice] = None,
   supplier_name: Optional[str] = None,
   account: Optional[BankAccount] = None,
-  invoices_by_norm: Optional[Dict[str, Invoice]] = None,
+  invoices_by_norm: Optional[Dict[str, List[Invoice]]] = None,
   suppliers_by_id: Optional[Dict[int, str]] = None,
 ) -> List[Dict[str, Any]]:
   """Elenco fatture collegate: nota sul movimento, FK singola, refs in causale."""
@@ -3240,6 +3271,19 @@ def _build_linked_invoices(
     name = sn or suppliers.get(getattr(inv, "supplier_id", None) or 0, "") or ""
     out.append(_invoice_brief(inv, supplier_name=name, account=account))
 
+  def _candidates_for(raw: str) -> List[Invoice]:
+    n = invoice_ref_digits(raw) or str(raw or "").strip()
+    key = _normalize_doc_token(n)
+    found: List[Invoice] = list(by_norm.get(key) or [])
+    if found:
+      return found
+    for group in by_norm.values():
+      for cand in group:
+        if _ref_matches_number(n, getattr(cand, "invoice_number", None)):
+          if all(int(getattr(other, "id") or 0) != int(cand.id) for other in found):
+            found.append(cand)
+    return found
+
   def _add_number(raw: str, *, require_match: bool = True) -> None:
     n = invoice_ref_digits(raw) or str(raw or "").strip()
     if not n:
@@ -3249,12 +3293,7 @@ def _build_linked_invoices(
     key = _normalize_doc_token(n)
     if not key or key in seen_norm:
       return
-    inv = by_norm.get(key)
-    if inv is None:
-      for cand in by_norm.values():
-        if _ref_matches_number(n, getattr(cand, "invoice_number", None)):
-          inv = cand
-          break
+    inv = _pick_invoice_for_movement_amount(_candidates_for(n), mov, account)
     if inv is not None:
       _add_inv(inv)
       return
@@ -3275,7 +3314,20 @@ def _build_linked_invoices(
     )
 
   if matched is not None:
-    _add_inv(matched, supplier_name or "")
+    key = _normalize_doc_token(str(matched.invoice_number or ""))
+    siblings = list(by_norm.get(key) or [])
+    picked = _pick_invoice_for_movement_amount(siblings, mov, account) if len(siblings) > 1 else None
+    amt = abs(_dec(getattr(mov, "amount", 0)))
+    matched_gap = abs(abs(_dec(getattr(matched, "total", 0))) - amt)
+    picked_gap = abs(abs(_dec(getattr(picked, "total", 0))) - amt) if picked is not None else matched_gap
+    if (
+      picked is not None
+      and int(getattr(picked, "id") or 0) != int(getattr(matched, "id") or 0)
+      and picked_gap + Decimal("0.05") < matched_gap
+    ):
+      _add_inv(picked)
+    else:
+      _add_inv(matched, supplier_name or "")
 
   for num in _parse_linked_invoices_note(getattr(mov, "notes", None)):
     _add_number(num, require_match=True)

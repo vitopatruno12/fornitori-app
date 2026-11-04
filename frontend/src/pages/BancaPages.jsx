@@ -17,6 +17,12 @@ import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
 import {
+  getLockedOperatorStationId,
+  getOperatorStationFatturePath,
+  isOperatorStationLocked,
+  resolveOperatorStationIdFromPath,
+} from '../utils/operatorMode.ts'
+import {
   confirmBancaConnectOtp,
   connectBancaAccount,
   createBancaAccount,
@@ -439,6 +445,15 @@ function linkedInvoicesForMovement(row) {
   return []
 }
 
+function fattureRegistratePath() {
+  if (typeof window === 'undefined') return '/fatture/registrate'
+  const stationId =
+    resolveOperatorStationIdFromPath(window.location.pathname) ||
+    (isOperatorStationLocked() ? getLockedOperatorStationId() : null)
+  if (!stationId) return '/fatture/registrate'
+  return `${getOperatorStationFatturePath(stationId)}/registrate`
+}
+
 function linkedInvoiceHref(inv, movement) {
   const params = new URLSearchParams()
   const idStr = inv?.id != null && inv.id !== '' ? String(inv.id) : ''
@@ -447,8 +462,11 @@ function linkedInvoiceHref(inv, movement) {
   if (num) params.set('n', num)
   const company = inv?.company || movement?.account_company
   if (company) params.set('company', String(company))
+  const amount = Math.abs(Number(movement?.amount))
+  if (Number.isFinite(amount) && amount > 0) params.set('importo', amount.toFixed(2))
   const qs = params.toString()
-  return qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'
+  const base = fattureRegistratePath()
+  return qs ? `${base}?${qs}` : base
 }
 
 function bankMovementsCellValue(row, col) {

@@ -50,13 +50,31 @@ function formatAmount(value) {
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function findInvoiceByNumber(list, qNum) {
+function invoiceAmountGap(inv, amount) {
+  if (amount == null || inv?.total == null || inv.total === '') return null
+  const total = Number(inv.total)
+  if (!Number.isFinite(total)) return null
+  return Math.abs(total - amount)
+}
+
+function findInvoiceByNumber(list, qNum, amount = null) {
   const needle = String(qNum || '').trim()
   if (!needle || !Array.isArray(list)) return null
   const low = needle.toLowerCase()
-  const exact = list.find((inv) => String(inv?.invoice_number || '').trim().toLowerCase() === low)
-  if (exact) return exact
-  return list.find((inv) => invoiceNumbersMatch(inv?.invoice_number, needle)) || null
+  const exact = list.filter((inv) => String(inv?.invoice_number || '').trim().toLowerCase() === low)
+  const pool = exact.length
+    ? exact
+    : list.filter((inv) => invoiceNumbersMatch(inv?.invoice_number, needle))
+  if (!pool.length) return null
+  if (amount == null || pool.length === 1) return pool[0]
+  const exactAmt = pool.filter((inv) => {
+    const gap = invoiceAmountGap(inv, amount)
+    return gap != null && gap <= 0.05
+  })
+  if (exactAmt.length) return exactAmt[0]
+  return pool
+    .slice()
+    .sort((a, b) => (invoiceAmountGap(a, amount) ?? 1e12) - (invoiceAmountGap(b, amount) ?? 1e12))[0]
 }
 
 const REGISTRATE_COLUMNS = [
@@ -325,6 +343,9 @@ export default function InvoicesPage() {
   useEffect(() => {
     const qId = String(searchParams.get('id') || '').trim()
     const qNum = String(searchParams.get('n') || '').trim()
+    const qAmountRaw = String(searchParams.get('importo') || '').replace(',', '.').trim()
+    const qAmountNum = qAmountRaw ? Number(qAmountRaw) : null
+    const qAmount = Number.isFinite(qAmountNum) ? Math.abs(qAmountNum) : null
     const qCompany = String(searchParams.get('company') || '').trim()
     const qSupplier = String(searchParams.get('supplier_id') || '').trim()
     const qSupplierName = String(searchParams.get('supplier') || '').trim()
@@ -378,7 +399,17 @@ export default function InvoicesPage() {
     setError('')
     let match = null
     if (qId) match = invoices.find((inv) => String(inv.id) === qId) || null
-    if (!match && qNum) match = findInvoiceByNumber(invoices, qNum)
+    if (qNum) {
+      const byNumber = findInvoiceByNumber(invoices, qNum, qAmount)
+      const matchGap = invoiceAmountGap(match, qAmount)
+      const numberGap = invoiceAmountGap(byNumber, qAmount)
+      if (
+        byNumber &&
+        (!match || (matchGap != null && numberGap != null && numberGap + 0.05 < matchGap))
+      ) {
+        match = byNumber
+      }
+    }
 
     const finishFocus = (inv) => {
       if (!inv?.id) return
@@ -409,6 +440,19 @@ export default function InvoicesPage() {
             const full = await fetchInvoice(qId)
             if (cancelled) return
             if (full?.id) {
+              const fullGap = invoiceAmountGap(full, qAmount)
+              if (qNum && qAmount != null && fullGap != null && fullGap > 0.05) {
+                try {
+                  const closer = await fetchInvoiceByNumber(qNum, { amount: qAmount, company: qCompany })
+                  if (!cancelled && closer?.id && (invoiceAmountGap(closer, qAmount) ?? 1e12) + 0.05 < fullGap) {
+                    setInvoices((prev) => (prev.some((x) => String(x.id) === String(closer.id)) ? prev : [closer, ...prev]))
+                    finishFocus(closer)
+                    return
+                  }
+                } catch {
+                  if (cancelled) return
+                }
+              }
               setInvoices((prev) => (prev.some((x) => String(x.id) === String(full.id)) ? prev : [full, ...prev]))
               finishFocus(full)
               return
@@ -421,7 +465,7 @@ export default function InvoicesPage() {
         const lookupNum = qNum || qId
         if (lookupNum) {
           try {
-            const hit = await fetchInvoiceByNumber(lookupNum)
+            const hit = await fetchInvoiceByNumber(lookupNum, { amount: qAmount, company: qCompany })
             if (cancelled) return
             if (hit?.id) {
               if (hit.ignored) setShowIgnored(true)

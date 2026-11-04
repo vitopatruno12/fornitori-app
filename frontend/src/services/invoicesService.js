@@ -17,10 +17,12 @@ export async function fetchInvoice(id) {
   return apiFetch(`/invoices/${id}`)
 }
 
-export async function fetchInvoiceByNumber(number) {
+export async function fetchInvoiceByNumber(number, { amount, company } = {}) {
   const n = String(number || '').trim()
   if (!n) return null
   const q = new URLSearchParams({ n })
+  if (amount != null && amount !== '' && Number.isFinite(Number(amount))) q.set('amount', String(amount))
+  if (company) q.set('company', String(company))
   return apiFetch(`/invoices/by-number?${q}`)
 }
 

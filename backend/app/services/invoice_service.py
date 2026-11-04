@@ -422,18 +422,40 @@ def invoice_numbers_match(stored: Optional[str], query: Optional[str]) -> bool:
   return False
 
 
-def find_invoice_id_by_number(db: Session, number: str) -> Optional[int]:
+def find_invoice_id_by_number(
+  db: Session,
+  number: str,
+  *,
+  amount: Optional[Decimal] = None,
+  company: Optional[str] = None,
+) -> Optional[int]:
   needle = str(number or "").strip()
   if not needle:
     return None
-  exact = (
-    db.query(Invoice.id)
+  exact_rows = (
+    db.query(Invoice)
     .filter(func.lower(Invoice.invoice_number) == needle.lower())
     .order_by(Invoice.invoice_date.desc(), Invoice.id.desc())
-    .first()
+    .all()
   )
-  if exact:
-    return int(exact[0])
+  company_id = str(company or "").strip().lower()
+  if company_id and exact_rows:
+    same_company = [
+      inv for inv in exact_rows if str(getattr(inv, "company", None) or "").strip().lower() == company_id
+    ]
+    if same_company:
+      exact_rows = same_company
+  if amount is not None and len(exact_rows) > 1:
+    target = abs(Decimal(amount))
+    exact_amt = [
+      inv for inv in exact_rows if abs(abs(Decimal(inv.total or 0)) - target) <= Decimal("0.05")
+    ]
+    if exact_amt:
+      return int(exact_amt[0].id)
+    closest = min(exact_rows, key=lambda inv: abs(abs(Decimal(inv.total or 0)) - target))
+    return int(closest.id)
+  if exact_rows:
+    return int(exact_rows[0].id)
   prefix = _invoice_main_number(needle)
   candidates = []
   if prefix:

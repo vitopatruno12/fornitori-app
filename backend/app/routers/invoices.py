@@ -359,9 +359,18 @@ def list_invoices(
 @router.get("/by-number", response_model=InvoiceDetailOut)
 def get_invoice_by_number(
   n: str = Query(..., min_length=1, description="Numero documento (anche 398 o 398/2026)"),
+  amount: Optional[float] = Query(None, description="Totale del documento, se il numero è ripetuto"),
+  company: Optional[str] = Query(None, description="Società, se il numero è ripetuto"),
   db: Session = Depends(get_db),
 ):
-  invoice_id = invoice_service.find_invoice_id_by_number(db, n)
+  from decimal import Decimal
+
+  invoice_id = invoice_service.find_invoice_id_by_number(
+    db,
+    n,
+    amount=Decimal(str(amount)) if amount is not None else None,
+    company=company,
+  )
   if not invoice_id:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fattura non trovata")
   inv = invoice_service.get_invoice_detail(db, invoice_id)

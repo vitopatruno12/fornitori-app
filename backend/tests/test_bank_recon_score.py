@@ -701,6 +701,18 @@ def test_pagamenti_file_window_before_june_2026():
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=None))
 
 
+def test_stesso_numero_apre_la_fattura_con_importo_del_movimento():
+  from types import SimpleNamespace
+  from app.services.banca_service import _pick_invoice_for_movement_amount
+
+  nine_hundred = _inv(id=1, invoice_number="2000", total=Decimal("990.00"))
+  five_thirty = _inv(id=2, invoice_number="2000", total=Decimal("536.00"))
+  mov = _mov(amount=Decimal("536.00"))
+  account = SimpleNamespace(company="pg")
+  picked = _pick_invoice_for_movement_amount([nine_hundred, five_thirty], mov, account)
+  assert picked.id == 2
+
+
 def test_spese_bonifico_sono_costi_banca():
   from app.services.banca_service import _is_bank_fee_movement
 
