@@ -1107,6 +1107,13 @@ def sync_enable_banking_account(
       date_from=date_from,
       date_to=date_to,
     )
+    if (company or "").strip().lower() == "pg":
+      banca_service.link_pos_payments_to_prima_nota(
+        db,
+        account_id=account_id,
+        date_from=date_from,
+        date_to=date_to,
+      )
   except Exception:
     logger.warning("Auto-link versamenti → Prima Nota fallito account %s", account_id, exc_info=True)
   if sync_payments and (company or imported):

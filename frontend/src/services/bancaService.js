@@ -1,7 +1,8 @@
 import { apiFetch, apiUrl } from './api'
 
-export async function fetchBancaDashboard() {
-  return apiFetch('/banca/dashboard')
+export async function fetchBancaDashboard(company) {
+  const q = company ? `?company=${encodeURIComponent(company)}` : ''
+  return apiFetch(`/banca/dashboard${q}`)
 }
 
 export async function fetchBancaAccounts() {
@@ -108,6 +109,7 @@ export async function fetchBancaMovimenti(params = {}, options = {}) {
   if (params.date_to) search.append('date_to', params.date_to)
   if (params.category) search.append('category', params.category)
   if (params.counterparty) search.append('counterparty', params.counterparty)
+  if (params.company) search.append('company', params.company)
   const q = search.toString()
   return apiFetch(q ? `/banca/movimenti?${q}` : '/banca/movimenti', options)
 }

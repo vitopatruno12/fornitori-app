@@ -9,7 +9,13 @@ import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { postBancaRiconciliazioneAuto } from '../services/bancaService.js'
 import { ACCOUNT_PLAN, fetchMastriniData } from '../services/mastriniService'
 import { accountCodesForCompany, GENERAL_ACCOUNTS } from '../constants/mastriniPasscom.js'
-import { companyLabel } from '../utils/fattureCompany.js'
+import { companyLabel, resolveEmbeddedFattureCompany } from '../utils/fattureCompany.js'
+import {
+  getOperatorStationBancaPath,
+  getOperatorStationFatturePath,
+  getOperatorStationRouterPath,
+  resolveOperatorStationIdFromPath,
+} from '../utils/operatorMode.ts'
 
 function statusBadge(status) {
   if (status === 'pareggio') return <span style={{ color: '#0f766e', fontWeight: 700 }}>Pareggio</span>
@@ -193,6 +199,16 @@ function exportTablePdf({ title, companyLabelText, periodLabel, filename, head, 
   doc.save(filename)
 }
 
+function stationAppPath(kind) {
+  const stationId = resolveOperatorStationIdFromPath()
+  if (!stationId) return ''
+  if (kind === 'fatture') return getOperatorStationFatturePath(stationId)
+  if (kind === 'banca') return getOperatorStationBancaPath(stationId)
+  if (kind === 'prima-nota') return getOperatorStationRouterPath('prima-nota', stationId)
+  if (kind === 'scheda') return `${getOperatorStationFatturePath(stationId)}/scheda-contabile`
+  return ''
+}
+
 function registrateHref(mv) {
   const invId = mv.linkedInvoiceId || mv.documentId || ''
   const params = new URLSearchParams()
@@ -206,7 +222,8 @@ function registrateHref(mv) {
   if (mv.company && mv.company !== 'non_classificata') params.set('company', String(mv.company))
   if (mv.supplierId) params.set('supplier_id', String(mv.supplierId))
   const qs = params.toString()
-  return qs ? `/fatture/registrate?${qs}` : '/fatture/registrate'
+  const base = stationAppPath('fatture') || '/fatture'
+  return qs ? `${base}/registrate?${qs}` : `${base}/registrate`
 }
 
 function emesseHref(mv) {
@@ -228,7 +245,8 @@ function emesseHref(mv) {
   const customer = String(mv.customer || mv.counterparty || '').trim()
   if (customer) params.set('customer', customer)
   const qs = params.toString()
-  return qs ? `/fatture/emesse?${qs}` : '/fatture/emesse'
+  const base = stationAppPath('fatture') || '/fatture'
+  return qs ? `${base}/emesse?${qs}` : `${base}/emesse`
 }
 
 function bancaMovimentiHref(mv) {
@@ -255,7 +273,8 @@ function bancaMovimentiHref(mv) {
           : 'entrata'
   params.set('sense', sense)
   const qs = params.toString()
-  return qs ? `/banca/movimenti?${qs}` : '/banca/movimenti'
+  const base = stationAppPath('banca') || '/banca'
+  return qs ? `${base}/movimenti?${qs}` : `${base}/movimenti`
 }
 
 function documentoLink(mv) {
@@ -301,7 +320,7 @@ function documentoLink(mv) {
           {label || `Fattura ${mv.linkedInvoiceId}`}
         </Link>
         <span aria-hidden>↔</span>
-        <Link to="/prima-nota" style={{ textDecoration: 'underline' }}>
+        <Link to={stationAppPath('prima-nota') || '/prima-nota'} style={{ textDecoration: 'underline' }}>
           PN-{mv.linkedCashEntryId}
         </Link>
       </span>
@@ -522,7 +541,8 @@ function sortMovementsNewestFirst(movements = []) {
 
 export default function MastriniContabiliPage() {
   const year = new Date().getFullYear()
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const embeddedCompany = resolveEmbeddedFattureCompany()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(!embeddedCompany)
   const [viewMode, setViewMode] = useState('clienti')
   const [dateFrom, setDateFrom] = useState(`${year}-01-01`)
   const [dateTo, setDateTo] = useState(`${year}-12-31`)
@@ -1064,14 +1084,21 @@ export default function MastriniContabiliPage() {
 
   return (
     <AmministrazionePageShell
-      title="Schede contabili / Mastrini"
+      title={embeddedCompany === 'pg' ? 'Mastrini PG · Gazza Ladra' : 'Schede contabili / Mastrini'}
       lead={
-        companyId
-          ? `Mastrini ${selectedCompanyLabel}: Scheda clienti (fatture emesse). I fornitori sono in Scheda fornitori, per società.`
-          : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
+        embeddedCompany
+          ? `Solo ${selectedCompanyLabel}. Scheda clienti e scheda fornitori di questa società.`
+          : companyId
+            ? `Mastrini ${selectedCompanyLabel}: Scheda clienti (fatture emesse). I fornitori sono in Scheda fornitori, per società.`
+            : 'Scegli la società dal menu per vedere i mastrini del registro corretto (come fatture e scadenziario).'
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Strumenti mastrini">
+          {embeddedCompany ? (
+            <strong className="fatture-note" style={{ margin: 0 }}>
+              {selectedCompanyLabel}
+            </strong>
+          ) : (
           <FattureCompanySelect
             className="mastrini-hero-tools-company"
             companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
@@ -1079,6 +1106,7 @@ export default function MastriniContabiliPage() {
             onChange={setCompanyId}
             loading={loadingCompanies}
           />
+          )}
           <div className="mastrini-hero-tools-btns">
             <button type="button" className="btn btn-primary btn-sm" onClick={() => load()} disabled={loading || !companyId}>
               {loading ? 'Aggiorno…' : 'Aggiorna'}
@@ -1141,7 +1169,7 @@ export default function MastriniContabiliPage() {
           >
             Scheda conto
           </button>
-          <Link className="btn btn-sm btn-secondary" to="/amministrazione/mastrini/scheda-fornitori">
+          <Link className="btn btn-sm btn-secondary" to={stationAppPath('scheda') || '/amministrazione/mastrini/scheda-fornitori'}>
             Scheda fornitori
           </Link>
           <button
@@ -1247,7 +1275,7 @@ export default function MastriniContabiliPage() {
             </form>
             <p className="fatture-note" style={{ marginBottom: 0 }}>
               Solo clienti con fatture emesse (in Dare = credito). I fornitori (ricevute / pagamenti) sono in{' '}
-              <Link to="/amministrazione/mastrini/scheda-fornitori">Scheda fornitori</Link>, sotto la società
+              <Link to={stationAppPath('scheda') || '/amministrazione/mastrini/scheda-fornitori'}>Scheda fornitori</Link>, sotto la società
               selezionata. Clic sul nome per aprire il mastrino.
             </p>
           </section>

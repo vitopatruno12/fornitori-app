@@ -62,8 +62,11 @@ class EnableBankingAuthBody(BaseModel):
 
 
 @router.get("/dashboard")
-def banca_dashboard(db: Session = Depends(get_db)) -> Dict[str, Any]:
-  return banca_service.get_dashboard(db)
+def banca_dashboard(
+  company: Optional[str] = Query(None, description="Solo i conti di questa società"),
+  db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+  return banca_service.get_dashboard(db, company=company)
 
 
 @router.get("/connect-profile")
@@ -377,6 +380,7 @@ def banca_movimenti(
   date_to: Optional[date] = Query(None),
   category: Optional[str] = Query(None),
   counterparty: Optional[str] = Query(None),
+  company: Optional[str] = Query(None, description="Solo i conti di questa società"),
   limit: int = Query(200, ge=1, le=5000),
   db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -391,6 +395,7 @@ def banca_movimenti(
     date_to=date_to,
     category=category,
     counterparty=counterparty,
+    company=company,
     limit=effective_limit,
   )
   return {"items": items, "count": len(items)}

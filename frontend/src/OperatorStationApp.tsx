@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import OperatorSatelliteShell from './components/OperatorSatelliteShell.tsx'
+import { BancaCompanyLockProvider, BancaNavBaseProvider } from './components/BancaShared.jsx'
 import { FattureNavBaseProvider } from './components/FattureShared.jsx'
 import HomePage from './pages/HomePage.jsx'
 import NewOrderPage from './pages/NewOrderPage.jsx'
@@ -9,7 +10,9 @@ import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import { type OperatorStationId, stationIdToAuthMode } from './utils/atlasAuth'
 import {
+  getOperatorStationBancaPath,
   getOperatorStationFatturePath,
+  getOperatorStationMastriniPath,
   getOperatorStationRouterPath,
   getOperatorStationView,
   markOperatorStationEntryPoint,
@@ -61,6 +64,20 @@ const FattureImportXmlPage = lazyFatture('FattureImportXmlPage')
 const FattureLogPage = lazyFatture('FattureLogPage')
 const FattureImpostazioniPage = lazyFatture('FattureImpostazioniPage')
 
+function lazyBanca(exportName: string) {
+  return lazy(() =>
+    import('./pages/BancaPages.jsx').then((m) => ({
+      default: (m as Record<string, React.ComponentType>)[exportName],
+    })),
+  )
+}
+
+const BancaDashboardPage = lazyBanca('BancaDashboardPage')
+const BancaContiPage = lazyBanca('BancaContiPage')
+const BancaMovimentiPage = lazyBanca('BancaMovimentiPage')
+const BancaRiconciliazionePage = lazyBanca('BancaRiconciliazionePage')
+const MastriniContabiliPage = lazy(() => import('./pages/MastriniContabiliPage.jsx'))
+
 function LazySection({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
@@ -101,6 +118,13 @@ const ADMIN_MENU: StationSection[] = [
   { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota di cassa' },
 ]
 
+const GAZZA_ADMIN_MENU: StationSection[] = [
+  { id: 'fatture', label: 'Fatture PG', title: 'Fatture PG · Gazza Ladra' },
+  { id: 'prima-nota', label: 'Prima Nota', title: 'Prima Nota · Gazza Ladra' },
+  { id: 'banca', label: 'Banca PG', title: 'Banca PG · Gazza Ladra' },
+  { id: 'mastrini', label: 'Mastrini PG', title: 'Mastrini PG · Gazza Ladra' },
+]
+
 const ALL_SECTIONS: StationSection[] = [
   ...TOP_SECTIONS,
   { id: 'delivery', label: 'Nuova consegna', title: 'Nuova consegna' },
@@ -108,13 +132,15 @@ const ALL_SECTIONS: StationSection[] = [
   ...DELIVERY_SUBMENU,
   ...PERSONALE_MENU,
   ...ADMIN_MENU,
+  { id: 'banca', label: 'Banca PG', title: 'Banca PG · Gazza Ladra' },
+  { id: 'mastrini', label: 'Mastrini PG', title: 'Mastrini PG · Gazza Ladra' },
   { id: 'gestione-sala', label: 'Gestione sala', title: 'Gestione sala' },
   { id: 'support-tech', label: 'Assistenza tecnici', title: 'Assistenza tecnici' },
 ]
 
 const DELIVERY_VIEWS: OperatorStationView[] = ['delivery', 'magazzino', 'trasportatori']
 const PERSONALE_VIEWS: OperatorStationView[] = ['staff', 'staff-report', 'stipendi']
-const ADMIN_VIEWS: OperatorStationView[] = ['fatture', 'prima-nota']
+const ADMIN_VIEWS: OperatorStationView[] = ['fatture', 'prima-nota', 'banca', 'mastrini']
 
 const STATION_LABELS: Record<OperatorStationId, string> = {
   abba: 'Abba 42',
@@ -153,6 +179,24 @@ const SECTION_ALIASES: Record<string, OperatorStationView> = {
 
 function resolveStationTitle(view: OperatorStationView): string {
   return ALL_SECTIONS.find((s) => s.id === view)?.title || 'Postazione operativa'
+}
+
+function GazzaBancaRoutes({ bancaBase }: { bancaBase: string }) {
+  return (
+    <LazySection>
+      <BancaCompanyLockProvider company="pg">
+        <BancaNavBaseProvider base={bancaBase}>
+          <Routes>
+            <Route index element={<BancaDashboardPage />} />
+            <Route path="conti" element={<BancaContiPage />} />
+            <Route path="movimenti" element={<BancaMovimentiPage />} />
+            <Route path="riconciliazione" element={<BancaRiconciliazionePage />} />
+            <Route path="*" element={<Navigate to="." replace />} />
+          </Routes>
+        </BancaNavBaseProvider>
+      </BancaCompanyLockProvider>
+    </LazySection>
+  )
 }
 
 function StationFattureRoutes({ fattureBase }: { fattureBase: string }) {
@@ -276,6 +320,8 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
   const location = useLocation()
   const navigate = useNavigate()
   const fatturePath = getOperatorStationFatturePath(stationId)
+  const bancaPath = getOperatorStationBancaPath(stationId)
+  const mastriniPath = getOperatorStationMastriniPath(stationId)
   const authMode = stationIdToAuthMode(stationId)
   const sedeLabel = STATION_LABELS[stationId]
   const hideCarriers = stationId === 'gazza'
@@ -289,6 +335,11 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
   })
 
   const onFatturePath = location.pathname === fatturePath || location.pathname.startsWith(`${fatturePath}/`)
+  const onBancaPath =
+    stationId === 'gazza' && (location.pathname === bancaPath || location.pathname.startsWith(`${bancaPath}/`))
+  const onMastriniPath =
+    stationId === 'gazza' &&
+    (location.pathname === mastriniPath || location.pathname.startsWith(`${mastriniPath}/`))
 
   React.useEffect(() => {
     markOperatorStationEntryPoint(stationId)
@@ -336,13 +387,20 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
     [setStationView],
   )
 
-  const effectiveView: OperatorStationView = onFatturePath ? 'fatture' : view
+  const effectiveView: OperatorStationView = onFatturePath
+    ? 'fatture'
+    : onBancaPath
+      ? 'banca'
+      : onMastriniPath
+        ? 'mastrini'
+        : view
   const activeTitle = resolveStationTitle(effectiveView)
+  const adminMenu = stationId === 'gazza' ? GAZZA_ADMIN_MENU : ADMIN_MENU
   const deliveryActive = DELIVERY_VIEWS.includes(effectiveView)
   const personaleActive = PERSONALE_VIEWS.includes(effectiveView)
   const adminActive = ADMIN_VIEWS.includes(effectiveView)
   const personaleMain = PERSONALE_MENU.find((s) => s.id === effectiveView) || PERSONALE_MENU[0]
-  const adminMain = ADMIN_MENU.find((s) => s.id === effectiveView) || ADMIN_MENU[0]
+  const adminMain = adminMenu.find((s) => s.id === effectiveView) || adminMenu[0]
 
   const nav = [
     ...TOP_SECTIONS.map((section) => ({
@@ -396,7 +454,7 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
       label: 'Amministrazione',
       active: adminActive,
       onClick: () => setStationView(adminMain.id),
-      items: ADMIN_MENU.map((item) => ({
+      items: adminMenu.map((item) => ({
         id: item.id,
         label: item.label,
         active: effectiveView === item.id,
@@ -428,6 +486,19 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
     >
       <Routes>
         <Route path="fatture/*" element={<StationFattureRoutes fattureBase={fatturePath} />} />
+        {stationId === 'gazza' ? (
+          <Route path="banca/*" element={<GazzaBancaRoutes bancaBase={bancaPath} />} />
+        ) : null}
+        {stationId === 'gazza' ? (
+          <Route
+            path="mastrini"
+            element={
+              <LazySection>
+                <MastriniContabiliPage />
+              </LazySection>
+            }
+          />
+        ) : null}
         <Route
           path="*"
           element={

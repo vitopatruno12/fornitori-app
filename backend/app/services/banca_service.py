@@ -32,6 +32,7 @@ from ..constants.company_banks import (
 from ..constants.prima_nota import DEFAULT_PRIMA_NOTA_ACTIVITY
 from .cash_service import (
   NON_FISCALE_CONTO,
+  POS_CONTO,
   STACKER_SVUOTAMENTO_CONTO,
   VERSAMENTO_BANCA_CONTO,
   normalize_activity,
@@ -50,6 +51,12 @@ _COMPANY_TO_PRIMA_NOTA_ACTIVITY = {
 # Es. «309 - TR - VERSAM. CONTANTI», «VERSAMENTO CONTANTE» (non «diversi»)
 _BANK_VERSAMENTO_RE = re.compile(
   r"(?i)(?:\bVERSAM(?:ENTO)?\.?\b|\bVERS\.?\s*CONTANT|\bVERSAMENTO\b)"
+)
+
+# Accrediti carte sul conto PG (Gazza Ladra): non i versamenti contanti.
+_BANK_POS_RE = re.compile(
+  r"(?i)(?:\bPOS\b|\bNEXI\b|PAGO\s*BANCOMAT|BANCOMAT\s*PAY|"
+  r"ACCREDITO\s+CART|INCASSI?\s+CART|CARTE\s+DI\s+CREDITO|PAGAMENTI\s+ELETTRON)"
 )
 
 
@@ -186,6 +193,128 @@ def link_versamenti_to_prima_nota(
       mov.reconciliation_status = "matched"
     if not (getattr(mov, "category", None) or "").strip():
       mov.category = "versamento"
+    linked += 1
+
+  if created or linked:
+    db.commit()
+  return {
+    "ok": True,
+    "created": created,
+    "linked": linked,
+    "scanned": len(rows),
+    "skipped": skipped,
+  }
+
+
+def _is_bank_pos_payment(mov: BankMovement) -> bool:
+  """Entrata banca che è un accredito POS/carte, non un versamento contanti."""
+  if str(getattr(mov, "movement_type", "") or "").lower() != "entrata":
+    return False
+  if _is_bank_versamento_movement(mov):
+    return False
+  blob = " ".join(
+    [
+      str(getattr(mov, "description", None) or ""),
+      str(getattr(mov, "causale", None) or ""),
+      str(getattr(mov, "counterparty", None) or ""),
+      str(getattr(mov, "notes", None) or ""),
+    ]
+  )
+  return bool(_BANK_POS_RE.search(blob))
+
+
+def link_pos_payments_to_prima_nota(
+  db: Session,
+  *,
+  account_id: Optional[int] = None,
+  date_from: Optional[date] = None,
+  date_to: Optional[date] = None,
+  limit: int = 500,
+) -> Dict[str, Any]:
+  """Scrive in Prima Nota Gazza Ladra (registro pg) gli accrediti POS del conto PG.
+
+  Solo la società PG. Non riusa le chiusure cassa «pagamenti POS»: quelle restano
+  le letture di cassa; qui entra il movimento banca.
+  """
+  q = db.query(BankMovement, BankAccount).join(
+    BankAccount, BankMovement.bank_account_id == BankAccount.id
+  )
+  q = q.filter(
+    BankMovement.matched_cash_entry_id.is_(None),
+    func.lower(BankMovement.movement_type) == "entrata",
+    func.lower(func.coalesce(BankAccount.company, "")) == "pg",
+  )
+  if account_id:
+    q = q.filter(BankMovement.bank_account_id == account_id)
+  if date_from:
+    q = q.filter(BankMovement.movement_date >= date_from)
+  if date_to:
+    q = q.filter(BankMovement.movement_date <= date_to)
+  rows = q.order_by(BankMovement.movement_date.asc(), BankMovement.id.asc()).limit(limit).all()
+
+  created = 0
+  linked = 0
+  skipped = 0
+  activity = _activity_for_bank_company("pg")
+  for mov, _account in rows:
+    if not _is_bank_pos_payment(mov):
+      skipped += 1
+      continue
+    amount = abs(_dec(getattr(mov, "amount", 0)))
+    if amount <= 0:
+      skipped += 1
+      continue
+    mov_date = getattr(mov, "movement_date", None)
+    if mov_date is None:
+      skipped += 1
+      continue
+    day_start = datetime.combine(mov_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    note_marker = f"Auto da movimento banca POS #{mov.id}"
+    existing = (
+      db.query(CashEntry)
+      .filter(
+        CashEntry.conto == POS_CONTO,
+        CashEntry.activity == activity,
+        CashEntry.entry_date >= day_start,
+        CashEntry.entry_date < day_end,
+        CashEntry.amount == amount,
+        CashEntry.note.like("Auto da movimento banca POS #%"),
+      )
+      .order_by(CashEntry.id.asc())
+      .first()
+    )
+    if existing is not None:
+      already = (
+        db.query(BankMovement.id)
+        .filter(BankMovement.matched_cash_entry_id == existing.id)
+        .first()
+      )
+      if already:
+        existing = None
+
+    if existing is not None:
+      ce = existing
+    else:
+      desc = (str(getattr(mov, "description", None) or "").strip() or "Accredito POS")[:255]
+      ce = CashEntry(
+        entry_date=day_start,
+        type="entrata",
+        amount=amount,
+        description=desc,
+        note=note_marker,
+        conto=POS_CONTO,
+        activity=activity,
+      )
+      db.add(ce)
+      db.flush()
+      created += 1
+
+    mov.matched_cash_entry_id = ce.id
+    if str(getattr(mov, "reconciliation_status", "") or "") == "unmatched":
+      mov.reconciliation_status = "matched"
+    if not (getattr(mov, "category", None) or "").strip():
+      mov.category = "pos"
     linked += 1
 
   if created or linked:
@@ -1021,6 +1150,7 @@ def list_movements(
   date_to: Optional[date] = None,
   category: Optional[str] = None,
   counterparty: Optional[str] = None,
+  company: Optional[str] = None,
   limit: int = 200,
 ) -> List[Dict[str, Any]]:
   ensure_default_account(db)
@@ -1034,9 +1164,21 @@ def list_movements(
     )
   except Exception:
     logger.warning("Auto-link versamenti → Prima Nota fallito in list_movements", exc_info=True)
+  try:
+    link_pos_payments_to_prima_nota(
+      db,
+      account_id=account_id,
+      date_from=date_from,
+      date_to=date_to,
+    )
+  except Exception:
+    logger.warning("Auto-link POS → Prima Nota Gazza fallito in list_movements", exc_info=True)
   q = db.query(BankMovement, BankAccount).join(BankAccount, BankMovement.bank_account_id == BankAccount.id)
   if account_id:
     q = q.filter(BankMovement.bank_account_id == account_id)
+  company_id = (company or "").strip().lower()
+  if company_id:
+    q = q.filter(func.lower(func.coalesce(BankAccount.company, "")) == company_id)
   if date_from:
     q = q.filter(BankMovement.movement_date >= date_from)
   if date_to:
@@ -1125,30 +1267,49 @@ def list_movements(
   return out_rows
 
 
-def get_dashboard(db: Session) -> Dict[str, Any]:
+def get_dashboard(db: Session, company: Optional[str] = None) -> Dict[str, Any]:
   from .enable_banking_service import consent_monitor_summary
 
+  company_id = (company or "").strip().lower() or None
   accounts_payload = list_accounts_payload(db)
   accounts = accounts_payload.get("items") or []
-  eb_consent = accounts_payload.get("eb_consent") or consent_monitor_summary([])
+  scope_ids = None
+  if company_id:
+    accounts = [
+      a for a in accounts if str(a.get("company") or "").strip().lower() == company_id
+    ]
+    scope_ids = [int(a["id"]) for a in accounts if a.get("id")] or [-1]
+  if company_id and scope_ids and scope_ids != [-1]:
+    scoped_rows = db.query(BankAccount).filter(BankAccount.id.in_(scope_ids)).all()
+    eb_consent = consent_monitor_summary(scoped_rows)
+  else:
+    eb_consent = accounts_payload.get("eb_consent") or consent_monitor_summary([])
   today = date.today()
   month_start = today.replace(day=1)
 
-  q_base = db.query(BankMovement)
-  ent_oggi = _dec(
-    q_base.filter(BankMovement.movement_date == today, BankMovement.movement_type == "entrata")
-    .with_entities(func.coalesce(func.sum(BankMovement.amount), 0))
-    .scalar()
-  )
-  usc_oggi = _dec(
-    db.query(func.coalesce(func.sum(BankMovement.amount), 0))
-    .filter(BankMovement.movement_date == today, BankMovement.movement_type == "uscita")
-    .scalar()
-  )
+  def _sum_bank(movement_type: str, *, on_day=None, start=None, end=None) -> Decimal:
+    q = db.query(func.coalesce(func.sum(BankMovement.amount), 0)).filter(
+      BankMovement.movement_type == movement_type
+    )
+    if scope_ids is not None:
+      q = q.filter(BankMovement.bank_account_id.in_(scope_ids))
+    if on_day is not None:
+      q = q.filter(BankMovement.movement_date == on_day)
+    if start is not None:
+      q = q.filter(BankMovement.movement_date >= start)
+    if end is not None:
+      q = q.filter(BankMovement.movement_date < end)
+    return _dec(q.scalar())
 
-  # Se inbox movimenti vuota, usa heuristic Prima Nota banca
-  mov_count = db.query(func.count(BankMovement.id)).scalar() or 0
-  if mov_count == 0:
+  ent_oggi = _sum_bank("entrata", on_day=today)
+  usc_oggi = _sum_bank("uscita", on_day=today)
+
+  count_q = db.query(func.count(BankMovement.id))
+  if scope_ids is not None:
+    count_q = count_q.filter(BankMovement.bank_account_id.in_(scope_ids))
+  # Se inbox movimenti vuota, usa heuristic Prima Nota banca (non sul filtro società)
+  mov_count = count_q.scalar() or 0
+  if mov_count == 0 and not company_id:
     ent_e = db.query(func.coalesce(func.sum(CashEntry.amount), 0)).filter(
       _fiscale_filter(), CashEntry.type == "entrata", _banca_conto_sql(), func.date(CashEntry.entry_date) == today
     ).scalar()
@@ -1174,30 +1335,14 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
   y, m = today.year, today.month
   for _ in range(6):
     key = f"{y:04d}-{m:02d}"
-    if mov_count > 0:
+    if mov_count > 0 or company_id:
       start = date(y, m, 1)
       if m == 12:
         end = date(y + 1, 1, 1)
       else:
         end = date(y, m + 1, 1)
-      ent = _dec(
-        db.query(func.coalesce(func.sum(BankMovement.amount), 0))
-        .filter(
-          BankMovement.movement_type == "entrata",
-          BankMovement.movement_date >= start,
-          BankMovement.movement_date < end,
-        )
-        .scalar()
-      )
-      usc = _dec(
-        db.query(func.coalesce(func.sum(BankMovement.amount), 0))
-        .filter(
-          BankMovement.movement_type == "uscita",
-          BankMovement.movement_date >= start,
-          BankMovement.movement_date < end,
-        )
-        .scalar()
-      )
+      ent = _sum_bank("entrata", start=start, end=end)
+      usc = _sum_bank("uscita", start=start, end=end)
     else:
       start_dt = datetime(y, m, 1, tzinfo=timezone.utc)
       if m == 12:
@@ -1241,15 +1386,12 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
       y -= 1
   monthly.reverse()
 
-  ultimi = list_movements(db, limit=8)
+  ultimi = list_movements(db, company=company_id, limit=8)
   if not ultimi and mov_count == 0:
-    cash_recent = (
-      db.query(CashEntry)
-      .filter(_fiscale_filter(), _banca_conto_sql())
-      .order_by(CashEntry.entry_date.desc())
-      .limit(8)
-      .all()
-    )
+    cash_q = db.query(CashEntry).filter(_fiscale_filter(), _banca_conto_sql())
+    if company_id:
+      cash_q = cash_q.filter(CashEntry.activity == _activity_for_bank_company(company_id))
+    cash_recent = cash_q.order_by(CashEntry.entry_date.desc()).limit(8).all()
     for ce in cash_recent:
       d = ce.entry_date.date() if isinstance(ce.entry_date, datetime) else ce.entry_date
       ultimi.append(
@@ -1269,18 +1411,17 @@ def get_dashboard(db: Session) -> Dict[str, Any]:
         }
       )
 
-  unmatched = (
-    db.query(func.count(BankMovement.id))
-    .filter(BankMovement.reconciliation_status == "unmatched")
-    .scalar()
-    or 0
+  unmatched_q = db.query(func.count(BankMovement.id)).filter(
+    BankMovement.reconciliation_status == "unmatched"
   )
-  differences = (
-    db.query(func.count(BankMovement.id))
-    .filter(BankMovement.reconciliation_status == "difference")
-    .scalar()
-    or 0
+  difference_q = db.query(func.count(BankMovement.id)).filter(
+    BankMovement.reconciliation_status == "difference"
   )
+  if scope_ids is not None:
+    unmatched_q = unmatched_q.filter(BankMovement.bank_account_id.in_(scope_ids))
+    difference_q = difference_q.filter(BankMovement.bank_account_id.in_(scope_ids))
+  unmatched = unmatched_q.scalar() or 0
+  differences = difference_q.scalar() or 0
   avvisi = []
   disconnected = [a for a in accounts if a["connection_status"] != "connected"]
   if disconnected:
@@ -5191,6 +5332,10 @@ def import_ban_movements(db: Session, account_id: int, movements: List[Dict[str,
   db.commit()
   db.refresh(account)
   versamenti = link_versamenti_to_prima_nota(db, account_id=account_id)
+  try:
+    link_pos_payments_to_prima_nota(db, account_id=account_id)
+  except Exception:
+    logger.warning("Auto-link POS → Prima Nota Gazza fallito import BAN account %s", account_id, exc_info=True)
   vers_n = int((versamenti or {}).get("created") or 0)
   msg = f"Import BAN: {created} nuovi movimenti ({skipped} già presenti o non validi)."
   if vers_n:

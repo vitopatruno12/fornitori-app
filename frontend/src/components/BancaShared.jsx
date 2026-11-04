@@ -1,5 +1,6 @@
 import React from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
+import { resolveEmbeddedFattureCompany } from '../utils/fattureCompany.js'
 
 export const AMMINISTRAZIONE_NAV_ITEMS = [
   { to: '/amministrazione', label: 'Dashboard', end: true },
@@ -19,6 +20,18 @@ export const BANCA_NAV_ITEMS = [
 
 /** Base path banca: `/banca` nel gestionale, oppure `/operatore-consegne/banca` in postazione trasportatore. */
 export const BancaNavBaseContext = React.createContext('/banca')
+
+/** Società fissa (postazione Gazza = pg). Vuoto nel gestionale. */
+export const BancaCompanyLockContext = React.createContext('')
+
+export function BancaCompanyLockProvider({ company = '', children }) {
+  const value = String(company || '').trim().toLowerCase()
+  return <BancaCompanyLockContext.Provider value={value}>{children}</BancaCompanyLockContext.Provider>
+}
+
+export function useBancaCompanyLock() {
+  return React.useContext(BancaCompanyLockContext) || ''
+}
 
 export function BancaNavBaseProvider({ base = '/banca', children }) {
   const normalized = String(base || '/banca').replace(/\/+$/, '') || '/banca'
@@ -177,6 +190,7 @@ export function BancaSubnav() {
 }
 
 export function AmministrazionePageShell({ title, lead, children, actions = null, className = '' }) {
+  const embeddedCompany = resolveEmbeddedFattureCompany()
   return (
     <div className={`fatture-page banca-page${className ? ` ${className}` : ''}`}>
       <header className="fatture-header staff-page-hero">
@@ -191,7 +205,7 @@ export function AmministrazionePageShell({ title, lead, children, actions = null
           {actions}
         </div>
       </header>
-      <AmministrazioneSubnav />
+      {embeddedCompany ? null : <AmministrazioneSubnav />}
       {children}
     </div>
   )

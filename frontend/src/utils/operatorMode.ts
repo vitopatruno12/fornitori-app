@@ -68,6 +68,8 @@ export type OperatorStationView =
   | 'prima-nota'
   | 'trasportatori'
   | 'fatture'
+  | 'banca'
+  | 'mastrini'
   | 'gestione-sala'
   | 'support-tech'
 
@@ -128,6 +130,14 @@ export function getOperatorStationBasePath(stationId: OperatorStationId = 'abba'
 
 export function getOperatorStationFatturePath(stationId: OperatorStationId = 'abba'): string {
   return `${getOperatorStationBasePath(stationId)}/fatture`
+}
+
+export function getOperatorStationBancaPath(stationId: OperatorStationId = 'abba'): string {
+  return `${getOperatorStationBasePath(stationId)}/banca`
+}
+
+export function getOperatorStationMastriniPath(stationId: OperatorStationId = 'abba'): string {
+  return `${getOperatorStationBasePath(stationId)}/mastrini`
 }
 
 export function resolveOperatorStationIdFromPath(pathname?: string): OperatorStationId | null {
@@ -263,7 +273,10 @@ export function markOperatorStationEntryPoint(stationId: OperatorStationId = 'ab
   }
 }
 
-const STATION_SECTION_BY_VIEW: Record<Exclude<OperatorStationView, 'overview' | 'fatture'>, string> = {
+const STATION_SECTION_BY_VIEW: Record<
+  Exclude<OperatorStationView, 'overview' | 'fatture' | 'banca' | 'mastrini'>,
+  string
+> = {
   suppliers: 'fornitori',
   orders: 'ordini',
   delivery: 'consegna',
@@ -306,6 +319,9 @@ const STATION_VIEW_ALIASES: Record<string, OperatorStationView> = {
   fatture: 'fatture',
   fatturazione: 'fatture',
   'fatture-fornitori': 'fatture',
+  banca: 'banca',
+  mastrini: 'mastrini',
+  'mastrini-contabili': 'mastrini',
   'gestione-sala': 'gestione-sala',
   'gestisci-sala': 'gestione-sala',
   sala: 'gestione-sala',
@@ -323,11 +339,18 @@ export function getOperatorStationView(stationId: OperatorStationId = 'abba'): O
   const fatturePath = getOperatorStationFatturePath(stationId)
   const path = normalizePathname()
   if (path === fatturePath || path.startsWith(`${fatturePath}/`)) return 'fatture'
+  if (stationId === 'gazza') {
+    const bancaPath = getOperatorStationBancaPath(stationId)
+    const mastriniPath = getOperatorStationMastriniPath(stationId)
+    if (path === bancaPath || path.startsWith(`${bancaPath}/`)) return 'banca'
+    if (path === mastriniPath || path.startsWith(`${mastriniPath}/`)) return 'mastrini'
+  }
   const q = new URLSearchParams(window.location.search)
   const raw = String(q.get('sezione') || '').trim().toLowerCase()
   if (raw && STATION_VIEW_ALIASES[raw]) {
     const view = STATION_VIEW_ALIASES[raw]
     if (view === 'gestione-sala' && stationId !== 'gazza') return 'overview'
+    if ((view === 'banca' || view === 'mastrini') && stationId !== 'gazza') return 'overview'
     return view
   }
   return 'overview'
@@ -442,6 +465,8 @@ export function getOperatorStationPublicUrl(
 ): string {
   const basePath = getOperatorStationBasePath(stationId)
   if (view === 'fatture') return buildPublicUrl(getOperatorStationFatturePath(stationId))
+  if (view === 'banca') return buildPublicUrl(getOperatorStationBancaPath(stationId))
+  if (view === 'mastrini') return buildPublicUrl(getOperatorStationMastriniPath(stationId))
   const base = buildPublicUrl(basePath)
   if (view === 'overview') return base
   const section = STATION_SECTION_BY_VIEW[view]
@@ -456,6 +481,8 @@ export function getOperatorStationRouterPath(
 ): string {
   const basePath = getOperatorStationBasePath(stationId)
   if (view === 'fatture') return getOperatorStationFatturePath(stationId)
+  if (view === 'banca') return getOperatorStationBancaPath(stationId)
+  if (view === 'mastrini') return getOperatorStationMastriniPath(stationId)
   if (view === 'overview') return basePath
   const section = STATION_SECTION_BY_VIEW[view]
   return `${basePath}?sezione=${section}`

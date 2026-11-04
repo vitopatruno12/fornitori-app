@@ -10,6 +10,7 @@ import {
   ReconLight,
   resolveBancaPath,
   useBancaBase,
+  useBancaCompanyLock,
 } from '../components/BancaShared.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import FattureCompanySelect from '../components/FattureCompanySelect.jsx'
@@ -22,6 +23,7 @@ import {
   deleteBancaAccount,
   disconnectBancaAccount,
   fetchBancaAccounts,
+  fetchBancaAccountsForCompany,
   fetchBancaConnectProfile,
   fetchBancaDashboard,
   fetchBancaEstratto,
@@ -894,6 +896,7 @@ export function AmministrazioneImpostazioniPage() {
 export function BancaDashboardPage() {
   const navigate = useNavigate()
   const bancaBase = useBancaBase()
+  const lockedCompany = useBancaCompanyLock()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -904,7 +907,7 @@ export function BancaDashboardPage() {
       setLoading(true)
       setError('')
       try {
-        const res = await fetchBancaDashboard()
+        const res = await fetchBancaDashboard(lockedCompany || undefined)
         if (!cancelled) setData(res)
       } catch (e) {
         if (!cancelled) setError(e?.message || 'Errore dashboard banca')
@@ -915,9 +918,11 @@ export function BancaDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [lockedCompany])
 
-  const societa = Array.isArray(data?.societa) ? data.societa : []
+  const societa = (Array.isArray(data?.societa) ? data.societa : []).filter(
+    (row) => !lockedCompany || String(row?.company || '').toLowerCase() === lockedCompany,
+  )
   const banner = (
     <>
       <EbConsentMonitor consent={data?.eb_consent} />
@@ -974,8 +979,12 @@ export function BancaDashboardPage() {
 
   return (
     <BancaPageShell
-      title="Dashboard bancaria"
-      lead="Saldi e ultimi movimenti divisi per società e per conto collegato."
+      title={lockedCompany === 'pg' ? 'Banca PG · Gazza Ladra' : 'Dashboard bancaria'}
+      lead={
+        lockedCompany === 'pg'
+          ? 'Solo il conto della PG S.r.l. (Gazza Ladra). Le altre società non sono in questa postazione.'
+          : 'Saldi e ultimi movimenti divisi per società e per conto collegato.'
+      }
       banner={banner}
     >
       {error && <div className="alert alert-danger">{error}</div>}
@@ -988,7 +997,7 @@ export function BancaDashboardPage() {
                 Saldi e flussi per società
               </h2>
               <p className="fatture-note" style={{ margin: 0 }}>
-                Totale tutte: saldo {eur(data.saldo_totale)} · entrate oggi{' '}
+                {lockedCompany === 'pg' ? 'PG · Gazza Ladra' : 'Totale tutte'}: saldo {eur(data.saldo_totale)} · entrate oggi{' '}
                 <span style={{ color: 'var(--success)' }}>{eur(data.entrate_oggi)}</span> · uscite oggi{' '}
                 <span style={{ color: 'var(--danger)' }}>{eur(data.uscite_oggi)}</span>
               </p>
@@ -1162,6 +1171,7 @@ function BankSyncCard({
 }
 
 export function BancaContiPage() {
+  const lockedCompany = useBancaCompanyLock()
   const [items, setItems] = useState([])
   const [ebConsent, setEbConsent] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1189,7 +1199,10 @@ export function BancaContiPage() {
     setLoading(true)
     setError('')
     try {
-      const [res, profile] = await Promise.all([fetchBancaAccounts(), fetchBancaConnectProfile().catch(() => null)])
+      const [res, profile] = await Promise.all([
+        lockedCompany ? fetchBancaAccountsForCompany(lockedCompany) : fetchBancaAccounts(),
+        fetchBancaConnectProfile().catch(() => null),
+      ])
       setItems(visibleBankAccounts(Array.isArray(res?.items) ? res.items : []))
       setEbConsent(res?.eb_consent || null)
       if (profile) setConnectProfile(profile)
@@ -1209,12 +1222,13 @@ export function BancaContiPage() {
     if (!bppb.length) return
     const stillValid = bppb.some((a) => String(a.id) === String(bppbSelectedId))
     if (stillValid) return
-    const prefer =
-      bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
-      || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
-      || bppb[0]
+    const prefer = lockedCompany
+      ? bppb.find((a) => String(a.company || '').toLowerCase() === lockedCompany) || bppb[0]
+      : bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+        || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
+        || bppb[0]
     setBppbSelectedId(String(prefer.id))
-  }, [items, bppbSelectedId])
+  }, [items, bppbSelectedId, lockedCompany])
 
   useEffect(() => {
     const bcc = preferConnectedDuplicates(items.filter(isBccTerraOtrantoAccount))
@@ -1493,6 +1507,11 @@ export function BancaContiPage() {
   }
 
   async function ensureBppbAccounts() {
+    if (lockedCompany) {
+      return items.filter(
+        (a) => isBppbAccount(a) && String(a?.company || '').toLowerCase() === lockedCompany,
+      )
+    }
     setBusyId(-2)
     setError('')
     setSuccess('')
@@ -1554,11 +1573,14 @@ export function BancaContiPage() {
       setError('Nessun conto BPPB in elenco.')
       return
     }
-    let selected =
-      bppb.find((a) => String(a.id) === String(bppbSelectedId))
-      || bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
-      || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
-      || bppb[0]
+    let selected = lockedCompany
+      ? bppb.find((a) => String(a.id) === String(bppbSelectedId))
+        || bppb.find((a) => String(a.company || '').toLowerCase() === lockedCompany)
+        || bppb[0]
+      : bppb.find((a) => String(a.id) === String(bppbSelectedId))
+        || bppb.find((a) => String(a.company || '').toLowerCase() === 'via_lattea')
+        || bppb.find((a) => String(a.iban || '').replace(/\s/g, '').toUpperCase() === 'IT25D0538516000CC1410004514')
+        || bppb[0]
     setBppbSelectedId(String(selected.id))
 
     // Allinea etichette/società se il seed Mediazione esiste ma è senza company
@@ -1872,8 +1894,12 @@ export function BancaContiPage() {
 
   return (
     <BancaPageShell
-      title="Conti correnti"
-      lead="Conti collegati, saldi e sincronizzazione. Il contatore Enable Banking avvisa 5 giorni prima della scadenza."
+      title={lockedCompany === 'pg' ? 'Conto PG · Gazza Ladra' : 'Conti correnti'}
+      lead={
+        lockedCompany === 'pg'
+          ? 'Solo la banca della PG S.r.l. (Gazza Ladra).'
+          : 'Conti collegati, saldi e sincronizzazione. Il contatore Enable Banking avvisa 5 giorni prima della scadenza.'
+      }
       banner={<EbConsentMonitor consent={ebConsent} />}
     >
       {error && <div className="alert alert-danger">{error}</div>}
@@ -1921,7 +1947,7 @@ export function BancaContiPage() {
           kicker="Popolare Puglia e Basilicata"
           title="BPPB"
           accounts={visibleBankAccounts(items.filter(isBppbAccount))}
-          emptyLabel="Via Lattea / Mediazione (crea al sync)"
+          emptyLabel={lockedCompany === 'pg' ? 'Conto PG · Gazza Ladra' : 'Via Lattea / Mediazione (crea al sync)'}
           selectedId={bppbSelectedId}
           onSelect={setBppbSelectedId}
           busy={busyId != null}
@@ -1932,6 +1958,8 @@ export function BancaContiPage() {
           selectTitle="Scegli quale conto BPPB importare"
           syncTitle="Collega o sincronizza solo il conto BPPB selezionato"
         />
+        {lockedCompany ? null : (
+        <>
         <BankSyncCard
           tone="bcc"
           kicker="Terra d'Otranto"
@@ -1980,8 +2008,19 @@ export function BancaContiPage() {
           selectTitle="Scegli quale conto UniCredit importare"
           syncTitle="Collega o sincronizza solo il conto UniCredit selezionato"
         />
+        </>
+        )}
       </div>
 
+      {lockedCompany ? (
+        <input
+          ref={banImportInputRef}
+          type="file"
+          accept=".ban,.cbi,.txt,.asc,text/plain"
+          style={{ display: 'none' }}
+          onChange={onBanImportExisting}
+        />
+      ) : (
       <section className="card fatture-panel">
         <h2 className="fatture-panel-title">Collega conto</h2>
         <form onSubmit={onCreate} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2032,6 +2071,7 @@ export function BancaContiPage() {
           </p>
         ) : null}
       </section>
+      )}
 
       <section className="card fatture-panel banca-fit-panel">
         {loading ? (
@@ -2059,6 +2099,11 @@ export function BancaContiPage() {
             actionsHeader="Azioni"
             renderActions={(a) => (
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                {lockedCompany ? (
+                  <span className="fatture-note" style={{ margin: 0 }}>
+                    {FATTURE_COMPANY_LABELS[lockedCompany] || lockedCompany}
+                  </span>
+                ) : (
                 <select
                   className="form-control"
                   style={{ minWidth: 150, maxWidth: 190, padding: '0.2rem 0.35rem', fontSize: '0.8rem' }}
@@ -2074,6 +2119,7 @@ export function BancaContiPage() {
                     </option>
                   ))}
                 </select>
+                )}
                 <select
                   className="form-control"
                   style={{ minWidth: 88, maxWidth: 100, padding: '0.2rem 0.35rem', fontSize: '0.8rem' }}
@@ -2181,6 +2227,7 @@ export function BancaContiPage() {
 export function BancaMovimentiPage() {
   const navigate = useNavigate()
   const bancaBase = useBancaBase()
+  const lockedCompany = useBancaCompanyLock()
   const [searchParams] = useSearchParams()
   const highlightMovementId = Number(searchParams.get('movement_id') || 0) || null
   const highlightSense = String(searchParams.get('sense') || '').toLowerCase()
@@ -2298,7 +2345,9 @@ export function BancaMovimentiPage() {
 
   const pageTitle = selectedAccount
     ? `Movimenti bancari · ${selectedAccount.bank_name || 'Banca'}`
-    : 'Movimenti bancari'
+    : lockedCompany === 'pg'
+      ? 'Movimenti banca PG · Gazza Ladra'
+      : 'Movimenti bancari'
 
   const pageLead = selectedAccount
     ? `Conto: ${formatBankAccountOptionLabel(selectedAccount)}`
@@ -2318,8 +2367,9 @@ export function BancaMovimentiPage() {
           account_id: nextAccount || undefined,
           date_from: nextFrom || undefined,
           date_to: nextTo || undefined,
+          company: lockedCompany || undefined,
         }),
-        fetchBancaAccounts(),
+        lockedCompany ? fetchBancaAccountsForCompany(lockedCompany) : fetchBancaAccounts(),
       ])
       setItems(Array.isArray(mov?.items) ? mov.items : [])
       setAccounts(visibleBankAccounts(Array.isArray(acc?.items) ? acc.items : []))
@@ -2842,7 +2892,8 @@ export function BancaMovimentiPage() {
 }
 
 export function BancaRiconciliazionePage() {
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(true)
+  const lockedCompany = useBancaCompanyLock()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(!lockedCompany)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [agentBusy, setAgentBusy] = useState(false)
@@ -3377,7 +3428,7 @@ export function BancaRiconciliazionePage() {
 
   return (
     <BancaPageShell
-      title="Inbox riconciliazione"
+      title={lockedCompany === 'pg' ? 'Riconciliazione PG · Gazza Ladra' : 'Inbox riconciliazione'}
       lead={
         companyId
           ? `Modello Sibill-like · ${companyName}: Enable Banking chiude le fatture da giugno; contanti/carta e pre-giugno dal file Pagamenti. Lavora le eccezioni nell’inbox.`
@@ -3385,6 +3436,11 @@ export function BancaRiconciliazionePage() {
       }
       actions={
         <aside className="mastrini-hero-tools" aria-label="Società riconciliazione">
+          {lockedCompany ? (
+            <strong className="fatture-note" style={{ margin: 0 }}>
+              {companyName || 'PG · Gazza Ladra'}
+            </strong>
+          ) : (
           <FattureCompanySelect
             className="mastrini-hero-tools-company"
             companies={[...companies, { id: 'non_classificata', label: 'Non classificate' }]}
@@ -3392,6 +3448,7 @@ export function BancaRiconciliazionePage() {
             onChange={setCompanyId}
             loading={loadingCompanies}
           />
+          )}
           <div className="mastrini-hero-tools-btns">
             <button
               type="button"
