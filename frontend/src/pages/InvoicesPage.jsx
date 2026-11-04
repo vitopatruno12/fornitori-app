@@ -11,7 +11,12 @@ import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDa
 import FattureActionsMenu from '../components/FattureActionsMenu.jsx'
 import { AnalisiLoadingBar } from '../components/AnalisiShared.jsx'
 import { useFattureCompany } from '../hooks/useFattureCompany.js'
-import { activitiesForCompany, isGestionaleFattureContext } from '../utils/fattureCompany.js'
+import {
+  activitiesForCompany,
+  companyLabel,
+  isGestionaleFattureContext,
+  resolveEmbeddedFattureCompany,
+} from '../utils/fattureCompany.js'
 import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
 
 /** Registro Prima Nota corretto per la fattura (società / attività / testo righe). */
@@ -76,7 +81,9 @@ function paymentStatusText(status, ignored) {
 export default function InvoicesPage() {
   const fattureBase = React.useContext(FattureNavBaseContext)
   const gestionaleMode = isGestionaleFattureContext(fattureBase)
-  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode)
+  const stationCompany = resolveEmbeddedFattureCompany()
+  const { companies, companyId, setCompanyId, loadingCompanies } = useFattureCompany(gestionaleMode && !stationCompany)
+  const lockedCompany = stationCompany || (!gestionaleMode ? String(companyId || '').trim().toLowerCase() : '')
   const [searchParams, setSearchParams] = useSearchParams()
   const focusHandledRef = useRef('')
   const urlFilterAppliedRef = useRef('')
@@ -313,7 +320,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadInvoices()
-  }, [supplierId, dueFilter, showIgnored, gestionaleMode, scopeMode, companyId, localeId, scopeReady])
+  }, [supplierId, dueFilter, showIgnored, gestionaleMode, scopeMode, companyId, localeId, scopeReady, lockedCompany])
 
   useEffect(() => {
     const qId = String(searchParams.get('id') || '').trim()
@@ -503,7 +510,7 @@ export default function InvoicesPage() {
 
   async function loadInvoices() {
     try {
-      if (gestionaleMode && !scopeReady) {
+      if ((gestionaleMode && !stationCompany && !scopeReady) || (lockedCompany === '' && !gestionaleMode)) {
         setInvoices([])
         setLoading(false)
         return
@@ -516,17 +523,29 @@ export default function InvoicesPage() {
         due_filter: dueFilter || undefined,
         include_ignored: showIgnored || undefined,
       }
-      if (gestionaleMode) {
+      if (lockedCompany) {
+        params.company = lockedCompany
+      } else if (gestionaleMode) {
         if (scopeMode === 'company' && companyId) params.company = companyId
         if (scopeMode === 'locale' && localeId) params.activity = localeId
       }
       const data = await fetchInvoices(params)
-      const list = Array.isArray(data) ? data : []
+      const rawList = Array.isArray(data) ? data : []
+      const list = lockedCompany
+        ? rawList.filter((inv) => String(inv?.company || '').trim().toLowerCase() === lockedCompany)
+        : rawList
       // Non perdere la fattura appena aperta da movimenti se il reload lista la esclude
       const keepId = String(focusInvoiceId || searchParams.get('id') || '').trim()
       if (keepId && !list.some((inv) => String(inv.id) === keepId)) {
         setInvoices((prev) => {
           const kept = prev.find((inv) => String(inv.id) === keepId)
+          if (
+            lockedCompany
+            && kept
+            && String(kept.company || '').trim().toLowerCase() !== lockedCompany
+          ) {
+            return list
+          }
           return kept ? [kept, ...list] : list
         })
       } else {
@@ -741,10 +760,14 @@ export default function InvoicesPage() {
 
   return (
     <FatturePageShell
-      title="Storico fatture"
-      lead="Archivio completo delle fatture: filtra per società o locale dal banner, poi scadenza e stato."
+      title={lockedCompany ? `Storico fatture · ${companyLabel(lockedCompany)}` : 'Storico fatture'}
+      lead={
+        lockedCompany
+          ? `Solo le fatture di ${companyLabel(lockedCompany)}. Mediazione e le altre società non sono in questa postazione.`
+          : 'Archivio completo delle fatture: filtra per società o locale dal banner, poi scadenza e stato.'
+      }
       actions={
-        gestionaleMode ? (
+        gestionaleMode && !lockedCompany ? (
           <FattureScopeTools
             mode={scopeMode}
             onModeChange={changeScopeMode}
@@ -758,7 +781,7 @@ export default function InvoicesPage() {
         ) : null
       }
     >
-      {gestionaleMode && !scopeReady ? (
+      {gestionaleMode && !lockedCompany && !scopeReady ? (
         <div className="alert alert-info">
           Scegli <strong>Società</strong> o <strong>Locale</strong> nel banner verde per vedere lo storico
           fatture.
@@ -1025,7 +1048,7 @@ export default function InvoicesPage() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => window.open(getInvoicesExportUrl(supplierId || undefined), '_blank')}
+            onClick={() => window.open(getInvoicesExportUrl(supplierId || undefined, lockedCompany), '_blank')}
           >
             CSV
           </button>

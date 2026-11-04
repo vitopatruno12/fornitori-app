@@ -102,9 +102,10 @@ export async function setInvoiceBollaVerified(id, verified) {
   return response.json()
 }
 
-export function getInvoicesExportUrl(supplierId) {
+export function getInvoicesExportUrl(supplierId, company) {
   const params = new URLSearchParams()
   if (supplierId) params.append('supplier_id', String(supplierId))
+  if (company) params.append('company', String(company))
   const q = params.toString()
   return `${API_BASE_URL}/invoices/export/csv${q ? '?' + q : ''}`
 }

@@ -268,9 +268,31 @@ def get_incoming_invoice(incoming_id: int, db: Session = Depends(get_db)):
 @router.get("/export/csv")
 def export_invoices_csv(
   supplier_id: Optional[int] = Query(None),
+  company: Optional[str] = Query(None, description="Solo questa società (postazione operativa)"),
   db: Session = Depends(get_db),
 ):
-  rows = invoice_service.get_invoices_for_export(db, supplier_id=supplier_id)
+  if company:
+    items = invoice_service.list_invoices(
+      db,
+      supplier_id=supplier_id,
+      company=company,
+      include_ignored=True,
+    )
+    rows = [
+      {
+        "data": item.invoice_date.strftime("%Y-%m-%d") if getattr(item, "invoice_date", None) else "",
+        "fornitore": getattr(item, "supplier_name", None) or "",
+        "n_fattura": getattr(item, "invoice_number", None) or "",
+        "imponibile": float(item.imponibile or 0),
+        "iva_percent": float(item.vat_percent or 0),
+        "iva": float(item.vat_amount or 0),
+        "totale": float(item.total or 0),
+        "note": getattr(item, "note", None) or "",
+      }
+      for item in items
+    ]
+  else:
+    rows = invoice_service.get_invoices_for_export(db, supplier_id=supplier_id)
 
   def _esc(s):
     return (s or "").replace(";", ",")
