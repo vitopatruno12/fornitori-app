@@ -50,6 +50,19 @@ export function safeMastrinoHref(raw) {
   return allowed ? value : ''
 }
 
+/** Ritorno ai movimenti banca (gestionale o postazione). */
+export function safeBancaMovimentiHref(raw) {
+  const value = String(raw || '').trim()
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\') || value.includes('://')) return ''
+  const path = value.split('?')[0].replace(/\/+$/, '') || '/'
+  const allowed =
+    path === '/banca/movimenti' ||
+    path.endsWith('/banca/movimenti') ||
+    path === '/banca' ||
+    path.endsWith('/banca')
+  return allowed ? value : ''
+}
+
 function mastrinoPartyLabel(href) {
   try {
     const party = new URL(href, 'https://atlass.it').searchParams.get('party') || ''
@@ -74,6 +87,19 @@ export function MastrinoReturnBar({ href }) {
       <FattureLink className="btn btn-primary" to={to}>
         ← Torna al mastrino
       </FattureLink>
+    </div>
+  )
+}
+
+export function BancaMovimentiReturnBar({ href }) {
+  const to = safeBancaMovimentiHref(href)
+  if (!to) return null
+  return (
+    <div className="mastrino-return-bar banca-movimenti-return-bar" role="region" aria-label="Ritorno ai movimenti banca">
+      <span>Fattura aperta da movimenti bancari.</span>
+      <Link className="btn btn-primary" to={to}>
+        ← Torna ai movimenti bancari
+      </Link>
     </div>
   )
 }

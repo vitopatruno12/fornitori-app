@@ -1,10 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { fetchSuppliers } from '../services/suppliersService'
 import { fetchInvoices, fetchInvoice, fetchInvoiceByNumber, createInvoice, updateInvoice, deleteInvoice, getInvoicesExportUrl, getInvoicePdfUrl, markInvoicePaid, setInvoiceIgnored } from '../services/invoicesService'
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
-import { FattureLink, FattureNavBaseContext, FatturePageShell, formatDate, safeMastrinoHref } from '../components/FattureShared.jsx'
+import {
+  BancaMovimentiReturnBar,
+  FattureLink,
+  FattureNavBaseContext,
+  FatturePageShell,
+  formatDate,
+  safeBancaMovimentiHref,
+  safeMastrinoHref,
+} from '../components/FattureShared.jsx'
 import FattureScopeTools from '../components/FattureScopeTools.jsx'
 import VneWorkbookGrid from '../components/VneWorkbookGrid.jsx'
 import { filterInvoicesBySupplierAndDate } from '../components/FattureSupplierDateFilters.jsx'
@@ -450,8 +458,10 @@ export default function InvoicesPage() {
       // Keep id in URL for share/reload, drop helper params once applied.
       const next = new URLSearchParams()
       next.set('id', String(inv.id))
-      const back = safeMastrinoHref(searchParams.get('mastrino'))
-      if (back) next.set('mastrino', back)
+      const backMastrino = safeMastrinoHref(searchParams.get('mastrino'))
+      if (backMastrino) next.set('mastrino', backMastrino)
+      const backBanca = safeBancaMovimentiHref(searchParams.get('banca'))
+      if (backBanca) next.set('banca', backBanca)
       setSearchParams(next, { replace: true })
     }
 
@@ -873,6 +883,7 @@ export default function InvoicesPage() {
           fatture.
         </div>
       ) : null}
+      <BancaMovimentiReturnBar href={searchParams.get('banca')} />
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
@@ -934,9 +945,14 @@ export default function InvoicesPage() {
                 Arrivo dal mastrino: la fattura è evidenziata nello{' '}
                 <a href="#fatture-storico-elenco">storico</a> sotto.
               </>
+            ) : safeBancaMovimentiHref(searchParams.get('banca')) ? (
+              <>
+                Arrivo da movimenti bancari: il documento è evidenziato nello{' '}
+                <a href="#fatture-storico-elenco">storico fatture</a> sotto.
+              </>
             ) : (
               <>
-                Arrivo da movimenti banca: il documento è evidenziato nello{' '}
+                Documento evidenziato nello{' '}
                 <a href="#fatture-storico-elenco">storico fatture</a> sotto.
               </>
             )}
@@ -1215,6 +1231,15 @@ export default function InvoicesPage() {
                   >
                     ← Torna al mastrino
                   </FattureLink>
+                ) : null}
+                {safeBancaMovimentiHref(searchParams.get('banca')) ? (
+                  <Link
+                    className="btn btn-primary btn-sm"
+                    to={safeBancaMovimentiHref(searchParams.get('banca'))}
+                    title="Torna ai movimenti bancari da cui hai aperto questa fattura"
+                  >
+                    ← Torna ai movimenti bancari
+                  </Link>
                 ) : null}
                 <button
                   type="button"

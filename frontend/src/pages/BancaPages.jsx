@@ -18,8 +18,10 @@ import { useFattureCompany } from '../hooks/useFattureCompany.js'
 import { invoiceNumbersMatch } from '../utils/pagamentiWorkbook.js'
 import {
   getLockedOperatorStationId,
+  getOperatorStationBancaPath,
   getOperatorStationFatturePath,
   isOperatorStationLocked,
+  OPERATOR_DELIVERY_BANCA_PATH,
   resolveOperatorStationIdFromPath,
 } from '../utils/operatorMode.ts'
 import {
@@ -462,6 +464,22 @@ function fattureRegistratePath() {
   return `${getOperatorStationFatturePath(stationId)}/registrate`
 }
 
+/** Path movimenti banca da cui si apre lo storico (per il pulsante «Torna»). */
+function bancaMovimentiReturnPath() {
+  if (typeof window === 'undefined') return '/banca/movimenti'
+  const path = String(window.location.pathname || '')
+  const search = String(window.location.search || '')
+  if (path.includes('/banca/movimenti')) return `${path}${search}`
+  const stationId =
+    resolveOperatorStationIdFromPath(path) ||
+    (isOperatorStationLocked() ? getLockedOperatorStationId() : null)
+  if (stationId) return `${getOperatorStationBancaPath(stationId)}/movimenti`
+  if (path.includes('/operatore-consegne') || path.includes(OPERATOR_DELIVERY_BANCA_PATH)) {
+    return `${OPERATOR_DELIVERY_BANCA_PATH}/movimenti`
+  }
+  return '/banca/movimenti'
+}
+
 function linkedInvoiceHref(inv, movement) {
   const params = new URLSearchParams()
   const idStr = inv?.id != null && inv.id !== '' ? String(inv.id) : ''
@@ -480,6 +498,8 @@ function linkedInvoiceHref(inv, movement) {
         ? invAmt
         : null
   if (amount != null) params.set('importo', amount.toFixed(2))
+  const back = bancaMovimentiReturnPath()
+  if (back) params.set('banca', back)
   const qs = params.toString()
   const base = fattureRegistratePath()
   return qs ? `${base}?${qs}` : base
