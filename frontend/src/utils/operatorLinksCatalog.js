@@ -1,4 +1,8 @@
-import { getOperatorDeliveryPublicUrl, getOperatorStationPublicUrl } from './operatorMode.ts'
+import {
+  getGazzaSalaPalmarePublicUrl,
+  getOperatorDeliveryPublicUrl,
+  getOperatorStationPublicUrl,
+} from './operatorMode.ts'
 
 export const OPERATOR_LINKS_WORKBOOK_TITLE = 'Link operatori'
 
@@ -7,6 +11,9 @@ const STATION_DESCRIPTION =
 
 const GAZZA_DESCRIPTION =
   'Postazione operativa PWA di PG S.r.l. · La Gazza Ladra: solo i dati di questa società. Panoramica, Gestione sala, Fornitori, Nuovo ordine, Nuova consegna (Magazzino, senza trasportatori), Storico consegne, Personale, Amministrazione (Fatture fornitori, Prima Nota) e Assistenza tecnici.'
+
+const GAZZA_PALMARE_DESCRIPTION =
+  'Sala camerieri sul telefono: stessi 15 tavoli di Gestione sala. Accesso con la postazione Gazza. Quello che si inserisce sul palmare arriva in Gestione sala.'
 
 const CARRIER_DESCRIPTION =
   'Postazione trasportatore PWA: Panoramica, Fornitori, Nuova consegna ▾ (Trasportatori, Magazzino), Storico e Amministrazione ▾ (Fatture fornitori, Prima Nota, Banca).'
@@ -44,6 +51,13 @@ export function buildOperatorLinksCatalog() {
       sede: 'PG S.r.l. · La Gazza Ladra',
       description: GAZZA_DESCRIPTION,
       url: getOperatorStationPublicUrl('overview', 'gazza'),
+    },
+    {
+      id: 'gazza-sala-palmare',
+      role: 'Palmare sala',
+      sede: 'PG S.r.l. · La Gazza Ladra',
+      description: GAZZA_PALMARE_DESCRIPTION,
+      url: getGazzaSalaPalmarePublicUrl(),
     },
     {
       id: 'carrier-guidatore',

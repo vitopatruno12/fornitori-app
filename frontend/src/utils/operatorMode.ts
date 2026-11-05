@@ -140,6 +140,10 @@ export function getGazzaSalaPalmarePath(): string {
   return `${OPERATOR_STATION_GAZZA_PATH}/sala`
 }
 
+export function getGazzaSalaPalmarePublicUrl(): string {
+  return buildPublicUrl(getGazzaSalaPalmarePath())
+}
+
 export function getOperatorStationMastriniPath(stationId: OperatorStationId = 'abba'): string {
   return `${getOperatorStationBasePath(stationId)}/mastrini`
 }
