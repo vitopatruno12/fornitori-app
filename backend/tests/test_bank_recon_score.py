@@ -701,6 +701,55 @@ def test_pagamenti_file_window_before_june_2026():
   assert not _uses_pagamenti_file_recon(_inv(invoice_date=None))
 
 
+def test_pg_estratto_chiude_senza_numero_fattura():
+  from app.services.banca_service import match_pg_statement_payments
+
+  open_inv = _inv(
+    id=10,
+    invoice_number="2000",
+    invoice_date=date(2026, 10, 1),
+    due_date=date(2026, 10, 31),
+    supplier_name="ESSEGI SERVIZI SRL",
+    total=Decimal("536.00"),
+    amount_paid=Decimal("536.00"),
+    payment_status="unpaid",
+  )
+  other = _inv(
+    id=11,
+    invoice_number="144",
+    invoice_date=date(2026, 10, 2),
+    due_date=date(2026, 10, 31),
+    supplier_name="LA COPISTERIA SRL",
+    total=Decimal("30.01"),
+    payment_status="unpaid",
+  )
+  wire = _mov(
+    id=70,
+    amount=Decimal("536.00"),
+    movement_date=date(2026, 10, 5),
+    counterparty="ESSEGI SERVIZI SRL",
+    description="BONIFICO DA VOI DISPOSTO",
+    matched_invoice_id=None,
+  )
+  card = _mov(
+    id=71,
+    amount=Decimal("30.01"),
+    movement_date=date(2026, 10, 2),
+    counterparty="",
+    description="PAGAMENTO CON CARTA",
+    matched_invoice_id=None,
+  )
+  meta = []
+  for mov in (wire, card):
+    blob = f"{mov.description} {mov.counterparty}"
+    meta.append({"mov": mov, "blob": blob, "beneficiary": mov.counterparty, "out": {}})
+  hits = match_pg_statement_payments([open_inv, other], meta)
+  assert hits[10]["reason"] == "bonifico_data"
+  assert hits[10]["meta"]["mov"].id == 70
+  assert hits[11]["reason"] == "file_carta"
+  assert hits[11]["meta"]["mov"].id == 71
+
+
 def test_stesso_numero_apre_la_fattura_con_importo_del_movimento():
   from types import SimpleNamespace
   from app.services.banca_service import _pick_invoice_for_movement_amount

@@ -4090,6 +4090,133 @@ def _pick_wire_on_payment_date(
   return min(pool, key=_rank)
 
 
+_CARD_PAY_RE = re.compile(
+  r"\b(?:PAGAMENTO\s+CON\s+CARTA|PAGATO\s+CON\s+CARTA|CARTA\s+DI\s+CREDITO|"
+  r"CARTE\s+DI\s+CREDITO|PAGOBANCOMAT|BANCOMAT|NEXI|ADDEBITO\s+CARTA)\b",
+  re.IGNORECASE,
+)
+
+
+def _movement_is_card_payment(blob: str) -> bool:
+  return bool(_CARD_PAY_RE.search(blob or ""))
+
+
+def match_pg_statement_payments(
+  unpaid: List[Any],
+  mov_meta: List[Dict[str, Any]],
+) -> Dict[int, Dict[str, Any]]:
+  """PG: chiude senza il numero in causale.
+
+  Bonifico se importo, data e beneficiario coincidono.
+  Carta, o bonifico senza nome, solo se quell'importo è di una sola fattura aperta.
+  """
+  open_rows = [
+    inv
+    for inv in unpaid
+    if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+    and abs(_dec(getattr(inv, "total", 0))) > Decimal("0.009")
+  ]
+  amount_owners: Dict[int, List[Any]] = {}
+  for inv in open_rows:
+    for target in _invoice_amount_targets(inv):
+      cents = int((abs(target) * 100).to_integral_value())
+      amount_owners.setdefault(cents, [])
+      if all(int(getattr(other, "id") or 0) != int(getattr(inv, "id") or 0) for other in amount_owners[cents]):
+        amount_owners[cents].append(inv)
+
+  pairs: List[tuple] = []
+  for inv in open_rows:
+    inv_id = int(getattr(inv, "id"))
+    inv_date = _as_date(getattr(inv, "invoice_date", None))
+    for meta in mov_meta:
+      mov = meta["mov"]
+      if str(getattr(mov, "movement_type", "") or "").lower() != "uscita":
+        continue
+      if _is_bank_fee_movement(mov):
+        continue
+      linked = getattr(mov, "matched_invoice_id", None)
+      if linked and int(linked) != inv_id:
+        continue
+      amt = abs(_dec(getattr(mov, "amount", 0)))
+      if amt <= Decimal("1.00"):
+        continue
+      if not any(abs(abs(target) - amt) <= Decimal("0.05") for target in _invoice_amount_targets(inv)):
+        continue
+      blob = meta.get("blob") or ""
+      if not _dates_compatible(inv, mov, max_days=365):
+        continue
+      beneficiary = meta.get("beneficiary") or _movement_beneficiary(mov, blob)
+      name_ok = bool(beneficiary) and _party_names_align(getattr(inv, "supplier_name", None), beneficiary)
+      card_ok = _movement_is_card_payment(blob)
+      cents = int((amt * 100).to_integral_value())
+      unique_amount = len(amount_owners.get(cents) or []) == 1
+      # Senza il nome serve un importo che appartiene a una sola fattura aperta.
+      if not name_ok and not unique_amount:
+        continue
+      mov_date = _as_date(getattr(mov, "movement_date", None))
+      gap = abs((mov_date - inv_date).days) if mov_date and inv_date else 9999
+      if not name_ok and gap > 120:
+        continue
+      kind = 0 if name_ok else (1 if card_ok else 2)
+      pairs.append((kind, gap, inv_id, meta, "file_carta" if card_ok and not name_ok else "bonifico_data"))
+
+  pairs.sort(key=lambda item: (item[0], item[1], item[2]))
+  used_inv: set[int] = set()
+  used_mov: set[int] = set()
+  hits: Dict[int, Dict[str, Any]] = {}
+  for _kind, _gap, inv_id, meta, reason in pairs:
+    mov_id = int(getattr(meta["mov"], "id") or 0)
+    if inv_id in used_inv or (mov_id and mov_id in used_mov):
+      continue
+    used_inv.add(inv_id)
+    if mov_id:
+      used_mov.add(mov_id)
+    hits[inv_id] = {"meta": meta, "reason": reason}
+  return hits
+
+
+def apply_pg_statement_payments(db: Session, company: Optional[str] = None) -> int:
+  """Segna pagate le fatture PG se l'estratto ha il bonifico o la carta, anche senza n. fattura."""
+  company_id = (company or "").strip() or None
+  if not _is_pg_company(company_id):
+    return 0
+  listed, _ = _load_recon_invoices(db, company_id)
+  unpaid = [
+    inv
+    for inv in listed
+    if (getattr(inv, "payment_status", None) or "unpaid") != "paid"
+  ]
+  if not unpaid:
+    return 0
+  primary_ids, secondary_ids, other_ids = recon_account_tiers(db, company_id)
+  mov_meta, _tier = _load_recon_movements_by_tiers(db, (primary_ids, secondary_ids, other_ids))
+  hits = match_pg_statement_payments(unpaid, mov_meta)
+  if not hits:
+    return 0
+  rows = {
+    int(row.id): row
+    for row in db.query(Invoice).filter(Invoice.id.in_(list(hits.keys()))).all()
+  }
+  marked = 0
+  for inv_id, hit in hits.items():
+    row = rows.get(inv_id)
+    mov = hit["meta"]["mov"]
+    if row is None:
+      continue
+    row.amount_paid = _dec(row.total)
+    row.is_paid = True
+    if getattr(mov, "id", None) and (
+      mov.matched_invoice_id is None or int(mov.matched_invoice_id) == inv_id
+    ):
+      mov.matched_invoice_id = inv_id
+      mov.reconciliation_status = "matched"
+      mov.difference_amount = None
+    marked += 1
+  if marked:
+    db.commit()
+  return marked
+
+
 def reconciliation_snapshot(
   db: Session,
   limit: int = 40,
@@ -4110,6 +4237,10 @@ def reconciliation_snapshot(
     marked_from_file = apply_pagamenti_file_window_payments(db, company_id)
   except Exception:
     logger.warning("Chiusura da file Pagamenti in snapshot fallita", exc_info=True)
+  try:
+    apply_pg_statement_payments(db, company_id)
+  except Exception:
+    logger.warning("Chiusura PG da estratto conto fallita in snapshot", exc_info=True)
 
   invoices, _match_invoices = _load_recon_invoices(db, company_id)
   account_items = accounts_for_company(db, company_id) if company_id else list_accounts(db)
@@ -4898,6 +5029,10 @@ def sync_payment_status_from_bank(
   from . import supplier_payments_service
 
   company_id = (company or "").strip() or None
+  try:
+    apply_pg_statement_payments(db, company_id)
+  except Exception:
+    logger.warning("Chiusura PG da estratto conto fallita in sync", exc_info=True)
   listed, _match_invoices = _load_recon_invoices(db, company_id)
   unpaid = [
     inv

@@ -2005,7 +2005,9 @@ export function FatturePagatePage() {
         ?? res?.accounts?.length,
       ) || 0
       setVerifySummary(
-        `Verifica: ${accounts || '—'} c/c · file Pagamenti ${fileRows} righe pagate · ${paid.length} pagate · ${open.length} da pagare`
+        (nextCompany === 'pg'
+          ? `Verifica estratto PG: ${paid.length} pagate · ${open.length} da pagare`
+          : `Verifica: ${accounts || '—'} c/c · file Pagamenti ${fileRows} righe pagate · ${paid.length} pagate · ${open.length} da pagare`)
         + (marked ? ` · ${marked} aggiornate ora` : '')
         + (fromFile ? ` (di cui ${fromFile} da file Pagamenti)` : ''),
       )
@@ -2172,9 +2174,11 @@ export function FatturePagatePage() {
     <FatturePageShell
       title="Fatture pagate"
       lead={
-        companyId
-          ? `Verifica bonifici sui conti collegati e file Pagamenti · ${companyName}. Segna pagata se n. fattura in banca o in PAGATO/DATA PAGAMENTO.`
-          : 'Scegli la società nel banner per verificare le fatture ricevute su conti e file Pagamenti.'
+        companyId === 'pg'
+          ? 'PG · Gazza Ladra: estratto conto. Se in quella data c’è il bonifico o la carta, la fattura passa da da pagare a pagata anche senza il numero in causale.'
+          : companyId
+            ? `Verifica bonifici sui conti collegati e file Pagamenti · ${companyName}. Segna pagata se n. fattura in banca o in PAGATO/DATA PAGAMENTO.`
+            : 'Scegli la società nel banner per verificare le fatture ricevute su conti e file Pagamenti.'
       }
       actions={
         <div className="mastrini-hero-tools" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
