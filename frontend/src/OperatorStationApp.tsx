@@ -10,6 +10,7 @@ import DeliveriesHistoryPage from './pages/DeliveriesHistoryPage.jsx'
 import SuppliersPage from './pages/SuppliersPage.jsx'
 import { type OperatorStationId, stationIdToAuthMode } from './utils/atlasAuth'
 import {
+  getGazzaSalaPalmarePath,
   getOperatorStationBancaPath,
   getOperatorStationFatturePath,
   getOperatorStationMastriniPath,
@@ -30,7 +31,7 @@ const StipendiPage = lazy(() => import('./pages/StipendiPage.jsx'))
 const SupportTechniciansPage = lazy(() => import('./pages/SupportTechniciansPage.jsx'))
 const GazzaLadraSalaPage = lazy(() =>
   import('./pages/GestioneLocaliPage.jsx').then((m) => ({
-    default: m.GazzaLadraSalaPage as React.ComponentType<{ operatorMode?: boolean }>,
+    default: m.GazzaLadraSalaPage as React.ComponentType<{ operatorMode?: boolean; palmare?: boolean }>,
   })),
 )
 const InvoicesPage = lazy(() => import('./pages/InvoicesPage.jsx'))
@@ -387,6 +388,9 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
     [setStationView],
   )
 
+  const salaPalmarePath = getGazzaSalaPalmarePath()
+  const onSalaPalmare =
+    stationId === 'gazza' && location.pathname.replace(/\/$/, '') === salaPalmarePath
   const effectiveView: OperatorStationView = onFatturePath
     ? 'fatture'
     : onBancaPath
@@ -473,16 +477,31 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
     <OperatorSatelliteShell
       authMode={authMode}
       stationId={stationId}
-      documentTitle={`ATLAS — ${activeTitle} (${sedeLabel})`}
-      loginHint={
-        stationId === 'gazza'
-          ? `Accesso postazione ${sedeLabel} — gestione sala, fornitori, ordini, consegne, personale, amministrazione`
-          : `Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, amministrazione, assistenza tecnici`
+      documentTitle={
+        onSalaPalmare ? `ATLAS — Sala palmare (${sedeLabel})` : `ATLAS — ${activeTitle} (${sedeLabel})`
       }
-      headerTitle={`Postazione operativa · ${sedeLabel}`}
-      headerSubtitle=""
+      loginHint={
+        onSalaPalmare
+          ? `Accesso palmare sala ${sedeLabel}`
+          : stationId === 'gazza'
+            ? `Accesso postazione ${sedeLabel} — gestione sala, fornitori, ordini, consegne, personale, amministrazione`
+            : `Accesso postazione ${sedeLabel} — fornitori, ordini, consegne, personale, amministrazione, assistenza tecnici`
+      }
+      headerTitle={onSalaPalmare ? `Sala palmare · ${sedeLabel}` : `Postazione operativa · ${sedeLabel}`}
+      headerSubtitle={onSalaPalmare ? 'Stessa sala della postazione' : ''}
       stationOnly
-      nav={nav}
+      nav={
+        onSalaPalmare
+          ? [
+              {
+                id: 'sala-palmare',
+                label: 'Sala',
+                active: true,
+                onClick: () => navigate(salaPalmarePath),
+              },
+            ]
+          : nav
+      }
     >
       <Routes>
         <Route path="fatture/*" element={<StationFattureRoutes fattureBase={fatturePath} />} />
@@ -495,6 +514,16 @@ export default function OperatorStationApp({ stationId = 'abba' }: OperatorStati
             element={
               <LazySection>
                 <MastriniContabiliPage />
+              </LazySection>
+            }
+          />
+        ) : null}
+        {stationId === 'gazza' ? (
+          <Route
+            path="sala"
+            element={
+              <LazySection>
+                <GazzaLadraSalaPage operatorMode palmare />
               </LazySection>
             }
           />

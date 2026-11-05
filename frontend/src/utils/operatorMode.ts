@@ -136,6 +136,10 @@ export function getOperatorStationBancaPath(stationId: OperatorStationId = 'abba
   return `${getOperatorStationBasePath(stationId)}/banca`
 }
 
+export function getGazzaSalaPalmarePath(): string {
+  return `${OPERATOR_STATION_GAZZA_PATH}/sala`
+}
+
 export function getOperatorStationMastriniPath(stationId: OperatorStationId = 'abba'): string {
   return `${getOperatorStationBasePath(stationId)}/mastrini`
 }
@@ -342,6 +346,8 @@ export function getOperatorStationView(stationId: OperatorStationId = 'abba'): O
   if (stationId === 'gazza') {
     const bancaPath = getOperatorStationBancaPath(stationId)
     const mastriniPath = getOperatorStationMastriniPath(stationId)
+    const salaPath = getGazzaSalaPalmarePath()
+    if (path === salaPath) return 'gestione-sala'
     if (path === bancaPath || path.startsWith(`${bancaPath}/`)) return 'banca'
     if (path === mastriniPath || path.startsWith(`${mastriniPath}/`)) return 'mastrini'
   }

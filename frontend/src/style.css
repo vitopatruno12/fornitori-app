@@ -2059,6 +2059,131 @@ select.form-control {
   opacity: 0.45;
 }
 
+.gazza-sala-link-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+  padding: 0.9rem 1rem;
+}
+
+.gazza-sala-link-card p {
+  margin: 0.25rem 0 0.35rem;
+  color: #475569;
+}
+
+.gazza-sala-link-card a {
+  word-break: break-all;
+  font-weight: 700;
+}
+
+.gazza-sala-page .gazza-sala-stat-save {
+  max-width: 22rem;
+  white-space: normal;
+  text-align: right;
+}
+
+.gazza-sala-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.gazza-sala-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.gazza-sala-card.gazza-sala-row-occupato {
+  background: #fff1f2;
+  border-color: #f87171;
+}
+
+.gazza-sala-card.gazza-sala-row-conto {
+  background: #fffbeb;
+  border-color: #f59e0b;
+}
+
+.gazza-sala-card.gazza-sala-row-pagato {
+  background: #f0fdf4;
+  border-color: #22c55e;
+}
+
+.gazza-sala-card.gazza-sala-row-chiuso {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.gazza-sala-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gazza-sala-card-head strong {
+  font-size: 1.15rem;
+}
+
+.gazza-sala-card-head span {
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.gazza-sala-card-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.gazza-sala-card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.gazza-sala-card-field:nth-child(1),
+.gazza-sala-card-field:nth-child(4) {
+  grid-column: 1 / -1;
+}
+
+.gazza-sala-card .excel-cell,
+.gazza-sala-card .excel-cell-select,
+.gazza-sala-card .gazza-sala-counter-select {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+.gazza-sala-card .gazza-sala-actions-btns .btn {
+  min-height: 44px;
+  flex: 1 1 30%;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 1100px), (pointer: coarse) {
+  .gazza-sala-link-card {
+    align-items: stretch;
+  }
+
+  .gazza-sala-page .gazza-sala-stat-save {
+    margin-left: 0;
+    text-align: left;
+  }
+}
+
 .gazza-sala-legend-occupato { color: #b91c1c; }
 .gazza-sala-legend-conto { color: #a16207; }
 .gazza-sala-legend-pagato { color: #15803d; }
