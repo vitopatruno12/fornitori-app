@@ -141,6 +141,10 @@ if systemctl is-active --quiet postgresql 2>/dev/null || pg_isready -q 2>/dev/nu
     log "Tabella documenti personale (contratti / buste / documenti)"
     APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-staff-documents-table.sh"
   fi
+  if [[ -f "$APP_DIR/deploy/ensure-gazza-sala-table.sh" ]]; then
+    log "Tabella sala Gazza (palmari camerieri)"
+    APP_DIR="$APP_DIR" DB_NAME="${DB_NAME:-fornitori_db}" bash "$APP_DIR/deploy/ensure-gazza-sala-table.sh"
+  fi
 else
   warn "PostgreSQL non attivo: salto migrazioni database."
 fi

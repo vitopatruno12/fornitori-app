@@ -249,6 +249,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
     )
     const slot = { ...slotRef.current }
     try {
+      await saveGazzaSalaRow(slot.date, slot.fascia, current)
       const payload = await markGazzaSalaPaid(slot.date, slot.fascia, tableId)
       window.setTimeout(() => {
         holdRef.current.delete(tableId)
