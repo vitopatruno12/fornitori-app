@@ -181,6 +181,12 @@ export function createEmptyGazzaSalaRow(tableId, { keepPaidTotal } = {}) {
   return emptyTableRow(tableId, keepPaidTotal ?? '')
 }
 
+/** Sul palmare un tavolo già pagato si libera: i dati restano sulla postazione finché non arrivano i nuovi. */
+export function gazzaSalaRowForPalmare(row) {
+  if (!row || row.status !== 'pagato') return row
+  return createEmptyGazzaSalaRow(row.table_id, { keepPaidTotal: row.paid_total })
+}
+
 /** Somma contatore + importo conto (2 decimali). */
 export function addGazzaSalaPaidTotal(currentTotal, paidAmount) {
   const next = Math.round((num(currentTotal) + num(paidAmount)) * 100) / 100

@@ -19,6 +19,7 @@ import {
   GAZZA_SALA_WORKBOOK_TITLE,
   createEmptyGazzaSalaRow,
   createEmptyGazzaSalaRows,
+  gazzaSalaRowForPalmare,
   gazzaSalaCellDisplay,
   gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
@@ -135,7 +136,11 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
   rowsRef.current = rows
   slotRef.current = { date, fascia }
 
-  const totals = useMemo(() => gazzaSalaTotals(rows), [rows])
+  const viewRows = useMemo(
+    () => (palmare ? rows.map((row) => gazzaSalaRowForPalmare(row)) : rows),
+    [rows, palmare],
+  )
+  const totals = useMemo(() => gazzaSalaTotals(viewRows), [viewRows])
   const fasciaLabel = GAZZA_SALA_FASCE.find((f) => f.id === fascia)?.label || fascia
   const palmareUrl = palmareAbsoluteUrl()
 
@@ -187,7 +192,13 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
     revRef.current[tableId] = (revRef.current[tableId] || 0) + 1
     pendingRef.current.add(tableId)
     noteSending()
-    setRows((prev) => prev.map((row) => (row.table_id === tableId ? { ...row, [field]: value } : row)))
+    setRows((prev) =>
+      prev.map((row) => {
+        if (Number(row.table_id) !== Number(tableId)) return row
+        const base = palmare ? gazzaSalaRowForPalmare(row) : row
+        return { ...base, [field]: value }
+      }),
+    )
     scheduleRowSave(tableId)
   }
 
@@ -259,8 +270,15 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
     pendingRef.current.delete(tableId)
     holdRef.current.add(tableId)
     noteSending()
+    const added = parseGazzaSalaAmount(current.paid) || 0
+    const prevTotal = parseGazzaSalaAmount(current.paid_total) || 0
+    const nextTotal = Math.round((prevTotal + added) * 100) / 100
     setRows((prev) =>
-      prev.map((row) => (Number(row.table_id) === Number(tableId) ? { ...row, status: 'pagato' } : row)),
+      prev.map((row) =>
+        Number(row.table_id) === Number(tableId)
+          ? { ...row, status: 'pagato', paid_total: nextTotal > 0 ? String(nextTotal) : row.paid_total }
+          : row,
+      ),
     )
     const slot = { ...slotRef.current }
     try {
@@ -536,8 +554,8 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
         </h1>
         {palmare ? (
           <p className="page-lead">
-            Pagato invia in Gestione sala nome, clienti, fattura, cameriere, metodo e conto. Il contatore si
-            aggiorna e il tavolo resta compilato sul foglio.
+            Pagato libera questo tavolo. Nome, clienti, fattura, cameriere, metodo e conto restano in Gestione
+            sala finché non inserisci il cliente successivo, e nello storico.
           </p>
         ) : null}
       </header>
@@ -626,7 +644,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
 
         {palmare ? (
           <div className="gazza-sala-cards">
-            {rows.map((row) => (
+            {viewRows.map((row) => (
               <article
                 key={row.table_id}
                 className={['gazza-sala-card', gazzaSalaStatusRowClass(row.status)].filter(Boolean).join(' ')}
@@ -676,7 +694,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {viewRows.map((row) => (
                   <tr
                     key={row.table_id}
                     className={['workbook-grid-row', gazzaSalaStatusRowClass(row.status)].filter(Boolean).join(' ')}
