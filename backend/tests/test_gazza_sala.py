@@ -1,4 +1,4 @@
-"""Sala Gazza condivisa: un tavolo non cancella l'altro, il pagato libera e tiene il contatore."""
+"""Sala Gazza condivisa: un tavolo non cancella l'altro, il pagato resta completo sul foglio."""
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -36,7 +36,7 @@ def test_due_camerieri_aggiornano_tavoli_diversi():
     assert len(sheet["tables"]) == 15
 
 
-def test_pagato_libera_il_tavolo_e_somma_il_contatore():
+def test_pagato_lascia_i_dati_sul_foglio_e_somma_il_contatore():
     db = _db()
     sala.save_table(
         db,
@@ -47,6 +47,7 @@ def test_pagato_libera_il_tavolo_e_somma_il_contatore():
             "status": "conto",
             "reservation_name": "Verdi",
             "clients": "3",
+            "invoice_number": "56",
             "waiter": "Marco",
             "paid": "42.50",
             "payment_type": "carta",
@@ -55,14 +56,84 @@ def test_pagato_libera_il_tavolo_e_somma_il_contatore():
     )
     done = sala.mark_table_paid(db, "2026-11-05", "pranzo", 4)
     row = done["row"]
-    assert row["status"] == "libero"
-    assert row["reservation_name"] == ""
-    assert row["paid"] == ""
+    assert row["status"] == "pagato"
+    assert row["reservation_name"] == "Verdi"
+    assert row["clients"] == "3"
+    assert row["invoice_number"] == "56"
+    assert row["waiter"] == "Marco"
+    assert row["payment_type"] == "carta"
+    assert row["paid"] == "42.5"
     assert row["paid_total"] == "52.5"
     assert len(done["history"]) == 1
     assert done["history"][0]["reservation_name"] == "Verdi"
+    assert done["history"][0]["invoice_number"] == "56"
     assert done["history"][0]["paid"] == "42.5"
     assert done["history"][0]["payment_type"] == "carta"
+
+
+def test_pagato_usa_i_dati_inviati_dal_palmare():
+    db = _db()
+    done = sala.mark_table_paid(
+        db,
+        "2026-11-06",
+        "pranzo",
+        1,
+        {
+            "table_id": 1,
+            "status": "occupato",
+            "reservation_name": "Rossi",
+            "clients": "5",
+            "invoice_number": "56",
+            "waiter": "Erico",
+            "payment_type": "contanti",
+            "paid": "150",
+            "paid_total": "0",
+        },
+    )
+    row = done["row"]
+    assert row["status"] == "pagato"
+    assert row["reservation_name"] == "Rossi"
+    assert row["clients"] == "5"
+    assert row["invoice_number"] == "56"
+    assert row["waiter"] == "Erico"
+    assert row["payment_type"] == "contanti"
+    assert row["paid"] == "150.0"
+    assert row["paid_total"] == "150.0"
+    assert done["tables"][2]["status"] == "libero"
+
+
+def test_salvataggio_non_azzera_il_contatore():
+    db = _db()
+    sala.save_table(
+        db,
+        "2026-11-06",
+        "pranzo",
+        {"table_id": 1, "status": "pagato", "reservation_name": "Rossi", "paid": "150", "paid_total": "150"},
+    )
+    sheet = sala.save_table(
+        db,
+        "2026-11-06",
+        "pranzo",
+        {
+            "table_id": 1,
+            "status": "occupato",
+            "reservation_name": "Calo",
+            "clients": "4",
+            "waiter": "Simone",
+            "paid": "250",
+            "payment_type": "carta",
+            "paid_total": "",
+        },
+    )
+    row = sheet["tables"][0]
+    assert row["reservation_name"] == "Calo"
+    assert row["paid_total"] == "150.0"
+    done = sala.mark_table_paid(db, "2026-11-06", "pranzo", 1)
+    assert done["row"]["reservation_name"] == "Calo"
+    assert done["row"]["waiter"] == "Simone"
+    assert done["row"]["paid"] == "250.0"
+    assert done["row"]["paid_total"] == "400.0"
+    assert done["row"]["status"] == "pagato"
 
 
 def test_importa_solo_se_il_foglio_e_vuoto():

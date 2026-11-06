@@ -13,6 +13,7 @@ import { getGazzaSalaPalmarePath } from '../utils/operatorMode.ts'
 import {
   GAZZA_SALA_COLUMNS,
   GAZZA_SALA_FASCE,
+  GAZZA_SALA_STATUS_OPTIONS,
   GAZZA_SALA_STATUS_SELECT_OPTIONS,
   GAZZA_SALA_TABLE_COUNT,
   GAZZA_SALA_WORKBOOK_TITLE,
@@ -96,6 +97,16 @@ function mergeSalaRows(localRows, remoteTables, pending, hold) {
     }
     return row
   })
+}
+
+function statusOptionsFor(row) {
+  const current = String(row?.status || '')
+  if (current !== 'pagato' && current !== 'conto') return GAZZA_SALA_STATUS_SELECT_OPTIONS
+  if (GAZZA_SALA_STATUS_SELECT_OPTIONS.some((opt) => opt.value === current)) {
+    return GAZZA_SALA_STATUS_SELECT_OPTIONS
+  }
+  const extra = GAZZA_SALA_STATUS_OPTIONS.find((opt) => opt.value === current)
+  return extra ? [...GAZZA_SALA_STATUS_SELECT_OPTIONS, extra] : GAZZA_SALA_STATUS_SELECT_OPTIONS
 }
 
 function palmareAbsoluteUrl() {
@@ -227,14 +238,18 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
       window.alert('Importo non valido.')
       return
     }
-    saveRowNow(tableId, { ...current, paid_total: amount > 0 ? String(amount) : '' })
+    saveRowNow(tableId, {
+      ...current,
+      paid_total: amount > 0 ? String(amount) : '',
+      clear_counter: !(amount > 0),
+    })
   }
 
   function resetTableCounter(tableId) {
     const current = rows.find((r) => Number(r.table_id) === Number(tableId))
     if (!current || parseGazzaSalaAmount(current.paid_total) === 0) return
     if (!window.confirm(`Azzerare il contatore del tavolo ${tableId} a fine serata?`)) return
-    saveRowNow(tableId, { ...current, paid_total: '' })
+    saveRowNow(tableId, { ...current, paid_total: '', clear_counter: true })
   }
 
   async function markTablePaid(tableId) {
@@ -249,8 +264,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
     )
     const slot = { ...slotRef.current }
     try {
-      await saveGazzaSalaRow(slot.date, slot.fascia, current)
-      const payload = await markGazzaSalaPaid(slot.date, slot.fascia, tableId)
+      const payload = await markGazzaSalaPaid(slot.date, slot.fascia, tableId, current)
       window.setTimeout(() => {
         holdRef.current.delete(tableId)
         applyRemote(payload)
@@ -432,7 +446,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
           }
           aria-label={`${col.label} tavolo ${row.table_id}`}
         >
-          {(col.id === 'status' ? GAZZA_SALA_STATUS_SELECT_OPTIONS : col.options || []).map((opt) => (
+          {(col.id === 'status' ? statusOptionsFor(row) : col.options || []).map((opt) => (
             <option key={opt.value || 'empty'} value={opt.value}>
               {opt.label}
             </option>
@@ -522,8 +536,8 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
         </h1>
         {palmare ? (
           <p className="page-lead">
-            Quello che inserisci qui arriva subito in Gestione sala della postazione. Ogni cameriere lavora sullo
-            stesso foglio.
+            Pagato invia in Gestione sala nome, clienti, fattura, cameriere, metodo e conto. Il contatore si
+            aggiorna e il tavolo resta compilato sul foglio.
           </p>
         ) : null}
       </header>
@@ -605,7 +619,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
           </div>
           <div className="gazza-sala-stat gazza-sala-stat-open">
             <span>Conti aperti</span>
-            <strong>{formatSalaEur(totals.paid)}</strong>
+            <strong>{formatSalaEur(totals.openPaid)}</strong>
           </div>
           <p className={['gazza-sala-stat-save', saveClass].join(' ')}>{saveText}</p>
         </div>

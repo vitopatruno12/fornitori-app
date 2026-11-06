@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ class SalaRowIn(BaseModel):
     paid: str = ""
     waiter: str = ""
     paid_total: str = ""
+    clear_counter: bool = False
 
 
 class SalaTableUpdate(BaseModel):
@@ -32,6 +33,7 @@ class SalaPaidIn(BaseModel):
     date: str
     fascia: str
     table_id: int = Field(..., ge=1, le=15)
+    row: Optional[SalaRowIn] = None
 
 
 class SalaResetIn(BaseModel):
@@ -73,7 +75,8 @@ def save_table(payload: SalaTableUpdate, db: Session = Depends(get_db)):
 @router.post("/pagato")
 def mark_paid(payload: SalaPaidIn, db: Session = Depends(get_db)):
     try:
-        return gazza_sala_service.mark_table_paid(db, payload.date, payload.fascia, payload.table_id)
+        source = payload.row.model_dump() if payload.row is not None else None
+        return gazza_sala_service.mark_table_paid(db, payload.date, payload.fascia, payload.table_id, source)
     except ValueError as exc:
         raise _value_error(exc) from exc
 

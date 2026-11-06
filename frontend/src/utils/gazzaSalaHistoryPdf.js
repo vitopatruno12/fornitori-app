@@ -43,6 +43,7 @@ export function buildGazzaSalaHistoryPdf({ date, fascia, entries }) {
     String(entry.table_id ?? ''),
     entry.reservation_name || '',
     entry.clients === '' || entry.clients == null ? '' : String(entry.clients),
+    entry.invoice_number || '',
     entry.waiter || '',
     formatEur(entry.paid),
     gazzaSalaPaymentLabel(entry.payment_type),
@@ -50,9 +51,9 @@ export function buildGazzaSalaHistoryPdf({ date, fascia, entries }) {
   ])
 
   if (list.length === 0) {
-    body.push(['', 'Nessun tavolo pagato in questa fascia.', '', '', '', '', ''])
+    body.push(['', 'Nessun tavolo pagato in questa fascia.', '', '', '', '', '', ''])
   } else {
-    body.push(['', '', '', 'Totale', formatEur(gazzaSalaEveningHistoryTotal(list)), '', ''])
+    body.push(['', '', '', '', 'Totale', formatEur(gazzaSalaEveningHistoryTotal(list)), '', ''])
   }
 
   autoTable(doc, {
@@ -61,6 +62,7 @@ export function buildGazzaSalaHistoryPdf({ date, fascia, entries }) {
       'Tavolo',
       'Nome prenotazione',
       'N. clienti',
+      'Fattura',
       'Cameriere',
       'Conto pagato €',
       'Metodo',
@@ -73,9 +75,10 @@ export function buildGazzaSalaHistoryPdf({ date, fascia, entries }) {
     margin: { left: 12, right: 12 },
     columnStyles: {
       0: { cellWidth: 16, halign: 'center' },
-      2: { cellWidth: 20, halign: 'right' },
-      4: { cellWidth: 28, halign: 'right' },
-      6: { cellWidth: 16, halign: 'center' },
+      2: { cellWidth: 18, halign: 'right' },
+      3: { cellWidth: 20 },
+      5: { cellWidth: 26, halign: 'right' },
+      7: { cellWidth: 16, halign: 'center' },
     },
     didParseCell(data) {
       const last = data.row.index === body.length - 1

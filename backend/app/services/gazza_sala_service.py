@@ -120,6 +120,7 @@ def normalize_history(saved: Any) -> List[Dict[str, Any]]:
                 "table_id": table_id,
                 "reservation_name": _clip(entry.get("reservation_name"), 120),
                 "clients": str(int(clients_n)) if entry.get("clients") not in (None, "") and clients_n > 0 else "",
+                "invoice_number": _clip(entry.get("invoice_number"), 40),
                 "waiter": _clip(entry.get("waiter"), 80),
                 "paid": str(paid_n) if entry.get("paid") not in (None, "") else "",
                 "payment_type": payment,
@@ -150,8 +151,18 @@ def replace_table(tables: List[Dict[str, Any]], row: Dict[str, Any]) -> List[Dic
     return next_rows
 
 
-def apply_paid(tables: List[Dict[str, Any]], history: List[Dict[str, Any]], table_id: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    current = tables[table_id - 1]
+def apply_paid(
+    tables: List[Dict[str, Any]],
+    history: List[Dict[str, Any]],
+    table_id: int,
+    source: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    stored = tables[table_id - 1]
+    if isinstance(source, dict):
+        current = normalize_row({**source, "table_id": table_id}, table_id)
+        current["paid_total"] = stored.get("paid_total") or ""
+    else:
+        current = stored
     paid_at = _now_iso()
     paid_n = _num(current.get("paid"))
     total_n = round(_num(current.get("paid_total")) + paid_n, 2)
@@ -160,14 +171,22 @@ def apply_paid(tables: List[Dict[str, Any]], history: List[Dict[str, Any]], tabl
         "table_id": table_id,
         "reservation_name": current.get("reservation_name") or "",
         "clients": current.get("clients") or "",
+        "invoice_number": current.get("invoice_number") or "",
         "waiter": current.get("waiter") or "",
         "paid": current.get("paid") or "",
         "payment_type": current.get("payment_type") or "",
         "paidAt": paid_at,
     }
+    kept = normalize_row(
+        {
+            **current,
+            "status": "pagato",
+            "paid_total": str(total_n) if total_n > 0 else "",
+        },
+        table_id,
+    )
     next_history = normalize_history([*history, entry])
-    cleared = empty_row(table_id, str(total_n) if total_n > 0 else "")
-    next_tables = replace_table(tables, cleared)
+    next_tables = replace_table(tables, kept)
     return next_tables, next_history, entry
 
 
@@ -267,21 +286,33 @@ def save_table(db: Session, service_date: str, fascia: str, row_in: Dict[str, An
     get_sheet(db, day, band)
     row = _lock_query(db, day, band).one()
     tables, history = _read_sheet(row)
-    tables = replace_table(tables, {**row_in, "table_id": table_id})
+    stored = tables[table_id - 1]
+    merged = {**row_in, "table_id": table_id}
+    if row_in.get("clear_counter"):
+        merged["paid_total"] = ""
+    elif _num(row_in.get("paid_total")) <= 0:
+        merged["paid_total"] = stored.get("paid_total") or ""
+    tables = replace_table(tables, merged)
     _write_sheet(row, tables, history)
     db.commit()
     db.refresh(row)
     return _payload(day, band, tables, history, row.updated_at, False)
 
 
-def mark_table_paid(db: Session, service_date: str, fascia: str, table_id: int) -> Dict[str, Any]:
+def mark_table_paid(
+    db: Session,
+    service_date: str,
+    fascia: str,
+    table_id: int,
+    source: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     day, band = parse_slot(service_date, fascia)
     if table_id < 1 or table_id > TABLE_COUNT:
         raise ValueError("Tavolo non valido")
     get_sheet(db, day, band)
     row = _lock_query(db, day, band).one()
     tables, history = _read_sheet(row)
-    tables, history, entry = apply_paid(tables, history, table_id)
+    tables, history, entry = apply_paid(tables, history, table_id, source)
     _write_sheet(row, tables, history)
     db.commit()
     db.refresh(row)

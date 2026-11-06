@@ -16,10 +16,10 @@ export function saveGazzaSalaRow(date, fascia, row) {
   })
 }
 
-export function markGazzaSalaPaid(date, fascia, tableId) {
+export function markGazzaSalaPaid(date, fascia, tableId, row) {
   return apiFetch('/gazza-sala/pagato', {
     method: 'POST',
-    body: JSON.stringify({ date, fascia, table_id: tableId }),
+    body: JSON.stringify({ date, fascia, table_id: tableId, row }),
   })
 }
 

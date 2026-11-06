@@ -265,6 +265,7 @@ export function snapshotGazzaSalaEveningEntry(row, paidAt = new Date().toISOStri
     table_id: row?.table_id ?? '',
     reservation_name: row?.reservation_name != null ? String(row.reservation_name) : '',
     clients: row?.clients != null && row.clients !== '' ? String(row.clients) : '',
+    invoice_number: row?.invoice_number != null ? String(row.invoice_number) : '',
     waiter: row?.waiter != null ? String(row.waiter) : '',
     paid: row?.paid != null && row.paid !== '' ? String(row.paid) : '',
     payment_type: row?.payment_type != null ? String(row.payment_type) : '',
@@ -294,6 +295,7 @@ export function gazzaSalaEveningHistoryToAoa(date, fascia, entries) {
     entry.table_id ?? '',
     entry.reservation_name || '',
     entry.clients === '' || entry.clients == null ? null : num(entry.clients),
+    entry.invoice_number || '',
     entry.waiter || '',
     entry.paid === '' || entry.paid == null ? null : num(entry.paid),
     gazzaSalaPaymentLabel(entry.payment_type) || '',
@@ -303,9 +305,9 @@ export function gazzaSalaEveningHistoryToAoa(date, fascia, entries) {
   return [
     [`Gazza Ladra — Storico ${fasciaLabel} ${date || ''}`],
     [],
-    ['Tavolo', 'Nome prenotazione', 'N. clienti', 'Cameriere', 'Conto totale pagato €', 'Metodo pagamento', 'Ora'],
+    ['Tavolo', 'Nome prenotazione', 'N. clienti', 'Fattura numero', 'Cameriere', 'Conto totale pagato €', 'Metodo pagamento', 'Ora'],
     ...body,
-    ['', '', '', 'Totale', total || null, '', ''],
+    ['', '', '', '', 'Totale', total || null, '', ''],
   ]
 }
 
@@ -468,6 +470,7 @@ export function gazzaSalaTotals(rows) {
   const list = Array.isArray(rows) ? rows : []
   const clients = list.reduce((s, r) => s + num(r.clients), 0)
   const paid = list.reduce((s, r) => s + num(r.paid), 0)
+  const openPaid = list.reduce((s, r) => s + (r.status === 'pagato' ? 0 : num(r.paid)), 0)
   const paidTotal = list.reduce((s, r) => s + num(r.paid_total), 0)
   const invoices = list.filter(
     (r) => r.invoice_number != null && String(r.invoice_number).trim() !== '',
@@ -478,6 +481,7 @@ export function gazzaSalaTotals(rows) {
     occupied,
     clients,
     paid,
+    openPaid: Math.round(openPaid * 100) / 100,
     paidTotal: Math.round(paidTotal * 100) / 100,
     invoices,
   }
