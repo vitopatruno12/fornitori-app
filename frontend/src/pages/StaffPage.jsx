@@ -183,6 +183,22 @@ function weekLoadDaysForSingleDate(d) {
   return new Set([weekDayOffsetFromDate(d)])
 }
 
+/** Tutte le date del mese di anchor il cui giorno (lun=0 … dom=6) è tra gli offset scelti. */
+function datesInMonthForWeekOffsets(anchorDate, offsets) {
+  const y = anchorDate.getFullYear()
+  const m = anchorDate.getMonth()
+  const last = new Date(y, m + 1, 0).getDate()
+  const wanted = new Set(offsets)
+  const dates = []
+  for (let day = 1; day <= last; day += 1) {
+    const date = new Date(y, m, day)
+    const dow = date.getDay()
+    const offset = dow === 0 ? 6 : dow - 1
+    if (wanted.has(offset)) dates.push(date)
+  }
+  return dates
+}
+
 const PLANNING_BACKUP_SLOT_LABELS = ['1ª settimana', '2ª settimana', '3ª settimana', '4ª settimana']
 
 function formatShortItDate(ymd) {
@@ -354,6 +370,7 @@ function StaffCheckboxDropdown({
   allSelected,
   onToggleAll,
   selectAllDisabled,
+  belowSelectAll,
   menuAriaLabel,
   emptyMessage,
   children,
@@ -399,6 +416,7 @@ function StaffCheckboxDropdown({
               <span>Tutti</span>
             </label>
           ) : null}
+          {belowSelectAll || null}
           {emptyMessage ? <span className="staff-shift-members-empty">{emptyMessage}</span> : null}
           {children}
         </div>
@@ -1225,6 +1243,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   const [refreshPlanMenuOpen, setRefreshPlanMenuOpen] = useState(false)
   const [copyPlanMenuOpen, setCopyPlanMenuOpen] = useState(false)
   const [weekLoadDays, setWeekLoadDays] = useState(() => new Set([0, 1, 2, 3, 4]))
+  const [loadWholeMonth, setLoadWholeMonth] = useState(false)
   const weekLoadDaysSelectAllRef = React.useRef(null)
   const [membersDropdownOpen, setMembersDropdownOpen] = useState(false)
   const [weekDaysDropdownOpen, setWeekDaysDropdownOpen] = useState(false)
@@ -2605,15 +2624,19 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
   }, [members, membersInFormGenere, formMemberIds, allFormMembersSelected, formGenere])
 
   const weekDaysDropdownLabel = useMemo(() => {
-    if (weekLoadDays.size === 0) return 'Seleziona giorni…'
-    if (allWeekDaysSelected) return 'Tutti i giorni'
+    if (loadWholeMonth && allWeekDaysSelected) return 'Mese intero'
+    if (weekLoadDays.size === 0) return loadWholeMonth ? 'Mese · seleziona giorni…' : 'Seleziona giorni…'
     const labels = [...weekLoadDays]
       .sort((a, b) => a - b)
       .map((off) => WEEK_LOAD_DAY_OPTIONS.find((d) => d.offset === off)?.label)
       .filter(Boolean)
-    if (labels.length <= 3) return labels.join(', ')
-    return `${labels.length} giorni selezionati`
-  }, [weekLoadDays, allWeekDaysSelected])
+    const dayText = allWeekDaysSelected
+      ? 'Tutti i giorni'
+      : labels.length <= 3
+        ? labels.join(', ')
+        : `${labels.length} giorni selezionati`
+    return loadWholeMonth ? `Mese · ${dayText}` : dayText
+  }, [weekLoadDays, allWeekDaysSelected, loadWholeMonth])
 
   useEffect(() => {
     setMembersDropdownOpen(false)
@@ -4285,16 +4308,30 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
     }
 
     const anchor = weekLoadTargetAnchor
-    const weekFrom = toYMD(anchor)
-    const weekTo = toYMD(addDays(anchor, 6))
-    const dayLabels = [...weekLoadDays]
-      .sort((a, b) => a - b)
+    const selectedOffsets = [...weekLoadDays].sort((a, b) => a - b)
+    const targetDates = loadWholeMonth
+      ? datesInMonthForWeekOffsets(anchor, selectedOffsets)
+      : selectedOffsets.map((offset) => addDays(anchor, offset))
+    const rangeStart = targetDates[0]
+    const rangeEnd = targetDates[targetDates.length - 1]
+    const weekFrom = toYMD(rangeStart)
+    const weekTo = toYMD(rangeEnd)
+    const dayLabels = selectedOffsets
       .map((off) => WEEK_LOAD_DAY_OPTIONS.find((d) => d.offset === off)?.label)
       .filter(Boolean)
       .join(', ')
+    const monthLabel = anchor.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
 
-    setPlanView('week')
-    setWeekAnchor(anchor)
+    if (loadWholeMonth) {
+      const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+      const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0)
+      setPlanView('period')
+      setPeriodFrom(monthStart)
+      setPeriodTo(monthEnd)
+    } else {
+      setPlanView('week')
+      setWeekAnchor(anchor)
+    }
     setShiftBusy(true)
     setError('')
     try {
@@ -4310,8 +4347,8 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
           setError(built.error)
           return
         }
-        for (const offset of [...weekLoadDays].sort((a, b) => a - b)) {
-          const ymd = toYMD(addDays(anchor, offset))
+        for (const date of targetDates) {
+          const ymd = toYMD(date)
           const exists = existingList.some((s) =>
             shiftEntryMatches(s, staffId, ymd, formKind, built.payload.time_start, built.payload.time_end),
           )
@@ -4338,14 +4375,15 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
       if (savedDates.length > 0) {
         focusPlanningOnWorkDate(savedDates[savedDates.length - 1])
       }
-      await loadForRange(anchor, addDays(anchor, 6))
+      await loadForRange(loadWholeMonth ? new Date(anchor.getFullYear(), anchor.getMonth(), 1) : anchor, loadWholeMonth ? new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0) : addDays(anchor, 6))
       const memberLabel =
         staffIds.length === 1
           ? members.find((m) => m.id === staffIds[0])?.name || 'Dipendente'
           : `${staffIds.length} dipendenti`
+      const scopeLabel = loadWholeMonth ? `nel mese di ${monthLabel}` : `in settimana (${weekFrom} → ${weekTo})`
       setSuccess(
         created > 0
-          ? `Caricato ${memberLabel} in settimana (${weekFrom} → ${weekTo}) per: ${dayLabels}. Creati ${created} turni${skipped ? `, ${skipped} già presenti` : ''}.`
+          ? `Caricato ${memberLabel} ${scopeLabel} per: ${dayLabels}. Creati ${created} turni${skipped ? `, ${skipped} già presenti` : ''}.`
           : `Nessun nuovo turno: i dipendenti selezionati hanno già voci per i giorni scelti (${dayLabels}).`,
       )
       setFormMemberIds(new Set())
@@ -6664,11 +6702,13 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             <p className="staff-shift-form-hint-title">Come inserire un turno</p>
             <p className="staff-shift-form-hint-list" style={{ margin: 0 }}>
               Scegli il <strong>Genere</strong> (Banco, Cucina, Forno… dalla sezione del dipendente), i{' '}
-              <strong>Dipendenti</strong> e i <strong>Giorni settimana</strong>, imposta il <strong>Tipo</strong>
+              <strong>Dipendenti</strong> e i <strong>Giorni settimana/mese</strong>, imposta il <strong>Tipo</strong>
               {isAllDayKind(formKind)
                 ? ' (ferie, assenza, malattia e riposo non richiedono orari)'
                 : ' e gli orari'}
-              , poi clicca <strong>Carica</strong>. Inserisce le voci nella settimana di quella sezione.
+              , poi clicca <strong>Carica</strong>. Senza Mese inserisce la settimana visibile. Con Mese, lo stesso
+              turno va su tutti i giorni corrispondenti del mese, ad esempio tutti i martedì. La singola voce si
+              modifica dopo.
             </p>
           </div>
         ) : null}
@@ -6757,7 +6797,7 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
             </StaffCheckboxDropdown>
           </div>
           <div className="form-group" style={{ flex: '1 1 150px' }}>
-            <label>Giorni settimana</label>
+            <label>Giorni settimana/mese</label>
             <StaffCheckboxDropdown
               hideLabel
               triggerLabel={weekDaysDropdownLabel}
@@ -6772,7 +6812,20 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
               allSelected={allWeekDaysSelected}
               onToggleAll={toggleSelectAllWeekLoadDays}
               selectAllDisabled={shiftBusy}
-              menuAriaLabel="Seleziona giorni della settimana"
+              belowSelectAll={
+                editingShiftId ? null : (
+                  <label className="staff-shift-member-option staff-shift-member-option--all">
+                    <input
+                      type="checkbox"
+                      checked={loadWholeMonth}
+                      disabled={shiftBusy}
+                      onChange={() => setLoadWholeMonth((on) => !on)}
+                    />
+                    <span>Mese</span>
+                  </label>
+                )
+              }
+              menuAriaLabel="Seleziona giorni della settimana o del mese"
             >
               {WEEK_LOAD_DAY_OPTIONS.map((d) => (
                 <label key={d.offset} className="staff-shift-member-option">
@@ -6827,7 +6880,11 @@ export default function StaffPage({ operatorMode = false, stationId: stationIdPr
                 className="btn btn-vino staff-week-load-btn-top"
                 disabled={shiftBusy || formMemberIds.size === 0 || weekLoadDays.size === 0}
                 onClick={() => void handleLoadMemberIntoWeekDays()}
-                title="Inserisce i dipendenti selezionati nei giorni scelti della settimana visibile (usa tipo, orari e note del modulo)"
+                title={
+                  loadWholeMonth
+                    ? 'Inserisce lo stesso turno su tutti i giorni scelti del mese visibile. Poi si può modificare la singola voce.'
+                    : 'Inserisce i dipendenti selezionati nei giorni scelti della settimana visibile (usa tipo, orari e note del modulo)'
+                }
               >
                 Carica
               </button>
