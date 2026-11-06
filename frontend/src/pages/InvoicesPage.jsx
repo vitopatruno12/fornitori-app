@@ -5,7 +5,6 @@ import { fetchInvoices, fetchInvoice, fetchInvoiceByNumber, createInvoice, updat
 import { fetchCashEntry } from '../services/cashService'
 import { checkAiAnomalies, suggestInvoiceFields } from '../services/aiService'
 import {
-  BancaMovimentiReturnBar,
   FattureLink,
   FattureNavBaseContext,
   FatturePageShell,
@@ -846,7 +845,6 @@ export default function InvoicesPage() {
           fatture.
         </div>
       ) : null}
-      <BancaMovimentiReturnBar href={searchParams.get('banca')} />
       {error && <div className="alert alert-danger">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 

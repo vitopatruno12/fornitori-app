@@ -91,19 +91,6 @@ export function MastrinoReturnBar({ href }) {
   )
 }
 
-export function BancaMovimentiReturnBar({ href }) {
-  const to = safeBancaMovimentiHref(href)
-  if (!to) return null
-  return (
-    <div className="mastrino-return-bar banca-movimenti-return-bar" role="region" aria-label="Ritorno ai movimenti banca">
-      <span>Fattura aperta da movimenti bancari.</span>
-      <Link className="btn btn-primary" to={to}>
-        ← Torna ai movimenti bancari
-      </Link>
-    </div>
-  )
-}
-
 export function FattureNavigate({ to, ...props }) {
   const resolved = useFattureTo(to)
   return <Navigate to={resolved} {...props} />
