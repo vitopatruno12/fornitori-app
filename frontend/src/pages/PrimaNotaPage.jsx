@@ -243,7 +243,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const [formNote, setFormNote] = useState('')
   const [formConto, setFormConto] = useState('')
   const [formFlowTag, setFormFlowTag] = useState('fiscale') // fiscale | non_fiscale | pos | fatture_emesse | contanti | refill | stacker_svuotamento | versamento_banca | movimento_cassetto
-  const extraCassaEntrataOnly = formFlowTag === 'pos' || formFlowTag === 'fatture_emesse'
+  const posUscitaAllowed = String(activeActivity || '').trim().toLowerCase() === 'pg'
+  const extraCassaEntrataOnly = formFlowTag === 'fatture_emesse' || (formFlowTag === 'pos' && !posUscitaAllowed)
   const cassaUscitaOnly = formFlowTag === 'versamento_banca' || formFlowTag === 'stacker_svuotamento' || formFlowTag === 'movimento_cassetto'
   const [formRifDocumento, setFormRifDocumento] = useState('')
   const [formSupplierId, setFormSupplierId] = useState('')
@@ -1434,7 +1435,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     setFormNote(entry.note || '')
     setFormConto(entry.conto || '')
     setFormFlowTag(flowTagFromConto(entry.conto))
-    if (entry.conto === CONTO_POS || entry.conto === CONTO_FATTURE_EMESSE || entry.conto === CONTO_CONTANTI) setFormType('entrata')
+    if (entry.conto === CONTO_FATTURE_EMESSE || entry.conto === CONTO_CONTANTI) setFormType('entrata')
+    if (entry.conto === CONTO_POS && String(entry.activity || activeActivity || '').trim().toLowerCase() !== 'pg') {
+      setFormType('entrata')
+    }
     if (isCassaUscitaForcedConto(entry.conto)) setFormType('uscita')
     setFormRifDocumento(entry.riferimento_documento || '')
     setFormSupplierId(entry.supplier_id ? String(entry.supplier_id) : '')
@@ -1810,7 +1814,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
     const nonFiscaleEntrata = nonFiscaleTag && isEntrata ? amount : 0
     const nonFiscaleUscita = nonFiscaleTag && !isEntrata ? amount : 0
     const nonFiscale = nonFiscaleEntrata - nonFiscaleUscita
-    const pos = posTag && isEntrata ? amount : 0
+    const pos = posTag ? (isEntrata ? amount : -amount) : 0
     const fattureEmesse = fattureTag && isEntrata ? amount : 0
     const contanti = contantiTag && isEntrata ? amount : 0
     const refill = refillTag ? (isEntrata ? amount : -amount) : 0
@@ -2057,8 +2061,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
 
   const posGiornoComputed = React.useMemo(() => {
     return entriesForSummary.reduce((acc, e) => {
-      if (e.conto !== CONTO_POS || e.type !== 'entrata') return acc
-      return acc + Number(e.amount || 0)
+      if (e.conto !== CONTO_POS) return acc
+      const delta = e.type === 'uscita' ? -Number(e.amount || 0) : Number(e.amount || 0)
+      return acc + delta
     }, 0)
   }, [entriesForSummary])
 
@@ -2344,7 +2349,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 <button
                   type="button"
                   className={formType === 'entrata' || extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
-                  onClick={() => setFormType('entrata')}
+                  onClick={() => {
+                    setFormType('entrata')
+                    if (posUscitaAllowed && formFlowTag === 'pos') {
+                      setFormDescription((prev) => {
+                        const text = String(prev || '').trim()
+                        if (text && text !== 'Storno POS PostePay') return prev
+                        return 'Incasso POS PostePay'
+                      })
+                    }
+                  }}
                   disabled={cassaUscitaOnly}
                   title={cassaUscitaOnly ? 'Svuotamento stacker e versamento banca sono uscite di cassa.' : undefined}
                 >
@@ -2353,7 +2367,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                 <button
                   type="button"
                   className={(formType === 'uscita' || cassaUscitaOnly) && !extraCassaEntrataOnly ? 'btn btn-primary' : 'btn btn-secondary'}
-                  onClick={() => setFormType('uscita')}
+                  onClick={() => {
+                    setFormType('uscita')
+                    if (posUscitaAllowed && formFlowTag === 'pos') {
+                      setFormDescription((prev) => {
+                        const text = String(prev || '').trim()
+                        if (text && text !== 'Incasso POS PostePay') return prev
+                        return 'Storno POS PostePay'
+                      })
+                    }
+                  }}
                   disabled={extraCassaEntrataOnly}
                   title={extraCassaEntrataOnly ? 'POS e fatture emesse registrano solo entrate.' : undefined}
                 >
@@ -2365,6 +2388,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   {formFlowTag === 'fatture_emesse'
                     ? 'Fatture emesse: restano fuori dal bancomat e dalla cassa fisica.'
                     : 'POS: solo pagamenti ricevuti (cassa entrata).'}
+                </p>
+              ) : formFlowTag === 'pos' && posUscitaAllowed ? (
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  POS PostePay Gazza: entrata è l’incasso carta, uscita è lo storno o il rimborso. I contanti non cambiano.
                 </p>
               ) : cassaUscitaOnly ? (
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
@@ -2429,8 +2456,15 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                   onClick={() => {
                     setFormFlowTag('pos')
                     setFormType('entrata')
+                    if (posUscitaAllowed) {
+                      setFormDescription((prev) => (String(prev || '').trim() ? prev : 'Incasso POS PostePay'))
+                    }
                   }}
-                  title="Flusso POS/Bancomat: solo pagamenti in entrata, escluso dalla cassa fisica."
+                  title={
+                    posUscitaAllowed
+                      ? 'POS PostePay Gazza: incasso in entrata, storno in uscita. Escluso dalla cassa fisica.'
+                      : 'Flusso POS/Bancomat: solo pagamenti in entrata, escluso dalla cassa fisica.'
+                  }
                 >
                   POS
                 </button>

@@ -201,9 +201,14 @@ def _conto_amount_for_day(
 
 
 def _normalize_cash_entry_payload(payload: dict) -> dict:
-    """POS solo entrata; svuotamento stacker e versamento banca solo uscita di cassa."""
+    """POS in uscita solo per PG Gazza; le altre sedi restano incasso. Stacker e versamento banca solo uscita."""
     conto = payload.get("conto")
-    if conto in (POS_CONTO, FATTURE_EMESSE_CONTO):
+    activity = normalize_activity(payload.get("activity"))
+    if conto == POS_CONTO and activity == "pg":
+        kind = str(payload.get("type") or "").strip().lower()
+        if kind not in {"entrata", "uscita"}:
+            payload = {**payload, "type": "entrata"}
+    elif conto in (POS_CONTO, FATTURE_EMESSE_CONTO):
         payload = {**payload, "type": "entrata"}
     elif conto in CASSA_USCITA_FORCED_CONTI:
         payload = {**payload, "type": "uscita"}
@@ -409,7 +414,7 @@ def _get_period_summary_metrics(
 
     totale_fiscale = _net_amount_for_day(db, start, end, activity, fiscale_only=True)
     totale_non_fiscale = _net_amount_for_day(db, start, end, activity, conto=NON_FISCALE_CONTO)
-    totale_pos = _entrata_amount_for_day(db, start, end, activity, conto=POS_CONTO)
+    totale_pos = _net_amount_for_day(db, start, end, activity, conto=POS_CONTO)
     totale_contanti = _entrata_amount_for_day(db, start, end, activity, conto=CONTANTI_CONTO)
     totale_fatture_emesse = _entrata_amount_for_day(db, start, end, activity, conto=FATTURE_EMESSE_CONTO)
     totale_refill = _net_amount_for_day(db, start, end, activity, conto=REFILL_CONTO)
