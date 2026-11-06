@@ -221,45 +221,8 @@ export default function InvoicesPage() {
     selectedInv ||
     (activeFocusId ? filteredInvoices.find((inv) => String(inv.id) === activeFocusId) || null : null)
 
-  // Da movimenti banca: vai all’elenco storico (non restare sui box Nuova fattura) e tieni la riga evidenziata.
-  const scrolledFocusRef = useRef('')
-  useEffect(() => {
-    if (loading) {
-      if (activeFocusId) scrolledFocusRef.current = ''
-      return
-    }
-    if (!activeFocusId) return
-    if (!filteredInvoices.some((inv) => String(inv.id) === activeFocusId)) return
-    if (scrolledFocusRef.current === activeFocusId) return
-    scrolledFocusRef.current = activeFocusId
-
-    let cancelled = false
-    let attempts = 0
-    const maxAttempts = 8
-
-    const scrollToFocusedInvoice = () => {
-      if (cancelled) return
-      const listEl = document.getElementById('fatture-storico-elenco')
-      const rowEl = document.getElementById(`invoice-row-${activeFocusId}`)
-      if (!rowEl) {
-        attempts += 1
-        if (attempts < maxAttempts) window.setTimeout(scrollToFocusedInvoice, 120)
-        return
-      }
-      // Prima porta in vista la sezione elenco (sotto i box di inserimento), poi la riga.
-      listEl?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      window.setTimeout(() => {
-        if (cancelled) return
-        rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }, 220)
-    }
-
-    const t = window.setTimeout(scrollToFocusedInvoice, 80)
-    return () => {
-      cancelled = true
-      window.clearTimeout(t)
-    }
-  }, [loading, activeFocusId, filteredInvoices])
+  // Lo storico virtualizza le righe: lo scroll parte solo quando la griglia ha montato quella fattura.
+  const [focusScrollTick, setFocusScrollTick] = useState(0)
 
   const kpi = useMemo(() => {
     let residuoTot = 0
@@ -451,7 +414,7 @@ export default function InvoicesPage() {
       if (!inv?.id) return
       focusHandledRef.current = targetKey
       setFocusInvoiceId(String(inv.id))
-      scrolledFocusRef.current = '' // forza nuovo scroll verso l’elenco
+      setFocusScrollTick((n) => n + 1)
       setError('')
       // Solo evidenzia + scroll: il dettaglio si apre al click sulla riga.
       setSuccess(`Documento ${inv.invoice_number || inv.id} evidenziato nell’elenco sotto`)
@@ -911,15 +874,18 @@ export default function InvoicesPage() {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
             {activeFocusId && !editingId ? (
               <>
-                <a className="btn btn-secondary btn-sm" href="#fatture-storico-elenco">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setFocusScrollTick((n) => n + 1)}
+                >
                   Vai all&apos;elenco evidenziato
-                </a>
+                </button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
                     setFocusInvoiceId('')
-                    scrolledFocusRef.current = ''
                     focusHandledRef.current = ''
                     setSuccess('')
                     const next = new URLSearchParams(searchParams)
@@ -1189,6 +1155,8 @@ export default function InvoicesPage() {
             columns={REGISTRATE_COLUMNS}
             rows={filteredInvoices}
             rowKey={(row) => row.id}
+            scrollToKey={activeFocusId}
+            scrollToToken={focusScrollTick}
             cellValue={(row, col) => {
               if (col.id === 'invoice_date' || col.id === 'due_date') return formatDate(row[col.id])
               if (col.id === 'supplier_name') return row.supplier_name || row.supplier_id || '—'

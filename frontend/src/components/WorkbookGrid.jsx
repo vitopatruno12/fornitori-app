@@ -32,6 +32,8 @@ export default function WorkbookGrid({
   onRowClick,
   rowClickTitle = 'Apri dettaglio',
   getRowId,
+  scrollToKey = '',
+  scrollToToken = 0,
   getTotalsCellClassName,
   actionsColWidth = '9.5rem',
   renderCell,
@@ -83,6 +85,49 @@ export default function WorkbookGrid({
   React.useEffect(() => () => {
     if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current)
   }, [])
+
+  const scrolledTokenRef = useRef('')
+  React.useEffect(() => {
+    const key = String(scrollToKey || '').trim()
+    if (!key || !Array.isArray(rows) || rows.length === 0) return undefined
+    const token = `${key}:${scrollToToken || 0}`
+    if (scrolledTokenRef.current === token) return undefined
+    const index = rows.findIndex((row, i) => String(resolveRowKey(row, i)) === key)
+    if (index < 0) return undefined
+    scrolledTokenRef.current = token
+
+    const node = wrapRef.current
+    const view = node?.clientHeight || viewportH || 480
+    const top = Math.max(0, index * ROW_H - Math.max(0, (view - ROW_H) / 2))
+    if (node) node.scrollTop = top
+    pendingScroll.current = top
+    setScrollTop((prev) => (Math.abs(prev - top) < 1 ? prev : top))
+
+    let frames = 0
+    let raf = 0
+    const align = () => {
+      const box = wrapRef.current
+      if (!box) {
+        frames += 1
+        if (frames < 16) raf = window.requestAnimationFrame(align)
+        return
+      }
+      if (!useVirtual) {
+        const rowId = typeof getRowId === 'function' ? getRowId(rows[index], index) : ''
+        const el = rowId ? document.getElementById(String(rowId)) : null
+        if (el) {
+          el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' })
+          return
+        }
+      }
+      // Con la virtualizzazione l'altezza riga è fissa: si sposta il riquadro, non la riga vera.
+      box.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' })
+    }
+    raf = window.requestAnimationFrame(align)
+    return () => window.cancelAnimationFrame(raf)
+    // resolveRowKey è definita nel render e legge solo rowKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToKey, scrollToToken, rows])
 
   const start = useVirtual
     ? Math.max(0, Math.floor(scrollTop / ROW_H) - overscanBefore)
