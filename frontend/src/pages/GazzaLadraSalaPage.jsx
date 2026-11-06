@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  deleteGazzaSalaHistory,
   fetchGazzaSala,
   importGazzaSala,
   markGazzaSalaPaid,
@@ -21,6 +22,7 @@ import {
   createEmptyGazzaSalaRows,
   gazzaSalaRowForPalmare,
   gazzaSalaCellDisplay,
+  gazzaSalaPaymentLabel,
   gazzaSalaRowHasData,
   gazzaSalaRowsToAoa,
   gazzaSalaStatusRowClass,
@@ -126,6 +128,7 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
   const [sending, setSending] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const rowsRef = useRef(rows)
   const slotRef = useRef({ date, fascia })
@@ -357,6 +360,32 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
       title: `Gazza_Ladra_Sala_${date}_${fascia}`,
       sheets: [{ name: `Sala ${fasciaLabel}`, rows: aoa }],
     })
+  }
+
+  function formatHistoryTime(iso) {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return ''
+    return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  async function removeHistoryEntry(entry) {
+    const name = entry.reservation_name || 'senza nome'
+    const amount = formatSalaEur(parseGazzaSalaAmount(entry.paid) || 0)
+    if (
+      !window.confirm(
+        `Togliere dallo storico il tavolo ${entry.table_id}, ${name}, ${amount}? Il contatore di quel tavolo scende dello stesso importo.`,
+      )
+    ) {
+      return
+    }
+    const slot = { ...slotRef.current }
+    try {
+      const payload = await deleteGazzaSalaHistory(slot.date, slot.fascia, entry.id)
+      applyRemote(payload, { force: true })
+      setSyncError('')
+    } catch {
+      setSyncError('Eliminazione dallo storico non riuscita. Riprova.')
+    }
   }
 
   function onOpenHistoryPdf() {
@@ -610,6 +639,13 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
                 Esporta Excel
               </button>
             )}
+            <button
+              type="button"
+              className={`btn btn-sm ${historyOpen ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setHistoryOpen((open) => !open)}
+            >
+              Storico{history.length ? ` (${history.length})` : ''}
+            </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenHistoryPdf}>
               Storico PDF
             </button>
@@ -641,6 +677,38 @@ export function GazzaLadraSalaPage({ operatorMode = false, palmare = false }) {
           </div>
           <p className={['gazza-sala-stat-save', saveClass].join(' ')}>{saveText}</p>
         </div>
+
+        {historyOpen ? (
+          <div className="gazza-sala-history">
+            <p>Togli le prove e i conti inseriti per errore. Il contatore del tavolo scende di quell’importo.</p>
+            {history.length === 0 ? (
+              <p className="gazza-sala-history-empty">Nessun conto in questa fascia.</p>
+            ) : (
+              <ul>
+                {[...history].reverse().map((entry) => (
+                  <li key={entry.id}>
+                    <span>
+                      <strong>Tavolo {entry.table_id}</strong>
+                      {' · '}
+                      {entry.reservation_name || 'Senza nome'}
+                      {' · '}
+                      {entry.clients ? `${entry.clients} clienti` : 'clienti n.d.'}
+                      {entry.invoice_number ? ` · fattura ${entry.invoice_number}` : ''}
+                      {entry.waiter ? ` · ${entry.waiter}` : ''}
+                      {' · '}
+                      {formatSalaEur(parseGazzaSalaAmount(entry.paid) || 0)}
+                      {entry.payment_type ? ` · ${gazzaSalaPaymentLabel(entry.payment_type)}` : ''}
+                      {entry.paidAt ? ` · ${formatHistoryTime(entry.paidAt)}` : ''}
+                    </span>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeHistoryEntry(entry)}>
+                      Elimina
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
 
         {palmare ? (
           <div className="gazza-sala-cards">

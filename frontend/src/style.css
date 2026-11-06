@@ -2085,6 +2085,46 @@ select.form-control {
   text-align: right;
 }
 
+.gazza-sala-history {
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.gazza-sala-history p {
+  margin: 0 0 0.65rem;
+  color: #475569;
+}
+
+.gazza-sala-history-empty {
+  margin: 0;
+}
+
+.gazza-sala-history ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gazza-sala-history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.gazza-sala-history li button {
+  min-height: 44px;
+}
+
 .gazza-sala-cards {
   display: flex;
   flex-direction: column;

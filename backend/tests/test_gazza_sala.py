@@ -157,6 +157,50 @@ def test_importa_solo_se_il_foglio_e_vuoto():
     assert second["tables"][1]["reservation_name"] == "Neri"
 
 
+def test_elimina_voce_storico_scala_il_contatore():
+    db = _db()
+    sala.mark_table_paid(
+        db,
+        "2026-11-06",
+        "pranzo",
+        1,
+        {
+            "table_id": 1,
+            "reservation_name": "Rossi",
+            "clients": "5",
+            "waiter": "Erico",
+            "paid": "150",
+            "payment_type": "contanti",
+        },
+    )
+    second = sala.mark_table_paid(
+        db,
+        "2026-11-06",
+        "pranzo",
+        1,
+        {
+            "table_id": 1,
+            "reservation_name": "Bianchi",
+            "clients": "10",
+            "invoice_number": "101",
+            "waiter": "Paolo",
+            "paid": "400",
+            "payment_type": "contanti",
+        },
+    )
+    assert second["row"]["paid_total"] == "550.0"
+    kept = sala.delete_history_entry(db, "2026-11-06", "pranzo", second["history"][0]["id"])
+    assert len(kept["history"]) == 1
+    assert kept["tables"][0]["status"] == "pagato"
+    assert kept["tables"][0]["reservation_name"] == "Bianchi"
+    assert kept["tables"][0]["paid_total"] == "400.0"
+    gone = sala.delete_history_entry(db, "2026-11-06", "pranzo", kept["history"][0]["id"])
+    assert gone["history"] == []
+    assert gone["tables"][0]["status"] == "libero"
+    assert gone["tables"][0]["reservation_name"] == ""
+    assert gone["tables"][0]["paid_total"] == ""
+
+
 def test_azzera_mantiene_lo_storico():
     db = _db()
     sala.save_table(db, "2026-11-05", "cena", {"table_id": 5, "status": "occupato", "paid": "8"})

@@ -23,6 +23,13 @@ export function markGazzaSalaPaid(date, fascia, tableId, row) {
   })
 }
 
+export function deleteGazzaSalaHistory(date, fascia, id) {
+  return apiFetch('/gazza-sala/storico/elimina', {
+    method: 'POST',
+    body: JSON.stringify({ date, fascia, id }),
+  })
+}
+
 export function resetGazzaSala(date, fascia) {
   return apiFetch('/gazza-sala/azzera', {
     method: 'POST',

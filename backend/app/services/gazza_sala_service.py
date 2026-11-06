@@ -322,6 +322,45 @@ def mark_table_paid(
     return payload
 
 
+def _same_paid_service(row: Dict[str, Any], entry: Dict[str, Any]) -> bool:
+    return (
+        row.get("status") == "pagato"
+        and (row.get("reservation_name") or "") == (entry.get("reservation_name") or "")
+        and (row.get("invoice_number") or "") == (entry.get("invoice_number") or "")
+        and (row.get("waiter") or "") == (entry.get("waiter") or "")
+        and _num(row.get("paid")) == _num(entry.get("paid"))
+    )
+
+
+def delete_history_entry(db: Session, service_date: str, fascia: str, entry_id: str) -> Dict[str, Any]:
+    day, band = parse_slot(service_date, fascia)
+    target = _clip(entry_id, 80)
+    if not target:
+        raise ValueError("Voce storico non valida")
+    get_sheet(db, day, band)
+    row = _lock_query(db, day, band).one()
+    tables, history = _read_sheet(row)
+    index = next((i for i, entry in enumerate(history) if entry.get("id") == target), None)
+    if index is None:
+        raise ValueError("Voce storico non trovata")
+    entry = history.pop(index)
+    table_id = int(entry["table_id"])
+    current = tables[table_id - 1]
+    total_n = round(max(0.0, _num(current.get("paid_total")) - _num(entry.get("paid"))), 2)
+    later = any(item.get("table_id") == table_id for item in history[index:])
+    if not later and _same_paid_service(current, entry):
+        tables = replace_table(tables, empty_row(table_id, str(total_n) if total_n > 0 else ""))
+    else:
+        kept = dict(current)
+        kept["paid_total"] = str(total_n) if total_n > 0 else ""
+        tables = replace_table(tables, kept)
+    history = normalize_history(history)
+    _write_sheet(row, tables, history)
+    db.commit()
+    db.refresh(row)
+    return _payload(day, band, tables, history, row.updated_at, False)
+
+
 def reset_sheet(db: Session, service_date: str, fascia: str) -> Dict[str, Any]:
     day, band = parse_slot(service_date, fascia)
     get_sheet(db, day, band)

@@ -41,6 +41,12 @@ class SalaResetIn(BaseModel):
     fascia: str
 
 
+class SalaHistoryDeleteIn(BaseModel):
+    date: str
+    fascia: str
+    id: str = Field(..., min_length=1, max_length=80)
+
+
 class SalaImportIn(BaseModel):
     date: str
     fascia: str
@@ -77,6 +83,14 @@ def mark_paid(payload: SalaPaidIn, db: Session = Depends(get_db)):
     try:
         source = payload.row.model_dump() if payload.row is not None else None
         return gazza_sala_service.mark_table_paid(db, payload.date, payload.fascia, payload.table_id, source)
+    except ValueError as exc:
+        raise _value_error(exc) from exc
+
+
+@router.post("/storico/elimina")
+def delete_history(payload: SalaHistoryDeleteIn, db: Session = Depends(get_db)):
+    try:
+        return gazza_sala_service.delete_history_entry(db, payload.date, payload.fascia, payload.id)
     except ValueError as exc:
         raise _value_error(exc) from exc
 
