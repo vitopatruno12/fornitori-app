@@ -26,7 +26,14 @@ function formatDate(value) {
  * @param {Array} opts.rows — righe con campi ledger (entrata, uscita, …)
  * @param {object} opts.totals
  */
-export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows, totals }) {
+export function generatePrimaNotaMovementsPdf({
+  activityLabel,
+  periodLabel,
+  rows,
+  totals,
+  fiscaleEntLabel = 'Fiscale ent',
+  fiscaleUscLabel = 'Fiscale usc',
+}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const generatedAt = new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
@@ -87,8 +94,8 @@ export function generatePrimaNotaMovementsPdf({ activityLabel, periodLabel, rows
       'Operazioni',
       'Entrata',
       'Uscita',
-      'Fiscale ent',
-      'Fiscale usc',
+      fiscaleEntLabel,
+      fiscaleUscLabel,
       'NC ent',
       'NC usc',
       'POS',

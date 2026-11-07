@@ -172,7 +172,16 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
   const tabletLight = useOperatorTabletLight()
   /** Postazione su tablet: stessa tabella Excel, celle di testo al posto di un campo per cella. */
   const tabletTable = Boolean(operatorMode && tabletLight)
-  const movementColumns = PRIMA_NOTA_MOVEMENTS_COLUMNS
+  const gazzaStation = operatorStationId === 'gazza'
+  const fiscaleEntLabel = gazzaStation ? 'Fisc/cont.Ent' : 'Fiscale ent'
+  const fiscaleUscLabel = gazzaStation ? 'Fisc/cont.Usc' : 'Fiscale usc'
+  const movementColumns = gazzaStation
+    ? PRIMA_NOTA_MOVEMENTS_COLUMNS.map((col) => {
+        if (col.id === 'fiscale_ent') return { ...col, label: fiscaleEntLabel, width: 120 }
+        if (col.id === 'fiscale_usc') return { ...col, label: fiscaleUscLabel, width: 120 }
+        return col
+      })
+    : PRIMA_NOTA_MOVEMENTS_COLUMNS
   const operatorActivitySlug = operatorStationId ? getOperatorStationActivitySlug(operatorStationId) : ''
   const operatorPrimaNotaBackupScope = operatorStationId ? String(operatorStationId).trim().toLowerCase() : ''
   const formatLocalIsoDate = (d) => {
@@ -1667,6 +1676,8 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       periodLabel: movementsSectionHeading.replace(/^Movimenti /, ''),
       rows: filteredMovementRows,
       totals: movementPeriodTotals,
+      fiscaleEntLabel,
+      fiscaleUscLabel,
     })
   }
 
@@ -1706,7 +1717,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
       downloadVneTableExcel({
         title: `prima-nota-movimenti-${safeLocale}-${range}`,
         sheetName: 'Movimenti',
-        columns: PRIMA_NOTA_MOVEMENTS_COLUMNS,
+        columns: movementColumns,
         rows: filteredMovementRows,
         cellValue: primaNotaMovementCellValue,
         totalsLabel: primaNotaMovementTotalsLabel,
@@ -2413,9 +2424,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                     setFormFlowTag('fiscale')
                     setFormType('entrata')
                   }}
-                  title="Entrata fiscale (anche chiusura pagamenti in contanti): Cassa entrata e Fiscale ent."
+                  title={`Entrata fiscale e contanti: Cassa entrata e ${fiscaleEntLabel}.`}
                 >
-                  Fiscale ent
+                  {fiscaleEntLabel}
                 </button>
                 <button
                   type="button"
@@ -2424,9 +2435,9 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
                     setFormFlowTag('fiscale')
                     setFormType('uscita')
                   }}
-                  title="Uscita fiscale: entra nei conteggi di cassa e nel riepilogo giornaliero (colonna Fiscale usc)."
+                  title={`Uscita fiscale e contanti: entra nei conteggi di cassa e nel riepilogo giornaliero (colonna ${fiscaleUscLabel}).`}
                 >
-                  Fiscale usc
+                  {fiscaleUscLabel}
                 </button>
                 <button
                   type="button"
@@ -2763,10 +2774,10 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
               {summaryScope === 'day' ? 'Totali giornata' : 'Totali periodo'} ({movementPeriodTotals.count} movimenti)
             </span>
             <span className="pn-movement-totals-item">
-              Fiscale ent: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
+              {fiscaleEntLabel}: <strong>€ {formatAmount(movementPeriodTotals.fiscaleEntrata)}</strong>
             </span>
             <span className="pn-movement-totals-item">
-              Fiscale usc: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
+              {fiscaleUscLabel}: <strong>€ {formatAmount(movementPeriodTotals.fiscaleUscita)}</strong>
             </span>
             <span className="pn-movement-totals-item pn-movement-totals-item--nf">
               NC ent: <strong>€ {formatAmount(movementPeriodTotals.nonFiscaleEntrata)}</strong>
@@ -2988,7 +2999,7 @@ export default function PrimaNotaPage({ operatorMode = false, stationId = null }
           hint={
             <>
               Fiscale, NC, POS, fatture emesse e Refill per <strong>{summaryPeriodLabel}</strong>.
-              I pagamenti in contanti della chiusura sono in Fiscale ent e Cassa entrata. Le fatture emesse non entrano nel bancomat.
+              I pagamenti in contanti della chiusura sono in {fiscaleEntLabel} e Cassa entrata. Le fatture emesse non entrano nel bancomat.
             </>
           }
           rows={dailySalesRows}
