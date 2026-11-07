@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -24,7 +24,8 @@ REFILL_CONTO = "REFILL"
 STACKER_SVUOTAMENTO_CONTO = "SVUOTAMENTO_STACKER"
 VERSAMENTO_BANCA_CONTO = "VERSAMENTO_BANCA"
 MOVIMENTO_CASSETTO_CONTO = "MOVIMENTO_CASSETTO"
-EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO, FATTURE_EMESSE_CONTO)
+COPERTI_CONTO = "COPERTI"
+EXTRA_CASSA_CONTI = (POS_CONTO, REFILL_CONTO, FATTURE_EMESSE_CONTO, COPERTI_CONTO)
 CASSA_USCITA_FORCED_CONTI = (
     STACKER_SVUOTAMENTO_CONTO,
     VERSAMENTO_BANCA_CONTO,
@@ -72,6 +73,7 @@ def _is_fiscale_filter():
                 STACKER_SVUOTAMENTO_CONTO,
                 VERSAMENTO_BANCA_CONTO,
                 MOVIMENTO_CASSETTO_CONTO,
+                COPERTI_CONTO,
             ]
         ),
     )
@@ -200,11 +202,24 @@ def _conto_amount_for_day(
     return Decimal(str(total or 0)).quantize(Decimal("0.01"))
 
 
+def _cover_count(amount) -> Decimal:
+    """Numero intero di coperti. Non è un importo in euro."""
+    try:
+        n = Decimal(str(amount if amount is not None else 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    except Exception:
+        n = Decimal("0")
+    if n < 1:
+        return Decimal("0")
+    return n
+
+
 def _normalize_cash_entry_payload(payload: dict) -> dict:
     """POS in uscita solo per PG Gazza; le altre sedi restano incasso. Stacker e versamento banca solo uscita."""
     conto = payload.get("conto")
     activity = normalize_activity(payload.get("activity"))
-    if conto == POS_CONTO and activity == "pg":
+    if conto == COPERTI_CONTO:
+        payload = {**payload, "type": "entrata", "amount": _cover_count(payload.get("amount"))}
+    elif conto == POS_CONTO and activity == "pg":
         kind = str(payload.get("type") or "").strip().lower()
         if kind not in {"entrata", "uscita"}:
             payload = {**payload, "type": "entrata"}

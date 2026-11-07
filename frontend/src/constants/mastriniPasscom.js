@@ -238,6 +238,7 @@ export function mapPrimaNotaToPasscomAccounts(row, { linkedInvoice = false } = {
   if (conto === PN_CONTO.STACKER) {
     return { dare: AUXILIARY_ACCOUNTS.stacker.code, avere: accounts.cassa, causale: 'STK' }
   }
+  if (conto === 'COPERTI') return null
   if (conto === PN_CONTO.VERSAMENTO_BANCA) {
     return { dare: GENERAL_ACCOUNTS.banca.code, avere: accounts.cassa, causale: 'VRB' }
   }

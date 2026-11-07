@@ -1,6 +1,12 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
+function coverCount(value) {
+  const n = Math.round(Number(value || 0))
+  if (!Number.isFinite(n) || n === 0) return '—'
+  return n.toLocaleString('it-IT')
+}
+
 function eur(value, entry) {
   const n = Number(value || 0)
   const formatted = `€ ${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -33,6 +39,7 @@ export function generatePrimaNotaMovementsPdf({
   totals,
   fiscaleEntLabel = 'Fiscale ent',
   fiscaleUscLabel = 'Fiscale usc',
+  coversMode = false,
 }) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -59,7 +66,9 @@ export function generatePrimaNotaMovementsPdf({
     entry.pos !== 0 ? eur(entry.pos, entry) : '—',
     entry.fattureEmesse !== 0 ? eur(entry.fattureEmesse, entry) : '—',
     entry.refill !== 0 ? eur(entry.refill, entry) : '—',
-    entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento, entry) : '—',
+    coversMode
+      ? coverCount(entry.coperti)
+      : entry.stackerSvuotamento !== 0 ? eur(entry.stackerSvuotamento, entry) : '—',
     entry.versamentoBanca !== 0 ? eur(entry.versamentoBanca, entry) : '—',
     entry.movimentoCassetto !== 0 ? eur(entry.movimentoCassetto, entry) : '—',
     eur(entry.incasso, entry),
@@ -79,7 +88,7 @@ export function generatePrimaNotaMovementsPdf({
       eur(totals.pos),
       eur(totals.fattureEmesse),
       eur(totals.refill),
-      eur(totals.stackerSvuotamento),
+      coversMode ? coverCount(totals.coperti) : eur(totals.stackerSvuotamento),
       eur(totals.versamentoBanca),
       eur(totals.movimentoCassetto),
       eur(totals.incasso),
@@ -101,7 +110,7 @@ export function generatePrimaNotaMovementsPdf({
       'POS',
       'Fatture emesse',
       'Refill',
-      'Stacker',
+      coversMode ? 'Coperti N' : 'Stacker',
       'Banca',
       'Cassetto',
       'Totale',

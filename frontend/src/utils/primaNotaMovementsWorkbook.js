@@ -4,6 +4,7 @@ const CONTO_FATTURE_EMESSE = 'FATTURE_EMESSE'
 const CONTO_CONTANTI = 'CONTANTI'
 const CONTO_REFILL = 'REFILL'
 const CONTO_STACKER_SVUOTAMENTO = 'SVUOTAMENTO_STACKER'
+const CONTO_COPERTI = 'COPERTI'
 const CONTO_VERSAMENTO_BANCA = 'VERSAMENTO_BANCA'
 const CONTO_MOVIMENTO_CASSETTO = 'MOVIMENTO_CASSETTO'
 
@@ -93,6 +94,16 @@ function isStackerSvuotamentoEntry(entry) {
   return entry?.conto === CONTO_STACKER_SVUOTAMENTO
 }
 
+function isCopertiEntry(entry) {
+  return entry?.conto === CONTO_COPERTI
+}
+
+function formatCoverCount(value) {
+  const n = Math.round(Number(value || 0))
+  if (!Number.isFinite(n) || n === 0) return ''
+  return n.toLocaleString('it-IT')
+}
+
 function isVersamentoBancaEntry(entry) {
   return entry?.conto === CONTO_VERSAMENTO_BANCA
 }
@@ -102,7 +113,7 @@ function isMovimentoCassettoEntry(entry) {
 }
 
 export function isExtraCassaMovement(entry) {
-  return isPosEntry(entry) || isRefillEntry(entry) || isFattureEmesseEntry(entry)
+  return isPosEntry(entry) || isRefillEntry(entry) || isFattureEmesseEntry(entry) || isCopertiEntry(entry)
 }
 
 export function cassettoOperazioni(entry) {
@@ -156,6 +167,7 @@ function movementDescription(entry) {
   else if (isContantiEntry(entry)) text = text ? `${text} [Contanti]` : '[Contanti]'
   else if (isRefillEntry(entry)) text = text ? `${text} [Refill]` : '[Refill]'
   else if (isStackerSvuotamentoEntry(entry)) text = text ? `${text} [Stacker]` : '[Stacker]'
+  else if (isCopertiEntry(entry)) text = text ? `${text} [Coperti]` : '[Coperti]'
   else if (isVersamentoBancaEntry(entry)) text = text ? `${text} [Banca]` : '[Banca]'
   else if (isMovimentoCassettoEntry(entry)) text = text ? `${text} [Cassetto]` : '[Cassetto]'
   return text
@@ -185,6 +197,7 @@ function entrySearchAmounts(entry) {
     entry?.contanti,
     entry?.refill,
     entry?.stackerSvuotamento,
+    entry?.coperti,
     entry?.versamentoBanca,
     entry?.movimentoCassetto,
     entry?.incasso,
@@ -275,6 +288,8 @@ export function primaNotaMovementCellValue(entry, column, ctx = {}) {
       return formatFlowAmount(entry.refill, entry)
     case 'stacker_svuotamento':
       return formatFlowAmount(entry.stackerSvuotamento, entry)
+    case 'coperti':
+      return formatCoverCount(entry.coperti)
     case 'incasso':
       return formatFlowAmount(entry.incasso, entry) || formatAmount(entry.incasso)
     case 'cassa_mattina':
@@ -303,6 +318,7 @@ export function primaNotaMovementTotalsLabel(columnId, totals) {
   if (columnId === 'fatture_emesse') return formatAmount(totals.fattureEmesse)
   if (columnId === 'refill') return formatAmount(totals.refill)
   if (columnId === 'stacker_svuotamento') return formatAmount(totals.stackerSvuotamento)
+  if (columnId === 'coperti') return formatCoverCount(totals.coperti)
   if (columnId === 'versamento_banca') return formatAmount(totals.versamentoBanca)
   if (columnId === 'movimento_cassetto') return formatAmount(totals.movimentoCassetto)
   if (columnId === 'incasso') return formatAmount(totals.incasso)

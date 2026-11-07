@@ -15,6 +15,7 @@ from ..constants.prima_nota import PRIMA_NOTA_ACTIVITIES
 from ..models.cash_entry import CashEntry
 from .cash_service import (
     CONTANTI_CONTO,
+    COPERTI_CONTO,
     FATTURE_EMESSE_CONTO,
     MOVIMENTO_CASSETTO_CONTO,
     NON_FISCALE_CONTO,
@@ -62,6 +63,7 @@ _PROTECTED_CONTI = (
     STACKER_SVUOTAMENTO_CONTO,
     VERSAMENTO_BANCA_CONTO,
     MOVIMENTO_CASSETTO_CONTO,
+    COPERTI_CONTO,
 )
 
 _KIND_META = {
