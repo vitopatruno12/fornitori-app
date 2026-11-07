@@ -46,6 +46,17 @@ const STIPENDI_COLUMNS = [
   { id: 'totale', label: 'Totale busta', width: 12, fluid: true, numeric: true },
 ]
 
+/** Gazza: il TFR non si usa. Il saldo è quanto resta del fuori busta dopo l'anticipo. */
+const GAZZA_STIPENDI_COLUMNS = [
+  { id: 'name', label: 'Nominativo', width: 22, fluid: true },
+  { id: 'busta', label: 'Busta', width: 12, fluid: true, numeric: true },
+  { id: 'busta_a', label: 'Busta A', width: 12, fluid: true, numeric: true },
+  { id: 'fuori', label: 'Fuori', width: 12, fluid: true, numeric: true },
+  { id: 'tfr_anticipato', label: 'Anticipato/sottratto', width: 16, fluid: true, numeric: true },
+  { id: 'saldo_busta', label: 'Saldo dopo anticipo', width: 16, fluid: true, numeric: true },
+  { id: 'totale', label: 'Totale busta', width: 12, fluid: true, numeric: true },
+]
+
 /** Fogli come in Report personale: un click apre una sola sezione. */
 const STIPENDI_SHEETS = [
   { id: 'stipendi', label: 'STIPENDI' },
@@ -152,6 +163,11 @@ function lineNuovoTfr(row) {
   return Math.round(((Number(row.tfr_attuale) || 0) - (Number(row.acconto_tfr) || 0)) * 100) / 100
 }
 
+/** Rimanente del fuori busta dopo l'anticipo. */
+function lineSaldoBusta(row) {
+  return Math.round(((Number(row.fuori) || 0) - (Number(row.tfr_anticipato) || 0)) * 100) / 100
+}
+
 function parseMoneyInput(raw) {
   const s = String(raw ?? '')
     .trim()
@@ -175,6 +191,7 @@ function stipendiCellValue(row, col) {
   if (col.id === 'fuori') return eur(row?.fuori)
   if (col.id === 'tfr_attuale') return eur(row?.tfr_attuale)
   if (col.id === 'nuovo_tfr') return eur(lineNuovoTfr(row))
+  if (col.id === 'saldo_busta') return eur(lineSaldoBusta(row))
   if (col.id === 'tfr_anticipato') return eur(row?.tfr_anticipato)
   if (col.id === 'totale') return eur(lineTotale(row))
   return ''
@@ -187,6 +204,8 @@ function moneyDisplay(n) {
 
 export default function StipendiPage({ operatorMode = false, stationId = null }) {
   const operatorStationId = operatorMode ? stationId || getLockedOperatorStationId() : null
+  const gazzaPayroll = operatorStationId === 'gazza'
+  const stipendiColumns = gazzaPayroll ? GAZZA_STIPENDI_COLUMNS : STIPENDI_COLUMNS
   const [operatorSessionOpen, setOperatorSessionOpen] = useState(() => {
     if (!operatorMode) return false
     const sid = stationId || getLockedOperatorStationId()
@@ -223,6 +242,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     const tfrAttuale = lines.reduce((a, r) => a + (Number(r.tfr_attuale) || 0), 0)
     const tfrAnticipato = lines.reduce((a, r) => a + (Number(r.tfr_anticipato) || 0), 0)
     const nuovoTfr = lines.reduce((a, r) => a + lineNuovoTfr(r), 0)
+    const saldoBusta = lines.reduce((a, r) => a + lineSaldoBusta(r), 0)
     return {
       busta,
       bustaA,
@@ -231,6 +251,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       tfrAttuale,
       tfrAnticipato,
       nuovoTfr,
+      saldoBusta,
       amount: busta + bustaA + fuori - tfr,
     }
   }, [lines])
@@ -432,11 +453,19 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
     setError('')
     if (editIndex !== null) {
       setLines((prev) => prev.map((row, i) => (i === editIndex ? cleaned : row)))
-      setSuccess(`Riga aggiornata: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`)
+      setSuccess(
+        gazzaPayroll
+          ? `Riga aggiornata: ${cleaned.name} · Saldo dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
+          : `Riga aggiornata: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`,
+      )
       setSelectedIndex(editIndex)
     } else {
       setLines((prev) => [...prev, cleaned])
-      setSuccess(`Riga aggiunta: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`)
+      setSuccess(
+        gazzaPayroll
+          ? `Riga aggiunta: ${cleaned.name} · Saldo dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
+          : `Riga aggiunta: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`,
+      )
       setSelectedIndex(lines.length)
     }
     resetDraft()
@@ -734,39 +763,57 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
 
   function handleExcel() {
     try {
-      const header = [
-        'Nominativo',
-        'Busta',
-        'Busta A',
-        'Fuori',
-        'TFR attuale',
-        'Acconto TFR (−)',
-        'Nuovo TFR',
-        'Anticipato/sottratto',
-        'Totale busta',
-      ]
-      const body = lines.map((r) => [
-        r.name,
-        Number(r.busta) || 0,
-        Number(r.busta_a) || 0,
-        Number(r.fuori) || 0,
-        Number(r.tfr_attuale) || 0,
-        Number(r.acconto_tfr) || 0,
-        lineNuovoTfr(r),
-        Number(r.tfr_anticipato) || 0,
-        lineTotale(r),
-      ])
-      body.push([
-        'TOTALI',
-        totals.busta,
-        totals.bustaA,
-        totals.fuori,
-        totals.tfrAttuale,
-        totals.tfr,
-        totals.nuovoTfr,
-        totals.tfrAnticipato,
-        totals.amount,
-      ])
+      const header = gazzaPayroll
+        ? ['Nominativo', 'Busta', 'Busta A', 'Fuori', 'Anticipato/sottratto', 'Saldo dopo anticipo', 'Totale busta']
+        : [
+            'Nominativo',
+            'Busta',
+            'Busta A',
+            'Fuori',
+            'TFR attuale',
+            'Acconto TFR (−)',
+            'Nuovo TFR',
+            'Anticipato/sottratto',
+            'Totale busta',
+          ]
+      const body = lines.map((r) =>
+        gazzaPayroll
+          ? [
+              r.name,
+              Number(r.busta) || 0,
+              Number(r.busta_a) || 0,
+              Number(r.fuori) || 0,
+              Number(r.tfr_anticipato) || 0,
+              lineSaldoBusta(r),
+              lineTotale(r),
+            ]
+          : [
+              r.name,
+              Number(r.busta) || 0,
+              Number(r.busta_a) || 0,
+              Number(r.fuori) || 0,
+              Number(r.tfr_attuale) || 0,
+              Number(r.acconto_tfr) || 0,
+              lineNuovoTfr(r),
+              Number(r.tfr_anticipato) || 0,
+              lineTotale(r),
+            ],
+      )
+      body.push(
+        gazzaPayroll
+          ? ['TOTALI', totals.busta, totals.bustaA, totals.fuori, totals.tfrAnticipato, totals.saldoBusta, totals.amount]
+          : [
+              'TOTALI',
+              totals.busta,
+              totals.bustaA,
+              totals.fuori,
+              totals.tfrAttuale,
+              totals.tfr,
+              totals.nuovoTfr,
+              totals.tfrAnticipato,
+              totals.amount,
+            ],
+      )
       downloadWorkbookAsExcel({
         title: `Stipendi_${yearMonth}`,
         sheets: [{ name: ymLabel(yearMonth), rows: [header, ...body] }],
@@ -914,30 +961,34 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                       placeholder="0,00"
                     />
                   </label>
-                  <label className="stipendi-edit-field">
-                    <span>TFR attuale</span>
-                    <input
-                      className="form-control"
-                      inputMode="decimal"
-                      value={moneyDisplay(draft.tfr_attuale)}
-                      onChange={(e) => updateDraft('tfr_attuale', e.target.value)}
-                      placeholder="0,00"
-                    />
-                  </label>
-                  <label className="stipendi-edit-field">
-                    <span>Acconto TFR (−)</span>
-                    <input
-                      className="form-control"
-                      inputMode="decimal"
-                      value={moneyDisplay(draft.acconto_tfr)}
-                      onChange={(e) => updateDraft('acconto_tfr', e.target.value)}
-                      placeholder="0,00"
-                    />
-                  </label>
-                  <div className="stipendi-edit-field stipendi-nuovo-tfr" title="TFR attuale − Acconto">
-                    <span>Nuovo TFR</span>
-                    <strong>{eur(lineNuovoTfr(draft))}</strong>
-                  </div>
+                  {gazzaPayroll ? null : (
+                    <>
+                      <label className="stipendi-edit-field">
+                        <span>TFR attuale</span>
+                        <input
+                          className="form-control"
+                          inputMode="decimal"
+                          value={moneyDisplay(draft.tfr_attuale)}
+                          onChange={(e) => updateDraft('tfr_attuale', e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </label>
+                      <label className="stipendi-edit-field">
+                        <span>Acconto TFR (−)</span>
+                        <input
+                          className="form-control"
+                          inputMode="decimal"
+                          value={moneyDisplay(draft.acconto_tfr)}
+                          onChange={(e) => updateDraft('acconto_tfr', e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </label>
+                      <div className="stipendi-edit-field stipendi-nuovo-tfr" title="TFR attuale − Acconto">
+                        <span>Nuovo TFR</span>
+                        <strong>{eur(lineNuovoTfr(draft))}</strong>
+                      </div>
+                    </>
+                  )}
                   <label className="stipendi-edit-field">
                     <span>Anticipato/sottratto</span>
                     <input
@@ -948,6 +999,12 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                       placeholder="0,00"
                     />
                   </label>
+                  {gazzaPayroll ? (
+                    <div className="stipendi-edit-field stipendi-nuovo-tfr" title="Fuori − anticipo: rimanente dopo l'anticipo">
+                      <span>Saldo dopo anticipo</span>
+                      <strong>{eur(lineSaldoBusta(draft))}</strong>
+                    </div>
+                  ) : null}
                   <div className="stipendi-edit-total" title="Busta + Busta A + Fuori − Acconto TFR">
                     {eur(lineTotale(draft))}
                   </div>
@@ -989,7 +1046,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                     ? `${lines.length} nominativi · selezionato: ${lines[selectedIndex].name || '—'}`
                     : `${lines.length} nominativi · clicca una riga per selezionarla`
                 }
-                columns={STIPENDI_COLUMNS}
+                columns={stipendiColumns}
                 rows={lines}
                 cellValue={stipendiCellValue}
                 emptyMessage="Nessuna riga. Compila sopra e premi Aggiungi."
@@ -1016,6 +1073,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                   tfr_attuale: totals.tfrAttuale,
                   acconto_tfr: totals.tfr,
                   nuovo_tfr: totals.nuovoTfr,
+                  saldo_busta: totals.saldoBusta,
                   tfr_anticipato: totals.tfrAnticipato,
                   totale: totals.amount,
                 }}
@@ -1027,6 +1085,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                   if (colId === 'tfr_attuale') return eur(t?.tfr_attuale)
                   if (colId === 'acconto_tfr') return eur(t?.acconto_tfr)
                   if (colId === 'nuovo_tfr') return eur(t?.nuovo_tfr)
+                  if (colId === 'saldo_busta') return eur(t?.saldo_busta)
                   if (colId === 'tfr_anticipato') return eur(t?.tfr_anticipato)
                   if (colId === 'totale') return eur(t?.totale)
                   return ''
