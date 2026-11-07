@@ -53,7 +53,7 @@ const GAZZA_STIPENDI_COLUMNS = [
   { id: 'busta_a', label: 'Busta A', width: 12, fluid: true, numeric: true },
   { id: 'fuori', label: 'Fuori', width: 12, fluid: true, numeric: true },
   { id: 'tfr_anticipato', label: 'Anticipato/sottratto', width: 16, fluid: true, numeric: true },
-  { id: 'saldo_busta', label: 'Saldo dopo anticipo', width: 16, fluid: true, numeric: true },
+  { id: 'saldo_busta', label: 'Saldo fuori dopo anticipo', width: 20, fluid: true, numeric: true },
   { id: 'totale', label: 'Totale busta', width: 12, fluid: true, numeric: true },
 ]
 
@@ -455,7 +455,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setLines((prev) => prev.map((row, i) => (i === editIndex ? cleaned : row)))
       setSuccess(
         gazzaPayroll
-          ? `Riga aggiornata: ${cleaned.name} · Saldo dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
+          ? `Riga aggiornata: ${cleaned.name} · Saldo fuori dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
           : `Riga aggiornata: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`,
       )
       setSelectedIndex(editIndex)
@@ -463,7 +463,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
       setLines((prev) => [...prev, cleaned])
       setSuccess(
         gazzaPayroll
-          ? `Riga aggiunta: ${cleaned.name} · Saldo dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
+          ? `Riga aggiunta: ${cleaned.name} · Saldo fuori dopo anticipo ${eur(lineSaldoBusta(cleaned))}`
           : `Riga aggiunta: ${cleaned.name} · Nuovo TFR ${eur(cleaned.nuovo_tfr)}`,
       )
       setSelectedIndex(lines.length)
@@ -764,7 +764,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
   function handleExcel() {
     try {
       const header = gazzaPayroll
-        ? ['Nominativo', 'Busta', 'Busta A', 'Fuori', 'Anticipato/sottratto', 'Saldo dopo anticipo', 'Totale busta']
+        ? ['Nominativo', 'Busta', 'Busta A', 'Fuori', 'Anticipato/sottratto', 'Saldo fuori dopo anticipo', 'Totale busta']
         : [
             'Nominativo',
             'Busta',
@@ -1001,7 +1001,7 @@ export default function StipendiPage({ operatorMode = false, stationId = null })
                   </label>
                   {gazzaPayroll ? (
                     <div className="stipendi-edit-field stipendi-nuovo-tfr" title="Fuori − anticipo: rimanente dopo l'anticipo">
-                      <span>Saldo dopo anticipo</span>
+                      <span>Saldo fuori dopo anticipo</span>
                       <strong>{eur(lineSaldoBusta(draft))}</strong>
                     </div>
                   ) : null}
